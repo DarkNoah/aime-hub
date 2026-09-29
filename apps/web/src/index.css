@@ -1,0 +1,86 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'streamdown/styles.css';
+
+/* Support both hoisted and isolated pnpm dependency layouts. */
+@source '../node_modules/streamdown/dist/*.js';
+@source '../../../node_modules/streamdown/dist/*.js';
+
+@theme inline {
+  --font-sans:
+    'Inter', 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui,
+    sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #eef0eb;
+  --color-secondary-foreground: #3f4942;
+  --color-muted: #f0f2ee;
+  --color-muted-foreground: #68726b;
+  --color-accent: #e9eee8;
+  --color-accent-foreground: #263e32;
+  --color-destructive: #b42332;
+  --color-border: #e2e6df;
+  --color-input: #d8ded5;
+  --color-ring: #416c53;
+  --color-sidebar: #f3f5f0;
+}
+
+:root {
+  font-family: var(--font-sans);
+  color-scheme: light;
+  --radius: 0.625rem;
+  --background: #f8f9f6;
+  --foreground: #202a24;
+  --card: #ffffff;
+  --primary: #305640;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply m-0 min-w-80 bg-background text-foreground;
+  }
+  button:not(:disabled),
+  a {
+    -webkit-tap-highlight-color: transparent;
+  }
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+  ::selection {
+    background: #dce9d8;
+    color: #203729;
+  }
+}
+
+.auth-grid {
+  background-image:
+    linear-gradient(#30564006 1px, transparent 1px),
+    linear-gradient(90deg, #30564006 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

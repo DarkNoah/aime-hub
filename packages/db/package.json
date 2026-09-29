@@ -1,0 +1,20 @@
+{
+  "name": "@aime/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "pg": "^8.16.3",
+    "reflect-metadata": "^0.2.2",
+    "typeorm": "0.3.31"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.15.5"
+  }
+}

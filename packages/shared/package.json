@@ -1,0 +1,17 @@
+{
+  "name": "@aime/shared",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./env": "./src/env.ts",
+    "./providers": "./src/providers.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.1.0",
+    "dotenv": "^17.2.0"
+  }
+}
