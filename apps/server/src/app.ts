@@ -13,10 +13,18 @@ import {
 } from './middleware/admin-api.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { modelRoutes } from './modules/models/routes.js';
+import { threadRoutes } from './modules/threads/routes.js';
+import type { ThreadService } from './modules/threads/service.js';
+import type { LanguageModelService } from './modules/models/language-model.js';
 
 export function createApp(
   auth: Auth,
   providers?: { service: ProviderService; webOrigin: string },
+  chat?: {
+    threads: ThreadService;
+    models: LanguageModelService;
+    webOrigin: string;
+  },
 ) {
   const app = express();
   app.disable('x-powered-by');
@@ -25,6 +33,11 @@ export function createApp(
   // Better Auth owns its request bodies and authorization for /api/auth/admin/*.
   app.use('/api', authRoutes(auth));
   if (providers) app.use('/api', modelRoutes(auth, providers.service));
+  if (chat)
+    app.use(
+      '/api/threads',
+      threadRoutes(auth, chat.threads, chat.models, chat.webOrigin),
+    );
   app.use('/api/admin', requireAdmin(auth));
   if (providers) {
     app.use(

@@ -11,15 +11,29 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet';
 import { LoadingState } from '@/components/loading-state';
+import { useAuthSession } from '@/features/auth/session-context';
+import { ThreadListProvider } from '@/pages/threads/thread-list-provider';
 import { Sidebar } from './sidebar';
 import { adminNavigation } from './navigation';
 
 export function AppLayout() {
+  const { data } = useAuthSession();
+  return (
+    <ThreadListProvider key={data?.session.id}>
+      <LayoutContent />
+    </ThreadListProvider>
+  );
+}
+
+function LayoutContent() {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const location = useLocation();
+  const isChat = location.pathname.startsWith('/threads');
   const title =
-    adminNavigation.find((item) => item.to === location.pathname)?.label ??
+    (isChat
+      ? 'nav.chats'
+      : adminNavigation.find((item) => item.to === location.pathname)?.label) ??
     'nav.home';
 
   useEffect(() => {
@@ -91,7 +105,11 @@ export function AppLayout() {
         <main
           id="main-content"
           tabIndex={-1}
-          className="mx-auto w-full max-w-[1440px] px-5 py-7 outline-none sm:px-8 lg:px-10 lg:py-9"
+          className={
+            isChat
+              ? 'h-[calc(100dvh-4rem)] min-h-0 w-full outline-none'
+              : 'mx-auto w-full max-w-[1440px] px-5 py-7 outline-none sm:px-8 lg:px-10 lg:py-9'
+          }
         >
           <Suspense fallback={<LoadingState />}>
             <Outlet />

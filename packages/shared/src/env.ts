@@ -17,6 +17,7 @@ const schema = z.object({
   WEB_ORIGIN: z.url(),
   SERVER_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
   ADMINS: z.string().default('admin'),
+  WORKSPACE_ROOT: z.string().min(1).default('workspaces'),
 });
 
 export function loadEnv() {

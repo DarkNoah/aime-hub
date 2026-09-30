@@ -18,6 +18,19 @@ export function WorkspacePage() {
         })}
         description={t('workspace.welcome')}
       />
+      <Link
+        to="/threads"
+        className="flex items-center gap-4 rounded-xl border bg-card p-5 transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <MessageSquare className="size-6 shrink-0 text-primary" />
+        <div className="flex-1">
+          <h2 className="font-semibold">{t('chat.new')}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t('chat.welcomeHint')}
+          </p>
+        </div>
+        <ArrowRight className="size-4" />
+      </Link>
       {admin && (
         <section aria-labelledby="workspace-manage-heading">
           <h2
@@ -70,11 +83,6 @@ export function WorkspacePage() {
         <div className="grid gap-6 border-t pt-6 sm:grid-cols-2 sm:gap-10">
           {(
             [
-              {
-                title: 'nav.chats',
-                description: 'workspace.chatsDescription',
-                icon: MessageSquare,
-              },
               {
                 title: 'nav.projects',
                 description: 'workspace.projectsDescription',

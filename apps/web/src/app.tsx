@@ -16,6 +16,9 @@ const AuthPage = lazy(() =>
 const WorkspacePage = lazy(() =>
   import('@/pages/workspace/page').then((m) => ({ default: m.WorkspacePage })),
 );
+const ThreadsPage = lazy(() =>
+  import('@/pages/threads/page').then((m) => ({ default: m.ThreadsPage })),
+);
 const AdminOverviewPage = lazy(() =>
   import('@/pages/admin/overview/page').then((m) => ({
     default: m.AdminOverviewPage,
@@ -64,6 +67,8 @@ export function App() {
               <Route element={<RequireSession />}>
                 <Route element={<AppLayout />}>
                   <Route index element={<WorkspacePage />} />
+                  <Route path="/threads" element={<ThreadsPage />} />
+                  <Route path="/threads/:threadId" element={<ThreadsPage />} />
                   <Route element={<RequireAdmin />}>
                     <Route path="/admin" element={<AdminOverviewPage />} />
                     <Route

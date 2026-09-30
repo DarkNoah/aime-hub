@@ -5,7 +5,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./env": "./src/env.ts",
-    "./providers": "./src/providers.ts"
+    "./providers": "./src/providers.ts",
+    "./threads": "./src/threads.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

@@ -27,6 +27,7 @@ export type ModelSelectorProps = {
   id?: string;
   label: string;
   imageOnly?: boolean;
+  textOnly?: boolean;
   value: string | null;
   onValueChange: (value: string | null) => void;
   disabled?: boolean;
@@ -38,6 +39,7 @@ export function ModelSelector({
   id,
   label,
   imageOnly = false,
+  textOnly = false,
   value,
   onValueChange,
   disabled = false,
@@ -47,8 +49,15 @@ export function ModelSelector({
   const { t } = useTranslation();
   const { providers, models, loading, error, refresh } = useAvailableModels();
   const options = useMemo(
-    () => modelOptions(providers, models, imageOnly),
-    [providers, models, imageOnly],
+    () =>
+      modelOptions(
+        providers,
+        textOnly
+          ? models.filter((model) => model.modalitiesOutput.includes('text'))
+          : models,
+        imageOnly,
+      ),
+    [providers, models, imageOnly, textOnly],
   );
   const noneText = noneLabel ?? t('modelSelector.none');
   const [open, setOpen] = useState(false);

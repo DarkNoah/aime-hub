@@ -6,6 +6,11 @@ import { createDataSource } from '@aime/db';
 import { loadEnv } from '@aime/shared/env';
 import { createApp } from './app.js';
 import { ProviderService } from './modules/providers/service.js';
+import { resolve } from 'node:path';
+import { createMastraRuntime } from './mastra/index.js';
+import { createPersonalChatRunner } from './modules/threads/runner.js';
+import { LanguageModelService } from './modules/models/language-model.js';
+import { ThreadService } from './modules/threads/service.js';
 
 const env = loadEnv();
 const database = createDataSource(env.DATABASE_URL);
@@ -36,19 +41,40 @@ try {
   ]);
   throw error;
 }
-const server = createApp(auth, {
-  service: new ProviderService(database),
-  webOrigin: env.WEB_ORIGIN,
-}).listen(env.SERVER_PORT, '127.0.0.1', () => {
+const providers = new ProviderService(database);
+const models = new LanguageModelService(database, providers);
+const { mastra, storage, memory } = createMastraRuntime(pool);
+await storage.init();
+const workspaceRoot = resolve(
+  process.env.INIT_CWD ?? process.cwd(),
+  env.WORKSPACE_ROOT,
+);
+const threads = new ThreadService(
+  memory,
+  createPersonalChatRunner(mastra, models, workspaceRoot),
+);
+const server = createApp(
+  auth,
+  {
+    service: providers,
+    webOrigin: env.WEB_ORIGIN,
+  },
+  { threads, models, webOrigin: env.WEB_ORIGIN },
+).listen(env.SERVER_PORT, '127.0.0.1', () => {
   console.log(`Aime Hub API: http://127.0.0.1:${env.SERVER_PORT}`);
 });
 let stopping = false;
 function shutdown() {
   if (stopping) return;
   stopping = true;
-  server.close(() => {
-    void Promise.all([pool.end(), database.destroy()]).catch(() => {
-      process.exitCode = 1;
+  void threads.shutdown().finally(() => {
+    server.closeAllConnections();
+    server.close(() => {
+      void Promise.all([mastra.shutdown(), database.destroy()])
+        .finally(() => pool.end())
+        .catch(() => {
+          process.exitCode = 1;
+        });
     });
   });
   server.closeIdleConnections();
