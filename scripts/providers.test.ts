@@ -4,7 +4,8 @@ import { once } from 'node:events';
 import type { Server } from 'node:http';
 import test from 'node:test';
 import { Pool } from 'pg';
-import { createAuth } from '@aime/auth';
+import { createAuth, createAuthOptions } from '@aime/auth';
+import { getMigrations } from '@aime/auth/migrations';
 import { createDataSource, Provider, ProviderModel, Setting } from '@aime/db';
 import {
   emptyModelDefaults,
@@ -22,11 +23,11 @@ import {
   isPublicAddress,
   ProviderError,
   requestProviderJson,
-} from '../apps/server/src/provider-network.js';
+} from '../apps/server/src/modules/providers/network.js';
 import {
   matchCatalogModel,
   ProviderService,
-} from '../apps/server/src/provider-service.js';
+} from '../apps/server/src/modules/providers/service.js';
 
 const webOrigin = 'http://localhost:5173';
 const baseUrl = 'https://provider.example.test/v1';
@@ -389,13 +390,15 @@ test(
     schemaCreated = true;
     await database.initialize();
     const migrations = await database.runMigrations();
-    const auth = createAuth({
+    const authConfig = {
       pool,
       secret: randomBytes(32).toString('hex'),
       baseURL: webOrigin,
       webOrigin,
       admins: 'admin',
-    });
+    };
+    await (await getMigrations(createAuthOptions(authConfig))).runMigrations();
+    const auth = createAuth(authConfig);
     const httpResponses: Record<string, unknown> = {};
     const httpFake = fakeJson(httpResponses);
     const service = new ProviderService(database, httpFake.request);
@@ -498,6 +501,120 @@ test(
           changes.upQueries.map((query) => query.query),
           [],
         );
+      },
+    );
+
+    await t.test(
+      '可用模型目录允许普通用户，过滤禁用和软删除并隐藏内部配置',
+      async () => {
+        const readCatalog = (cookie = '') =>
+          fetch(`${base}/api/models`, { headers: { cookie } });
+        const anonymous = await readCatalog();
+        assert.equal(anonymous.status, 401);
+        assert.equal((await anonymous.json()).code, 'UNAUTHORIZED');
+        const empty = await readCatalog(cookies.user);
+        assert.equal(empty.status, 200);
+        assert.deepEqual(await empty.json(), { providers: [] });
+        const provider = await newProvider('Available', {
+          apiKey: testKey,
+          metadata: { private: 'hidden' },
+        });
+        const disabled = await newProvider('Disabled catalog provider', {
+          enabled: false,
+        });
+        const removed = await newProvider('Deleted catalog provider');
+        const emptyProvider = await newProvider('No models');
+        for (const id of [provider, disabled, removed]) {
+          await service.createModel(
+            id,
+            modelInputSchema.parse({
+              id: 'org/shared/model',
+              name: 'Shared',
+              displayName: 'Friendly',
+              modalitiesInput: ['text', 'image'],
+              modalitiesOutput: ['image'],
+              reasoning: true,
+              toolCall: true,
+              limitContext: 128000,
+              limitOutput: 8192,
+              metadata: { private: 'hidden' },
+            }),
+          );
+        }
+        await service.createModel(
+          provider,
+          modelInputSchema.parse({
+            id: 'disabled',
+            name: 'Disabled',
+            enabled: false,
+          }),
+        );
+        await service.createModel(
+          provider,
+          modelInputSchema.parse({ id: 'deleted', name: 'Deleted' }),
+        );
+        await service.deleteModel(provider, 'deleted');
+        await service.deleteProvider(removed);
+        const response = await readCatalog(cookies.user);
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get('cache-control'), 'no-store');
+        const data = await response.json();
+        assertNoKey(data);
+        assert.deepEqual(
+          data.providers.map((item: { id: string }) => item.id).sort(),
+          [provider, emptyProvider].sort(),
+        );
+        assert.deepEqual(
+          data.providers.find(
+            (item: { id: string }) => item.id === emptyProvider,
+          ).models,
+          [],
+        );
+        const entry = data.providers.find(
+          (item: { id: string }) => item.id === provider,
+        );
+        assert.deepEqual(Object.keys(entry).sort(), [
+          'enabled',
+          'id',
+          'models',
+          'name',
+          'type',
+        ]);
+        assert.deepEqual(entry.models, [
+          {
+            providerId: provider,
+            id: 'org/shared/model',
+            name: 'Shared',
+            displayName: 'Friendly',
+            description: null,
+            enabled: true,
+            modalitiesInput: ['text', 'image'],
+            modalitiesOutput: ['image'],
+            reasoning: true,
+            toolCall: true,
+            limitContext: 128000,
+            limitOutput: 8192,
+          },
+        ]);
+        assert.deepEqual(await (await readCatalog(cookies.admin)).json(), data);
+        await service.updateModel(provider, 'org/shared/model', {
+          enabled: false,
+        });
+        const updated = await (await readCatalog(cookies.user)).json();
+        assert.deepEqual(
+          updated.providers.find((item: { id: string }) => item.id === provider)
+            .models,
+          [],
+        );
+        await service.updateProvider(disabled, { enabled: true });
+        const enabled = await (await readCatalog(cookies.user)).json();
+        assert.equal(
+          enabled.providers.find((item: { id: string }) => item.id === disabled)
+            .models.length,
+          1,
+        );
+        for (const id of [provider, disabled, emptyProvider])
+          await service.deleteProvider(id);
       },
     );
 

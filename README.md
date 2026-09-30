@@ -9,8 +9,8 @@
 - 登录态和管理员路由守卫、响应式侧栏、移动端无障碍导航抽屉。
 - 用户管理：管理员用户列表、邮箱/显示名称搜索、服务端分页、创建/编辑用户、角色调整、重置密码、封禁/解封、撤销全部会话、删除用户。
 - 模型供应商管理：供应商及模型 CRUD、OpenAI 兼容 `/models` 拉取、models.dev 能力匹配、默认模型及思考模式持久化。
-- 管理概览和独立系统设置页仍为占位页；本阶段模型相关默认设置位于供应商页面。
-- TypeORM 实体、显式数据库迁移、snake_case 列名和三个日期装饰器。
+- 工作台和管理概览提供模块入口；独立系统设置页说明当前可用配置。模型默认设置仍位于供应商页面。
+- 认证表由 Better Auth 配置生成；业务表使用 TypeORM 实体、显式迁移、snake_case 列名和三个日期装饰器。
 
 ## 技术栈
 
@@ -18,7 +18,7 @@
 - UI：shadcn/ui 风格源码组件、Radix UI、Lucide、CVA；独立实现，不依赖本地 `ui-dojo`。
 - 已安装 AI SDK 6 `ai` / `@ai-sdk/react` 3；AI Elements 官方 registry 源码已添加至 `apps/web/src/components/ai-elements`，包含 `conversation`、`message`、`prompt-input`、`reasoning`、`suggestion` 及其 `shimmer` 依赖。配套 Radix UI、Streamdown、Motion、滚动跟随与动画样式已接入，尚未连接聊天 API。
 - `apps/server`：Express 5；`packages/auth`：Better Auth；`packages/db`：TypeORM + PostgreSQL。
-- Better Auth 使用官方 PostgreSQL adapter 执行认证读写，TypeORM 管理同一套表的实体与迁移，不自建认证 adapter 或用户管理 API。
+- Better Auth 使用官方 PostgreSQL adapter 管理认证读写和表结构；TypeORM 只管理供应商、模型和设置等业务表，不定义认证实体或自建用户管理 API。
 
 ## 用户管理
 
@@ -36,12 +36,12 @@
 
 管理员从后台导航进入 `/admin/providers`，管理 OpenAI 兼容供应商，并通过“模型”按钮打开右侧抽屉管理各供应商的持久化模型；模型新增、编辑和删除确认在独立弹窗中完成。
 
-- 首次更新代码后执行 `pnpm db:migrate`，新增 `providers`、`provider_models`、`settings` 三张表；不会重建认证表。
+- 初始化时执行 `pnpm db:migrate`，先由 Better Auth 初始化认证表，再由 TypeORM 创建 `providers`、`provider_models`、`settings` 三张业务表。重复执行只应用待执行变更。
 - 供应商可新增、编辑、启停、删除。API Key 仅保存在服务端数据库，不回传浏览器；编辑时留空保留原值，显式勾选清除才删除密钥。数据库目前为明文存储，应限制数据库/备份访问权限。metadata 不用于保存密钥。
 - Base URL 填写 API 根地址（包括所需的 `/v1`），同步时追加 `/models`。为防 SSRF，仅允许公共网络 HTTP(S) 地址；阻止内网、回环、链路本地地址和重定向，DNS 校验后固定连接地址。携带密钥的网络请求强制使用 HTTPS；本阶段不支持本地 Ollama 等私网端点。
 - 同步成功后新增模型，并根据本次列表双向更新 `deprecated`。缺失模型仅标记，不禁用、不删除；失败不会改动模型。models.dev 不可用时仍导入 ID，显示能力补全警告。
 - 新模型优先精确匹配 models.dev 模型 ID，否则匹配 ID 最后一段，忽略供应商分组；多候选按供应商键排序稳定选择。保存匹配模型 raw JSON 为 metadata。已有模型的手工字段始终保留，同步仅更新过时标记。
-- 模型支持手工创建、编辑 ID/名称/显示名称、输入输出能力、思考/工具调用、上下文/输出长度和 metadata。上下文长度预设 32k/64k/128k/256k/512k，输出长度预设 16k/32k/64k/128k/256k/512k（1k = 1,000 tokens），均可输入自定义整数；留空保存为 null，表示按模型默认。`passTest` 是人工登记状态，默认未测试；本阶段不会自动调用收费推理或生成接口。
+- 模型支持手工创建、编辑 ID/名称/显示名称、输入输出能力、思考/工具调用和上下文/输出长度，启用状态使用 Switch。上下文长度预设 32k/64k/128k/256k/512k，输出长度预设 16k/32k/64k/128k/256k/512k（1k = 1,000 tokens），通过输入框下方的 Badge 点击填写，也可输入自定义整数；留空或点击“按模型默认”保存为 null。模型弹窗不编辑 metadata、deprecated 和 passTest，更新请求省略这些字段以保留已有值。模型能力使用带悬停及键盘提示的图标展示，启用、过时与测试状态使用 Badge 展示；新模型默认未测试，不会自动调用收费推理或生成接口。
 - 模型以 `(provider_id, id)` 复合主键存储，支持不同供应商同名以及含 `/` 的模型 ID。模型引用采用 `<providerId>/<完整模型ID>`。
 - 默认模型、快速模型、图片生成模型及思考模式（自动/开启/关闭）保存在 `settings` 的 `models` 行；只允许选择启用供应商下的启用模型，图片生成默认项要求图片输出能力。取消默认配置后才能删除、停用或修改被引用模型 ID；过时模型仍可作为默认项。
 - 删除供应商或模型为软删除；供应商删除同时清除其密钥。再次拉取不会恢复手工删除的模型或重命名前的旧 ID；需要恢复时可手工使用原 ID 新建。删除需要输入名称或模型 ID 确认。
@@ -143,40 +143,27 @@ SERVER_PORT=3001
 - **`ECONNREFUSED 127.0.0.1:5432`**：该地址没有可连接的数据库服务，检查 PostgreSQL 是否启动及 `DATABASE_URL` 的端口、库名和凭据。
 - **页面能打开，但 `/api/health` 失败**：只代表 Vite 已启动，后端可能仍因配置、数据库连接或未执行迁移而启动失败，应查看终端的 server 日志。
 
-### 本机临时测试账号与数据库
+### 数据库重建与账号
 
-以下是本次本地验收环境中已创建的测试账号，**不是项目内置的默认账号，也不会在启动时自动创建**：
+项目不提供默认账号。清空认证表或更换数据库后，先执行 `pnpm db:migrate`，再执行 `pnpm auth:create-admin` 创建管理员；旧账号和登录会话不会恢复。
 
-```text
-用户名：admin
-密码：Preview-Admin-2026!
-```
+`pnpm db:migrate` 是初始化／增量迁移命令，不会清空已有数据。认证表结构以 `packages/auth/src/index.ts` 的 Better Auth 配置及插件为唯一来源，不保留手写认证迁移或 TypeORM 认证实体。认证表没有 `deleted_at`；用户删除使用 Better Auth 的硬删除，停用账号使用封禁。
 
-该账号保存在本机临时 PostgreSQL 数据库中，连接配置为：
-
-```env
-DATABASE_URL=postgresql://aime_test@127.0.0.1:55439/aime_hub_test
-```
-
-数据库用户名为 `aime_test`，端口为 `55439`，库名为 `aime_hub_test`；该实例仅监听本机，使用 trust 认证，无需密码。它不是项目自动提供的数据库，其他机器或实例停止后不能直接使用此连接串。
-
-重启开发服务不会改变账号密码；修改 `BETTER_AUTH_SECRET` 会使原有会话失效，但不会修改密码。删除或更换数据库后，需要重新运行 `pnpm auth:create-admin` 创建账号。临时数据库不保证长期保留；正式开发请使用持久化数据库。
-
-**以上公开测试密码与免密数据库仅用于本机测试，禁止用于生产或对公网开放。** 正式环境应自行创建管理员并设置独立强密码，勿将真实密钥或生产凭据写入 README。
+开发数据库需要自行启动并通过 `DATABASE_URL` 配置。临时 PostgreSQL 不保证长期保留，正式开发请使用持久化数据库。重启服务不会修改密码；更改 `BETTER_AUTH_SECRET` 会使旧会话失效。
 
 ## 常用命令
 
-| 命令                                | 用途                                                 |
-| ----------------------------------- | ---------------------------------------------------- |
-| `pnpm dev`                          | concurrently 启动前端和 API                          |
-| `pnpm db:migrate`                   | 执行 TypeORM 迁移，可重复运行                        |
-| `pnpm auth:create-admin`            | 通过 Better Auth admin 插件创建保留管理员            |
-| `pnpm typecheck`                    | 工作区及脚本类型检查                                 |
-| `pnpm lint`                         | ESLint                                               |
-| `pnpm format` / `pnpm format:check` | Prettier 格式化／检查                                |
-| `pnpm build`                        | 构建前后端                                           |
-| `pnpm start`                        | 启动编译后的 API，不启动前端静态服务器               |
-| `pnpm test`                         | 单元测试；未提供测试库时明确跳过 PostgreSQL 集成测试 |
+| 命令                                | 用途                                                     |
+| ----------------------------------- | -------------------------------------------------------- |
+| `pnpm dev`                          | concurrently 启动前端和 API                              |
+| `pnpm db:migrate`                   | 执行 Better Auth 认证迁移与 TypeORM 业务迁移，可重复运行 |
+| `pnpm auth:create-admin`            | 通过 Better Auth admin 插件创建保留管理员                |
+| `pnpm typecheck`                    | 工作区及脚本类型检查                                     |
+| `pnpm lint`                         | ESLint                                                   |
+| `pnpm format` / `pnpm format:check` | Prettier 格式化／检查                                    |
+| `pnpm build`                        | 构建前后端                                               |
+| `pnpm start`                        | 启动编译后的 API，不启动前端静态服务器                   |
+| `pnpm test`                         | 单元测试；未提供测试库时明确跳过 PostgreSQL 集成测试     |
 
 集成测试使用真实 PostgreSQL，在指定数据库内创建随机 schema，测试结束只删除该 schema，不操作已有业务表。建议使用专用测试数据库；测试账号需有创建 schema 的权限。
 
@@ -184,22 +171,22 @@ DATABASE_URL=postgresql://aime_test@127.0.0.1:55439/aime_hub_test
 TEST_DATABASE_URL=postgresql://user:password@127.0.0.1:5432/aime_hub_test pnpm test
 ```
 
-覆盖：迁移一致性与幂等、注册、密码哈希、登录、会话、退出、多管理员、保留用户名、客户端提权拦截、服务端权限、跨来源拒绝和限流；以及管理员 HTTP 创建、重复账号拒绝、用户搜索/排序/分页、编辑、角色变更、密码重置、会话查询/撤销、封禁/解封、自我封禁/删除拒绝、硬删除及关联数据清理。
+覆盖：Better Auth 独立建表、插件字段与迁移幂等、TypeORM 业务实体一致性、注册、密码哈希、登录、会话、退出、多管理员、保留用户名、客户端提权拦截、服务端权限、跨来源拒绝和限流；以及管理员 HTTP 创建、重复账号拒绝、用户搜索/排序/分页、编辑、角色变更、密码重置、会话查询/撤销、封禁/解封、自我封禁/删除拒绝、硬删除及关联数据清理。
 
 ## 目录
+
+前端页面按 `pages/<模块>/page.tsx` 组织，后台页面位于 `pages/admin/<模块>/`，专属组件、请求和 hooks 就近存放。跨页面认证逻辑放在 `features/auth`，应用布局放在 `layouts`。后端业务按 `modules/auth`、`health`、`providers`、`settings` 拆分，`app.ts` 负责组装。完整边界和目录见 [模块组织](docs/architecture.md)。
 
 ```text
 apps/web/       Vite React UI
 apps/server/    Express API
-packages/auth/  Better Auth 工厂、插件与字段映射
-packages/db/    TypeORM 实体、数据源及迁移
+packages/auth/  Better Auth 工厂、插件、字段映射与官方迁移入口
+packages/db/    TypeORM 业务实体、数据源及业务迁移
 packages/shared/ 共享逻辑与仅服务端使用的环境加载
 scripts/        迁移、管理员初始化、测试
 ```
 
-PRD 中 `packages/db` 和 `packages/database` 职责重复，本阶段统一放在 `packages/db`，不建立空目录或双重 schema 来源。数据库 `synchronize` 关闭，启动服务不会自动修改表结构；存在未执行迁移时会提示先迁移。
-
-虽然实体保留 `@DeleteDateColumn`，Better Auth 的删除语义仍是**硬删除**；不要对认证表使用 TypeORM `softDelete`，否则认证层不会自动过滤 `deleted_at`。账号停用应使用 admin 插件的封禁能力。
+PRD 中 `packages/db` 和 `packages/database` 的业务持久化职责统一放在 `packages/db`；认证结构由 `packages/auth` 内的 Better Auth 配置管理。数据库 `synchronize` 关闭，启动服务会检查认证表／字段／索引和业务迁移是否就绪，缺失时提示运行 `pnpm db:migrate`，不会自动修改表结构。业务实体使用 `@DeleteDateColumn` 保留软删除能力。
 
 ## 生产部署边界
 
@@ -213,6 +200,8 @@ PRD 中 `packages/db` 和 `packages/database` 职责重复，本阶段统一放�
 
 账号认证、用户管理、模型供应商管理已完成实现与测试。当前 69 项测试全部通过（含隔离 PostgreSQL 集成、供应商权限/密钥/同步/defaults、前端表单及长度预设），类型检查、Lint、生产构建通过；浏览器验证供应商/模型创建与编辑、模型抽屉及嵌套弹窗焦点恢复、长度预设/自定义/清空、默认配置保存及桌面/移动端响应式布局。上游模型接口使用受控 fixture 验证，未使用真实供应商密钥进行联网或收费推理测试。
 
-本次修改文件通过格式检查；全仓格式检查仍报告已有 `.vscode/settings.json` 格式问题，未修改用户编辑器配置。生产构建有前端单包超过 500 kB 和依赖库注释提示，不影响构建成功。
+本次修改文件通过格式检查；全仓格式检查仍报告已有 `.vscode/settings.json` 格式问题，未修改用户编辑器配置。页面已按路由懒加载，当前入口 JS 约 463 kB（gzip 约 149 kB），不再出现单块超过 500 kB 的提示；依赖库注释提示仍存在，不影响构建成功。
 
 PRD 模型供应商项已勾选，等待用户验收确认后再进入下一阶段。聊天、项目、独立系统设置 CRUD、Mastra 等不在本阶段实现范围内。
+
+模块整理与 UI 优化已通过类型检查、Lint、生产构建及 69 项测试（含隔离 PostgreSQL 集成）。浏览器验证了供应商搜索、模型抽屉及编辑弹窗取消后的焦点恢复、用户创建弹窗、移动端导航和桌面/390px 窄屏布局；本轮未提交界面中的数据变更，也未调用真实供应商同步或推理。

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
+import type { Server } from 'node:http';
 import test from 'node:test';
 import { Pool } from 'pg';
-import { createAuth } from '@aime/auth';
-import { createDataSource } from '@aime/db';
+import { createAuth, createAuthOptions } from '@aime/auth';
+import { getMigrations } from '@aime/auth/migrations';
 import { hasAdminRole, parseAdminUsernames } from '@aime/shared';
 import { createApp } from '../apps/server/src/app.js';
 
@@ -25,72 +26,99 @@ test(
     const connectionString = process.env.TEST_DATABASE_URL!;
     const schema = `auth_test_${randomBytes(8).toString('hex')}`;
     const root = new Pool({ connectionString });
-    await root.query(`CREATE SCHEMA "${schema}"`);
     const options = `-c search_path=${schema}`;
-    const database = createDataSource(connectionString).setOptions({
-      schema,
-      extra: { options },
-    });
     const pool = new Pool({ connectionString, options });
-    await database.initialize();
-    const initialMigrations = await database.runMigrations();
-    const auth = createAuth({
-      pool,
-      secret: randomBytes(32).toString('hex'),
-      baseURL: 'http://localhost:5173',
-      webOrigin: 'http://localhost:5173',
-      admins: 'admin,owner',
-    });
-    const server = createApp(auth).listen(0, '127.0.0.1');
-    await once(server, 'listening');
-    const address = server.address();
-    assert.ok(address && typeof address !== 'string');
-    const base = `http://127.0.0.1:${address.port}`;
-    const password = 'Integration-Password-49!';
-    let userCookie = '';
-    let adminCookie = '';
-    let userId = '';
-    let adminId = '';
-    let ownerId = '';
-    let managedId = '';
-    let managedCookie = '';
-    let managedToken = '';
-    const managedPassword = 'Managed-New-Password-73!';
-    async function request(
-      path: string,
-      body?: unknown,
-      cookie = '',
-      origin = 'http://localhost:5173',
-      extraHeaders: Record<string, string> = {},
-    ) {
-      const response = await fetch(`${base}${path}`, {
-        method: body === undefined ? 'GET' : 'POST',
-        headers: {
-          'content-type': 'application/json',
-          origin,
-          cookie,
-          ...extraHeaders,
-        },
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
-      const text = await response.text();
-      return {
-        response,
-        data: text ? JSON.parse(text) : null,
-        cookie: response.headers
-          .getSetCookie()
-          .map((value) => value.split(';')[0])
-          .join('; '),
-      };
-    }
+    let server: Server | undefined;
+    let schemaCreated = false;
     try {
-      await t.test('迁移可重复运行，实体与数据库结构一致', async () => {
-        assert.equal(initialMigrations.length, database.migrations.length);
-        assert.equal((await database.runMigrations()).length, 0);
-        const changes = await database.driver.createSchemaBuilder().log();
+      await root.query(`CREATE SCHEMA "${schema}"`);
+      schemaCreated = true;
+      const authConfig = {
+        pool,
+        secret: randomBytes(32).toString('hex'),
+        baseURL: 'http://localhost:5173',
+        webOrigin: 'http://localhost:5173',
+        admins: 'admin,owner',
+      };
+      const initialMigrations = await getMigrations(
+        createAuthOptions(authConfig),
+      );
+      await initialMigrations.runMigrations();
+      const auth = createAuth(authConfig);
+      server = createApp(auth).listen(0, '127.0.0.1');
+      await once(server, 'listening');
+      const address = server.address();
+      assert.ok(address && typeof address !== 'string');
+      const base = `http://127.0.0.1:${address.port}`;
+      const password = 'Integration-Password-49!';
+      let userCookie = '';
+      let adminCookie = '';
+      let userId = '';
+      let adminId = '';
+      let ownerId = '';
+      let managedId = '';
+      let managedCookie = '';
+      let managedToken = '';
+      const managedPassword = 'Managed-New-Password-73!';
+      async function request(
+        path: string,
+        body?: unknown,
+        cookie = '',
+        origin = 'http://localhost:5173',
+        extraHeaders: Record<string, string> = {},
+      ) {
+        const response = await fetch(`${base}${path}`, {
+          method: body === undefined ? 'GET' : 'POST',
+          headers: {
+            'content-type': 'application/json',
+            origin,
+            cookie,
+            ...extraHeaders,
+          },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        const text = await response.text();
+        return {
+          response,
+          data: text ? JSON.parse(text) : null,
+          cookie: response.headers
+            .getSetCookie()
+            .map((value) => value.split(';')[0])
+            .join('; '),
+        };
+      }
+      await t.test('Better Auth 独立建表，插件字段齐全且迁移幂等', async () => {
         assert.deepEqual(
-          changes.upQueries.map((query) => query.query),
-          [],
+          initialMigrations.toBeCreated.map(({ table }) => table).sort(),
+          ['accounts', 'sessions', 'users', 'verifications'],
+        );
+        const next = await getMigrations(auth.options);
+        assert.deepEqual(next.toBeCreated, []);
+        assert.deepEqual(next.toBeAdded, []);
+        assert.deepEqual(next.toBeAddedIndexes, []);
+        assert.deepEqual(next.schemaProblems, []);
+        await next.runMigrations();
+        const columns = await pool.query(
+          `SELECT column_name FROM information_schema.columns
+           WHERE table_schema = $1 AND table_name = 'users'`,
+          [schema],
+        );
+        const names = columns.rows.map((row) => row.column_name);
+        for (const name of [
+          'username',
+          'display_username',
+          'role',
+          'banned',
+          'ban_reason',
+          'ban_expires',
+        ]) {
+          assert.ok(names.includes(name), `Missing plugin column: ${name}`);
+        }
+        assert.ok(!names.includes('deleted_at'));
+        assert.equal(
+          (await pool.query('SELECT current_schema() AS schema')).rows[0]
+            .schema,
+          schema,
         );
       });
       await t.test('匿名请求无法访问个人和管理接口', async () => {
@@ -942,13 +970,17 @@ test(
         assert.equal(spoofed.response.status, 429);
       });
     } finally {
-      await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
-      );
+      if (server?.listening) {
+        const activeServer = server;
+        const closing = new Promise<void>((resolve, reject) =>
+          activeServer.close((error) => (error ? reject(error) : resolve())),
+        );
+        activeServer.closeAllConnections();
+        await closing;
+      }
       await pool.end();
-      if (database.isInitialized) await database.destroy();
       // Only remove this run's randomly named schema, never an existing application's tables.
-      await root.query(`DROP SCHEMA "${schema}" CASCADE`);
+      if (schemaCreated) await root.query(`DROP SCHEMA "${schema}" CASCADE`);
       await root.end();
     }
   },

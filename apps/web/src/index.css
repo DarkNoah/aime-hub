@@ -22,25 +22,25 @@
   --color-card-foreground: var(--foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: #ffffff;
-  --color-secondary: #eef0eb;
+  --color-secondary: #eef2ef;
   --color-secondary-foreground: #3f4942;
-  --color-muted: #f0f2ee;
-  --color-muted-foreground: #68726b;
+  --color-muted: #f1f4f2;
+  --color-muted-foreground: #5e6b63;
   --color-accent: #e9eee8;
   --color-accent-foreground: #263e32;
   --color-destructive: #b42332;
-  --color-border: #e2e6df;
-  --color-input: #d8ded5;
+  --color-border: #e0e6e2;
+  --color-input: #d4ddd6;
   --color-ring: #416c53;
-  --color-sidebar: #f3f5f0;
+  --color-sidebar: #f0f3f1;
 }
 
 :root {
   font-family: var(--font-sans);
   color-scheme: light;
   --radius: 0.625rem;
-  --background: #f8f9f6;
-  --foreground: #202a24;
+  --background: #f8faf9;
+  --foreground: #202d25;
   --card: #ffffff;
   --primary: #305640;
   font-synthesis: none;
@@ -63,17 +63,18 @@
   button:not(:disabled) {
     cursor: pointer;
   }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
   ::selection {
     background: #dce9d8;
     color: #203729;
   }
-}
-
-.auth-grid {
-  background-image:
-    linear-gradient(#30564006 1px, transparent 1px),
-    linear-gradient(90deg, #30564006 1px, transparent 1px);
-  background-size: 48px 48px;
 }
 
 @media (prefers-reduced-motion: reduce) {

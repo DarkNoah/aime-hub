@@ -1,9 +1,19 @@
 export const en = {
+  'common.loading': 'Loading page…',
+  'providers.search': 'Search name or URL',
+  'providers.noResults': 'No matching providers',
+  'workspace.greeting': 'Welcome back, {{name}}',
+  'workspace.quickAccess': 'Manage your workspace',
+  'admin.settingsTitle': 'More settings are on the way',
+  'admin.settingsHint':
+    'Default models and thinking mode are available on the model providers page. More system settings will be added here.',
+
   'meta.title': 'Aime Hub · Workspace',
   'meta.description': 'Aime Hub · Your AI workspace',
   'common.workspace': 'Workspace',
   'common.comingSoon': 'Coming soon',
   'common.close': 'Close',
+  'common.notifications': 'Notifications',
   'nav.overview': 'Overview',
   'nav.providers': 'Model providers',
   'nav.users': 'Users',
@@ -77,16 +87,14 @@ export const en = {
   'providers.urlHint':
     'Use an HTTP(S) API base URL without credentials, query parameters or fragments. Synchronization appends /models.',
   'providers.apiKey': 'API key',
+  'providers.showApiKey': 'Show API key',
+  'providers.hideApiKey': 'Hide API key',
   'providers.keyHint':
     'Optional. The saved key is never returned or displayed.',
   'providers.keyKeepHint':
     'Leave blank to keep the existing key. Enter a new key to replace it. The saved key is never returned.',
   'providers.keySet': 'API key configured',
   'providers.keyUnset': 'No API key configured',
-  'providers.clearKey': 'Explicitly clear the saved API key',
-  'providers.metadata': 'Metadata (JSON)',
-  'providers.metadataHint':
-    'Enter a JSON object. Use {} for empty metadata. Do not store API keys here.',
   'providers.enabled': 'Enabled',
   'providers.disabled': 'Disabled',
   'providers.enable': 'Enable',
@@ -134,6 +142,9 @@ export const en = {
   'models.toolCall': 'Tool calling',
   'models.modalitiesInput': 'Input modalities',
   'models.modalitiesOutput': 'Output modalities',
+  'models.input': 'Input',
+  'models.output': 'Output',
+  'models.enableNamed': 'Enable model {{name}}',
   'models.modality.text': 'Text',
   'models.modality.image': 'Image',
   'models.modality.audio': 'Audio',
@@ -145,7 +156,9 @@ export const en = {
   'models.modelDefault': 'Model default',
   'models.customLimit': 'Custom input',
   'models.limitHint':
-    'Choose a preset or enter a token count. 1k = 1,000 tokens; leave blank for the model default.',
+    'Click a preset below or enter a token count. 1k = 1,000 tokens; leave blank for the model default.',
+  'models.deprecatedUnknown': 'Deprecation unknown',
+  'models.noCapabilities': 'Not configured',
   'models.deprecated': 'Deprecated',
   'models.deprecatedYes': 'Deprecated',
   'models.deprecatedNo': 'Not deprecated',
@@ -170,6 +183,19 @@ export const en = {
     'Synchronized: {{added}} added, {{deprecated}} deprecated, {{total}} total.',
   'models.catalogUnavailable':
     'The model catalog was unavailable. The provider model list was synchronized without catalog enrichment.',
+  'providers.enableNamed': 'Enable {{name}}',
+  'modelSelector.loading': 'Loading models…',
+  'modelSelector.retry': 'Retry',
+  'modelSelector.title': 'Select {{label}}',
+  'modelSelector.hint': 'Browse models by provider, or search to find a model.',
+  'modelSelector.search': 'Search provider, model name or ID',
+  'modelSelector.selected': 'Selected',
+  'modelSelector.empty': 'No models available',
+  'modelSelector.none': 'No model selected',
+  'modelSelector.unavailable': 'Unavailable: {{reference}}',
+  'modelSelector.noResults': 'No matching models',
+  'modelSelector.searchHint': 'Try another search or clear the search field.',
+  'modelSelector.emptyHint': 'There are no models to choose from.',
   'defaults.title': 'Default model configuration',
   'defaults.hint':
     'Only enabled models from enabled providers are selectable. Image generation requires image output. Save new defaults before disabling or deleting a referenced provider or model.',
@@ -181,7 +207,6 @@ export const en = {
   'defaults.on': 'On (on)',
   'defaults.off': 'Off (off)',
   'defaults.none': 'Not configured',
-  'defaults.unavailable': 'Unavailable: {{reference}}',
   'defaults.noImages': 'No enabled models with image output are available.',
   'defaults.noModels':
     'No enabled models are available. Configure a provider and enable its models first.',
@@ -201,8 +226,6 @@ export const en = {
     'The provider request failed. Check its base URL and API key, then retry synchronization.',
   'errors.providerUrl':
     'This provider URL is invalid or not allowed. Check the HTTP(S) base URL.',
-  'errors.providerMetadata':
-    'Metadata must be a valid JSON object, not an array, null or a primitive value.',
   'admin.usersDescription':
     'Manage accounts, access roles and account security.',
   'users.create': 'Create user',
@@ -274,8 +297,7 @@ export const en = {
   'errors.selfBan': 'You cannot suspend your own account.',
   'errors.selfDelete': 'You cannot delete your own account.',
   'errors.userNotFound': 'This user no longer exists. Refresh the list.',
-  'admin.settingsDescription':
-    'System configuration will be available in a future release.',
+  'admin.settingsDescription': 'Manage the defaults for your workspace.',
   'admin.eyebrow': 'ADMINISTRATION',
   'admin.placeholderTitle': 'This feature is not available yet',
   'admin.placeholderDescription':
@@ -283,8 +305,7 @@ export const en = {
   'admin.future': 'Available in a future release',
   'workspace.eyebrow': 'YOUR WORKSPACE',
   'workspace.heading': 'A fresh start',
-  'workspace.welcome':
-    'Welcome to Aime Hub. Your account is ready, and your workspace is taking shape.',
+  'workspace.welcome': 'Manage your account and AI workspace in one place.',
   'workspace.heroTitle': 'Make room for ideas to grow.',
   'workspace.heroDescription':
     'Sign-in, registration, and administration navigation are available. Chats and projects are coming soon; no sample conversations or projects are shown.',

@@ -4,7 +4,7 @@ import { createInstance } from 'i18next';
 import { i18nOptions, resolveLocale } from './config';
 import { en } from './locales/en';
 import { zhCN } from './locales/zh-CN';
-import { authErrorKey, validateCredentials } from '../lib/auth-errors';
+import { authErrorKey, validateCredentials } from '../features/auth/errors';
 
 test('浏览器语言按偏好匹配，中英文区域变体及未知语言回退', () => {
   for (const language of ['zh', 'zh-CN', 'zh-TW', 'zh-Hant-HK', ' ZH_cn ']) {

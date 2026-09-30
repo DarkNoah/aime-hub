@@ -122,6 +122,30 @@ export type ProviderSummary = Omit<ProviderInput, 'apiKey'> & {
   modelCount: number;
 };
 export type ProviderDetail = ProviderSummary & { models: ProviderModel[] };
+// User-facing catalog: connection details and internal metadata stay server-side.
+export type AvailableModel = Pick<
+  ProviderModel,
+  | 'providerId'
+  | 'id'
+  | 'name'
+  | 'displayName'
+  | 'description'
+  | 'enabled'
+  | 'modalitiesInput'
+  | 'modalitiesOutput'
+  | 'reasoning'
+  | 'toolCall'
+  | 'limitContext'
+  | 'limitOutput'
+>;
+export type AvailableProvider = {
+  id: string;
+  name: string;
+  type: string;
+  enabled: boolean;
+  models: AvailableModel[];
+};
+export type AvailableModels = { providers: AvailableProvider[] };
 export type SyncResult = {
   added: number;
   deprecated: number;

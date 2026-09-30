@@ -1,11 +1,21 @@
 import type { en } from './en';
 
 export const zhCN = {
+  'common.loading': '正在加载页面…',
+  'providers.search': '搜索名称或地址',
+  'providers.noResults': '未找到匹配的供应商',
+  'workspace.greeting': '欢迎回来，{{name}}',
+  'workspace.quickAccess': '工作空间管理',
+  'admin.settingsTitle': '更多设置将在这里提供',
+  'admin.settingsHint':
+    '默认模型与思考模式可在模型供应商页面中配置，其他系统设置将逐步开放。',
+
   'meta.title': 'Aime Hub · 工作空间',
   'meta.description': 'Aime Hub · 你的 AI 工作空间',
   'common.workspace': '工作空间',
   'common.comingSoon': '待开放',
   'common.close': '关闭',
+  'common.notifications': '通知',
   'nav.overview': '管理概览',
   'nav.providers': '模型供应商',
   'nav.users': '用户管理',
@@ -72,15 +82,13 @@ export const zhCN = {
   'providers.urlHint':
     '填写 HTTP(S) API 基础地址，不包含账号密码、查询参数或片段；同步时会追加 /models。',
   'providers.apiKey': 'API 密钥',
+  'providers.showApiKey': '显示 API 密钥',
+  'providers.hideApiKey': '隐藏 API 密钥',
   'providers.keyHint': '可选。已保存的密钥不会返回或显示。',
   'providers.keyKeepHint':
     '留空保留原密钥，输入新密钥则替换。已保存的密钥不会返回。',
   'providers.keySet': '已配置密钥',
   'providers.keyUnset': '未配置密钥',
-  'providers.clearKey': '明确清除已保存的 API 密钥',
-  'providers.metadata': '元数据（JSON）',
-  'providers.metadataHint':
-    '请输入 JSON 对象，空元数据使用 {}。请勿在此存放 API 密钥。',
   'providers.enabled': '已启用',
   'providers.disabled': '已停用',
   'providers.enable': '启用',
@@ -125,6 +133,9 @@ export const zhCN = {
   'models.toolCall': '支持工具调用',
   'models.modalitiesInput': '输入能力',
   'models.modalitiesOutput': '输出能力',
+  'models.input': '输入',
+  'models.output': '输出',
+  'models.enableNamed': '启用模型 {{name}}',
   'models.modality.text': '文本',
   'models.modality.image': '图像',
   'models.modality.audio': '音频',
@@ -136,7 +147,9 @@ export const zhCN = {
   'models.modelDefault': '按模型默认',
   'models.customLimit': '自定义输入',
   'models.limitHint':
-    '可选预设或输入 token 数量，1k = 1,000 tokens，留空按模型默认。',
+    '点击下方预设或输入 token 数量，1k = 1,000 tokens，留空按模型默认。',
+  'models.deprecatedUnknown': '过时状态未知',
+  'models.noCapabilities': '未配置',
   'models.deprecated': '已过时',
   'models.deprecatedYes': '已过时',
   'models.deprecatedNo': '未过时',
@@ -161,6 +174,19 @@ export const zhCN = {
     '同步完成：新增 {{added}} 个，过时 {{deprecated}} 个，共 {{total}} 个。',
   'models.catalogUnavailable':
     '模型目录暂不可用，供应商模型列表已同步，但未补充目录信息。',
+  'providers.enableNamed': '启用 {{name}}',
+  'modelSelector.loading': '正在加载模型…',
+  'modelSelector.retry': '重试',
+  'modelSelector.title': '选择{{label}}',
+  'modelSelector.hint': '按供应商浏览模型，也可以搜索查找。',
+  'modelSelector.search': '搜索供应商、模型名称或 ID',
+  'modelSelector.selected': '已选中',
+  'modelSelector.empty': '暂无可选模型',
+  'modelSelector.none': '未选择模型',
+  'modelSelector.unavailable': '不可用：{{reference}}',
+  'modelSelector.noResults': '未找到匹配模型',
+  'modelSelector.searchHint': '请尝试其他关键词或清空搜索条件。',
+  'modelSelector.emptyHint': '当前没有可供选择的模型。',
   'defaults.title': '默认模型配置',
   'defaults.hint':
     '仅可选择已启用供应商的已启用模型，图片生成模型需支持图像输出。停用或删除被引用的模型、供应商前，请先修改并保存默认配置。',
@@ -172,7 +198,6 @@ export const zhCN = {
   'defaults.on': '开启（on）',
   'defaults.off': '关闭（off）',
   'defaults.none': '未配置',
-  'defaults.unavailable': '不可用：{{reference}}',
   'defaults.noImages': '暂无已启用且支持图像输出的模型。',
   'defaults.noModels': '暂无可用模型，请先配置供应商并启用其模型。',
   'defaults.save': '保存默认配置',
@@ -182,15 +207,13 @@ export const zhCN = {
   'errors.providerNotFound': '此供应商或模型已不存在，请刷新列表后重试。',
   'errors.providerConflict': '此标识对应的供应商或模型已存在，请使用其他标识。',
   'errors.modelInUse':
-    '默认配置正在引用此供应商或模型，请先修改并保存上方默认配置，再停用、修改 ID 或删除。',
+    '默认配置正在引用此供应商或模型，请先修改并保存默认配置，再停用、修改 ID 或删除。',
   'errors.invalidModel':
     '所选模型不可用或不具备所需能力。请刷新并选择已启用模型；图片生成需要图像输出能力。',
   'errors.providerUpstream':
     '供应商请求失败，请检查基础地址和 API 密钥后重新同步。',
   'errors.providerUrl':
     '供应商地址无效或不被允许，请检查 HTTP(S) API 基础地址。',
-  'errors.providerMetadata':
-    '元数据必须是有效 JSON 对象，不能是数组、null 或基本类型值。',
   'admin.usersDescription': '管理用户账号、访问权限与账号安全。',
   'users.create': '创建用户',
   'users.edit': '编辑用户',
@@ -255,7 +278,7 @@ export const zhCN = {
   'errors.selfBan': '不能封禁当前登录账号。',
   'errors.selfDelete': '不能删除当前登录账号。',
   'errors.userNotFound': '此用户已不存在，请刷新列表。',
-  'admin.settingsDescription': '系统配置入口，后续阶段实现。',
+  'admin.settingsDescription': '管理工作空间的默认配置。',
   'admin.eyebrow': 'ADMINISTRATION',
   'admin.placeholderTitle': '页面已预留，功能尚未实现',
   'admin.placeholderDescription':
@@ -263,8 +286,8 @@ export const zhCN = {
   'admin.future': '后续阶段开放',
   'workspace.eyebrow': 'YOUR WORKSPACE',
   'workspace.heading': '一个新的开始',
-  'workspace.welcome': '欢迎来到 Aime Hub。账号已就绪，工作空间正在逐步构建。',
-  'workspace.heroTitle': '保留空间，等待灵感生长。',
+  'workspace.welcome': '在这里管理你的账号与 AI 工作空间。',
+  'workspace.heroTitle': '准备你的工作空间',
   'workspace.heroDescription':
     '当前阶段支持账号登录、注册和后台导航。聊天与项目功能尚未开放，这里不会展示模拟会话或示例项目。',
   'workspace.openAdmin': '进入管理后台',

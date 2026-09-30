@@ -1,18 +1,14 @@
 import 'reflect-metadata';
 import { Pool } from 'pg';
 import { createAuth } from '@aime/auth';
+import { getMigrations } from '@aime/auth/migrations';
 import { createDataSource } from '@aime/db';
 import { loadEnv } from '@aime/shared/env';
 import { createApp } from './app.js';
-import { ProviderService } from './provider-service.js';
+import { ProviderService } from './modules/providers/service.js';
 
 const env = loadEnv();
 const database = createDataSource(env.DATABASE_URL);
-await database.initialize();
-if (await database.showMigrations()) {
-  await database.destroy();
-  throw new Error('数据库存在未执行迁移，请先运行 pnpm db:migrate');
-}
 const pool = new Pool({ connectionString: env.DATABASE_URL });
 const auth = createAuth({
   pool,
@@ -21,6 +17,25 @@ const auth = createAuth({
   webOrigin: env.WEB_ORIGIN,
   admins: env.ADMINS,
 });
+try {
+  await database.initialize();
+  const authMigrations = await getMigrations(auth.options);
+  if (
+    authMigrations.toBeCreated.length ||
+    authMigrations.toBeAdded.length ||
+    authMigrations.toBeAddedIndexes.length ||
+    authMigrations.schemaProblems.length ||
+    (await database.showMigrations())
+  ) {
+    throw new Error('数据库结构未就绪，请先运行 pnpm db:migrate');
+  }
+} catch (error) {
+  await Promise.allSettled([
+    pool.end(),
+    database.isInitialized ? database.destroy() : Promise.resolve(),
+  ]);
+  throw error;
+}
 const server = createApp(auth, {
   service: new ProviderService(database),
   webOrigin: env.WEB_ORIGIN,

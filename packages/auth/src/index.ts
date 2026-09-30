@@ -1,4 +1,4 @@
-import { betterAuth } from 'better-auth';
+import { betterAuth, type BetterAuthOptions } from 'better-auth';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { admin, username } from 'better-auth/plugins';
 import { parseAdminUsernames } from '@aime/shared';
@@ -12,9 +12,9 @@ type AuthConfig = {
   admins: string;
 };
 
-export function createAuth(config: AuthConfig) {
+export function createAuthOptions(config: AuthConfig) {
   const reserved = new Set(parseAdminUsernames(config.admins));
-  return betterAuth({
+  return {
     appName: 'Aime Hub',
     database: config.pool,
     secret: config.secret,
@@ -122,7 +122,11 @@ export function createAuth(config: AuthConfig) {
         },
       }),
     ],
-  });
+  } satisfies BetterAuthOptions;
+}
+
+export function createAuth(config: AuthConfig) {
+  return betterAuth(createAuthOptions(config));
 }
 
 export type Auth = ReturnType<typeof createAuth>;

@@ -43,7 +43,7 @@ DEFAULT_MODEL=gpt-6-sol
 
 ## 数据结构
 
-> 使用 TypeORM, 使用 @CreateDateColumn @DeleteDateColumn @UpdateDateColumn
+> 业务表使用 TypeORM, 使用 @CreateDateColumn @DeleteDateColumn @UpdateDateColumn；认证表由 Better Auth 配置、插件和官方迁移管理，不定义 TypeORM 认证实体。
 > 映射规则
 
 ```
@@ -164,3 +164,4 @@ api/admin/settings/\* 系统配置
 \[x] 登录/注册实现, 侧边栏(后台管理)不是实现具体功能（实现及测试完成，待用户确认后进入下一阶段）
 \[x] 实现用户管理模块（Better Auth admin 插件；实现及测试完成，待用户确认后进入下一阶段）
 \[x] 模型供应商管理模块（右侧抽屉管理模型，长度支持预设、自定义及留空按模型默认；实现及测试完成，待用户验收确认）
+\[ ] 参照 `./harness.md` 构建个人聊天页面功能(暂时不构建项目聊天)
