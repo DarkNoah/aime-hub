@@ -6,8 +6,10 @@ export const zhCN = {
   'chat.welcome': '今天想一起完成什么？',
   'chat.welcomeHint': '提出一个问题、梳理一个想法，或添加图片开始对话。',
   'chat.model': '聊天模型',
-  'chat.defaultModel': '使用个人 / 系统默认模型',
+  'chat.defaultModel': '系统默认模型',
   'chat.reasoning': '思考过程',
+  'chat.reasoningLevel': '思考等级',
+  'chat.reasoningHint': '拖动选择等级，松开后保存为个人默认配置。',
   'chat.reasoning.auto': '默认思考模式',
   'chat.reasoning.none': '关闭思考',
   'chat.reasoning.minimal': '最低',
@@ -38,7 +40,6 @@ export const zhCN = {
   'chat.removeImage': '移除图片',
   'chat.imageHint':
     '最多 4 张 PNG、JPEG、WebP 或 GIF 图片，每张不超过 2 MB。请选择支持图片的模型。',
-  'chat.you': '你',
   'chat.thinking': 'Aime 正在思考…',
   'chat.copy': '复制',
   'chat.copied': '已复制回复。',
@@ -66,10 +67,7 @@ export const zhCN = {
   'chat.deleteHint':
     '此操作会永久删除聊天及其消息记录，工作目录中的文件会保留。',
   'chat.deleted': '聊天已删除。',
-  'chat.preferences': '个人聊天设置',
-  'chat.preferencesHint':
-    '个人模型优先于系统默认模型；聊天中指定的模型优先于个人设置。思考能力及可用等级由供应商决定。',
-  'chat.saved': '个人聊天设置已保存。',
+  'chat.saved': '个人默认配置已更新。',
   'chat.errors.notFound': '该聊天不存在，或你没有访问权限。',
   'chat.errors.noModel': '请选择聊天模型，或联系管理员配置默认模型。',
   'chat.errors.modelUnavailable': '所选模型不可用，请选择已启用的文本模型。',

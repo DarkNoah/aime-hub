@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import type { ChatSettings, ThreadSummary } from '@aime/shared/threads';
+import type { ThreadSummary } from '@aime/shared/threads';
 import {
   Dialog,
   DialogContent,
@@ -10,16 +10,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetTitle,
-} from '@/components/ui/sheet';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { ChatSettingsFields } from '@/components/chat/chat-settings';
 import { chatApi, chatErrorKey } from '@/components/chat/api';
 
 export function ThreadDialog({
@@ -128,61 +121,5 @@ export function ThreadDialog({
         </form>
       </DialogContent>
     </Dialog>
-  );
-}
-
-export function PreferencesSheet({
-  initial,
-  onClose,
-  onSaved,
-}: {
-  initial: ChatSettings;
-  onClose: () => void;
-  onSaved: (settings: ChatSettings) => void;
-}) {
-  const { t } = useTranslation();
-  const [settings, setSettings] = useState(initial);
-  const [pending, setPending] = useState(false);
-  return (
-    <Sheet
-      open
-      onOpenChange={(open) => {
-        if (!open && !pending) onClose();
-      }}
-    >
-      <SheetContent closeLabel={t('common.close')}>
-        <div className="space-y-2 p-4 pr-10">
-          <SheetTitle>{t('chat.preferences')}</SheetTitle>
-          <SheetDescription>{t('chat.preferencesHint')}</SheetDescription>
-        </div>
-        <div className="p-4">
-          <ChatSettingsFields
-            value={settings}
-            onChange={setSettings}
-            disabled={pending}
-          />
-        </div>
-        <div className="mt-auto p-4">
-          <Button
-            className="w-full"
-            disabled={pending}
-            onClick={() => {
-              setPending(true);
-              void chatApi
-                .savePreferences(settings)
-                .then((value) => {
-                  onSaved(value);
-                  toast.success(t('chat.saved'));
-                  onClose();
-                })
-                .catch((cause) => toast.error(t(chatErrorKey(cause))))
-                .finally(() => setPending(false));
-            }}
-          >
-            {t(pending ? 'users.saving' : 'users.save')}
-          </Button>
-        </div>
-      </SheetContent>
-    </Sheet>
   );
 }

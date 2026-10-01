@@ -37,6 +37,9 @@ test(
   async (t) => {
     // Opt-in manual browser verification uses the same isolated schemas and local provider.
     const browserVerify = process.env.CHAT_BROWSER_VERIFY === '1';
+    const browserPort = Number(process.env.CHAT_BROWSER_PORT ?? 3001);
+    const browserOrigin =
+      process.env.CHAT_BROWSER_ORIGIN ?? 'http://localhost:5173';
     const schema = `chat_test_${randomBytes(6).toString('hex')}`;
     const connectionString = process.env.TEST_DATABASE_URL!;
     const root = new Pool({ connectionString });
@@ -192,9 +195,9 @@ test(
     } as unknown as Auth;
     server = createApp(
       auth,
-      { service: providers, webOrigin: 'http://localhost:5173' },
-      { threads, models, webOrigin: 'http://localhost:5173' },
-    ).listen(browserVerify ? 3001 : 0, '127.0.0.1');
+      { service: providers, webOrigin: browserOrigin },
+      { threads, models, webOrigin: browserOrigin },
+    ).listen(browserVerify ? browserPort : 0, '127.0.0.1');
     await once(server, 'listening');
     const address = server.address();
     assert.ok(address && typeof address !== 'string');
@@ -208,7 +211,7 @@ test(
         });
       }
       console.log(
-        'Isolated browser fixture ready on port 3001. Stop with SIGINT or SIGTERM to remove test schemas.',
+        `Isolated browser fixture ready on port ${browserPort}. Stop with SIGINT or SIGTERM to remove test schemas.`,
       );
       await new Promise<void>((resolve) => {
         process.once('SIGINT', resolve);

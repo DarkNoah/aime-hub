@@ -5,8 +5,11 @@ export const en = {
   'chat.welcomeHint':
     'Ask a question, explore an idea, or add an image to start a conversation.',
   'chat.model': 'Chat model',
-  'chat.defaultModel': 'Use personal / system default',
+  'chat.defaultModel': 'System default model',
   'chat.reasoning': 'Reasoning',
+  'chat.reasoningLevel': 'Reasoning effort',
+  'chat.reasoningHint':
+    'Drag to choose a level. Release to save your personal default.',
   'chat.reasoning.auto': 'Default reasoning',
   'chat.reasoning.none': 'Reasoning off',
   'chat.reasoning.minimal': 'Minimal',
@@ -38,7 +41,6 @@ export const en = {
   'chat.removeImage': 'Remove image',
   'chat.imageHint':
     'Up to 4 PNG, JPEG, WebP or GIF images, 2 MB each. Choose a model that supports images.',
-  'chat.you': 'You',
   'chat.thinking': 'Aime is thinking…',
   'chat.copy': 'Copy',
   'chat.copied': 'Response copied.',
@@ -67,10 +69,7 @@ export const en = {
   'chat.deleteHint':
     'This permanently deletes the chat and its message history. Workspace files are retained.',
   'chat.deleted': 'Chat deleted.',
-  'chat.preferences': 'Personal chat settings',
-  'chat.preferencesHint':
-    'Your preferred model takes priority over the system default. A model selected in a chat takes priority over these settings. Reasoning support and accepted levels depend on the provider.',
-  'chat.saved': 'Personal chat settings saved.',
+  'chat.saved': 'Personal defaults updated.',
   'chat.errors.notFound':
     'This chat is unavailable or you do not have access to it.',
   'chat.errors.noModel':

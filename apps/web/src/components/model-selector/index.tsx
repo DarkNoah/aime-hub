@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dialog';
 import { groupModelOptions, modelOptions } from './model-options';
 import { useAvailableModels } from '@/features/models/use-available-models';
+import { cn } from '@/lib/utils';
 
 export type { ModelOption } from './model-options';
 
@@ -28,6 +29,7 @@ export type ModelSelectorProps = {
   label: string;
   imageOnly?: boolean;
   textOnly?: boolean;
+  compact?: boolean;
   value: string | null;
   onValueChange: (value: string | null) => void;
   disabled?: boolean;
@@ -40,6 +42,7 @@ export function ModelSelector({
   label,
   imageOnly = false,
   textOnly = false,
+  compact = false,
   value,
   onValueChange,
   disabled = false,
@@ -87,13 +90,22 @@ export function ModelSelector({
       <DialogTrigger asChild>
         <Button
           id={id}
-          variant="outline"
+          type="button"
+          variant={compact ? 'ghost' : 'outline'}
           disabled={disabled}
-          className="w-full min-w-0 justify-between px-3 font-normal"
+          className={cn(
+            'w-full min-w-0 justify-between px-3 font-normal',
+            compact && 'h-8 gap-1.5 px-2 text-xs text-muted-foreground',
+          )}
           aria-label={`${label}: ${selectedLabel}`}
           title={selectedLabel}
         >
-          <span className="flex min-w-0 items-center gap-2">
+          <span
+            className={cn(
+              'flex min-w-0 items-center gap-2',
+              compact && 'gap-1.5',
+            )}
+          >
             <Box
               className="shrink-0 text-muted-foreground"
               aria-hidden="true"
@@ -103,7 +115,10 @@ export function ModelSelector({
             </span>
           </span>
           <ChevronDown
-            className="shrink-0 text-muted-foreground"
+            className={cn(
+              'shrink-0 text-muted-foreground',
+              compact && 'size-3',
+            )}
             aria-hidden="true"
           />
         </Button>

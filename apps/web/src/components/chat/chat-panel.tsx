@@ -16,6 +16,7 @@ import { chatApi, chatErrorKey } from './api';
 import { ChatComposer } from './chat-composer';
 import { ChatMessage } from './chat-messages';
 import { useThreadChat } from './use-thread-chat';
+import { PersonalChatSettingsProvider } from './personal-chat-settings-provider';
 
 export type ChatPanelProps = {
   threadId?: string | null;
@@ -31,12 +32,15 @@ export type ChatPanelProps = {
  * Mount inside a page, Sheet, resizable panel, or floating dialog with a bounded height.
  */
 export function ChatPanel(props: ChatPanelProps) {
-  return <ChatPanelSession key={props.threadId ?? 'new'} {...props} />;
+  return (
+    <PersonalChatSettingsProvider initialSettings={props.initialSettings}>
+      <ChatPanelSession key={props.threadId ?? 'new'} {...props} />
+    </PersonalChatSettingsProvider>
+  );
 }
 
 function ChatPanelSession({
   threadId,
-  initialSettings = { model: null, reasoningEffort: 'auto' },
   onThreadCreated,
   onThreadUpdated,
   onClose,
@@ -80,7 +84,6 @@ function ChatPanelSession({
         />
       </div>
       <ChatComposer
-        initialSettings={initialSettings}
         onSend={async (input) => {
           // Create and accept the first message before navigation or unmount can occur.
           const thread =
@@ -264,10 +267,6 @@ function ExistingChat({
       )}
       {chat.thread && (
         <ChatComposer
-          initialSettings={{
-            model: chat.thread.model,
-            reasoningEffort: chat.thread.reasoningEffort,
-          }}
           disabled={!chat.connected}
           running={running}
           stopping={stopping}

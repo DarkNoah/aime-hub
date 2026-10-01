@@ -1,20 +1,18 @@
 import { useState } from 'react';
 import { useLocation, useNavigate, useMatch } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { ChevronRight, MessageSquare, Plus, Settings2 } from 'lucide-react';
-import { toast } from 'sonner';
-import type { ChatSettings, ThreadSummary } from '@aime/shared/threads';
+import { ChevronRight, MessageSquare, Plus } from 'lucide-react';
+import type { ThreadSummary } from '@aime/shared/threads';
 import { Button } from '@/components/ui/button';
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import { chatApi, chatErrorKey } from '@/components/chat/api';
 import { cn } from '@/lib/utils';
 import { useThreadList } from '../use-thread-list';
 import { ThreadList } from './thread-list';
-import { PreferencesSheet, ThreadDialog } from './thread-dialogs';
+import { ThreadDialog } from './thread-dialogs';
 
 export function ThreadSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { t } = useTranslation();
@@ -23,8 +21,6 @@ export function ThreadSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const selectedId = useMatch('/threads/:threadId')?.params.threadId;
   const { updateThread, removeThread } = useThreadList();
   const [open, setOpen] = useState(true);
-  const [preferences, setPreferences] = useState<ChatSettings | null>(null);
-  const [loadingPreferences, setLoadingPreferences] = useState(false);
   const [action, setAction] = useState<{
     thread: ThreadSummary;
     mode: 'rename' | 'delete';
@@ -71,33 +67,9 @@ export function ThreadSidebar({ onNavigate }: { onNavigate?: () => void }) {
               onSelect={select}
               onAction={(thread, mode) => setAction({ thread, mode })}
             />
-            <Button
-              variant="ghost"
-              size="sm"
-              className="mt-1 h-8 w-full justify-start px-3 text-xs text-muted-foreground"
-              disabled={loadingPreferences}
-              onClick={() => {
-                setLoadingPreferences(true);
-                void chatApi
-                  .preferences()
-                  .then(setPreferences)
-                  .catch((cause) => toast.error(t(chatErrorKey(cause))))
-                  .finally(() => setLoadingPreferences(false));
-              }}
-            >
-              <Settings2 className="size-3.5" />
-              {t('chat.preferences')}
-            </Button>
           </div>
         </CollapsibleContent>
       </Collapsible>
-      {preferences && (
-        <PreferencesSheet
-          initial={preferences}
-          onClose={() => setPreferences(null)}
-          onSaved={setPreferences}
-        />
-      )}
       {action && (
         <ThreadDialog
           key={`${action.thread.id}:${action.mode}`}

@@ -13,15 +13,18 @@ import {
 import { LoadingState } from '@/components/loading-state';
 import { useAuthSession } from '@/features/auth/session-context';
 import { ThreadListProvider } from '@/pages/threads/thread-list-provider';
+import { PersonalChatSettingsProvider } from '@/components/chat/personal-chat-settings-provider';
 import { Sidebar } from './sidebar';
 import { adminNavigation } from './navigation';
 
 export function AppLayout() {
   const { data } = useAuthSession();
   return (
-    <ThreadListProvider key={data?.session.id}>
-      <LayoutContent />
-    </ThreadListProvider>
+    <PersonalChatSettingsProvider>
+      <ThreadListProvider key={data?.session.id}>
+        <LayoutContent />
+      </ThreadListProvider>
+    </PersonalChatSettingsProvider>
   );
 }
 

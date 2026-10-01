@@ -7,7 +7,6 @@ import {
   MAX_CHAT_FILES,
   MAX_IMAGE_BYTES,
   runInputSchema,
-  type ChatSettings,
   type RunInput,
 } from '@aime/shared/threads';
 import {
@@ -28,6 +27,7 @@ import {
 } from '@/components/ui/select';
 import { ChatSettingsFields } from './chat-settings';
 import { ChatApiError, chatErrorKey } from './api';
+import { usePersonalChatSettings } from './use-personal-chat-settings';
 
 function ComposerAttachments({ disabled }: { disabled: boolean }) {
   const { t } = useTranslation();
@@ -83,14 +83,12 @@ function AttachButton({ disabled }: { disabled: boolean }) {
 }
 
 export function ChatComposer({
-  initialSettings,
   disabled,
   running,
   stopping,
   onSend,
   onStop,
 }: {
-  initialSettings: ChatSettings;
   disabled?: boolean;
   running?: boolean;
   stopping?: boolean;
@@ -98,19 +96,23 @@ export function ChatComposer({
   onStop?: () => Promise<void>;
 }) {
   const { t } = useTranslation();
-  const [settings, setSettings] = useState(initialSettings);
+  const {
+    settings,
+    loading: loadingSettings,
+    saving: savingSettings,
+    error: settingsError,
+    save: saveSettings,
+    retry: retrySettings,
+  } = usePersonalChatSettings();
   const [text, setText] = useState('');
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
   const retryId = useRef<string | null>(null);
   const [immediate, setImmediate] = useState(false);
+  const unavailable =
+    disabled || loadingSettings || savingSettings || !!settingsError;
   return (
     <div className="shrink-0 space-y-2 border-t bg-card p-3 @lg/chat:p-5">
-      <ChatSettingsFields
-        value={settings}
-        onChange={setSettings}
-        disabled={pending || stopping}
-      />
       <PromptInput
         accept="image/png,image/jpeg,image/webp,image/gif"
         multiple
@@ -118,7 +120,7 @@ export function ChatComposer({
         maxFileSize={MAX_IMAGE_BYTES}
         onError={() => toast.error(t('chat.imageHint'))}
         onSubmit={async ({ text: draft, files }) => {
-          if (disabled || stopping || pendingRef.current)
+          if (unavailable || stopping || pendingRef.current)
             throw new Error('Unavailable');
           if (!draft.trim() && !files.length) throw new Error('Empty');
           const id = retryId.current ?? nanoid();
@@ -167,9 +169,29 @@ export function ChatComposer({
             className="max-h-44 min-h-20"
           />
         </PromptInputBody>
-        <PromptInputFooter>
-          <div className="flex min-w-0 items-center gap-1">
+        <PromptInputFooter className="items-end gap-2">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
             <AttachButton disabled={pending || !!disabled || !!stopping} />
+            <ChatSettingsFields
+              value={settings}
+              onChange={(value) => {
+                void saveSettings(value)
+                  .then((saved) => {
+                    if (saved)
+                      toast.success(t('chat.saved'), {
+                        id: 'chat-preferences',
+                      });
+                  })
+                  .catch((cause) =>
+                    toast.error(t(chatErrorKey(cause)), {
+                      id: 'chat-preferences',
+                    }),
+                  );
+              }}
+              disabled={
+                pending || stopping || loadingSettings || !!settingsError
+              }
+            />
             {running && (
               <Select
                 value={immediate ? 'immediate' : 'queue'}
@@ -190,7 +212,7 @@ export function ChatComposer({
               </Select>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {(running || stopping) && onStop && (
               <Button
                 type="button"
@@ -208,7 +230,7 @@ export function ChatComposer({
               </Button>
             )}
             <PromptInputSubmit
-              disabled={pending || disabled || stopping}
+              disabled={pending || unavailable || stopping}
               status={pending ? 'submitted' : 'ready'}
               aria-label={t(running ? 'chat.queueSend' : 'chat.send')}
               title={t('chat.send')}
@@ -218,6 +240,22 @@ export function ChatComposer({
           </div>
         </PromptInputFooter>
       </PromptInput>
+      {settingsError && (
+        <div
+          role="alert"
+          className="flex items-center justify-center gap-2 text-xs text-destructive"
+        >
+          <span>{t(settingsError)}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => void retrySettings()}
+          >
+            {t('providers.retry')}
+          </Button>
+        </div>
+      )}
       <p className="text-center text-xs leading-5 text-muted-foreground">
         {t(running ? 'chat.backgroundHint' : 'chat.inputHint')}
       </p>

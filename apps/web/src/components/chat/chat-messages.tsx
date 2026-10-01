@@ -30,15 +30,12 @@ export const ChatMessage = memo(function ChatMessage({
     .join('\n');
   return (
     <Message from={message.role} className="w-full min-w-0 max-w-full">
-      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-        <span>{message.role === 'user' ? t('chat.you') : 'Aime'}</span>
-        {streaming && (
-          <LoaderCircle
-            className="size-3 animate-spin"
-            aria-label={t('chat.running')}
-          />
-        )}
-      </div>
+      {streaming && (
+        <LoaderCircle
+          className="mb-2 size-3 animate-spin text-muted-foreground"
+          aria-label={t('chat.running')}
+        />
+      )}
       <MessageContent className="min-w-0 max-w-full overflow-hidden text-sm leading-7 [overflow-wrap:anywhere] group-[.is-assistant]:w-full">
         {message.parts.map((part, index) => {
           if (part.type === 'text')
@@ -129,8 +126,10 @@ export const ChatMessage = memo(function ChatMessage({
       {message.role === 'assistant' && text && !streaming && (
         <Button
           variant="ghost"
-          size="sm"
-          className="mt-1 h-7 text-xs text-muted-foreground"
+          size="icon-sm"
+          className="mt-1 size-7 text-muted-foreground"
+          aria-label={t('chat.copy')}
+          title={t('chat.copy')}
           onClick={() =>
             void navigator.clipboard
               .writeText(text)
@@ -138,8 +137,7 @@ export const ChatMessage = memo(function ChatMessage({
               .catch(() => toast.error(t('errors.generic')))
           }
         >
-          <Copy className="size-3" />
-          {t('chat.copy')}
+          <Copy className="size-3.5" aria-hidden="true" />
         </Button>
       )}
     </Message>

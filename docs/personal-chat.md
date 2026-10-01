@@ -5,7 +5,7 @@
 ## 组件与目录
 
 - `apps/web/src/components/chat/`：完整、可嵌入的 `ChatPanel`，包括消息、推理过程、工具结果、图片、模型设置、输入、队列、运行状态和历史分页。通信 Hook 与 transport 同目录组织，无 React Router、页面高度或定位依赖。
-- `apps/web/src/pages/threads/`：页面路由适配、侧栏聊天折叠列表、会话共享状态、重命名／删除 Dialog、个人设置 Sheet。列表每页 10 条，向下滚动自动加载；更新单项保留分页与滚动位置，页面不再单独显示一列列表。
+- `apps/web/src/pages/threads/`：页面路由适配、侧栏聊天折叠列表、会话共享状态、重命名／删除 Dialog。列表每页 10 条，向下滚动自动加载；更新单项保留分页与滚动位置，页面不再单独显示一列列表。
 - `apps/server/src/modules/threads/`：权限、HTTP/SSE、运行队列、动态 Agent 工厂、工作目录与 skills 发现。
 - `apps/server/src/modules/models/language-model.ts`：个人模型配置、统一模型解析和供应商思考参数转换。
 - `apps/server/src/mastra/storage.ts`：Mastra PostgreSQL 存储与历史查询用 Memory 配置。
@@ -28,6 +28,8 @@ import { ChatPanel } from '@/components/chat';
 ```
 
 `threadId` 不传时显示新聊天，并在首次发送成功后自动切换到新线程；宿主可以通过 `onThreadCreated` 保存 ID。组件关闭／卸载只断开订阅，不停止服务端运行。只有「停止」才调用 abort。`headerActions` 可插入宿主自己的按钮，定位、拖拽、缩放由宿主负责。
+
+模型与思考控制位于附件按钮旁。选择模型即时保存个人默认配置；思考按钮打开 Popover，通过离散 Slider 选择等级，拖动时预览、松开后保存，支持键盘调节。新聊天和已有聊天均读取当前个人默认配置；选择「系统默认模型」会清除个人模型覆盖。写入按顺序执行，失败恢复至最近成功保存的值并显示 toast。`ChatPanel` 自带设置 Provider；同一宿主挂载多个面板时可在外层共用 `PersonalChatSettingsProvider`，使所有面板同步选择。消息不显示角色署名，复制操作使用带无障碍标签的图标按钮。
 
 ## 数据与运行
 
@@ -64,6 +66,7 @@ HTTP 仅提交新消息，AI SDK `useChat` 的 transport 收到接受响应后�
 ## 验证与部署边界
 
 - `scripts/threads.test.ts`：归属权限、每页 10 条、列表并发请求合并与增量更新、分页重试、并发串行化、断开订阅不停止、重复提交、立即／排队、暂停恢复、进程重启提示、固定历史分页、附件验证、历史合并和 skills 覆盖。
+- `scripts/chat-preferences.test.ts`：共享默认配置读取、连续修改按序保存、失败恢复与重试、会话退出取消待发写入。
 - `scripts/threads.integration.test.ts`：真实 PostgreSQL、Mastra Memory、Agent、HTTP/SSE 与本机 OpenAI 兼容测试服务；包含持久化 ID 一致性、停止保存部分回复、队列恢复、Workspace 工具调用后的立即注入。需要 `TEST_DATABASE_URL`，只创建并清理随机命名的测试 schema。
 - 浏览器验证使用隔离测试服务，已覆盖实际页面的发送、多轮、刷新，以及 390px 窄屏与独立 420×620 容器中的排队、停止、继续。侧栏验证了 10→20→23 条自动分页、折叠展开、重命名保留滚动位置及移动导航选中后收起。没有调用真实供应商；真实模型的思考等级、图片理解和长上下文触发 OM 仍需配置对应供应商后验收。
 
