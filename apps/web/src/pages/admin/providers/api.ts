@@ -12,6 +12,8 @@ const errorKeys = {
   NOT_FOUND: 'errors.providerNotFound',
   CONFLICT: 'errors.providerConflict',
   MODEL_IN_USE: 'errors.modelInUse',
+  PROVIDER_HAS_MODELS: 'errors.providerHasModels',
+  PROVIDER_CONFIG_ONLY: 'errors.providerConfigOnly',
   INVALID_MODEL: 'errors.invalidModel',
   UPSTREAM_ERROR: 'errors.providerUpstream',
   INVALID_URL: 'errors.providerUrl',
@@ -90,7 +92,7 @@ export function providerFormInput(
   const apiKey = String(form.get('apiKey') ?? '').trim();
   const parsed = providerFormSchema.safeParse({
     name: form.get('name'),
-    type: 'openai',
+    type: form.get('type') ?? 'openai',
     baseUrl: String(form.get('baseUrl') ?? '').trim(),
     enabled: form.has('enabled'),
     ...(apiKey ? { apiKey } : {}),

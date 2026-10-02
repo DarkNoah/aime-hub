@@ -137,12 +137,13 @@ https://mastra.ai/docs/skills#filesystem-path-skills
 
 
 全局级别共用skills:
-路径下放置 `<WORKSPACE_ROOT>/.skills/` 支持多层目录skill识别,  如  `<WORKSPACE_ROOT>/.skills/owner/repo/<skill-name>/SKILL.md` 按SKILL.md为识别包, 分组使用 "owner/repo" 作为分组标识, skill-name 为skill id
+路径下放置 `<WORKSPACE_ROOT>/.agents/skills/` 支持多层目录skill识别,  如  `<WORKSPACE_ROOT>/.agents/skills/owner/repo/<skill-name>/SKILL.md` 按SKILL.md为识别包, 分组使用 "owner/repo" 作为分组标识, skill-name 为skill id
 个人级别skills:
-路径下放置 `<WORKSPACE_ROOT>/users/<user_id>/.skills/`, 同上
+路径下放置 `<WORKSPACE_ROOT>/users/<user_id>/.agents/skills/`, 同上
 项目级别skills:
-路径下放置 `<WORKSPACE_ROOT>/projects/<project_id>/.skills/`, 同上
+路径下放置 `<WORKSPACE_ROOT>/projects/<project_id>/.agents/skills/`, 同上
 
 遇到相同id, 即不同级别但 `skill-name` 相同的, 个人/项目 级别的覆盖全局工具的skill
 
+仅扫描 `.agents/skills/`；已有 `.skills/` 目录中的 skill 包需移动到对应级别的 `.agents/skills/`，保留原有分组目录结构。
 

@@ -1,39 +1,35 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { motion } from 'motion/react';
-import {
-  type CSSProperties,
-  type ElementType,
-  type JSX,
-  memo,
-  useMemo,
-} from 'react';
+import type { MotionProps } from 'motion/react';
+import { motion, useReducedMotion } from 'motion/react';
+import type { CSSProperties, ElementType, JSX } from 'react';
+import { memo, useMemo } from 'react';
 
-export type TextShimmerProps = {
+type MotionHTMLProps = MotionProps & Record<string, unknown>;
+
+// Cache motion components at module level to avoid creating during render
+const motionComponentCache = new Map<
+  keyof JSX.IntrinsicElements,
+  React.ComponentType<MotionHTMLProps>
+>();
+
+const getMotionComponent = (element: keyof JSX.IntrinsicElements) => {
+  let component = motionComponentCache.get(element);
+  if (!component) {
+    component = motion.create(element);
+    motionComponentCache.set(element, component);
+  }
+  return component;
+};
+
+export interface TextShimmerProps {
   children: string;
   as?: ElementType;
   className?: string;
   duration?: number;
   spread?: number;
-};
-
-const createMotionComponent = (component: ElementType) =>
-  motion.create(component as keyof JSX.IntrinsicElements);
-
-const motionComponents = new Map<
-  ElementType,
-  ReturnType<typeof createMotionComponent>
->();
-
-const getMotionComponent = (component: ElementType) => {
-  let cached = motionComponents.get(component);
-  if (!cached) {
-    cached = createMotionComponent(component);
-    motionComponents.set(component, cached);
-  }
-  return cached;
-};
+}
 
 const ShimmerComponent = ({
   children,
@@ -42,15 +38,20 @@ const ShimmerComponent = ({
   duration = 2,
   spread = 2,
 }: TextShimmerProps) => {
-  const MotionComponent = getMotionComponent(Component);
+  const reducedMotion = useReducedMotion();
+  const MotionComponent = getMotionComponent(
+    Component as keyof JSX.IntrinsicElements,
+  );
 
   const dynamicSpread = useMemo(
     () => (children?.length ?? 0) * spread,
     [children, spread],
   );
 
+  if (reducedMotion)
+    return <Component className={className}>{children}</Component>;
+
   return (
-    // eslint-disable-next-line react-hooks/static-components -- The module-level cache preserves component identity for each `as` type across renders.
     <MotionComponent
       animate={{ backgroundPosition: '0% center' }}
       className={cn(
@@ -67,9 +68,9 @@ const ShimmerComponent = ({
         } as CSSProperties
       }
       transition={{
-        repeat: Number.POSITIVE_INFINITY,
         duration,
         ease: 'linear',
+        repeat: Number.POSITIVE_INFINITY,
       }}
     >
       {children}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
@@ -6,6 +6,8 @@ import {
   modelDefaultsSchema,
   type ModelDefaults,
 } from '@aime/shared/providers';
+import { thinkingLevels } from '@aime/shared/threads';
+import { invalidateAvailableModels } from '@/features/models/resource';
 import { LoadingState } from '@/components/loading-state';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -77,19 +79,21 @@ export function ModelDefaultsSection({
     available.models,
     true,
   );
-  function change<K extends keyof ModelDefaults>(
+  async function change<K extends keyof ModelDefaults>(
     field: K,
     next: ModelDefaults[K],
   ) {
-    if (!value) return;
-    setDraft({ ...value, [field]: next });
-    setError(null);
-  }
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (submitting.current || disabled || loading || loadError || !value)
+    if (
+      submitting.current ||
+      disabled ||
+      loading ||
+      loadError ||
+      !value ||
+      value[field] === next
+    )
       return;
-    const parsed = modelDefaultsSchema.safeParse(value);
+    const nextDefaults = { ...value, [field]: next };
+    const parsed = modelDefaultsSchema.safeParse(nextDefaults);
     if (!parsed.success) {
       setError('errors.providerValidation');
       return;
@@ -97,15 +101,16 @@ export function ModelDefaultsSection({
     if (
       (['defaultModel', 'fastModel', 'imageModel'] as const).some(
         (field) =>
-          value[field] !== null &&
+          nextDefaults[field] !== null &&
           !(field === 'imageModel' ? imageOptions : options).some(
-            (option) => option.value === value[field],
+            (option) => option.value === nextDefaults[field],
           ),
       )
     ) {
       setError('errors.invalidModel');
       return;
     }
+    setDraft(nextDefaults);
     submitting.current = true;
     setPending(true);
     onPendingChange(true);
@@ -118,11 +123,12 @@ export function ModelDefaultsSection({
       setResult((current) =>
         current ? { ...current, defaults: saved } : current,
       );
-      setDraft(null);
+      invalidateAvailableModels();
       toast.success(t('defaults.saved'));
     } catch (cause) {
       toast.error(t(providerErrorKey(cause)));
     } finally {
+      setDraft(null);
       submitting.current = false;
       setPending(false);
       onPendingChange(false);
@@ -161,7 +167,7 @@ export function ModelDefaultsSection({
         </div>
       ) : (
         value && (
-          <form onSubmit={save} className="space-y-4">
+          <div className="space-y-4" aria-busy={pending}>
             <fieldset
               disabled={pending || disabled}
               className="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-4"
@@ -186,7 +192,7 @@ export function ModelDefaultsSection({
                             : 'defaults.noModels',
                         )}
                         value={value[field]}
-                        onValueChange={(next) => change(field, next)}
+                        onValueChange={(next) => void change(field, next)}
                         disabled={pending || disabled}
                       />
                       {choices.length === 0 && (
@@ -209,7 +215,7 @@ export function ModelDefaultsSection({
                 <Select
                   value={value.thinkingMode}
                   onValueChange={(next) =>
-                    change(
+                    void change(
                       'thinkingMode',
                       next as ModelDefaults['thinkingMode'],
                     )
@@ -220,9 +226,9 @@ export function ModelDefaultsSection({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {(['auto', 'on', 'off'] as const).map((mode) => (
+                    {thinkingLevels.map((mode) => (
                       <SelectItem key={mode} value={mode}>
-                        {t(`defaults.${mode}`)}
+                        {t(`chat.reasoning.${mode}`)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -234,11 +240,16 @@ export function ModelDefaultsSection({
                 {t(error)}
               </p>
             )}
-            <Button type="submit" disabled={pending || disabled || loading}>
-              {pending && <Loader2 className="animate-spin" />}
-              {t(pending ? 'providers.saving' : 'defaults.save')}
-            </Button>
-          </form>
+            {pending && (
+              <p
+                role="status"
+                className="flex items-center gap-2 text-sm text-muted-foreground"
+              >
+                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                {t('providers.saving')}
+              </p>
+            )}
+          </div>
         )
       )}
     </section>

@@ -5,6 +5,9 @@ import type {
   RunInput,
   ThreadList,
   ThreadSummary,
+  ThreadSnapshot,
+  UpdateQueuedMessage,
+  QueuedMessageDetail,
 } from '@aime/shared/threads';
 
 export class ChatApiError extends Error {
@@ -15,8 +18,9 @@ export class ChatApiError extends Error {
 export async function chatRequest<T>(
   path: string,
   init?: RequestInit,
+  base = '/api/threads',
 ): Promise<T> {
-  const response = await fetch(`/api/threads${path}`, {
+  const response = await fetch(`${base}${path}`, {
     ...init,
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', ...init?.headers },
@@ -28,9 +32,14 @@ export async function chatRequest<T>(
   return response.status === 204 ? (undefined as T) : response.json();
 }
 export const chatApi = {
-  list: (page = 0, signal?: AbortSignal) =>
-    chatRequest<ThreadList>(`?page=${page}`, { signal }),
-  create: (settings: ChatSettings) =>
+  list: (page = 0, signal?: AbortSignal, projectId?: string, perPage = 10) =>
+    chatRequest<ThreadList>(
+      `?page=${page}&perPage=${perPage}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''}`,
+      { signal },
+    ),
+  get: (id: string, signal?: AbortSignal) =>
+    chatRequest<ThreadSnapshot<UIMessage>>(`/${id}`, { signal }),
+  create: (settings: ChatSettings & { projectId?: string }) =>
     chatRequest<ThreadSummary>('', {
       method: 'POST',
       body: JSON.stringify(settings),
@@ -59,7 +68,25 @@ export const chatApi = {
     chatRequest<ThreadSummary>(`/${id}/queue/${messageId}`, {
       method: 'DELETE',
     }),
+  queued: (id: string, messageId: string, signal?: AbortSignal) =>
+    chatRequest<QueuedMessageDetail>(`/${id}/queue/${messageId}`, { signal }),
+  updateQueued: (id: string, messageId: string, input: UpdateQueuedMessage) =>
+    chatRequest<ThreadSummary>(`/${id}/queue/${messageId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  moveQueued: (id: string, messageId: string, beforeId: string | null) =>
+    chatRequest<ThreadSummary>(`/${id}/queue`, {
+      method: 'PATCH',
+      body: JSON.stringify({ id: messageId, beforeId }),
+    }),
   preferences: () => chatRequest<ChatSettings>('/preferences'),
+  projectPreferences: (projectId: string) =>
+    chatRequest<ChatSettings>(
+      `/${projectId}/preferences`,
+      undefined,
+      '/api/projects',
+    ),
   savePreferences: (settings: ChatSettings) =>
     chatRequest<ChatSettings>('/preferences', {
       method: 'PUT',
@@ -108,6 +135,16 @@ export function chatErrorKey(error: unknown) {
       return 'errors.forbidden';
     case 'THREAD_NOT_FOUND':
       return 'chat.errors.notFound';
+    case 'PROJECT_NOT_FOUND':
+      return 'projects.errors.notFound';
+    case 'PROJECT_BUSY':
+      return 'projects.errors.busy';
+    case 'PROJECT_OWNER_REQUIRED':
+      return 'projects.errors.owner';
+    case 'PROJECT_USER_NOT_FOUND':
+      return 'projects.errors.user';
+    case 'PROJECT_MEMBER_EXISTS':
+      return 'projects.errors.exists';
     case 'MODEL_NOT_CONFIGURED':
       return 'chat.errors.noModel';
     case 'MODEL_UNAVAILABLE':
@@ -122,6 +159,8 @@ export function chatErrorKey(error: unknown) {
       return 'chat.errors.stopping';
     case 'QUEUE_FULL':
       return 'chat.errors.queueFull';
+    case 'QUEUED_MESSAGE_NOT_FOUND':
+      return 'chat.errors.queuedGone';
     case 'MESSAGE_TOO_LARGE':
     case 'VALIDATION_ERROR':
       return 'chat.errors.validation';

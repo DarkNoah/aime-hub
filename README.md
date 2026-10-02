@@ -1,6 +1,6 @@
 # Aime Hub
 
-按 `docs/PRD.md` 分阶段构建的 AI 工作空间。已实现账号认证、后台导航、用户管理和模型供应商管理，后续模块等待验收确认。
+按 `docs/PRD.md` 分阶段构建的 AI 工作空间。已实现账号认证、用户管理、模型供应商管理、个人聊天和项目协作聊天。
 
 ## 已实现
 
@@ -9,6 +9,7 @@
 - 登录态和管理员路由守卫、响应式侧栏、移动端无障碍导航抽屉。
 - 用户管理：管理员用户列表、邮箱/显示名称搜索、服务端分页、创建/编辑用户、角色调整、重置密码、封禁/解封、撤销全部会话、删除用户。
 - 模型供应商管理：供应商及模型 CRUD、OpenAI 兼容 `/models` 拉取、models.dev 能力匹配、默认模型及思考模式持久化。
+- 个人与项目聊天共用 ThreadService、ChatPanel、Mastra 原生持久化、后台执行队列和 SSE。项目支持成员角色、仪表盘、默认模型与共享工作目录。
 - 工作台和管理概览提供模块入口；独立系统设置页说明当前可用配置。模型默认设置仍位于供应商页面。
 - 认证表由 Better Auth 配置生成；业务表使用 TypeORM 实体、显式迁移、snake_case 列名和三个日期装饰器。
 
@@ -16,7 +17,7 @@
 
 - pnpm workspace；`apps/web`：Vite 7、React 19、React Router 7、Tailwind CSS 4。
 - UI：shadcn/ui 风格源码组件、Radix UI、Lucide、CVA；独立实现，不依赖本地 `ui-dojo`。
-- 已安装 AI SDK 6 `ai` / `@ai-sdk/react` 3；AI Elements 官方 registry 源码已添加至 `apps/web/src/components/ai-elements`，包含 `conversation`、`message`、`prompt-input`、`reasoning`、`suggestion` 及其 `shimmer` 依赖。配套 Radix UI、Streamdown、Motion、滚动跟随与动画样式已接入，尚未连接聊天 API。
+- 已安装 AI SDK 6 `ai` / `@ai-sdk/react` 3；AI Elements 官方 registry 源码已添加至 `apps/web/src/components/ai-elements`，包含 `conversation`、`message`、`prompt-input`、`reasoning`、`suggestion` 及其 `shimmer` 依赖。配套 Radix UI、Streamdown、Motion、滚动跟随与动画样式已接入个人和项目聊天 API。
 - `apps/server`：Express 5；`packages/auth`：Better Auth；`packages/db`：TypeORM + PostgreSQL。
 - Better Auth 使用官方 PostgreSQL adapter 管理认证读写和表结构；TypeORM 只管理供应商、模型和设置等业务表，不定义认证实体或自建用户管理 API。
 
@@ -46,7 +47,7 @@
 - 默认模型、快速模型、图片生成模型及思考模式（自动/开启/关闭）保存在 `settings` 的 `models` 行；只允许选择启用供应商下的启用模型，图片生成默认项要求图片输出能力。取消默认配置后才能删除、停用或修改被引用模型 ID；过时模型仍可作为默认项。
 - 删除供应商或模型为软删除；供应商删除同时清除其密钥。再次拉取不会恢复手工删除的模型或重命名前的旧 ID；需要恢复时可手工使用原 ID 新建。删除需要输入名称或模型 ID 确认。
 - 后端 `ProviderService.getProvider(id)` 供服务端读取持久化配置及密钥；HTTP 使用脱敏 DTO。`getModel(reference)` 仅读数据库，提供 `supportsImageInput`、`supportsVideoInput`、`supportsAudioInput`、`context` 等属性。
-- 模型同步每供应商每分钟最多一次，HTTP 请求有超时及响应大小限制；限流为单进程内存机制。聊天执行、默认模型运行时回退和思考参数适配留待聊天阶段实现。
+- 模型同步每供应商每分钟最多一次，HTTP 请求有超时及响应大小限制；限流为单进程内存机制。聊天执行、默认模型回退和思考参数适配由共用聊天模块处理。
 
 ## 前端 AI 组件
 
@@ -75,7 +76,7 @@ import {
 import { Suggestions, Suggestion } from '@/components/ai-elements/suggestion';
 ```
 
-组件源自 `https://registry.ai-sdk.dev/{name}.json`，配套 UI 源自 shadcn/ui registry；保留原有登录页 Button/Input，并适配当前 TypeScript、React Hooks 规则与项目主题。AI Elements 是源码组件，不需要安装同名运行时包。`useChat` 的模型请求待聊天模块实现时再连接后端，API 密钥不得放入前端环境变量。
+组件源自 `https://registry.ai-sdk.dev/{name}.json`，配套 UI 源自 shadcn/ui registry；保留原有登录页 Button/Input，并适配当前 TypeScript、React Hooks 规则与项目主题。AI Elements 是源码组件，不需要安装同名运行时包。`useChat` 通过共用聊天 transport 提交消息，SSE 接收服务端后台运行结果，API 密钥不得放入前端环境变量。
 
 继续添加其他组件可在根目录运行（已有文件不要直接覆盖）：
 
@@ -91,7 +92,15 @@ pnpm dlx shadcn@latest add @ai-elements/<组件名> --cwd apps/web
 - 页面跟随浏览器 `languagechange` 事件更新，同时同步 HTML `lang`、页面标题和描述；目前没有手动语言选择或账号语言设置。
 - 登录、注册、导航、用户管理、管理占位页、404、会话提示和认证校验均已接入。错误状态保存翻译键，在渲染时翻译，语言变化后已有错误提示也会更新。
 - 新文案先添加到 `en.ts`，再补齐 `zh-CN.ts`；TypeScript 校验键名和两种语言的键集合。组件中使用 `useTranslation()`，不要在模块顶层缓存翻译结果。
-- 尚未接入聊天页面的 AI Elements 保留上游默认文案，接入聊天模块时再统一适配。服务端及 CLI 日志保持原样。
+- 未使用的 AI Elements 保留上游默认文案；项目页面和实际使用的聊天控件已接入翻译。服务端及 CLI 日志保持原样。
+
+## 项目与聊天
+
+- 项目入口为 `/projects`，仪表盘为 `/projects/:projectId`，项目聊天为 `/projects/:projectId/threads/:threadId`；`/threads/:threadId` 会识别项目归属并跳转。
+- 项目创建者自动成为 owner；owner/admin 管理配置，member 参与共享聊天。owner 可以删除空闲且无排队消息的项目；删除保留聊天和工作文件，撤销成员访问。
+- 项目和个人线程共用 `modules/threads`，Mastra resourceId 分别为 `project:<projectId>` 与 `user:<userId>`。项目默认模型不继承个人配置，项目工作目录为 `WORKSPACE_ROOT/projects/<projectId>/`。
+- 更新后先运行 `pnpm db:migrate`，新增 `projects` 和 `project_members`。队列与广播由单服务进程持有，部署要求单实例。
+- 范围、权限和验证记录见 [项目 PRD](docs/projects.md)；聊天组件与运行协议见 [个人聊天](docs/personal-chat.md)。
 
 ## 首次启动
 
@@ -175,7 +184,7 @@ TEST_DATABASE_URL=postgresql://user:password@127.0.0.1:5432/aime_hub_test pnpm t
 
 ## 目录
 
-前端页面按 `pages/<模块>/page.tsx` 组织，后台页面位于 `pages/admin/<模块>/`，专属组件、请求和 hooks 就近存放。跨页面认证逻辑放在 `features/auth`，应用布局放在 `layouts`。后端业务按 `modules/auth`、`health`、`providers`、`settings` 拆分，`app.ts` 负责组装。完整边界和目录见 [模块组织](docs/architecture.md)。
+前端页面按 `pages/<模块>/page.tsx` 组织，后台页面位于 `pages/admin/<模块>/`，专属组件、请求和 hooks 就近存放。跨页面认证逻辑放在 `features/auth`，应用布局放在 `layouts`。后端业务按 `modules/auth`、`health`、`providers`、`settings`、`models`、`projects`、`threads` 拆分，`app.ts` 负责组装。完整边界和目录见 [模块组织](docs/architecture.md)。
 
 ```text
 apps/web/       Vite React UI
@@ -202,6 +211,6 @@ PRD 中 `packages/db` 和 `packages/database` 的业务持久化职责统一放�
 
 本次修改文件通过格式检查；全仓格式检查仍报告已有 `.vscode/settings.json` 格式问题，未修改用户编辑器配置。页面已按路由懒加载，当前入口 JS 约 463 kB（gzip 约 149 kB），不再出现单块超过 500 kB 的提示；依赖库注释提示仍存在，不影响构建成功。
 
-PRD 模型供应商项已勾选，等待用户验收确认后再进入下一阶段。聊天、项目、独立系统设置 CRUD、Mastra 等不在本阶段实现范围内。
+项目模块已完成实现和隔离测试，真实供应商行为仍需验收。独立文件管理、邀请邮件、所有权转移和多实例执行不在本阶段范围内。
 
 模块整理与 UI 优化已通过类型检查、Lint、生产构建及 69 项测试（含隔离 PostgreSQL 集成）。浏览器验证了供应商搜索、模型抽屉及编辑弹窗取消后的焦点恢复、用户创建弹窗、移动端导航和桌面/390px 窄屏布局；本轮未提交界面中的数据变更，也未调用真实供应商同步或推理。

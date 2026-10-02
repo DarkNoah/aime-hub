@@ -1,5 +1,73 @@
 export const en = {
+  'projects.all': 'All projects',
+  'projects.list': 'Project list',
+  'projects.openNamed': 'Open {{name}} dashboard',
+  'projects.threadList': '{{name}} conversations',
+  'projects.description':
+    'Organize shared conversations, models, and members by project.',
+  'projects.create': 'Create project',
+  'projects.edit': 'Edit project',
+  'projects.name': 'Project name',
+  'projects.nameHint': 'Give the project a name your team can recognize.',
+  'projects.saved': 'Changes saved.',
+  'projects.deleted': 'Project deleted.',
+  'projects.empty': 'Your projects start here',
+  'projects.emptyHint':
+    'Create a project to bring conversations and collaborators together.',
+  'projects.updated': 'Updated {{date}}',
+  'projects.editNamed': 'Edit {{name}}',
+  'projects.loadMore': 'Load more projects',
+  'projects.role.owner': 'Owner',
+  'projects.role.admin': 'Admin',
+  'projects.role.member': 'Member',
+  'projects.chat': 'Project chat',
+  'projects.members': 'Members',
+  'projects.membersHint':
+    'Members share project conversations and the project workspace.',
+  'projects.addMember': 'Add member',
+  'projects.searchUsers': 'Search name or username (at least 2 characters)',
+  'projects.noUsers': 'No matching accounts available to add.',
+  'projects.memberRole': 'Role for {{name}}',
+  'projects.removeNamed': 'Remove {{name}}',
+  'projects.removeHint':
+    'This member will lose access to all project conversations.',
+  'projects.removeMember': 'Remove member',
+  'projects.settings': 'Project settings',
+  'projects.settingsHint':
+    'Shared defaults for project chats. Personal chat defaults are independent.',
+  'projects.dashboard': 'Project dashboard',
+  'projects.dashboardHint':
+    'Continue a shared conversation or start a new one with your team.',
+  'projects.actions': 'Project actions',
+  'projects.delete': 'Delete project',
+  'projects.deleteHint':
+    'The project will become inaccessible to all members. Chat records and workspace files are retained. Stop running chats and clear their queues first.',
+  'projects.runningThreads': '{{count}} running',
+  'projects.newChatNamed': 'New chat in {{name}}',
+  'projects.runningThreadsHint': 'Includes running and stopping threads',
+  'projects.conversations': 'Conversations',
+  'projects.emptyChats': 'Start the first conversation',
+  'projects.emptyChatsHint':
+    'Every member can join and continue project conversations.',
+  'projects.errors.notFound':
+    'This project is unavailable or you no longer have access.',
+  'projects.errors.busy':
+    'Stop project chats and clear queued messages before deleting the project.',
+  'projects.errors.owner': 'The project owner cannot be removed or demoted.',
+  'projects.errors.user': 'The account is unavailable.',
+  'projects.errors.exists': 'This user is already a project member.',
+
   'chat.personal': 'Personal chat',
+  'chat.usage.title': 'Token usage',
+  'chat.usage.latestStep': 'Latest completed step · updates after each step',
+  'chat.usage.input': 'Input',
+  'chat.usage.output': 'Output',
+  'chat.usage.reasoning': 'Reasoning (included in output)',
+  'chat.usage.cache': 'Cache read (included in input)',
+  'chat.usage.cacheWrite': 'Cache write (included in input)',
+  'chat.usage.total': 'Total tokens',
+  'chat.usage.unknownLimit': 'Context limit is not configured',
+  'chat.usage.unavailable': 'Token usage is unavailable from the provider',
   'chat.new': 'New chat',
   'chat.welcome': 'What would you like to work on?',
   'chat.welcomeHint':
@@ -8,9 +76,8 @@ export const en = {
   'chat.defaultModel': 'System default model',
   'chat.reasoning': 'Reasoning',
   'chat.reasoningLevel': 'Reasoning effort',
-  'chat.reasoningHint':
-    'Drag to choose a level. Release to save your personal default.',
-  'chat.reasoning.auto': 'Default reasoning',
+  'chat.reasoningHint': 'Drag to choose a level. Release to apply it.',
+  'chat.reasoning.auto': 'Automatic',
   'chat.reasoning.none': 'Reasoning off',
   'chat.reasoning.minimal': 'Minimal',
   'chat.reasoning.low': 'Low',
@@ -32,6 +99,23 @@ export const en = {
   'chat.queuedLabel': 'Queued',
   'chat.queued': 'Queued messages · {{count}}',
   'chat.resumeQueue': 'Resume queue',
+  'chat.queueImmediate': 'Immediate',
+  'chat.queueImmediateHint':
+    'Insert at the next step when selected; otherwise wait in the queue.',
+  'chat.queueDrag': 'Drag to reorder, or use the up and down arrow keys',
+  'chat.queueActions': 'Queued message actions',
+  'chat.queueMoveUp': 'Move up',
+  'chat.queueMoveDown': 'Move down',
+  'chat.editQueued': 'Edit queued message',
+  'chat.editQueuedMessage': 'Edit message: {{text}}',
+  'chat.editQueuedHint':
+    'Edit a message before it runs. Its current queue setting will be preserved.',
+  'chat.queueAttachmentsKept': 'Existing image attachments will be kept.',
+  'chat.queueEmpty': 'Enter a message.',
+  'chat.queueUpdated': 'Queue updated.',
+  'chat.queuePaused': 'Queue paused',
+  'chat.errors.queuedGone':
+    'This message has started running or was removed and can no longer be edited.',
   'chat.cancelQueued': 'Remove queued message',
   'chat.backgroundHint':
     'You can leave this chat. Aime keeps working in the background.',
@@ -42,11 +126,30 @@ export const en = {
   'chat.imageHint':
     'Up to 4 PNG, JPEG, WebP or GIF images, 2 MB each. Choose a model that supports images.',
   'chat.thinking': 'Aime is thinking…',
+  'chat.inspector.title': 'Raw messages',
+  'chat.inspector.resize': 'Resize message panel',
+  'chat.inspector.copy': 'Copy messages JSON',
+  'chat.inspector.copied': 'Messages JSON copied.',
+  'chat.inspector.count': 'Loaded messages: {{count}}',
+  'chat.inspector.hint':
+    'Original message objects, updated as messages stream in.',
+  'chat.inspector.earlier':
+    'Load earlier messages in the chat to include more history.',
+  'chat.inspector.floating': 'Chat',
+  'chat.inspector.restore': 'Restore split view',
   'chat.copy': 'Copy',
   'chat.copied': 'Response copied.',
   'chat.toolRunning': 'Running',
   'chat.toolDone': 'Completed',
   'chat.toolFailed': 'Failed',
+  'chat.toolPending': 'Pending',
+  'chat.toolAwaitingApproval': 'Awaiting Approval',
+  'chat.toolApprovalResponded': 'Responded',
+  'chat.toolDenied': 'Denied',
+  'chat.toolParameters': 'Parameters',
+  'chat.toolResult': 'Result',
+  'chat.toolError': 'Error',
+  'chat.toolGroup': 'Tool calls · {{count}}',
   'chat.status.idle': 'Ready',
   'chat.status.running': 'Running',
   'chat.status.stopping': 'Stopping',
@@ -69,7 +172,7 @@ export const en = {
   'chat.deleteHint':
     'This permanently deletes the chat and its message history. Workspace files are retained.',
   'chat.deleted': 'Chat deleted.',
-  'chat.saved': 'Personal defaults updated.',
+  'chat.saved': 'Chat settings updated.',
   'chat.errors.notFound':
     'This chat is unavailable or you do not have access to it.',
   'chat.errors.noModel':
@@ -173,6 +276,20 @@ export const en = {
   'providers.edit': 'Edit provider',
   'providers.delete': 'Delete provider',
   'providers.name': 'Provider name',
+  'providers.group.languageModel': 'Chat models',
+  'providers.group.other': 'Other',
+  'providers.searchTypes': 'Search provider key or name',
+  'providers.typeHint':
+    'Types come from models.dev. Model calls and synchronization currently require an OpenAI-compatible URL.',
+  'providers.configOnly': 'Configuration only',
+  'providers.configOnlyHint':
+    'MinerU connection settings are saved only. Document parsing is not yet available.',
+  'providers.otherUrlHint': 'Enter the HTTP(S) API base URL for this service.',
+  'providers.emptyGroup': 'No providers in this group.',
+  'errors.providerConfigOnly':
+    'This provider only supports configuration. Model management and calls are not available yet.',
+  'errors.providerHasModels':
+    'Delete this provider’s models before changing its group.',
   'providers.type': 'Provider type',
   'providers.baseUrl': 'Base URL',
   'providers.urlHint':
@@ -213,7 +330,7 @@ export const en = {
   'providers.selectHint':
     'Select Models on a provider to manage its models on this page.',
   'providers.formHint':
-    'Configure an OpenAI-compatible connection. Change default model references before disabling an in-use provider.',
+    'Choose a provider type and configure its connection. Change default model references before disabling an in-use provider.',
   'providers.deleteHint':
     'This cannot be undone. Deleting a provider also deletes its models. Change any default model references before deleting.',
   'providers.deleteConfirm':
@@ -289,11 +406,11 @@ export const en = {
   'modelSelector.emptyHint': 'There are no models to choose from.',
   'defaults.title': 'Default model configuration',
   'defaults.hint':
-    'Only enabled models from enabled providers are selectable. Image generation requires image output. Save new defaults before disabling or deleting a referenced provider or model.',
+    'Changes are saved automatically. Only enabled models from enabled providers are selectable. Image generation requires image output. Change defaults before disabling or deleting a referenced provider or model.',
   'defaults.defaultModel': 'Default model',
   'defaults.fastModel': 'Fast model',
   'defaults.imageModel': 'Image generation model',
-  'defaults.thinkingMode': 'Default thinking mode',
+  'defaults.thinkingMode': 'Default reasoning effort',
   'defaults.auto': 'Automatic (auto)',
   'defaults.on': 'On (on)',
   'defaults.off': 'Off (off)',
@@ -301,7 +418,6 @@ export const en = {
   'defaults.noImages': 'No enabled models with image output are available.',
   'defaults.noModels':
     'No enabled models are available. Configure a provider and enable its models first.',
-  'defaults.save': 'Save defaults',
   'defaults.saved': 'Default model configuration saved.',
   'errors.providerValidation':
     'Check required fields, the URL, field lengths and positive integer limits.',

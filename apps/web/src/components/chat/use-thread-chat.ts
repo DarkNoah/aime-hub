@@ -6,6 +6,7 @@ import type {
   RunInput,
   ThreadSnapshot,
   ThreadSummary,
+  ChatUsage,
 } from '@aime/shared/threads';
 import { chatApi, ChatApiError, createThreadTransport } from './api';
 import { mergeMessages } from './messages';
@@ -16,6 +17,7 @@ export function useThreadChat(
 ) {
   const [thread, setThread] = useState<ThreadSummary | null>(null);
   const [connected, setConnected] = useState(false);
+  const [usage, setUsage] = useState<ChatUsage | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
   const [history, setHistory] = useState<MessagePage<UIMessage> | null>(null);
@@ -74,6 +76,7 @@ export function useThreadChat(
           setError(null);
           updateThread(snapshot.thread);
           setActiveMessageId(snapshot.activeMessageId);
+          setUsage(snapshot.usage ?? null);
           const queued = new Set(snapshot.thread.queue.map((item) => item.id));
           if (recovering)
             recoveredMessages = mergeMessages(
@@ -117,6 +120,16 @@ export function useThreadChat(
           source?.close();
           setConnected(false);
           setError(new ChatApiError('UNAUTHORIZED'));
+        });
+        source.addEventListener('revoked', () => {
+          source?.close();
+          recoveryVersion++;
+          setConnected(false);
+          setMessages([]);
+          setThread(null);
+          setUsage(null);
+          setHistory(null);
+          setError(new ChatApiError('PROJECT_NOT_FOUND'));
         });
         source.onerror = () => {
           if (!disposed) {
@@ -174,6 +187,7 @@ export function useThreadChat(
 
   return {
     thread,
+    usage,
     messages,
     connected,
     error,

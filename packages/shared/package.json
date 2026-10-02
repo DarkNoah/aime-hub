@@ -6,7 +6,8 @@
     ".": "./src/index.ts",
     "./env": "./src/env.ts",
     "./providers": "./src/providers.ts",
-    "./threads": "./src/threads.ts"
+    "./threads": "./src/threads.ts",
+    "./projects": "./src/projects.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

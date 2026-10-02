@@ -7,16 +7,21 @@ import {
   createThreadSchema,
   runInputSchema,
   updateThreadSchema,
+  updateQueuedMessageSchema,
+  moveQueuedMessageSchema,
 } from '@aime/shared/threads';
 import type { ThreadService } from './service.js';
 import type { LanguageModelService } from '../models/language-model.js';
 import { ThreadError } from './errors.js';
 import { adminApiPolicy } from '../../middleware/admin-api.js';
+import { streamThreadNavigation } from './navigation-route.js';
 
 const idSchema = z.string().regex(/^[a-zA-Z0-9_-]{16}$/);
 const pagination = z.object({
   page: z.coerce.number().int().min(0).max(10000).default(0),
   anchor: z.iso.datetime().optional(),
+  projectId: idSchema.optional(),
+  perPage: z.coerce.number().int().min(1).max(50).default(10),
 });
 
 export function threadRoutes(
@@ -35,6 +40,9 @@ export function threadRoutes(
     next();
   });
   router.use(adminApiPolicy(webOrigin), json({ limit: '12mb' }));
+  router.get('/events', (req, res) =>
+    streamThreadNavigation(auth, service, req, res),
+  );
   router.get('/preferences', async (_req, res) =>
     res.json(await models.getPreferences(res.locals.userId)),
   );
@@ -46,14 +54,12 @@ export function threadRoutes(
       ),
     ),
   );
-  router.get('/', async (req, res) =>
+  router.get('/', async (req, res) => {
+    const { page, projectId, perPage } = pagination.parse(req.query);
     res.json(
-      await service.listThreads(
-        res.locals.userId,
-        pagination.parse(req.query).page,
-      ),
-    ),
-  );
+      await service.listThreads(res.locals.userId, page, projectId, perPage),
+    );
+  });
   router.post('/', async (req, res) =>
     res
       .status(201)
@@ -99,15 +105,13 @@ export function threadRoutes(
     );
   });
   router.post('/:threadId/messages', async (req, res) =>
-    res
-      .status(202)
-      .json(
-        await service.run(
-          res.locals.userId,
-          String(req.params.threadId),
-          runInputSchema.parse(req.body),
-        ),
-      ),
+    res.status(202).json(
+      await service.run(res.locals.userId, String(req.params.threadId), {
+        ...runInputSchema.parse(req.body),
+        createdBy: res.locals.userId,
+        createdAt: new Date().toISOString(),
+      }),
+    ),
   );
   router.post('/:threadId/abort', async (req, res) =>
     res.json(
@@ -119,6 +123,36 @@ export function threadRoutes(
       await service.resume(res.locals.userId, String(req.params.threadId)),
     ),
   );
+  router.get('/:threadId/queue/:messageId', async (req, res) =>
+    res.json(
+      await service.getQueued(
+        res.locals.userId,
+        String(req.params.threadId),
+        String(req.params.messageId),
+      ),
+    ),
+  );
+  router.patch('/:threadId/queue/:messageId', async (req, res) =>
+    res.json(
+      await service.updateQueued(
+        res.locals.userId,
+        String(req.params.threadId),
+        String(req.params.messageId),
+        updateQueuedMessageSchema.parse(req.body),
+      ),
+    ),
+  );
+  router.patch('/:threadId/queue', async (req, res) => {
+    const input = moveQueuedMessageSchema.parse(req.body);
+    res.json(
+      await service.moveQueued(
+        res.locals.userId,
+        String(req.params.threadId),
+        input.id,
+        input.beforeId,
+      ),
+    );
+  });
   router.delete('/:threadId/queue/:messageId', async (req, res) =>
     res.json(
       await service.cancelQueued(
@@ -146,13 +180,18 @@ export function threadRoutes(
     const authorization = setInterval(() => {
       void auth.api
         .getSession({ headers: fromNodeHeaders(req.headers) })
-        .then((session) => {
+        .then(async (session) => {
           if (!session) {
             res.write('event: expired\ndata: {}\n\n');
             res.end();
+            return;
           }
+          await service.getThread(session.user.id, String(req.params.threadId));
         })
-        .catch(() => res.end());
+        .catch(() => {
+          if (!closed) res.write('event: revoked\ndata: {}\n\n');
+          res.end();
+        });
     }, 60_000);
     const cleanup = () => {
       closed = true;
@@ -176,6 +215,10 @@ export function threadRoutes(
             `event: ${initial ? 'snapshot' : 'update'}\ndata: ${JSON.stringify(snapshot)}\n\n`,
           );
         },
+        () => {
+          if (!closed) res.write('event: revoked\ndata: {}\n\n');
+          res.end();
+        },
       );
       if (closed) unsubscribe();
     } catch {
@@ -187,7 +230,12 @@ export function threadRoutes(
   return router;
 }
 
-const threadErrorHandler: ErrorRequestHandler = (error, _req, res, next) => {
+export const threadErrorHandler: ErrorRequestHandler = (
+  error,
+  _req,
+  res,
+  next,
+) => {
   if (error instanceof ThreadError)
     return res.status(error.status).json({ code: error.code });
   if (

@@ -7,6 +7,7 @@
     "node": ">=22.12.0"
   },
   "scripts": {
+    "providers:catalog": "node --import tsx scripts/update-provider-catalog.ts",
     "dev": "concurrently -k -n server,web \"pnpm --filter @aime/server dev\" \"pnpm --filter @aime/web dev\"",
     "build": "pnpm --filter @aime/server build && pnpm --filter @aime/web build",
     "start": "pnpm --filter @aime/server start",

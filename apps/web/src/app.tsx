@@ -19,6 +19,14 @@ const WorkspacePage = lazy(() =>
 const ThreadsPage = lazy(() =>
   import('@/pages/threads/page').then((m) => ({ default: m.ThreadsPage })),
 );
+const ProjectsPage = lazy(() =>
+  import('@/pages/projects/page').then((m) => ({ default: m.ProjectsPage })),
+);
+const ProjectPage = lazy(() =>
+  import('@/pages/projects/project-page').then((m) => ({
+    default: m.ProjectPage,
+  })),
+);
 const AdminOverviewPage = lazy(() =>
   import('@/pages/admin/overview/page').then((m) => ({
     default: m.AdminOverviewPage,
@@ -69,6 +77,19 @@ export function App() {
                   <Route index element={<WorkspacePage />} />
                   <Route path="/threads" element={<ThreadsPage />} />
                   <Route path="/threads/:threadId" element={<ThreadsPage />} />
+                  <Route path="/projects" element={<ProjectsPage />} />
+                  <Route
+                    path="/projects/:projectId"
+                    element={<ProjectPage />}
+                  />
+                  <Route
+                    path="/projects/:projectId/threads"
+                    element={<ProjectPage />}
+                  />
+                  <Route
+                    path="/projects/:projectId/threads/:threadId"
+                    element={<ProjectPage />}
+                  />
                   <Route element={<RequireAdmin />}>
                     <Route path="/admin" element={<AdminOverviewPage />} />
                     <Route

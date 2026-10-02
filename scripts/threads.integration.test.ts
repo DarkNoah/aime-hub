@@ -10,13 +10,19 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Pool } from 'pg';
 import type { Auth } from '@aime/auth';
-import { createDataSource, Provider, ProviderModel } from '@aime/db';
+import {
+  createDataSource,
+  Provider,
+  ProviderModel,
+  ProjectMember,
+} from '@aime/db';
 import { createApp } from '../apps/server/src/app.js';
 import { createMastraRuntime } from '../apps/server/src/mastra/index.js';
 import { createPersonalChatRunner } from '../apps/server/src/modules/threads/runner.js';
 import { ThreadService } from '../apps/server/src/modules/threads/service.js';
 import { LanguageModelService } from '../apps/server/src/modules/models/language-model.js';
 import { ProviderService } from '../apps/server/src/modules/providers/service.js';
+import { ProjectService } from '../apps/server/src/modules/projects/service.js';
 
 async function close(server?: Server) {
   if (!server?.listening) return;
@@ -159,12 +165,14 @@ test(
       defaultModel: 'test-provider/fixture-model',
       fastModel: null,
       imageModel: null,
-      thinkingMode: 'auto',
+      thinkingMode: 'medium',
     });
     const models = new LanguageModelService(database, providers);
+    const projects = new ProjectService(database);
     threads = new ThreadService(
       memory,
       createPersonalChatRunner(mastra, models, directory),
+      projects,
     );
     const auth = {
       api: {
@@ -196,7 +204,7 @@ test(
     server = createApp(
       auth,
       { service: providers, webOrigin: browserOrigin },
-      { threads, models, webOrigin: browserOrigin },
+      { threads, models, projects, webOrigin: browserOrigin },
     ).listen(browserVerify ? browserPort : 0, '127.0.0.1');
     await once(server, 'listening');
     const address = server.address();
@@ -430,6 +438,83 @@ test(
     assert.equal(
       (await threads.getThread('alice', toolThread.id)).thread.queue.length,
       0,
+    );
+    // The same real Mastra runner, native memory and local provider also serve shared project threads.
+    toolMode = false;
+    const project = await projects.create('alice', {
+      name: 'Shared fixture project',
+    });
+    await database.manager.save(ProjectMember, {
+      projectId: project.id,
+      userId: 'bob',
+      role: 'member',
+    });
+    const shared = await (
+      await request('', 'POST', { projectId: project.id })
+    ).json();
+    const projectStored = await memory.getThreadById({ threadId: shared.id });
+    assert.equal(projectStored?.resourceId, `project:${project.id}`);
+    assert.equal(
+      projectStored?.metadata?.workspace,
+      join(directory, 'projects', project.id),
+    );
+    const sharedAgain = await threads.createThread('bob', {
+      projectId: project.id,
+      model: null,
+      reasoningEffort: 'auto',
+    });
+    assert.equal(
+      (await memory.getThreadById({ threadId: sharedAgain.id }))?.metadata
+        ?.workspace,
+      projectStored?.metadata?.workspace,
+    );
+    await request(
+      `/${shared.id}/messages`,
+      'POST',
+      { ...input, id: 'project-message1' },
+      'bob',
+    );
+    await until(async () => requests.length === 6);
+    const memberStreams = await Promise.all(
+      ['alice', 'bob'].map(async (userId) => {
+        const abort = new AbortController();
+        const response = await fetch(`${base}/${shared.id}/messages`, {
+          headers: { cookie: userId },
+          signal: abort.signal,
+        });
+        assert.equal(response.status, 200);
+        const reader = response.body!.getReader();
+        let text = '';
+        while (!text.includes('Aime ')) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          text += new TextDecoder().decode(chunk.value);
+        }
+        abort.abort();
+        await reader.cancel().catch(() => undefined);
+        return text;
+      }),
+    );
+    assert.ok(memberStreams.every((stream) => stream.includes('Aime ')));
+    release!();
+    await until(
+      async () =>
+        (await threads!.getThread('bob', shared.id)).thread.status === 'idle',
+    );
+    const aliceHistory = await threads.history('alice', shared.id);
+    const bobHistory = await threads.history(
+      'bob',
+      shared.id,
+      0,
+      aliceHistory.anchor,
+    );
+    assert.deepEqual(aliceHistory, bobHistory);
+    assert.ok(
+      bobHistory.messages.some((message) => message.role === 'assistant'),
+    );
+    assert.equal(
+      (await threads.getThread('alice', shared.id)).thread.error,
+      null,
     );
   },
 );

@@ -45,4 +45,45 @@ export default tseslint.config(
       ],
     },
   },
+  // Keep upstream registry sources intact; these patterns are not React Compiler compatible.
+  {
+    files: [
+      'apps/web/src/components/ai-elements/code-block.tsx',
+      'apps/web/src/components/ai-elements/jsx-preview.tsx',
+      'apps/web/src/components/ai-elements/speech-input.tsx',
+    ],
+    rules: { 'react-hooks/refs': 'off' },
+  },
+  {
+    files: [
+      'apps/web/src/components/ai-elements/commit.tsx',
+      'apps/web/src/components/ai-elements/inline-citation.tsx',
+      'apps/web/src/components/ai-elements/jsx-preview.tsx',
+      'apps/web/src/components/ai-elements/mic-selector.tsx',
+      'apps/web/src/components/ai-elements/speech-input.tsx',
+      'apps/web/src/components/ui/carousel.tsx',
+    ],
+    rules: { 'react-hooks/set-state-in-effect': 'off' },
+  },
+  {
+    files: ['apps/web/src/components/ai-elements/persona.tsx'],
+    rules: { 'react-hooks/immutability': 'off' },
+  },
+  {
+    files: ['apps/web/src/components/ai-elements/shimmer.tsx'],
+    rules: { 'react-hooks/static-components': 'off' },
+  },
+  {
+    files: [
+      'apps/web/src/components/ai-elements/image.tsx',
+      'apps/web/src/components/ai-elements/jsx-preview.tsx',
+      'apps/web/src/components/ai-elements/prompt-input.tsx',
+    ],
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { varsIgnorePattern: '^_', argsIgnorePattern: '^_' },
+      ],
+    },
+  },
 );

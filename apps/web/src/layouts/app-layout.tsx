@@ -13,7 +13,9 @@ import {
 import { LoadingState } from '@/components/loading-state';
 import { useAuthSession } from '@/features/auth/session-context';
 import { ThreadListProvider } from '@/pages/threads/thread-list-provider';
+import { ProjectNavigationProvider } from '@/pages/projects/navigation-provider';
 import { PersonalChatSettingsProvider } from '@/components/chat/personal-chat-settings-provider';
+import { ThreadNavigationProvider } from '@/components/chat/thread-navigation-provider';
 import { Sidebar } from './sidebar';
 import { adminNavigation } from './navigation';
 
@@ -22,7 +24,11 @@ export function AppLayout() {
   return (
     <PersonalChatSettingsProvider>
       <ThreadListProvider key={data?.session.id}>
-        <LayoutContent />
+        <ProjectNavigationProvider>
+          <ThreadNavigationProvider>
+            <LayoutContent />
+          </ThreadNavigationProvider>
+        </ProjectNavigationProvider>
       </ThreadListProvider>
     </PersonalChatSettingsProvider>
   );
@@ -32,12 +38,17 @@ function LayoutContent() {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const location = useLocation();
-  const isChat = location.pathname.startsWith('/threads');
+  const isProject = location.pathname.startsWith('/projects');
+  const isChat =
+    location.pathname.startsWith('/threads') ||
+    /^\/projects\/[^/]+\/threads(?:\/|$)/.test(location.pathname);
   const title =
-    (isChat
-      ? 'nav.chats'
-      : adminNavigation.find((item) => item.to === location.pathname)?.label) ??
-    'nav.home';
+    (isProject
+      ? 'nav.projects'
+      : isChat
+        ? 'nav.chats'
+        : adminNavigation.find((item) => item.to === location.pathname)
+            ?.label) ?? 'nav.home';
 
   useEffect(() => {
     const desktop = window.matchMedia('(min-width: 768px)');

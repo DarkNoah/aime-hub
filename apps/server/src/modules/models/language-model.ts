@@ -1,5 +1,5 @@
 import type { DataSource } from 'typeorm';
-import { Provider, ProviderModel, Setting } from '@aime/db';
+import { Provider, ProviderModel, Setting, Project } from '@aime/db';
 import {
   chatSettingsSchema,
   type ChatSettings,
@@ -10,28 +10,21 @@ import type { AgentExecutionOptions } from '@mastra/core/agent';
 type SharedProviderOptions = NonNullable<
   AgentExecutionOptions<undefined>['providerOptions']
 >;
+import { providerGroup, type ModelDefaults } from '@aime/shared/providers';
 import type { ProviderService } from '../providers/service.js';
 import { ThreadError } from '../threads/errors.js';
 
 export function getProviderOptions({
   reasoningEffort,
   reasoning = true,
-  thinkingMode = 'auto',
+  thinkingMode = 'medium',
 }: {
   reasoningEffort: ReasoningEffort;
   reasoning?: boolean;
-  thinkingMode?: 'auto' | 'on' | 'off';
+  thinkingMode?: ModelDefaults['thinkingMode'];
 }): SharedProviderOptions {
   if (!reasoning) return {};
-  const effort =
-    reasoningEffort === 'auto'
-      ? thinkingMode === 'off'
-        ? 'none'
-        : thinkingMode === 'on'
-          ? 'medium'
-          : null
-      : reasoningEffort;
-  if (!effort) return {};
+  const effort = reasoningEffort === 'auto' ? thinkingMode : reasoningEffort;
   return {
     openai: { reasoningEffort: effort },
     deepseek: {
@@ -50,6 +43,7 @@ export type ResolvedChatModel = {
   supportsImages: boolean;
   toolCall: boolean;
   maxOutputTokens?: number;
+  maxContextTokens?: number;
 };
 
 export class LanguageModelService {
@@ -77,9 +71,12 @@ export class LanguageModelService {
   async getLanguageModel(
     userId: string,
     input: ChatSettings,
+    projectId?: string,
   ): Promise<ResolvedChatModel> {
     const [preferences, defaults] = await Promise.all([
-      this.getPreferences(userId),
+      projectId
+        ? this.getProjectPreferences(projectId)
+        : this.getPreferences(userId),
       this.providers.getDefaults(),
     ]);
     const reference = input.model ?? preferences.model ?? defaults.defaultModel;
@@ -103,7 +100,12 @@ export class LanguageModelService {
         enabled: true,
       }),
     ]);
-    if (!provider || !model || !model.modalitiesOutput.includes('text'))
+    if (
+      !provider ||
+      providerGroup(provider.type) !== 'languageModel' ||
+      !model ||
+      !model.modalitiesOutput.includes('text')
+    )
       throw new ThreadError('MODEL_UNAVAILABLE');
     return {
       reference,
@@ -126,6 +128,17 @@ export class LanguageModelService {
       supportsImages: model.modalitiesInput.includes('image'),
       toolCall: model.toolCall,
       maxOutputTokens: model.limitOutput ?? undefined,
+      maxContextTokens: model.limitContext ?? undefined,
     };
+  }
+
+  private async getProjectPreferences(
+    projectId: string,
+  ): Promise<ChatSettings> {
+    const project = await this.database.manager.findOneBy(Project, {
+      id: projectId,
+    });
+    if (!project) throw new ThreadError('PROJECT_NOT_FOUND', 404);
+    return chatSettingsSchema.parse(project.metadata.chat ?? {});
   }
 }

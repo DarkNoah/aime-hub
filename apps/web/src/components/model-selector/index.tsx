@@ -35,6 +35,7 @@ export type ModelSelectorProps = {
   disabled?: boolean;
   noneLabel?: string;
   emptyHint?: string;
+  allowNone?: boolean;
 };
 
 export function ModelSelector({
@@ -48,6 +49,7 @@ export function ModelSelector({
   disabled = false,
   noneLabel,
   emptyHint,
+  allowNone = true,
 }: ModelSelectorProps) {
   const { t } = useTranslation();
   const { providers, models, loading, error, refresh } = useAvailableModels();
@@ -168,7 +170,7 @@ export function ModelSelector({
             className="max-h-[min(52dvh,420px)] scroll-py-2 p-2"
             label={label}
           >
-            {!loading && !error && !search.trim() && (
+            {allowNone && !loading && !error && !search.trim() && (
               <CommandItem
                 value="__none__"
                 onSelect={() => select(null)}

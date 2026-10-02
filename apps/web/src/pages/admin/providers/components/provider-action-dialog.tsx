@@ -1,18 +1,13 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import type { ProviderModel, ProviderSummary } from '@aime/shared/providers';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from '@/components/ui/input-group';
+import { PasswordInput } from '@/components/password-input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -34,6 +29,7 @@ import {
   providersPath,
 } from '@/pages/admin/providers/api';
 import type { ErrorKey } from '@/i18n/config';
+import { ProviderTypeSelector } from './provider-type-selector';
 
 export type ProviderAction =
   | { kind: 'provider'; provider?: ProviderSummary }
@@ -49,7 +45,7 @@ export function ProviderActionDialog({
 }: {
   action: ProviderAction;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (provider?: ProviderSummary) => void;
   restoreFocus: () => void;
 }) {
   const { t } = useTranslation();
@@ -57,8 +53,8 @@ export function ProviderActionDialog({
   const submitting = useRef(false);
   const [error, setError] = useState<ErrorKey | null>(null);
   const [confirmation, setConfirmation] = useState('');
-  const [showApiKey, setShowApiKey] = useState(false);
   const provider = action.kind === 'provider' ? action.provider : undefined;
+  const [providerType, setProviderType] = useState(provider?.type ?? 'openai');
   const model = action.kind === 'model' ? action.model : undefined;
   const [limits, setLimits] = useState({
     limitContext: String(model?.limitContext ?? ''),
@@ -101,8 +97,9 @@ export function ProviderActionDialog({
     submitting.current = true;
     setPending(true);
     try {
+      let savedProvider: ProviderSummary | undefined;
       if (action.kind === 'provider') {
-        await providerRequest(
+        savedProvider = await providerRequest<ProviderSummary>(
           provider ? providerPath(provider.id) : providersPath,
           {
             method: provider ? 'PATCH' : 'POST',
@@ -124,7 +121,7 @@ export function ProviderActionDialog({
           { method: 'DELETE' },
         );
       }
-      onSuccess();
+      onSuccess(savedProvider);
     } catch (cause) {
       toast.error(t(providerErrorKey(cause)));
     } finally {
@@ -196,7 +193,18 @@ export function ProviderActionDialog({
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="provider-type">{t('providers.type')}</Label>
-                  <Input id="provider-type" value="openai" readOnly />
+                  <ProviderTypeSelector
+                    value={providerType}
+                    onChange={setProviderType}
+                    disabled={pending}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {t(
+                      providerType === 'mineru'
+                        ? 'providers.configOnlyHint'
+                        : 'providers.typeHint',
+                    )}
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="provider-url">{t('providers.baseUrl')}</Label>
@@ -209,42 +217,28 @@ export function ProviderActionDialog({
                     defaultValue={provider?.baseUrl ?? ''}
                   />
                   <p className="text-xs text-muted-foreground">
-                    {t('providers.urlHint')}
+                    {t(
+                      providerType === 'mineru'
+                        ? 'providers.otherUrlHint'
+                        : 'providers.urlHint',
+                    )}
                   </p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="provider-key">{t('providers.apiKey')}</Label>
-                  <InputGroup className="h-11 rounded-lg bg-card">
-                    <InputGroupInput
-                      id="provider-key"
-                      name="apiKey"
-                      type={showApiKey ? 'text' : 'password'}
-                      autoComplete="new-password"
-                      autoCapitalize="none"
-                      spellCheck={false}
-                      maxLength={4096}
-                      aria-describedby="provider-key-hint"
-                    />
-                    <InputGroupAddon align="inline-end">
-                      <InputGroupButton
-                        size="icon-sm"
-                        disabled={pending}
-                        aria-controls="provider-key"
-                        aria-label={t(
-                          showApiKey
-                            ? 'providers.hideApiKey'
-                            : 'providers.showApiKey',
-                        )}
-                        onClick={() => setShowApiKey((visible) => !visible)}
-                      >
-                        {showApiKey ? (
-                          <EyeOff aria-hidden="true" />
-                        ) : (
-                          <Eye aria-hidden="true" />
-                        )}
-                      </InputGroupButton>
-                    </InputGroupAddon>
-                  </InputGroup>
+                  <PasswordInput
+                    id="provider-key"
+                    name="apiKey"
+                    groupClassName="h-11 rounded-lg bg-card"
+                    disabled={pending}
+                    showLabel={t('providers.showApiKey')}
+                    hideLabel={t('providers.hideApiKey')}
+                    autoComplete="new-password"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    maxLength={4096}
+                    aria-describedby="provider-key-hint"
+                  />
                   <p
                     id="provider-key-hint"
                     className="text-xs text-muted-foreground"

@@ -26,5 +26,12 @@ export function useProviderResource<T>(path: string, revision: number) {
     loading: result?.key !== key,
     data: result?.key === key ? result.data : undefined,
     error: result?.key === key ? result.error : undefined,
+    updateData: (update: (data: T) => T) => {
+      setResult((current) =>
+        current?.key === key && current.data !== undefined
+          ? { ...current, data: update(current.data) }
+          : current,
+      );
+    },
   };
 }

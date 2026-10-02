@@ -1,7 +1,8 @@
 import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Brain } from 'lucide-react';
-import { reasoningEfforts, type ChatSettings } from '@aime/shared/threads';
+import { thinkingLevels, type ChatSettings } from '@aime/shared/threads';
+import { useAvailableModels } from '@/features/models/use-available-models';
 import { ModelSelector } from '@/components/model-selector';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -22,20 +23,26 @@ export function ChatSettingsFields({
   disabled?: boolean;
 }) {
   const { t } = useTranslation();
+  const { defaults } = useAvailableModels();
+  const effectiveEffort =
+    value.reasoningEffort === 'auto'
+      ? (defaults?.thinkingMode ?? 'medium')
+      : value.reasoningEffort;
+  const efforts = thinkingLevels;
   const labelId = useId();
   const hintId = useId();
   const [preview, setPreview] = useState<number | null>(null);
-  const level = preview ?? reasoningEfforts.indexOf(value.reasoningEffort);
-  const label = t(`chat.reasoning.${reasoningEfforts[level]}`);
+  const level = preview ?? efforts.indexOf(effectiveEffort);
+  const label = t(`chat.reasoning.${efforts[level]}`);
   return (
     <>
       <div className="min-w-0 max-w-[min(11rem,38cqw)]">
         <ModelSelector
           label={t('chat.model')}
-          value={value.model}
+          value={value.model ?? defaults?.defaultModel ?? null}
           onValueChange={(model) => onChange({ ...value, model })}
           disabled={disabled}
-          noneLabel={t('chat.defaultModel')}
+          allowNone={false}
           textOnly
           compact
         />
@@ -48,12 +55,12 @@ export function ChatSettingsFields({
             size="sm"
             className="h-8 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground"
             disabled={disabled}
-            aria-label={`${t('chat.reasoningLevel')}: ${t(`chat.reasoning.${value.reasoningEffort}`)}`}
-            title={`${t('chat.reasoningLevel')}: ${t(`chat.reasoning.${value.reasoningEffort}`)}`}
+            aria-label={`${t('chat.reasoningLevel')}: ${t(`chat.reasoning.${effectiveEffort}`)}`}
+            title={`${t('chat.reasoningLevel')}: ${t(`chat.reasoning.${effectiveEffort}`)}`}
           >
             <Brain className="size-4" />
             <span className="hidden @md/chat:inline">
-              {t(`chat.reasoning.${value.reasoningEffort}`)}
+              {t(`chat.reasoning.${effectiveEffort}`)}
             </span>
           </Button>
         </PopoverTrigger>
@@ -73,7 +80,7 @@ export function ChatSettingsFields({
           <Slider
             className="mt-5 mb-3 py-2"
             min={0}
-            max={reasoningEfforts.length - 1}
+            max={efforts.length - 1}
             step={1}
             value={[level]}
             disabled={disabled}
@@ -85,7 +92,7 @@ export function ChatSettingsFields({
             onValueChange={([next]) => setPreview(next)}
             onValueCommit={([next]) => {
               setPreview(null);
-              const reasoningEffort = reasoningEfforts[next];
+              const reasoningEffort = efforts[next];
               if (reasoningEffort !== value.reasoningEffort)
                 onChange({ ...value, reasoningEffort });
             }}
@@ -94,7 +101,7 @@ export function ChatSettingsFields({
             aria-hidden="true"
             className="flex justify-between text-xs text-muted-foreground"
           >
-            <span>{t('chat.reasoning.auto')}</span>
+            <span>{t(`chat.reasoning.${efforts[0]}`)}</span>
             <span>{t('chat.reasoning.max')}</span>
           </div>
         </PopoverContent>

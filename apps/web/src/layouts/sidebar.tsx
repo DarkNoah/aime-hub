@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router';
-import { Folder, Home, LoaderCircle, LogOut } from 'lucide-react';
+import { Home, LoaderCircle, LogOut } from 'lucide-react';
 import { Brand } from '@/components/brand';
 import { Button } from '@/components/ui/button';
 import { useAuthSession } from '@/features/auth/session-context';
@@ -10,6 +10,7 @@ import { authClient, isAdmin } from '@/features/auth/client';
 import { authErrorKey } from '@/features/auth/errors';
 import { cn } from '@/lib/utils';
 import { ThreadSidebar } from '@/pages/threads/components/thread-sidebar';
+import { ProjectSidebar } from '@/pages/projects/components/project-sidebar';
 import { adminNavigation } from './navigation';
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
@@ -65,21 +66,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             {t('nav.home')}
           </NavLink>
           <ThreadSidebar onNavigate={onNavigate} />
-          {[{ label: t('nav.projects'), icon: Folder }].map(
-            ({ label, icon: Icon }) => (
-              <div
-                key={label}
-                aria-disabled="true"
-                className="flex h-10 select-none items-center gap-3 rounded-lg px-3 text-sm text-muted-foreground"
-              >
-                <Icon className="size-4" />
-                {label}
-                <span className="ml-auto rounded border border-border px-1.5 py-0.5 text-[10px]">
-                  {t('common.comingSoon')}
-                </span>
-              </div>
-            ),
-          )}
+          <ProjectSidebar onNavigate={onNavigate} />
         </div>
         {admin && (
           <div className="space-y-1">

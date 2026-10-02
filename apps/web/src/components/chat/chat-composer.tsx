@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowUp, Paperclip, Square, X } from 'lucide-react';
 import { nanoid } from 'nanoid';
@@ -8,6 +8,7 @@ import {
   MAX_IMAGE_BYTES,
   runInputSchema,
   type RunInput,
+  type ChatUsage,
 } from '@aime/shared/threads';
 import {
   PromptInput,
@@ -18,16 +19,11 @@ import {
   usePromptInputAttachments,
 } from '@/components/ai-elements/prompt-input';
 import { Button } from '@/components/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { cn } from '@/lib/utils';
 import { ChatSettingsFields } from './chat-settings';
 import { ChatApiError, chatErrorKey } from './api';
 import { usePersonalChatSettings } from './use-personal-chat-settings';
+import { ChatContextUsage } from './chat-context-usage';
 
 function ComposerAttachments({ disabled }: { disabled: boolean }) {
   const { t } = useTranslation();
@@ -83,12 +79,18 @@ function AttachButton({ disabled }: { disabled: boolean }) {
 }
 
 export function ChatComposer({
+  className,
   disabled,
   running,
   stopping,
   onSend,
   onStop,
+  queue,
+  usage,
 }: {
+  className?: string;
+  queue?: ReactNode;
+  usage?: ChatUsage | null;
   disabled?: boolean;
   running?: boolean;
   stopping?: boolean;
@@ -108,138 +110,129 @@ export function ChatComposer({
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
   const retryId = useRef<string | null>(null);
-  const [immediate, setImmediate] = useState(false);
   const unavailable =
     disabled || loadingSettings || savingSettings || !!settingsError;
   return (
-    <div className="shrink-0 space-y-2 border-t bg-card p-3 @lg/chat:p-5">
-      <PromptInput
-        accept="image/png,image/jpeg,image/webp,image/gif"
-        multiple
-        maxFiles={MAX_CHAT_FILES}
-        maxFileSize={MAX_IMAGE_BYTES}
-        onError={() => toast.error(t('chat.imageHint'))}
-        onSubmit={async ({ text: draft, files }) => {
-          if (unavailable || stopping || pendingRef.current)
-            throw new Error('Unavailable');
-          if (!draft.trim() && !files.length) throw new Error('Empty');
-          const id = retryId.current ?? nanoid();
-          retryId.current = id;
-          const result = runInputSchema.safeParse({
-            id,
-            ...settings,
-            isImmediate: immediate,
-            parts: [
-              ...files,
-              ...(draft.trim() ? [{ type: 'text', text: draft.trim() }] : []),
-            ],
-          });
-          if (!result.success) {
-            toast.error(t('chat.errors.validation'));
-            throw new ChatApiError('VALIDATION_ERROR');
-          }
-          pendingRef.current = true;
-          setPending(true);
-          try {
-            await onSend(result.data);
-            setText('');
-            retryId.current = null;
-          } catch (cause) {
-            toast.error(t(chatErrorKey(cause)));
-            throw cause;
-          } finally {
-            setPending(false);
-            pendingRef.current = false;
-          }
-        }}
-      >
-        <ComposerAttachments disabled={pending} />
-        <PromptInputBody>
-          <PromptInputTextarea
-            value={text}
-            onChange={(event) => {
-              setText(event.target.value);
+    <div
+      className={cn('shrink-0 space-y-2 bg-card p-3 @lg/chat:p-5', className)}
+    >
+      <div>
+        {queue}
+        {usage && (
+          <div className="mb-1 flex justify-end">
+            <ChatContextUsage usage={usage} />
+          </div>
+        )}
+        <PromptInput
+          className="relative [&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:bg-card"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          multiple
+          maxFiles={MAX_CHAT_FILES}
+          maxFileSize={MAX_IMAGE_BYTES}
+          onError={() => toast.error(t('chat.imageHint'))}
+          onSubmit={async ({ text: draft, files }) => {
+            if (unavailable || stopping || pendingRef.current)
+              throw new Error('Unavailable');
+            if (!draft.trim() && !files.length) throw new Error('Empty');
+            const id = retryId.current ?? nanoid();
+            retryId.current = id;
+            const result = runInputSchema.safeParse({
+              id,
+              ...settings,
+              isImmediate: false,
+              parts: [
+                ...files,
+                ...(draft.trim() ? [{ type: 'text', text: draft.trim() }] : []),
+              ],
+            });
+            if (!result.success) {
+              toast.error(t('chat.errors.validation'));
+              throw new ChatApiError('VALIDATION_ERROR');
+            }
+            pendingRef.current = true;
+            setPending(true);
+            try {
+              await onSend(result.data);
+              setText('');
               retryId.current = null;
-            }}
-            disabled={pending || disabled || stopping}
-            placeholder={t(
-              running ? 'chat.queuePlaceholder' : 'chat.placeholder',
-            )}
-            aria-label={t('chat.message')}
-            className="max-h-44 min-h-20"
-          />
-        </PromptInputBody>
-        <PromptInputFooter className="items-end gap-2">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-            <AttachButton disabled={pending || !!disabled || !!stopping} />
-            <ChatSettingsFields
-              value={settings}
-              onChange={(value) => {
-                void saveSettings(value)
-                  .then((saved) => {
-                    if (saved)
-                      toast.success(t('chat.saved'), {
-                        id: 'chat-preferences',
-                      });
-                  })
-                  .catch((cause) =>
-                    toast.error(t(chatErrorKey(cause)), {
-                      id: 'chat-preferences',
-                    }),
-                  );
+            } catch (cause) {
+              toast.error(t(chatErrorKey(cause)));
+              throw cause;
+            } finally {
+              setPending(false);
+              pendingRef.current = false;
+            }
+          }}
+        >
+          <ComposerAttachments disabled={pending} />
+          <PromptInputBody>
+            <PromptInputTextarea
+              value={text}
+              onChange={(event) => {
+                setText(event.target.value);
+                retryId.current = null;
               }}
-              disabled={
-                pending || stopping || loadingSettings || !!settingsError
-              }
+              disabled={pending || disabled || stopping}
+              placeholder={t(
+                running ? 'chat.queuePlaceholder' : 'chat.placeholder',
+              )}
+              aria-label={t('chat.message')}
+              className="max-h-44 min-h-20"
             />
-            {running && (
-              <Select
-                value={immediate ? 'immediate' : 'queue'}
-                onValueChange={(value) => setImmediate(value === 'immediate')}
-              >
-                <SelectTrigger
-                  aria-label={t('chat.sendMode')}
-                  className="h-8 border-0 shadow-none text-xs"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="queue">{t('chat.queueSend')}</SelectItem>
-                  <SelectItem value="immediate">
-                    {t('chat.immediateSend')}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {(running || stopping) && onStop && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={stopping}
-                onClick={() =>
-                  void onStop().catch((cause) =>
-                    toast.error(t(chatErrorKey(cause))),
-                  )
+          </PromptInputBody>
+          <PromptInputFooter className="items-end gap-2">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+              <AttachButton disabled={pending || !!disabled || !!stopping} />
+              <ChatSettingsFields
+                value={settings}
+                onChange={(value) => {
+                  void saveSettings(value)
+                    .then((saved) => {
+                      if (saved)
+                        toast.success(t('chat.saved'), {
+                          id: 'chat-preferences',
+                        });
+                    })
+                    .catch((cause) =>
+                      toast.error(t(chatErrorKey(cause)), {
+                        id: 'chat-preferences',
+                      }),
+                    );
+                }}
+                disabled={
+                  pending || stopping || loadingSettings || !!settingsError
                 }
+              />
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {(running || stopping) && onStop && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={stopping}
+                  onClick={() =>
+                    void onStop().catch((cause) =>
+                      toast.error(t(chatErrorKey(cause))),
+                    )
+                  }
+                >
+                  <Square className="size-3" />
+                  {t(stopping ? 'chat.stopping' : 'chat.stop')}
+                </Button>
+              )}
+              <PromptInputSubmit
+                disabled={pending || unavailable || stopping}
+                status={pending ? 'submitted' : 'ready'}
+                aria-label={t(running ? 'chat.queueSend' : 'chat.send')}
+                title={t('chat.send')}
               >
-                <Square className="size-3" />
-                {t(stopping ? 'chat.stopping' : 'chat.stop')}
-              </Button>
-            )}
-            <PromptInputSubmit
-              disabled={pending || unavailable || stopping}
-              status={pending ? 'submitted' : 'ready'}
-              aria-label={t(running ? 'chat.queueSend' : 'chat.send')}
-              title={t('chat.send')}
-            >
-              <ArrowUp />
-            </PromptInputSubmit>
-          </div>
-        </PromptInputFooter>
-      </PromptInput>
+                <ArrowUp />
+              </PromptInputSubmit>
+            </div>
+          </PromptInputFooter>
+        </PromptInput>
+      </div>
       {settingsError && (
         <div
           role="alert"
@@ -256,9 +249,6 @@ export function ChatComposer({
           </Button>
         </div>
       )}
-      <p className="text-center text-xs leading-5 text-muted-foreground">
-        {t(running ? 'chat.backgroundHint' : 'chat.inputHint')}
-      </p>
     </div>
   );
 }

@@ -16,6 +16,8 @@ import { modelRoutes } from './modules/models/routes.js';
 import { threadRoutes } from './modules/threads/routes.js';
 import type { ThreadService } from './modules/threads/service.js';
 import type { LanguageModelService } from './modules/models/language-model.js';
+import { projectRoutes } from './modules/projects/routes.js';
+import type { ProjectService } from './modules/projects/service.js';
 
 export function createApp(
   auth: Auth,
@@ -24,6 +26,7 @@ export function createApp(
     threads: ThreadService;
     models: LanguageModelService;
     webOrigin: string;
+    projects?: ProjectService;
   },
 ) {
   const app = express();
@@ -37,6 +40,17 @@ export function createApp(
     app.use(
       '/api/threads',
       threadRoutes(auth, chat.threads, chat.models, chat.webOrigin),
+    );
+  if (chat?.projects)
+    app.use(
+      '/api/projects',
+      projectRoutes(
+        auth,
+        chat.projects,
+        chat.threads,
+        chat.models,
+        chat.webOrigin,
+      ),
     );
   app.use('/api/admin', requireAdmin(auth));
   if (providers) {

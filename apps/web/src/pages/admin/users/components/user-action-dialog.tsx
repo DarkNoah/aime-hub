@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/password-input';
 import { Label } from '@/components/ui/label';
 import {
   Dialog,
@@ -286,10 +287,9 @@ export function UserActionDialog({
               <>
                 <div className="space-y-2">
                   <Label htmlFor="user-password">{t('auth.password')}</Label>
-                  <Input
+                  <PasswordInput
                     id="user-password"
                     name="password"
-                    type="password"
                     required
                     minLength={8}
                     maxLength={128}
@@ -301,10 +301,9 @@ export function UserActionDialog({
                   <Label htmlFor="user-confirm-password">
                     {t('auth.confirmPassword')}
                   </Label>
-                  <Input
+                  <PasswordInput
                     id="user-confirm-password"
                     name="confirmPassword"
-                    type="password"
                     required
                     minLength={8}
                     maxLength={128}

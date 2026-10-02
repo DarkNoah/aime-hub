@@ -1,4 +1,18 @@
 import { z } from 'zod';
+import { thinkingLevels } from './threads.js';
+import { languageModelProviders } from './provider-catalog.js';
+
+export { languageModelProviders };
+export const providerGroups = ['languageModel', 'other'] as const;
+export function providerGroup(type: string) {
+  return type === 'mineru' ? 'other' : 'languageModel';
+}
+export const providerTypeSchema = z.enum([
+  ...(Object.keys(languageModelProviders) as Array<
+    keyof typeof languageModelProviders
+  >),
+  'mineru',
+]);
 
 const metadata = z.record(z.string(), z.unknown());
 const modelId = z
@@ -14,7 +28,7 @@ const modelId = z
 export const providerInputSchema = z
   .object({
     name: z.string().trim().min(1).max(100),
-    type: z.literal('openai').default('openai'),
+    type: providerTypeSchema.default('openai'),
     baseUrl: z
       .url()
       .max(2048)
@@ -103,7 +117,7 @@ export const modelDefaultsSchema = z
     defaultModel: z.string().min(3).max(512).nullable(),
     fastModel: z.string().min(3).max(512).nullable(),
     imageModel: z.string().min(3).max(512).nullable(),
-    thinkingMode: z.enum(['auto', 'on', 'off']),
+    thinkingMode: z.enum(thinkingLevels),
   })
   .strict();
 export type ProviderInput = z.infer<typeof providerInputSchema>;
@@ -145,7 +159,10 @@ export type AvailableProvider = {
   enabled: boolean;
   models: AvailableModel[];
 };
-export type AvailableModels = { providers: AvailableProvider[] };
+export type AvailableModels = {
+  providers: AvailableProvider[];
+  defaults?: Pick<ModelDefaults, 'defaultModel' | 'thinkingMode'>;
+};
 export type SyncResult = {
   added: number;
   deprecated: number;
@@ -156,8 +173,21 @@ export const emptyModelDefaults: ModelDefaults = {
   defaultModel: null,
   fastModel: null,
   imageModel: null,
-  thinkingMode: 'auto',
+  thinkingMode: 'medium',
 };
 export function modelReference(providerId: string, id: string) {
   return `${providerId}/${id}`;
+}
+
+// Normalize persisted mode values from before system thinking levels were introduced.
+export function normalizeModelDefaults(value: unknown): ModelDefaults {
+  if (!value || typeof value !== 'object') return { ...emptyModelDefaults };
+  const stored = value as Record<string, unknown>;
+  const thinkingMode =
+    stored.thinkingMode === 'off'
+      ? 'none'
+      : stored.thinkingMode === 'on' || stored.thinkingMode === 'auto'
+        ? 'medium'
+        : stored.thinkingMode;
+  return modelDefaultsSchema.parse({ ...stored, thinkingMode });
 }

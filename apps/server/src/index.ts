@@ -8,9 +8,10 @@ import { createApp } from './app.js';
 import { ProviderService } from './modules/providers/service.js';
 import { resolve } from 'node:path';
 import { createMastraRuntime } from './mastra/index.js';
-import { createPersonalChatRunner } from './modules/threads/runner.js';
+import { createChatRunner } from './modules/threads/runner.js';
 import { LanguageModelService } from './modules/models/language-model.js';
 import { ThreadService } from './modules/threads/service.js';
+import { ProjectService } from './modules/projects/service.js';
 
 const env = loadEnv();
 const database = createDataSource(env.DATABASE_URL);
@@ -43,6 +44,7 @@ try {
 }
 const providers = new ProviderService(database);
 const models = new LanguageModelService(database, providers);
+const projects = new ProjectService(database);
 const { mastra, storage, memory } = createMastraRuntime(pool);
 await storage.init();
 const workspaceRoot = resolve(
@@ -51,7 +53,8 @@ const workspaceRoot = resolve(
 );
 const threads = new ThreadService(
   memory,
-  createPersonalChatRunner(mastra, models, workspaceRoot),
+  createChatRunner(mastra, models, workspaceRoot),
+  projects,
 );
 const server = createApp(
   auth,
@@ -59,7 +62,7 @@ const server = createApp(
     service: providers,
     webOrigin: env.WEB_ORIGIN,
   },
-  { threads, models, webOrigin: env.WEB_ORIGIN },
+  { threads, models, projects, webOrigin: env.WEB_ORIGIN },
 ).listen(env.SERVER_PORT, '127.0.0.1', () => {
   console.log(`Aime Hub API: http://127.0.0.1:${env.SERVER_PORT}`);
 });

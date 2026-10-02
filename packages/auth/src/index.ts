@@ -21,7 +21,6 @@ export function createAuthOptions(config: AuthConfig) {
     baseURL: config.baseURL,
     basePath: '/api/auth',
     advanced: {
-      cookiePrefix: 'aime-hub',
       ipAddress: { ipAddressHeaders: ['x-aime-client-ip'] },
     },
     trustedOrigins: [new URL(config.webOrigin).origin],

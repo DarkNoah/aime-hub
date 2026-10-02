@@ -12,7 +12,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useThreadList } from '../use-thread-list';
 import { ThreadList } from './thread-list';
-import { ThreadDialog } from './thread-dialogs';
+import { ThreadDialog } from '@/components/chat/thread-dialogs';
 
 export function ThreadSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { t } = useTranslation();

@@ -3,13 +3,14 @@ import { z } from 'zod';
 import type { DataSource, EntityManager } from 'typeorm';
 import { Provider, ProviderModel, Setting } from '@aime/db';
 import {
-  emptyModelDefaults,
   modelInputSchema,
   modelReference,
   type ModelDefaults,
   type ModelInput,
   type ProviderInput,
+  normalizeModelDefaults,
   type AvailableModels,
+  providerGroup,
 } from '@aime/shared/providers';
 import { ProviderError, requestProviderJson } from './network.js';
 
@@ -99,10 +100,13 @@ export class ProviderService {
     if (!provider) throw new ProviderError('NOT_FOUND', 404);
     return provider;
   }
+  private assertLanguageModelProvider(provider: Provider) {
+    if (providerGroup(provider.type) !== 'languageModel')
+      throw new ProviderError('PROVIDER_CONFIG_ONLY');
+  }
   private async defaults(manager: EntityManager): Promise<ModelDefaults> {
-    return (
-      ((await manager.findOneBy(Setting, { id: settingsId }))
-        ?.value as ModelDefaults) ?? { ...emptyModelDefaults }
+    return normalizeModelDefaults(
+      (await manager.findOneBy(Setting, { id: settingsId }))?.value,
     );
   }
   private async assertUnused(
@@ -175,14 +179,22 @@ export class ProviderService {
       .addOrderBy('provider.id', 'ASC')
       .addOrderBy('model.id', 'ASC')
       .getMany();
+    const defaults = await this.getDefaults();
     return {
-      providers: providers.map((provider) => ({
-        id: provider.id,
-        name: provider.name,
-        type: provider.type,
-        enabled: provider.enabled,
-        models: (provider as Provider & { models: ProviderModel[] }).models.map(
-          (model) => ({
+      defaults: {
+        defaultModel: defaults.defaultModel,
+        thinkingMode: defaults.thinkingMode,
+      },
+      providers: providers
+        .filter((provider) => providerGroup(provider.type) === 'languageModel')
+        .map((provider) => ({
+          id: provider.id,
+          name: provider.name,
+          type: provider.type,
+          enabled: provider.enabled,
+          models: (
+            provider as Provider & { models: ProviderModel[] }
+          ).models.map((model) => ({
             providerId: model.providerId,
             id: model.id,
             name: model.name,
@@ -195,9 +207,8 @@ export class ProviderService {
             toolCall: model.toolCall,
             limitContext: model.limitContext,
             limitOutput: model.limitOutput,
-          }),
-        ),
-      })),
+          })),
+        })),
     };
   }
   // Server-only persisted configuration, including credentials, for future model clients.
@@ -226,7 +237,9 @@ export class ProviderService {
     const slash = reference.indexOf('/');
     if (slash < 1) throw new ProviderError('INVALID_MODEL');
     const providerId = reference.slice(0, slash);
-    await this.requireProvider(this.database.manager, providerId);
+    this.assertLanguageModelProvider(
+      await this.requireProvider(this.database.manager, providerId),
+    );
     const model = await this.database.manager.findOneBy(ProviderModel, {
       providerId,
       id: reference.slice(slash + 1),
@@ -258,6 +271,14 @@ export class ProviderService {
     await this.write(async (manager) => {
       const provider = await this.requireProvider(manager, id);
       if (input.enabled === false) await this.assertUnused(manager, id);
+      if (
+        input.type &&
+        providerGroup(input.type) !== providerGroup(provider.type)
+      ) {
+        await this.assertUnused(manager, id);
+        if (await manager.countBy(ProviderModel, { providerId: id }))
+          throw new ProviderError('PROVIDER_HAS_MODELS', 409);
+      }
       await manager.save(Provider, {
         ...provider,
         ...input,
@@ -278,7 +299,9 @@ export class ProviderService {
   }
   async createModel(providerId: string, input: ModelInput) {
     return this.write(async (manager) => {
-      await this.requireProvider(manager, providerId);
+      this.assertLanguageModelProvider(
+        await this.requireProvider(manager, providerId),
+      );
       const old = await manager.findOne(ProviderModel, {
         where: { providerId, id: input.id },
         withDeleted: true,
@@ -301,7 +324,9 @@ export class ProviderService {
     input: Partial<ModelInput>,
   ) {
     return this.write(async (manager) => {
-      await this.requireProvider(manager, providerId);
+      this.assertLanguageModelProvider(
+        await this.requireProvider(manager, providerId),
+      );
       const model = await manager.findOneBy(ProviderModel, { providerId, id });
       if (!model) throw new ProviderError('NOT_FOUND', 404);
       const nextId = input.id ?? id;
@@ -365,6 +390,7 @@ export class ProviderService {
         });
         if (
           !provider ||
+          providerGroup(provider.type) !== 'languageModel' ||
           !model ||
           (key === 'imageModel' && !model.modalitiesOutput.includes('image'))
         )
@@ -394,6 +420,7 @@ export class ProviderService {
     let provider: Awaited<ReturnType<ProviderService['getProvider']>>;
     try {
       provider = await this.getProvider(providerId);
+      this.assertLanguageModelProvider(provider);
     } catch (error) {
       this.syncing.delete(providerId);
       throw error;

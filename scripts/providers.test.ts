@@ -15,10 +15,14 @@ import {
   modelUpdateSchema,
   providerInputSchema,
   providerUpdateSchema,
+  languageModelProviders,
+  providerGroup,
   type ModelDefaults,
   type ModelInput,
 } from '@aime/shared/providers';
 import { createApp } from '../apps/server/src/app.js';
+import { LanguageModelService } from '../apps/server/src/modules/models/language-model.js';
+import { chatSettingsSchema } from '@aime/shared/threads';
 import {
   isPublicAddress,
   ProviderError,
@@ -83,7 +87,7 @@ test('provider schema 标准化、默认值及 partial 更新不注入默认值'
     { name: '' },
     { name: ' '.repeat(3) },
     { name: 'x'.repeat(101) },
-    { type: 'anthropic' },
+    { type: 'not-a-catalog-provider' },
     { enabled: 'true' },
     { metadata: [] },
     { apiKey: 'a\r\nb' },
@@ -101,6 +105,33 @@ test('provider schema 标准化、默认值及 partial 更新不注入默认值'
       false,
     );
     assert.equal(providerUpdateSchema.safeParse(patch).success, false);
+  }
+});
+
+test('models.dev keys and MinerU round-trip through create/update validation with stable groups', () => {
+  for (const type of [...Object.keys(languageModelProviders), 'mineru']) {
+    assert.equal(
+      providerInputSchema.parse({ name: type, type, baseUrl }).type,
+      type,
+    );
+    assert.equal(providerUpdateSchema.parse({ type }).type, type);
+    assert.equal(
+      providerGroup(type),
+      type === 'mineru' ? 'other' : 'languageModel',
+    );
+  }
+  for (const type of [
+    '',
+    'OpenAI',
+    'unknown-provider',
+    '__proto__',
+    'toString',
+  ]) {
+    assert.equal(
+      providerInputSchema.safeParse({ name: type, type, baseUrl }).success,
+      false,
+    );
+    assert.equal(providerUpdateSchema.safeParse({ type }).success, false);
   }
 });
 
@@ -188,7 +219,15 @@ test('defaults schema 要求完整配置、合法 thinkingMode，引用保留完
     modelDefaultsSchema.parse(emptyModelDefaults),
     emptyModelDefaults,
   );
-  for (const thinkingMode of ['auto', 'on', 'off']) {
+  for (const thinkingMode of [
+    'none',
+    'minimal',
+    'low',
+    'medium',
+    'high',
+    'xhigh',
+    'max',
+  ]) {
     assert.equal(
       modelDefaultsSchema.safeParse({ ...emptyModelDefaults, thinkingMode })
         .success,
@@ -514,7 +553,10 @@ test(
         assert.equal((await anonymous.json()).code, 'UNAUTHORIZED');
         const empty = await readCatalog(cookies.user);
         assert.equal(empty.status, 200);
-        assert.deepEqual(await empty.json(), { providers: [] });
+        assert.deepEqual(await empty.json(), {
+          defaults: { defaultModel: null, thinkingMode: 'medium' },
+          providers: [],
+        });
         const provider = await newProvider('Available', {
           apiKey: testKey,
           metadata: { private: 'hidden' },
@@ -988,7 +1030,7 @@ test(
           defaultModel: modelReference(provider, 'org/chat'),
           fastModel: modelReference(provider, 'org/fast'),
           imageModel: modelReference(provider, 'org/image'),
-          thinkingMode: 'on',
+          thinkingMode: 'medium',
         };
         assert.deepEqual(
           await expect('/settings/models', 'PUT', defaults, 200),
@@ -1084,7 +1126,7 @@ test(
         await expect(
           '/settings/models',
           'PUT',
-          { ...emptyModelDefaults, thinkingMode: 'off' },
+          { ...emptyModelDefaults, thinkingMode: 'none' },
           200,
         );
         await expect(
@@ -1434,6 +1476,125 @@ test(
             true,
           );
         }
+      },
+    );
+
+    await t.test(
+      '供应商类型持久化，MinerU 仅配置且无法进入模型调用路径',
+      async () => {
+        const provider = await newProvider('Typed provider', {
+          type: 'anthropic',
+          apiKey: testKey,
+        });
+        assert.equal(
+          (await offline().getPublicProvider(provider)).type,
+          'anthropic',
+        );
+        await expect(
+          `/providers/${provider}`,
+          'PATCH',
+          { type: 'deepseek' },
+          200,
+        );
+        assert.equal(
+          (await offline().getPublicProvider(provider)).type,
+          'deepseek',
+        );
+        await service.createModel(
+          provider,
+          modelInputSchema.parse({ id: 'chat', name: 'Chat' }),
+        );
+        await expect(
+          `/providers/${provider}`,
+          'PATCH',
+          { type: 'mineru' },
+          409,
+          'PROVIDER_HAS_MODELS',
+        );
+        assert.equal(
+          (await offline().getPublicProvider(provider)).type,
+          'deepseek',
+        );
+
+        const mineru = await newProvider('MinerU', {
+          type: 'mineru',
+          apiKey: testKey,
+        });
+        await expect(
+          `/providers/${mineru}`,
+          'PATCH',
+          { name: 'Document parser', enabled: false },
+          200,
+        );
+        const saved = await offline().getPublicProvider(mineru);
+        assert.equal(saved.type, 'mineru');
+        assert.equal(saved.name, 'Document parser');
+        assert.equal(saved.enabled, false);
+        assert.equal(saved.hasApiKey, true);
+        assert.deepEqual(saved.models, []);
+        await expect(`/providers/${mineru}`, 'PATCH', { enabled: true }, 200);
+        const calls = httpFake.calls.length;
+        await expect(
+          modelPath(mineru),
+          'POST',
+          { id: 'parser', name: 'Parser' },
+          400,
+          'PROVIDER_CONFIG_ONLY',
+        );
+        await expect(
+          `/providers/${mineru}/sync`,
+          'POST',
+          {},
+          400,
+          'PROVIDER_CONFIG_ONLY',
+        );
+        assert.equal(httpFake.calls.length, calls);
+
+        // Even legacy or externally seeded model rows must not expose a config-only provider.
+        await database.manager.save(
+          ProviderModel,
+          database.manager.create(ProviderModel, {
+            ...modelInputSchema.parse({ id: 'legacy', name: 'Legacy' }),
+            providerId: mineru,
+          }),
+        );
+        assert.equal(
+          (await offline().listAvailableModels()).providers.some(
+            (item) => item.id === mineru,
+          ),
+          false,
+        );
+        await expect(
+          modelPath(mineru, 'legacy'),
+          'PATCH',
+          { enabled: true },
+          400,
+          'PROVIDER_CONFIG_ONLY',
+        );
+        await assert.rejects(
+          offline().getModel(modelReference(mineru, 'legacy')),
+          { code: 'PROVIDER_CONFIG_ONLY' },
+        );
+        await expect(
+          '/settings/models',
+          'PUT',
+          {
+            ...emptyModelDefaults,
+            defaultModel: modelReference(mineru, 'legacy'),
+          },
+          400,
+          'INVALID_MODEL',
+        );
+        const languageModels = new LanguageModelService(database, offline());
+        await assert.rejects(
+          languageModels.getLanguageModel(
+            'test-user',
+            chatSettingsSchema.parse({
+              model: modelReference(mineru, 'legacy'),
+            }),
+          ),
+          { code: 'MODEL_UNAVAILABLE' },
+        );
       },
     );
 

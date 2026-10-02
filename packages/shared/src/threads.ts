@@ -1,7 +1,7 @@
 import { z } from 'zod';
+import type { ProjectSummary } from './projects.js';
 
-export const reasoningEfforts = [
-  'auto',
+export const thinkingLevels = [
   'none',
   'minimal',
   'low',
@@ -10,6 +10,7 @@ export const reasoningEfforts = [
   'xhigh',
   'max',
 ] as const;
+export const reasoningEfforts = ['auto', ...thinkingLevels] as const;
 export const reasoningEffortSchema = z.enum(reasoningEfforts);
 export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
 export const chatSettingsSchema = z
@@ -21,6 +22,10 @@ export const chatSettingsSchema = z
 export type ChatSettings = z.infer<typeof chatSettingsSchema>;
 export const createThreadSchema = chatSettingsSchema.extend({
   title: z.string().trim().min(1).max(120).optional(),
+  projectId: z
+    .string()
+    .regex(/^[a-zA-Z0-9_-]{16}$/)
+    .optional(),
 });
 export const updateThreadSchema = z
   .object({
@@ -66,9 +71,33 @@ export const runInputSchema = chatSettingsSchema
           parts.filter((part) => part.type === 'file').length <= MAX_CHAT_FILES,
       ),
     isImmediate: z.boolean().default(false),
+    createdBy: z.string().trim().optional(),
+    createdAt: z.string().trim().optional(),
   })
   .strict();
 export type RunInput = z.infer<typeof runInputSchema>;
+export const updateQueuedMessageSchema = z
+  .object({
+    text: z.string().trim().max(60000).optional(),
+    isImmediate: z.boolean().optional(),
+  })
+  .strict()
+  .refine(
+    (input) => input.text !== undefined || input.isImmediate !== undefined,
+  );
+export type UpdateQueuedMessage = z.infer<typeof updateQueuedMessageSchema>;
+export const moveQueuedMessageSchema = z
+  .object({
+    id: runInputSchema.shape.id,
+    beforeId: runInputSchema.shape.id.nullable(),
+  })
+  .strict();
+export type QueuedMessageDetail = {
+  id: string;
+  text: string;
+  isImmediate: boolean;
+  hasAttachments: boolean;
+};
 export type QueuedMessage = {
   id: string;
   text: string;
@@ -78,6 +107,8 @@ export type QueuedMessage = {
 export type ThreadStatus = 'idle' | 'running' | 'stopping' | 'error';
 export type ThreadSummary = ChatSettings & {
   id: string;
+  projectId?: string | null;
+  createdBy?: string;
   title: string;
   createdAt: string;
   updatedAt: string;
@@ -89,12 +120,30 @@ export type ThreadSnapshot<Message> = {
   thread: ThreadSummary;
   messages: Message[];
   activeMessageId: string | null;
+  usage?: ChatUsage | null;
+};
+// Usage from the latest completed LLM step, not a sum across context windows.
+export type ChatUsage = {
+  model: string;
+  maxTokens: number | null;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  reasoningTokens?: number;
+  cachedInputTokens?: number;
+  cacheCreationInputTokens?: number;
 };
 export type ThreadList = {
   threads: ThreadSummary[];
   hasMore: boolean;
   page: number;
 };
+// Navigation carries summaries only; message streams remain scoped to the open chat.
+export type ThreadNavigationEvent =
+  | { type: 'snapshot'; threads: ThreadSummary[]; projects: ProjectSummary[] }
+  | { type: 'upsert'; thread: ThreadSummary }
+  | { type: 'remove'; id: string; projectId: string | null }
+  | { type: 'project-removed'; projectId: string };
 export type MessagePage<Message> = {
   messages: Message[];
   hasMore: boolean;

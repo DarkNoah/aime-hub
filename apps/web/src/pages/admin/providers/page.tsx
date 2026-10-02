@@ -10,7 +10,13 @@ import {
   RefreshCw,
   Search,
 } from 'lucide-react';
-import type { ProviderSummary, SyncResult } from '@aime/shared/providers';
+import {
+  providerGroup,
+  providerGroups,
+  type ProviderSummary,
+  type SyncResult,
+} from '@aime/shared/providers';
+import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/page-header';
 import { LoadingState } from '@/components/loading-state';
 import { StatusBadge } from '@/components/status-badge';
@@ -80,20 +86,29 @@ export function AdminProvidersPage() {
     submitting.current = true;
     setPending(true);
     try {
-      const result = await providerRequest<SyncResult>(path, {
+      const result = await providerRequest<SyncResult | ProviderSummary>(path, {
         method,
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
       toast.success(
-        sync ? t('models.synced', result) : t('providers.success'),
+        sync
+          ? t('models.synced', result as SyncResult)
+          : t('providers.success'),
         {
           description:
-            sync && !result.catalogAvailable
+            sync && !(result as SyncResult).catalogAvailable
               ? t('models.catalogUnavailable')
               : undefined,
         },
       );
-      setRevision((value) => value + 1);
+      if (!sync && method === 'PATCH' && !path.includes('/models')) {
+        const saved = result as ProviderSummary;
+        providers.updateData((items) =>
+          items.map((item) => (item.id === saved.id ? saved : item)),
+        );
+      } else {
+        setRevision((value) => value + 1);
+      }
     } catch (cause) {
       toast.error(t(providerErrorKey(cause)));
     } finally {
@@ -198,103 +213,157 @@ export function AdminProvidersPage() {
               </p>
             </div>
           ) : (
-            <ul className="divide-y">
-              {filteredProviders.map((provider) => (
-                <li
-                  key={provider.id}
-                  className={`flex flex-wrap items-center justify-between gap-4 p-4 transition-colors hover:bg-muted/30 sm:p-5 ${selected === provider.id ? 'bg-primary/5' : ''}`}
-                >
-                  <span
-                    aria-hidden="true"
-                    className="hidden size-11 shrink-0 items-center justify-center rounded-lg border bg-background text-primary sm:flex"
+            <div className="divide-y">
+              {providerGroups.map((group) => {
+                const items = filteredProviders.filter(
+                  (provider) => providerGroup(provider.type) === group,
+                );
+                return (
+                  <section
+                    key={group}
+                    aria-labelledby={`provider-group-${group}`}
                   >
-                    <Plug className="size-5" strokeWidth={1.5} />
-                  </span>
-                  <div className="min-w-0 flex-1 basis-56">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="break-all font-medium">{provider.name}</h3>
-                      <StatusBadge
-                        tone={provider.enabled ? 'success' : 'neutral'}
+                    <div className="flex items-center gap-2 bg-muted/40 px-4 py-3 sm:px-5">
+                      <h3
+                        id={`provider-group-${group}`}
+                        className="text-sm font-medium"
                       >
-                        {t(
-                          provider.enabled
-                            ? 'providers.enabled'
-                            : 'providers.disabled',
-                        )}
-                      </StatusBadge>
+                        {t(`providers.group.${group}`)}
+                      </h3>
+                      <Badge variant="secondary">{items.length}</Badge>
                     </div>
-                    <p className="mt-1.5 break-all font-mono text-xs text-muted-foreground">
-                      {provider.baseUrl}
-                    </p>
-                    <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                      <span className="rounded bg-muted px-1.5 py-0.5">
-                        {provider.type}
-                      </span>
-                      <Box className="ml-1 size-3.5" aria-hidden="true" />
-                      {t('providers.modelCount', {
-                        count: provider.modelCount,
-                      })}{' '}
-                      <KeyRound className="ml-2 size-3.5" aria-hidden="true" />
-                      {t(
-                        provider.hasApiKey
-                          ? 'providers.keySet'
-                          : 'providers.keyUnset',
-                      )}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      variant={
-                        selected === provider.id ? 'secondary' : 'outline'
-                      }
-                      size="sm"
-                      disabled={busy}
-                      id={`provider-models-${provider.id}`}
-                      aria-haspopup="dialog"
-                      aria-expanded={selected === provider.id}
-                      onClick={() => {
-                        setSelected(provider.id);
-                        setModelsOpen(true);
-                      }}
-                    >
-                      {t('providers.models')}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={busy}
-                      onClick={() => openAction({ kind: 'provider', provider })}
-                    >
-                      {t('providers.editAction')}
-                    </Button>
-                    <Switch
-                      checked={provider.enabled}
-                      disabled={busy || providers.loading}
-                      aria-label={t('providers.enableNamed', {
-                        name: provider.name,
-                      })}
-                      className="mx-2"
-                      onCheckedChange={(enabled) =>
-                        void mutate(providerPath(provider.id), 'PATCH', {
-                          enabled,
-                        })
-                      }
-                    />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive"
-                      disabled={busy}
-                      onClick={() =>
-                        openAction({ kind: 'deleteProvider', provider })
-                      }
-                    >
-                      {t('providers.deleteAction')}
-                    </Button>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                    {items.length === 0 && (
+                      <p className="px-5 py-4 text-sm text-muted-foreground">
+                        {t('providers.emptyGroup')}
+                      </p>
+                    )}
+                    <ul className="divide-y">
+                      {items.map((provider) => (
+                        <li
+                          key={provider.id}
+                          className={`flex flex-wrap items-center justify-between gap-4 p-4 transition-colors hover:bg-muted/30 sm:p-5 ${selected === provider.id ? 'bg-primary/5' : ''}`}
+                        >
+                          <span
+                            aria-hidden="true"
+                            className="hidden size-11 shrink-0 items-center justify-center rounded-lg border bg-background text-primary sm:flex"
+                          >
+                            <Plug className="size-5" strokeWidth={1.5} />
+                          </span>
+                          <div className="min-w-0 flex-1 basis-56">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h4 className="break-all font-medium">
+                                {provider.name}
+                              </h4>
+                              <StatusBadge
+                                tone={provider.enabled ? 'success' : 'neutral'}
+                              >
+                                {t(
+                                  provider.enabled
+                                    ? 'providers.enabled'
+                                    : 'providers.disabled',
+                                )}
+                              </StatusBadge>
+                            </div>
+                            <p className="mt-1.5 break-all font-mono text-xs text-muted-foreground">
+                              {provider.baseUrl}
+                            </p>
+                            <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                              <span className="rounded bg-muted px-1.5 py-0.5">
+                                {provider.type}
+                              </span>
+                              {group === 'languageModel' ? (
+                                <>
+                                  <Box
+                                    className="ml-1 size-3.5"
+                                    aria-hidden="true"
+                                  />
+                                  {t('providers.modelCount', {
+                                    count: provider.modelCount,
+                                  })}
+                                </>
+                              ) : (
+                                <Badge variant="outline">
+                                  {t('providers.configOnly')}
+                                </Badge>
+                              )}
+                              <KeyRound
+                                className="ml-2 size-3.5"
+                                aria-hidden="true"
+                              />
+                              {t(
+                                provider.hasApiKey
+                                  ? 'providers.keySet'
+                                  : 'providers.keyUnset',
+                              )}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {group === 'languageModel' && (
+                              <Button
+                                variant={
+                                  selected === provider.id
+                                    ? 'secondary'
+                                    : 'outline'
+                                }
+                                size="sm"
+                                disabled={busy}
+                                id={`provider-models-${provider.id}`}
+                                aria-haspopup="dialog"
+                                aria-expanded={selected === provider.id}
+                                onClick={() => {
+                                  setSelected(provider.id);
+                                  setModelsOpen(true);
+                                }}
+                              >
+                                {t('providers.models')}
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={busy}
+                              onClick={() =>
+                                openAction({ kind: 'provider', provider })
+                              }
+                            >
+                              {t('providers.editAction')}
+                            </Button>
+                            <Switch
+                              checked={provider.enabled}
+                              disabled={busy || providers.loading}
+                              aria-label={t('providers.enableNamed', {
+                                name: provider.name,
+                              })}
+                              className="mx-2"
+                              onCheckedChange={(enabled) =>
+                                void mutate(
+                                  providerPath(provider.id),
+                                  'PATCH',
+                                  {
+                                    enabled,
+                                  },
+                                )
+                              }
+                            />
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive"
+                              disabled={busy}
+                              onClick={() =>
+                                openAction({ kind: 'deleteProvider', provider })
+                              }
+                            >
+                              {t('providers.deleteAction')}
+                            </Button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                );
+              })}
+            </div>
           )}
         </div>
       </section>
@@ -368,7 +437,7 @@ export function AdminProvidersPage() {
               document.getElementById('provider-models-heading')?.focus();
             else document.getElementById('create-provider')?.focus();
           }}
-          onSuccess={() => {
+          onSuccess={(saved) => {
             if (
               action.kind === 'deleteProvider' &&
               action.provider.id === selected
@@ -376,7 +445,19 @@ export function AdminProvidersPage() {
               setSelected(null);
             setAction(null);
             toast.success(t('providers.success'));
-            setRevision((value) => value + 1);
+            if (saved) {
+              providers.updateData((items) =>
+                items.some((item) => item.id === saved.id)
+                  ? items.map((item) => (item.id === saved.id ? saved : item))
+                  : [saved, ...items],
+              );
+            } else if (action.kind === 'deleteProvider') {
+              providers.updateData((items) =>
+                items.filter((item) => item.id !== action.provider.id),
+              );
+            } else {
+              setRevision((value) => value + 1);
+            }
           }}
         />
       )}

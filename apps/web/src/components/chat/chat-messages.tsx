@@ -1,8 +1,14 @@
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Copy, Check, LoaderCircle } from 'lucide-react';
+import { Copy, LoaderCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import type { UIMessage } from 'ai';
+import {
+  ChainOfThought,
+  ChainOfThoughtContent,
+  ChainOfThoughtHeader,
+  ChainOfThoughtStep,
+} from '@/components/ai-elements/chain-of-thought';
 import {
   Message,
   MessageContent,
@@ -14,17 +20,50 @@ import {
   ReasoningTrigger,
 } from '@/components/ai-elements/reasoning';
 import { Shimmer } from '@/components/ai-elements/shimmer';
+import {
+  Tool,
+  ToolContent,
+  ToolHeader,
+  ToolInput,
+  ToolOutput,
+} from '@/components/ai-elements/tool';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { groupChatMessages, groupMessageParts } from './messages';
+
+export function ChatMessages({
+  messages,
+  running,
+  activeMessageId,
+}: {
+  messages: UIMessage[];
+  running: boolean;
+  activeMessageId: string | null;
+}) {
+  const rows = groupChatMessages(messages);
+  const lastMessageId = messages.at(-1)?.id;
+  return rows.map(({ message, sourceIds }) => (
+    <ChatMessage
+      key={message.id}
+      message={message}
+      streaming={
+        running && !!activeMessageId && sourceIds.includes(activeMessageId)
+      }
+      showReasoning={sourceIds.includes(lastMessageId ?? '')}
+      isLastMessage={sourceIds.includes(lastMessageId ?? '')}
+    />
+  ));
+}
 
 export const ChatMessage = memo(function ChatMessage({
   message,
   streaming,
   showReasoning,
+  isLastMessage = false,
 }: {
   message: UIMessage;
   streaming: boolean;
   showReasoning: boolean;
+  isLastMessage?: boolean;
 }) {
   const { t } = useTranslation();
   const text = message.parts
@@ -44,7 +83,55 @@ export const ChatMessage = memo(function ChatMessage({
         />
       )}
       <MessageContent className="min-w-0 max-w-full overflow-hidden text-sm leading-7 [overflow-wrap:anywhere] group-[.is-assistant]:w-full">
-        {message.parts.map((part, index) => {
+        {groupMessageParts(message).map((item) => {
+          if (item.type === 'tools') {
+            return (
+              <ChainOfThought
+                // Reset the default only when the message becomes history.
+                key={`${item.id}:${isLastMessage ? 'last-message' : 'history'}`}
+                defaultOpen={isLastMessage}
+                className="min-w-0"
+              >
+                <ChainOfThoughtHeader>
+                  {t('chat.toolGroup', { count: item.tools.length })}
+                </ChainOfThoughtHeader>
+                <ChainOfThoughtContent>
+                  {item.tools.map((tool) => (
+                    <ChainOfThoughtStep
+                      key={tool.toolCallId}
+                      status={
+                        tool.state.startsWith('output-')
+                          ? 'complete'
+                          : tool.state === 'input-streaming'
+                            ? 'pending'
+                            : 'active'
+                      }
+                      label={
+                        <Tool defaultOpen={false} className="mb-0">
+                          <ToolHeader
+                            {...(tool.type === 'dynamic-tool'
+                              ? { type: tool.type, toolName: tool.toolName }
+                              : { type: tool.type })}
+                            state={tool.state}
+                          />
+                          <ToolContent>
+                            {tool.input !== undefined && (
+                              <ToolInput input={tool.input} />
+                            )}
+                            <ToolOutput
+                              output={tool.output}
+                              errorText={tool.errorText}
+                            />
+                          </ToolContent>
+                        </Tool>
+                      }
+                    />
+                  ))}
+                </ChainOfThoughtContent>
+              </ChainOfThought>
+            );
+          }
+          const { part, index } = item;
           if (part.type === 'text')
             return message.role === 'user' ? (
               <p key={index} className="whitespace-pre-wrap">
@@ -90,51 +177,6 @@ export const ChatMessage = memo(function ChatMessage({
                 className="max-h-72 max-w-full rounded-lg object-contain"
               />
             );
-          if (part.type === 'dynamic-tool' || part.type.startsWith('tool-')) {
-            const tool = part as {
-              type: string;
-              toolName?: string;
-              state: string;
-              input?: unknown;
-              output?: unknown;
-              errorText?: string;
-            };
-            const finished = tool.state === 'output-available';
-            const failed = tool.state === 'output-error';
-            return (
-              <details
-                key={index}
-                className="my-2 rounded-lg border bg-muted/30 px-3 py-2"
-              >
-                <summary className="flex cursor-pointer items-center gap-2 text-xs">
-                  {finished ? (
-                    <Check className="size-3.5" />
-                  ) : (
-                    <span className="size-1.5 rounded-full bg-current" />
-                  )}
-                  <span className="min-w-0 flex-1 truncate">
-                    {tool.toolName ?? tool.type.replace(/^tool-/, '')}
-                  </span>
-                  <Badge variant={failed ? 'destructive' : 'secondary'}>
-                    {t(
-                      failed
-                        ? 'chat.toolFailed'
-                        : finished
-                          ? 'chat.toolDone'
-                          : 'chat.toolRunning',
-                    )}
-                  </Badge>
-                </summary>
-                <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap text-xs">
-                  {JSON.stringify(
-                    tool.output ?? tool.input ?? tool.errorText ?? {},
-                    null,
-                    2,
-                  )}
-                </pre>
-              </details>
-            );
-          }
           return null;
         })}
       </MessageContent>

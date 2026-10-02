@@ -165,3 +165,4 @@ api/admin/settings/\* 系统配置
 \[x] 实现用户管理模块（Better Auth admin 插件；实现及测试完成，待用户确认后进入下一阶段）
 \[x] 模型供应商管理模块（右侧抽屉管理模型，长度支持预设、自定义及留空按模型默认；实现及测试完成，待用户验收确认）
 \[x] 参照 `./harness.md` 构建个人聊天页面功能(暂时不构建项目聊天)（可复用 ChatPanel、Mastra 持久化与后台流式运行、队列及历史恢复；实现及隔离测试完成，真实供应商验收待用户确认。详见 `./personal-chat.md`）
+\[x] 参照 `./harness.md` 构建项目聊天页面功能（项目 CRUD、成员权限、仪表盘与统一 threads 运行链路已实现；隔离 PostgreSQL/Mastra/HTTP/SSE 回归和浏览器验收通过，真实供应商验收待用户确认。详见 `./projects.md`）

@@ -78,6 +78,21 @@ test('provider form rejects unsafe URLs', () => {
   }
 });
 
+test('provider form saves the selected models.dev key or MinerU without resetting it to OpenAI', () => {
+  for (const type of ['anthropic', 'deepseek', 'google', 'mineru']) {
+    const form = providerForm();
+    form.set('type', type);
+    assert.equal(providerFormInput(form).type, type);
+    assert.equal(
+      providerUpdateSchema.parse(providerFormInput(form)).type,
+      type,
+    );
+  }
+  const form = providerForm();
+  form.set('type', 'not-a-catalog-provider');
+  assert.throws(() => providerFormInput(form), { code: 'VALIDATION_ERROR' });
+});
+
 test('model form validates editable capabilities without sending hidden fields', () => {
   const form = modelForm();
   let input = modelFormInput(form);
@@ -256,6 +271,8 @@ test('all API error codes map to localized safe messages', () => {
     NOT_FOUND: 'errors.providerNotFound',
     CONFLICT: 'errors.providerConflict',
     MODEL_IN_USE: 'errors.modelInUse',
+    PROVIDER_CONFIG_ONLY: 'errors.providerConfigOnly',
+    PROVIDER_HAS_MODELS: 'errors.providerHasModels',
     INVALID_MODEL: 'errors.invalidModel',
     UPSTREAM_ERROR: 'errors.providerUpstream',
     INVALID_URL: 'errors.providerUrl',

@@ -239,6 +239,90 @@ test('sidebar retries the failed page and ignores a cancelled request', async ()
   assert.equal(resource.getSnapshot().page, 0);
 });
 
+test('idle submissions run directly without appearing in persisted or published queues', async (t) => {
+  const { memory, messages } = fakeMemory();
+  const persistedQueues: string[][] = [];
+  const publishedQueues: string[][] = [];
+  const updateThread = memory.updateThread.bind(memory);
+  memory.updateThread = async (args) => {
+    const data = args.metadata as { queue: RunInput[] };
+    persistedQueues.push(data.queue.map((item) => item.id));
+    return updateThread(args);
+  };
+  const started: string[] = [];
+  const service = new ThreadService(memory, {
+    ...baseRunner,
+    async execute({ input, signal }) {
+      assert.ok(messages.has(input.id));
+      started.push(input.id);
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) resolve();
+        else signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+    },
+  });
+  t.after(() => service.shutdown());
+  const thread = await service.createThread('alice', settings);
+  await service.subscribe('alice', thread.id, (snapshot) => {
+    publishedQueues.push(snapshot.thread.queue.map((item) => item.id));
+  });
+  for (const isImmediate of [false, true]) {
+    const message = input(isImmediate ? 'message02' : 'message01', isImmediate);
+    const accepted = await service.run('alice', thread.id, message);
+    assert.equal(accepted.status, 'running');
+    assert.deepEqual(accepted.queue, []);
+    assert.ok(messages.has(message.id));
+    await until(() => started.includes(message.id));
+    await service.run('alice', thread.id, message);
+    assert.equal(started.filter((id) => id === message.id).length, 1);
+    await service.abort('alice', thread.id);
+    await until(
+      async () =>
+        (await service.getThread('alice', thread.id)).thread.status === 'idle',
+    );
+  }
+  assert.ok(persistedQueues.length > 0);
+  assert.ok(publishedQueues.length > 0);
+  assert.ok(persistedQueues.every((queue) => queue.length === 0));
+  assert.ok(publishedQueues.every((queue) => queue.length === 0));
+});
+
+test('failed direct admission can be retried without losing or duplicating the message', async (t) => {
+  const { memory } = fakeMemory();
+  const started: string[] = [];
+  const service = new ThreadService(memory, {
+    ...baseRunner,
+    async execute({ input }) {
+      started.push(input.id);
+    },
+  });
+  t.after(() => service.shutdown());
+  const thread = await service.createThread('alice', settings);
+  const saveMessages = memory.saveMessages.bind(memory);
+  memory.saveMessages = async () => {
+    throw new Error('Message storage unavailable');
+  };
+  await assert.rejects(service.run('alice', thread.id, input('message01')));
+  assert.deepEqual(started, []);
+  assert.deepEqual((await service.getThread('alice', thread.id)).messages, []);
+  memory.saveMessages = saveMessages;
+  const updateThread = memory.updateThread.bind(memory);
+  memory.updateThread = async () => {
+    throw new Error('Storage unavailable');
+  };
+  await assert.rejects(service.run('alice', thread.id, input('message01')));
+  assert.deepEqual(started, []);
+  assert.equal(
+    (await service.getThread('alice', thread.id)).thread.status,
+    'idle',
+  );
+  memory.updateThread = updateThread;
+  const accepted = await service.run('alice', thread.id, input('message01'));
+  assert.deepEqual(accepted.queue, []);
+  await until(() => started.length === 1);
+  assert.deepEqual(started, ['message01']);
+});
+
 test('disconnect never aborts a run; concurrent submissions serialize and retries are idempotent', async (t) => {
   const { memory } = fakeMemory();
   let active = 0;
@@ -361,10 +445,8 @@ test('restart marks unfinished work interrupted and retains queued messages for 
   const stored = threads.get(thread.id)!;
   stored.metadata = {
     ...stored.metadata,
-    aime: {
-      activeId: 'previous-run',
-      queue: [{ ...input('message02'), createdAt: new Date().toISOString() }],
-    },
+    activeId: 'previous-run',
+    queue: [{ ...input('message02'), createdAt: new Date().toISOString() }],
   };
   const snapshot = await service.getThread('alice', thread.id);
   assert.equal(snapshot.thread.error, 'RUN_INTERRUPTED');
@@ -448,7 +530,7 @@ test('message validation rejects remote file URLs and unsupported roles; history
     {},
   );
   assert.equal(
-    getProviderOptions({ reasoningEffort: 'auto', thinkingMode: 'off' }).openai
+    getProviderOptions({ reasoningEffort: 'auto', thinkingMode: 'none' }).openai
       ?.reasoningEffort,
     'none',
   );
@@ -458,9 +540,10 @@ test('nested skills group by relative folder and personal IDs override global ID
   const root = await mkdtemp(join(tmpdir(), 'aime-skills-'));
   try {
     for (const path of [
-      '.skills/owner/repo/review',
-      '.skills/writer',
-      'users/alice/.skills/team/review',
+      '.agents/skills/owner/repo/review',
+      '.agents/skills/owner/repo/search',
+      '.agents/skills/writer',
+      'users/alice/.agents/skills/team/review',
     ]) {
       await mkdir(join(root, path), { recursive: true });
       await writeFile(
@@ -469,8 +552,17 @@ test('nested skills group by relative folder and personal IDs override global ID
       );
     }
     const skills = await discoverPersonalSkills(root, 'alice');
-    assert.equal(skills.length, 2);
+    assert.equal(skills.length, 3);
     assert.equal(skills.find((skill) => skill.id === 'review')?.group, 'team');
+    assert.equal(
+      skills.find((skill) => skill.id === 'review')?.path,
+      join(root, 'users/alice/.agents/skills/team/review'),
+    );
+    assert.equal(
+      skills.find((skill) => skill.id === 'search')?.group,
+      'owner/repo',
+    );
+    assert.equal(skills.find((skill) => skill.id === 'writer')?.group, '');
     assert.throws(() => userDirectory(root, '../bob'));
   } finally {
     await rm(root, { recursive: true, force: true });
