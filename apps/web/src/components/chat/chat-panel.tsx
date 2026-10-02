@@ -204,11 +204,12 @@ function ExistingChat({
               <div className="ml-auto h-14 w-3/5 rounded-lg bg-muted" />
             </div>
           )}
-          {chat.messages.map((message) => (
+          {chat.messages.map((message, index) => (
             <ChatMessage
               key={message.id}
               message={message}
               streaming={running && message.id === chat.activeMessageId}
+              showReasoning={index === chat.messages.length - 1}
             />
           ))}
           {chat.thread && !chat.messages.length && (

@@ -20,9 +20,11 @@ import { Badge } from '@/components/ui/badge';
 export const ChatMessage = memo(function ChatMessage({
   message,
   streaming,
+  showReasoning,
 }: {
   message: UIMessage;
   streaming: boolean;
+  showReasoning: boolean;
 }) {
   const { t } = useTranslation();
   const text = message.parts
@@ -54,7 +56,7 @@ export const ChatMessage = memo(function ChatMessage({
               </MessageResponse>
             );
           if (part.type === 'reasoning') {
-            if (index !== lastReasoningIndex) return null;
+            if (!showReasoning || index !== lastReasoningIndex) return null;
             const isReasoningStreaming =
               streaming && part.state === 'streaming';
             if (!part.text && !isReasoningStreaming) return null;
