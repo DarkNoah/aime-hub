@@ -13,6 +13,7 @@ import {
   ReasoningContent,
   ReasoningTrigger,
 } from '@/components/ai-elements/reasoning';
+import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
@@ -28,6 +29,10 @@ export const ChatMessage = memo(function ChatMessage({
     .filter((part) => part.type === 'text')
     .map((part) => part.text)
     .join('\n');
+  const lastReasoningIndex = message.parts.reduce(
+    (last, part, index) => (part.type === 'reasoning' ? index : last),
+    -1,
+  );
   return (
     <Message from={message.role} className="w-full min-w-0 max-w-full">
       {streaming && (
@@ -48,23 +53,31 @@ export const ChatMessage = memo(function ChatMessage({
                 {part.text}
               </MessageResponse>
             );
-          if (part.type === 'reasoning' && part.text)
+          if (part.type === 'reasoning') {
+            if (index !== lastReasoningIndex) return null;
+            const isReasoningStreaming =
+              streaming && part.state === 'streaming';
+            if (!part.text && !isReasoningStreaming) return null;
             return (
               <Reasoning
-                key={index}
-                isStreaming={streaming && part.state === 'streaming'}
-                defaultOpen={false}
+                // Reset expansion for a new stream or completed history, not for every text delta.
+                key={`reasoning-${index}-${isReasoningStreaming ? 'streaming' : 'complete'}`}
+                isStreaming={isReasoningStreaming}
+                defaultOpen={isReasoningStreaming}
               >
-                <ReasoningTrigger>
-                  {t(
-                    streaming && part.state === 'streaming'
-                      ? 'chat.thinking'
-                      : 'chat.reasoning',
-                  )}
-                </ReasoningTrigger>
+                <ReasoningTrigger
+                  getThinkingMessage={(active) =>
+                    active ? (
+                      <Shimmer duration={1}>{t('chat.thinking')}</Shimmer>
+                    ) : (
+                      t('chat.reasoning')
+                    )
+                  }
+                />
                 <ReasoningContent>{part.text}</ReasoningContent>
               </Reasoning>
             );
+          }
           if (part.type === 'file' && part.mediaType.startsWith('image/'))
             return (
               <img
