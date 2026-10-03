@@ -23,14 +23,17 @@ test('new thread runtime fields are stored directly in metadata', async (t) => {
     model: null,
     createdBy: 'alice',
     workspace: 'workspace',
+    status: 'idle',
     queue: [],
     activeId: null,
     acceptedIds: [],
     reasoningEffort: 'high',
     error: null,
+    failedInput: null,
     paused: false,
     autoTitle: true,
     usage: null,
+    toolInteractions: [],
   });
 });
 

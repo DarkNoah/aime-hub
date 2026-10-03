@@ -91,9 +91,7 @@ export function ProviderModelsSection({
             disabled={busy || loading || !!error}
             onClick={onSync}
           >
-            {busy && (
-              <Loader2 className="size-4 animate-spin" />
-            )}
+            {busy && <Loader2 className="size-4 animate-spin" />}
             {!busy && <RefreshCw className="size-4" />}
             {t('models.sync')}
           </Button>

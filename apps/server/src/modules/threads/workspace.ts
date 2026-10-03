@@ -7,6 +7,7 @@ import {
   WORKSPACE_TOOLS,
 } from '@mastra/core/workspace';
 import { ThreadError } from './errors.js';
+import { directorySkillConfig } from './skill-source.js';
 
 export function userDirectory(root: string, userId: string) {
   if (!/^[a-zA-Z0-9_-]+$/.test(userId)) throw new ThreadError('INVALID_USER');
@@ -42,12 +43,14 @@ export function getWorkspace(
   userId: string,
   path: string,
   projectId?: string,
+  skillPaths: string[] = [],
 ) {
   const valid = projectId
     ? path === projectDirectory(root, projectId)
     : dirname(path) === userDirectory(root, userId);
   if (!valid) throw new ThreadError('WORKSPACE_UNAVAILABLE', 500);
   return new Workspace({
+    ...directorySkillConfig(skillPaths),
     id: basename(path),
     filesystem: new LocalFilesystem({ basePath: path, contained: true }),
     bm25: true,

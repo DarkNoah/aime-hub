@@ -4,7 +4,7 @@ import test from 'node:test';
 import { once } from 'node:events';
 import { randomBytes } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -102,11 +102,11 @@ test(
             tool_calls: [
               {
                 index: 0,
-                id: 'fixture-list-call',
+                id: 'fixture-read-call',
                 type: 'function',
                 function: {
-                  name: 'mastra_workspace_list_files',
-                  arguments: '{"path":"."}',
+                  name: 'read_file',
+                  arguments: '{"path":"fixture.txt"}',
                 },
               },
             ],
@@ -310,7 +310,7 @@ test(
     const snapshot = await threads.getThread('alice', thread.id);
     assert.equal(
       snapshot.thread.status,
-      'idle',
+      'success',
       JSON.stringify(snapshot.thread),
     );
     assert.equal(requests.length, 1);
@@ -372,7 +372,8 @@ test(
     assert.equal((await request(`/${thread.id}/abort`, 'POST')).status, 200);
     await until(
       async () =>
-        (await threads!.getThread('alice', thread.id)).thread.status === 'idle',
+        (await threads!.getThread('alice', thread.id)).thread.status ===
+        'canceled',
     );
     assert.equal(
       (await threads.getThread('alice', thread.id)).thread.queue.length,
@@ -391,7 +392,8 @@ test(
     release!();
     await until(
       async () =>
-        (await threads!.getThread('alice', thread.id)).thread.status === 'idle',
+        (await threads!.getThread('alice', thread.id)).thread.status ===
+        'success',
     );
     assert.equal((await request(`/${thread.id}`, 'DELETE')).status, 204);
     assert.equal((await request(`/${thread.id}`)).status, 404);
@@ -402,15 +404,20 @@ test(
     );
     toolMode = true;
     const toolThread = await (await request('', 'POST', {})).json();
+    await writeFile(
+      join(
+        await threads.workspaceDirectory('alice', toolThread.id),
+        'fixture.txt',
+      ),
+      'Workspace fixture content.',
+    );
     await request(`/${toolThread.id}/messages`, 'POST', {
       ...input,
       id: 'tool-message-1',
     });
     await until(async () => requests.length === 4);
     assert.ok(
-      requests[3].tools?.some(
-        (tool) => tool.function.name === 'mastra_workspace_list_files',
-      ),
+      requests[3].tools?.some((tool) => tool.function.name === 'read_file'),
     );
     await request(`/${toolThread.id}/messages`, 'POST', {
       ...input,
@@ -424,11 +431,18 @@ test(
       JSON.stringify(requests[4].messages),
       /Injected after the tool/,
     );
+    assert.match(
+      JSON.stringify(
+        requests[4].messages.filter((message) => message.role === 'tool'),
+      ),
+      /Workspace fixture content\./,
+      'The registered workspace tool must run before the immediate input is injected',
+    );
     release!();
     await until(
       async () =>
         (await threads!.getThread('alice', toolThread.id)).thread.status ===
-        'idle',
+        'success',
     );
     const toolHistory = await threads.history('alice', toolThread.id);
     assert.equal(
@@ -499,7 +513,8 @@ test(
     release!();
     await until(
       async () =>
-        (await threads!.getThread('bob', shared.id)).thread.status === 'idle',
+        (await threads!.getThread('bob', shared.id)).thread.status ===
+        'success',
     );
     const aliceHistory = await threads.history('alice', shared.id);
     const bobHistory = await threads.history(

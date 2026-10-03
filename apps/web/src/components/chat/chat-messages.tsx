@@ -2,7 +2,8 @@ import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Copy, LoaderCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import type { UIMessage } from 'ai';
+import { isToolUIPart, type UIMessage } from 'ai';
+import type { ToolInteraction, ToolResponse } from '@aime/shared/threads';
 import {
   ChainOfThought,
   ChainOfThoughtContent,
@@ -28,30 +29,65 @@ import {
   ToolOutput,
 } from '@/components/ai-elements/tool';
 import { Button } from '@/components/ui/button';
+import { ChatBackgroundTask } from './chat-background-task';
+import { ChatToolInteraction } from './chat-tool-interaction';
 import { groupChatMessages, groupMessageParts } from './messages';
 
 export function ChatMessages({
   messages,
   running,
   activeMessageId,
+  toolInteractions = [],
+  onToolResponse,
+  disabled,
 }: {
   messages: UIMessage[];
   running: boolean;
   activeMessageId: string | null;
+  toolInteractions?: ToolInteraction[];
+  onToolResponse?: (
+    interactionId: string,
+    response: ToolResponse,
+  ) => Promise<void>;
+  disabled?: boolean;
 }) {
   const rows = groupChatMessages(messages);
   const lastMessageId = messages.at(-1)?.id;
-  return rows.map(({ message, sourceIds }) => (
-    <ChatMessage
-      key={message.id}
-      message={message}
-      streaming={
-        running && !!activeMessageId && sourceIds.includes(activeMessageId)
-      }
-      showReasoning={sourceIds.includes(lastMessageId ?? '')}
-      isLastMessage={sourceIds.includes(lastMessageId ?? '')}
-    />
-  ));
+  const visibleToolIds = new Set(
+    messages.flatMap((message) =>
+      message.parts.filter(isToolUIPart).map((part) => part.toolCallId),
+    ),
+  );
+  return (
+    <>
+      {rows.map(({ message, sourceIds }) => (
+        <ChatMessage
+          key={message.id}
+          message={message}
+          streaming={
+            running && !!activeMessageId && sourceIds.includes(activeMessageId)
+          }
+          showReasoning={sourceIds.includes(lastMessageId ?? '')}
+          isLastMessage={sourceIds.includes(lastMessageId ?? '')}
+          toolInteractions={toolInteractions}
+          onToolResponse={onToolResponse}
+          disabled={disabled}
+        />
+      ))}
+      {toolInteractions
+        .filter(
+          (item) => !item.response && !visibleToolIds.has(item.toolCallId),
+        )
+        .map((interaction) => (
+          <ChatToolInteraction
+            key={interaction.id}
+            interaction={interaction}
+            onRespond={onToolResponse}
+            disabled={disabled}
+          />
+        ))}
+    </>
+  );
 }
 
 export const ChatMessage = memo(function ChatMessage({
@@ -59,11 +95,20 @@ export const ChatMessage = memo(function ChatMessage({
   streaming,
   showReasoning,
   isLastMessage = false,
+  toolInteractions = [],
+  onToolResponse,
+  disabled,
 }: {
   message: UIMessage;
   streaming: boolean;
   showReasoning: boolean;
   isLastMessage?: boolean;
+  toolInteractions?: ToolInteraction[];
+  onToolResponse?: (
+    interactionId: string,
+    response: ToolResponse,
+  ) => Promise<void>;
+  disabled?: boolean;
 }) {
   const { t } = useTranslation();
   const text = message.parts
@@ -83,7 +128,10 @@ export const ChatMessage = memo(function ChatMessage({
         />
       )}
       <MessageContent className="min-w-0 max-w-full overflow-hidden text-sm leading-7 [overflow-wrap:anywhere] group-[.is-assistant]:w-full">
-        {groupMessageParts(message).map((item) => {
+        {groupMessageParts(
+          message,
+          new Set(toolInteractions.map((item) => item.toolCallId)),
+        ).map((item) => {
           if (item.type === 'tools') {
             return (
               <ChainOfThought
@@ -132,6 +180,38 @@ export const ChatMessage = memo(function ChatMessage({
             );
           }
           const { part, index } = item;
+          if (isToolUIPart(part)) {
+            const interaction = toolInteractions.find(
+              (item) => item.toolCallId === part.toolCallId,
+            );
+            return (
+              <ChatToolInteraction
+                key={interaction?.id ?? part.toolCallId}
+                interaction={interaction}
+                tool={part}
+                onRespond={onToolResponse}
+                disabled={disabled}
+              />
+            );
+          }
+          if (part.type === 'data-background-task-completed') {
+            const data = part.data;
+            if (
+              !data ||
+              typeof data !== 'object' ||
+              !('toolName' in data) ||
+              typeof data.toolName !== 'string' ||
+              !data.toolName.trim()
+            )
+              return null;
+            return (
+              <ChatBackgroundTask
+                key={index}
+                toolName={data.toolName}
+                result={'result' in data ? data.result : undefined}
+              />
+            );
+          }
           if (part.type === 'text')
             return message.role === 'user' ? (
               <p key={index} className="whitespace-pre-wrap">

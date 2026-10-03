@@ -1,6 +1,7 @@
 import type { UIMessage, ChatTransport } from 'ai';
 import type {
   ChatSettings,
+  ChatSkill,
   MessagePage,
   RunInput,
   ThreadList,
@@ -8,6 +9,7 @@ import type {
   ThreadSnapshot,
   UpdateQueuedMessage,
   QueuedMessageDetail,
+  ToolResponse,
 } from '@aime/shared/threads';
 
 export class ChatApiError extends Error {
@@ -32,6 +34,15 @@ export async function chatRequest<T>(
   return response.status === 204 ? (undefined as T) : response.json();
 }
 export const chatApi = {
+  skills: (
+    scope: { threadId?: string; projectId?: string },
+    signal?: AbortSignal,
+  ) => {
+    const query = new URLSearchParams();
+    if (scope.threadId) query.set('threadId', scope.threadId);
+    else if (scope.projectId) query.set('projectId', scope.projectId);
+    return chatRequest<ChatSkill[]>(`/skills?${query}`, { signal });
+  },
   list: (page = 0, signal?: AbortSignal, projectId?: string, perPage = 10) =>
     chatRequest<ThreadList>(
       `?page=${page}&perPage=${perPage}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''}`,
@@ -62,8 +73,23 @@ export const chatApi = {
     ),
   abort: (id: string) =>
     chatRequest<ThreadSummary>(`/${id}/abort`, { method: 'POST' }),
+  cancelBackgroundTask: (id: string, taskId: string) =>
+    chatRequest<void>(
+      `/${id}/background-tasks/${encodeURIComponent(taskId)}/cancel`,
+      { method: 'POST' },
+    ),
+  respondToTool: (id: string, interactionId: string, response: ToolResponse) =>
+    chatRequest<ThreadSummary>(
+      `/${id}/tool-interactions/${encodeURIComponent(interactionId)}`,
+      {
+        method: 'POST',
+        body: JSON.stringify(response),
+      },
+    ),
   resume: (id: string) =>
     chatRequest<ThreadSummary>(`/${id}/resume`, { method: 'POST' }),
+  retry: (id: string) =>
+    chatRequest<ThreadSummary>(`/${id}/retry`, { method: 'POST' }),
   cancel: (id: string, messageId: string) =>
     chatRequest<ThreadSummary>(`/${id}/queue/${messageId}`, {
       method: 'DELETE',
@@ -153,8 +179,16 @@ export function chatErrorKey(error: unknown) {
       return 'chat.errors.noImages';
     case 'RUN_INTERRUPTED':
       return 'chat.errors.interrupted';
+    case 'RETRY_UNAVAILABLE':
+      return 'chat.errors.retryUnavailable';
     case 'THREAD_BUSY':
       return 'chat.errors.busy';
+    case 'TOOL_NOT_PENDING':
+      return 'chat.errors.toolNotPending';
+    case 'BACKGROUND_TASK_NOT_FOUND':
+      return 'chat.backgroundTaskNotFound';
+    case 'BACKGROUND_TASKS_UNAVAILABLE':
+      return 'chat.backgroundTaskStopFailed';
     case 'THREAD_STOPPING':
       return 'chat.errors.stopping';
     case 'QUEUE_FULL':

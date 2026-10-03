@@ -64,6 +64,7 @@ test('global summaries follow background runs, queue, rename, deletion and membe
       },
       async execute(value) {
         context = value;
+        value.onStatus('running');
         await new Promise<void>((resolve) => {
           finish = resolve;
           value.signal.addEventListener('abort', resolve as () => void, {
@@ -162,11 +163,14 @@ test('global summaries follow background runs, queue, rename, deletion and membe
   await service.cancelQueued('bob', shared.id, 'message02');
   await service.abort('bob', shared.id);
   await until(
-    () => (latest() as { thread: ThreadSummary }).thread.status === 'idle',
+    () => (latest() as { thread: ThreadSummary }).thread.status === 'canceled',
   );
   assert.ok(
     alice.some(
-      (event) => event.type === 'upsert' && event.thread.status === 'stopping',
+      (event) =>
+        event.type === 'upsert' &&
+        event.thread.stopping &&
+        event.thread.status === 'running',
     ),
   );
   await service.updateThread('alice', shared.id, {
@@ -254,12 +258,13 @@ test('global cache counts all project runs, preserves paging and reconciles offl
   const projects = createProjectNavigationResource();
   const global = createThreadNavigationResource(personal, projects);
   const oldPage = personal.loadMore();
-  const items = Array.from({ length: 14 }, (_, i) =>
-    thread(
+  const items = Array.from({ length: 14 }, (_, i) => ({
+    ...thread(
       `thread-${String(i).padStart(2, '0')}`,
-      i < 3 ? 'running' : i === 3 ? 'stopping' : 'idle',
+      i < 3 ? 'running' : i === 3 ? 'pending' : 'idle',
     ),
-  );
+    ...(i === 3 ? { stopping: true } : {}),
+  }));
   global.receive({ type: 'snapshot', threads: items, projects: [project] });
   assert.equal(
     global.runningCount(project.id),
@@ -290,7 +295,7 @@ test('global cache counts all project runs, preserves paging and reconciles offl
     list.getSnapshot().threads.map((item) => item.id),
     before.threads.map((item) => item.id),
   );
-  global.receive({ type: 'upsert', thread: { ...items[0], status: 'error' } });
+  global.receive({ type: 'upsert', thread: { ...items[0], status: 'failed' } });
   assert.equal(global.runningCount(project.id), 3);
   global.receive({ type: 'remove', id: items[1].id, projectId: project.id });
   assert.equal(global.runningCount(project.id), 2);

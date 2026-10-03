@@ -1,3 +1,4 @@
+import { isThreadActive } from '@aime/shared/threads';
 import type {
   ThreadNavigationEvent,
   ThreadSummary,
@@ -57,7 +58,7 @@ export function createThreadNavigationResource(
         // Stopping still owns execution until the runner acknowledges cancellation.
         if (
           thread.projectId &&
-          (thread.status === 'running' || thread.status === 'stopping')
+          (isThreadActive(thread.status) || thread.stopping)
         )
           counts.set(thread.projectId, (counts.get(thread.projectId) ?? 0) + 1);
       }

@@ -269,7 +269,7 @@ test('idle submissions run directly without appearing in persisted or published 
   for (const isImmediate of [false, true]) {
     const message = input(isImmediate ? 'message02' : 'message01', isImmediate);
     const accepted = await service.run('alice', thread.id, message);
-    assert.equal(accepted.status, 'running');
+    assert.equal(accepted.status, 'pending');
     assert.deepEqual(accepted.queue, []);
     assert.ok(messages.has(message.id));
     await until(() => started.includes(message.id));
@@ -278,7 +278,8 @@ test('idle submissions run directly without appearing in persisted or published 
     await service.abort('alice', thread.id);
     await until(
       async () =>
-        (await service.getThread('alice', thread.id)).thread.status === 'idle',
+        (await service.getThread('alice', thread.id)).thread.status ===
+        'canceled',
     );
   }
   assert.ok(persistedQueues.length > 0);
@@ -375,7 +376,7 @@ test('disconnect never aborts a run; concurrent submissions serialize and retrie
   gates.shift()!();
   await until(
     async () =>
-      (await service.getThread('alice', thread.id)).thread.status === 'idle',
+      (await service.getThread('alice', thread.id)).thread.status === 'success',
   );
   assert.equal(maximum, 1);
   assert.deepEqual(started, ['message01', 'message02', 'message03']);
@@ -424,7 +425,8 @@ test('immediate input joins at a step boundary while normal messages stay queued
   await service.abort('alice', thread.id);
   await until(
     async () =>
-      (await service.getThread('alice', thread.id)).thread.status === 'idle',
+      (await service.getThread('alice', thread.id)).thread.status ===
+      'canceled',
   );
   assert.equal(executions, 1);
   await service.resume('alice', thread.id);

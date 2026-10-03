@@ -147,7 +147,8 @@ test('members observe one shared runtime; revocation closes subscriptions and de
       async validate(_userId, _input, id) {
         validated.push(id);
       },
-      async execute({ input: request, onMessage, signal }) {
+      async execute({ input: request, onMessage, onStatus, signal }) {
+        onStatus('running');
         maxActive = Math.max(maxActive, ++active);
         onMessage({
           id: `reply-${request.id}`,
@@ -219,7 +220,8 @@ test('members observe one shared runtime; revocation closes subscriptions and de
   await service.abort('alice', thread.id);
   await until(
     async () =>
-      (await service.getThread('alice', thread.id)).thread.status === 'idle',
+      (await service.getThread('alice', thread.id)).thread.status ===
+      'canceled',
   );
   assert.equal(maxActive, 1);
   assert.equal(bob.length, count);

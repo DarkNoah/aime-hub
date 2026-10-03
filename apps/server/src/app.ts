@@ -18,6 +18,8 @@ import type { ThreadService } from './modules/threads/service.js';
 import type { LanguageModelService } from './modules/models/language-model.js';
 import { projectRoutes } from './modules/projects/routes.js';
 import type { ProjectService } from './modules/projects/service.js';
+import { skillRoutes } from './modules/skills/routes.js';
+import type { SkillService } from './modules/skills/service.js';
 
 export function createApp(
   auth: Auth,
@@ -28,6 +30,7 @@ export function createApp(
     webOrigin: string;
     projects?: ProjectService;
   },
+  skills?: { service: SkillService; webOrigin: string },
 ) {
   const app = express();
   app.disable('x-powered-by');
@@ -53,14 +56,18 @@ export function createApp(
       ),
     );
   app.use('/api/admin', requireAdmin(auth));
-  if (providers) {
+  const adminOrigin = providers?.webOrigin ?? skills?.webOrigin;
+  if (adminOrigin) {
     app.use(
       '/api/admin',
-      adminApiPolicy(providers.webOrigin),
+      adminApiPolicy(adminOrigin),
       express.json({ limit: '128kb' }),
     );
-    app.use('/api/admin', providerRoutes(providers.service));
-    app.use('/api/admin/settings', settingsRoutes(providers.service));
+    if (providers) {
+      app.use('/api/admin', providerRoutes(providers.service));
+      app.use('/api/admin/settings', settingsRoutes(providers.service));
+    }
+    if (skills) app.use('/api/admin/skills', skillRoutes(skills.service));
     app.use('/api/admin', adminApiErrorHandler);
   }
   app.use('/api/admin', (_req, res) =>

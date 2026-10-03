@@ -3,6 +3,7 @@ import { LoaderCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThreadSummary } from '@aime/shared/threads';
 import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { ThreadListItems } from '@/components/chat/thread-list-items';
 import { useThreadList } from '../use-thread-list';
 
@@ -17,7 +18,7 @@ export function ThreadList({
 }) {
   const { t } = useTranslation();
   const { threads, loading, error, hasMore, loadMore } = useThreadList();
-  const scrollRef = useRef<HTMLElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -34,10 +35,15 @@ export function ThreadList({
   }, [loading, error, hasMore, loadMore]);
 
   return (
-    <nav
-      ref={scrollRef}
-      aria-label={t('chat.threadList')}
-      className="max-h-[min(22.5rem,45dvh)] overflow-y-auto overscroll-contain"
+    <ScrollArea
+      className="overflow-hidden pr-2"
+      viewportProps={{
+        ref: scrollRef,
+        role: 'navigation',
+        'aria-label': t('chat.threadList'),
+        className:
+          'max-h-[min(22.5rem,45dvh)] overscroll-contain [&>div]:block!',
+      }}
     >
       {!loading && !error && !threads.length && (
         <p className="px-3 py-3 text-xs leading-5 text-muted-foreground">
@@ -79,6 +85,6 @@ export function ThreadList({
           )}
         </div>
       )}
-    </nav>
+    </ScrollArea>
   );
 }

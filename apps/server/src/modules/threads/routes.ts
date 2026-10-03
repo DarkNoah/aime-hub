@@ -9,14 +9,22 @@ import {
   updateThreadSchema,
   updateQueuedMessageSchema,
   moveQueuedMessageSchema,
+  toolResponseSchema,
 } from '@aime/shared/threads';
 import type { ThreadService } from './service.js';
 import type { LanguageModelService } from '../models/language-model.js';
 import { ThreadError } from './errors.js';
 import { adminApiPolicy } from '../../middleware/admin-api.js';
 import { streamThreadNavigation } from './navigation-route.js';
+import { fileRoutes } from '../files/routes.js';
 
 const idSchema = z.string().regex(/^[a-zA-Z0-9_-]{16}$/);
+const skillsScope = z
+  .object({
+    threadId: idSchema.optional(),
+    projectId: idSchema.optional(),
+  })
+  .strict();
 const pagination = z.object({
   page: z.coerce.number().int().min(0).max(10000).default(0),
   anchor: z.iso.datetime().optional(),
@@ -46,6 +54,12 @@ export function threadRoutes(
   router.get('/preferences', async (_req, res) =>
     res.json(await models.getPreferences(res.locals.userId)),
   );
+  router.get('/skills', async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json(
+      await service.listSkills(res.locals.userId, skillsScope.parse(req.query)),
+    );
+  });
   router.put('/preferences', async (req, res) =>
     res.json(
       await models.setPreferences(
@@ -80,6 +94,7 @@ export function threadRoutes(
       await service.getThread(res.locals.userId, String(req.params.threadId)),
     ),
   );
+  router.use('/:threadId/files', fileRoutes(service));
   router.patch('/:threadId', async (req, res) =>
     res.json(
       await service.updateThread(
@@ -118,10 +133,40 @@ export function threadRoutes(
       await service.abort(res.locals.userId, String(req.params.threadId)),
     ),
   );
+  router.post(
+    '/:threadId/background-tasks/:taskId/cancel',
+    async (req, res) => {
+      await service.cancelBackgroundTask(
+        res.locals.userId,
+        String(req.params.threadId),
+        String(req.params.taskId),
+      );
+      res.status(204).end();
+    },
+  );
+  router.post('/:threadId/tool-interactions/:interactionId', async (req, res) =>
+    res
+      .status(202)
+      .json(
+        await service.respondToTool(
+          res.locals.userId,
+          String(req.params.threadId),
+          String(req.params.interactionId),
+          toolResponseSchema.parse(req.body),
+        ),
+      ),
+  );
   router.post('/:threadId/resume', async (req, res) =>
     res.json(
       await service.resume(res.locals.userId, String(req.params.threadId)),
     ),
+  );
+  router.post('/:threadId/retry', async (req, res) =>
+    res
+      .status(202)
+      .json(
+        await service.retry(res.locals.userId, String(req.params.threadId)),
+      ),
   );
   router.get('/:threadId/queue/:messageId', async (req, res) =>
     res.json(

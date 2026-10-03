@@ -7,7 +7,9 @@
     "./env": "./src/env.ts",
     "./providers": "./src/providers.ts",
     "./threads": "./src/threads.ts",
-    "./projects": "./src/projects.ts"
+    "./projects": "./src/projects.ts",
+    "./files": "./src/files.ts",
+    "./skills": "./src/skills.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

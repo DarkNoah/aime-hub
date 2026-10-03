@@ -1,4 +1,130 @@
 export const en = {
+  'nav.skills': 'Skills',
+  'admin.skillsDescription':
+    'Manage workspace skills shared by personal and project conversations.',
+  'skills.import': 'Import from GitHub',
+  'skills.importHint':
+    'Find skills in a repository, select folders or individual skills, then install them together.',
+  'skills.source': 'GitHub source',
+  'skills.sourceHint':
+    'Accepts owner/repo, a repository URL, a tree folder URL, or a blob SKILL.md URL. Scans automatically after typing.',
+  'skills.scan': 'Scan',
+  'skills.scanning': 'Downloading the repository and finding SKILL.md files…',
+  'skills.startScan': 'Paste a GitHub source to get started',
+  'skills.scanHint':
+    'Repository links scan the entire project. Folder and file links limit the search to that location.',
+  'skills.repositoryRoot': 'Repository root',
+  'skills.defaultBranch': 'Default branch',
+  'skills.filter': 'Search skills, descriptions, or folders…',
+  'skills.selectAll': 'Select all results',
+  'skills.selectFolder': 'Select folder {{name}}',
+  'skills.selectSkill': 'Select skill {{name}}',
+  'skills.found': '{{count}} skills found',
+  'skills.selected': '{{count}} selected',
+  'skills.files': '{{count}} files included',
+  'skills.destination': 'Install to: {{path}}',
+  'skills.skippedFiles':
+    '{{count}} symbolic links or submodules will be skipped.',
+  'skills.installed': 'Installed',
+  'skills.invalid': 'Invalid skill',
+  'skills.installedCount': '{{count}} installed',
+  'skills.install': 'Install selected',
+  'skills.installing': 'Installing…',
+  'skills.installSuccess': 'Installed {{count}} skills.',
+  'skills.noSkills': 'No SKILL.md files found at this location.',
+  'skills.noMatches': 'No skills match your search.',
+  'skills.empty': 'No skills installed yet',
+  'skills.emptyHint':
+    'Import skills from GitHub to make their instructions, scripts, and reference files available to conversations.',
+  'skills.storage': 'Skill directory',
+  'skills.localGroup': 'Local skills',
+  'skills.refresh': 'Refresh skills',
+  'skills.retry': 'Retry',
+  'skills.cancel': 'Cancel',
+  'skills.remove': 'Remove skill',
+  'skills.removeNamed': 'Remove {{name}}',
+  'skills.removeTitle': 'Remove this skill?',
+  'skills.removeHint':
+    '“{{name}}” and its bundled files will be deleted from the shared skill directory. Future conversation runs will no longer load it.',
+  'skills.removeSuccess': 'Skill removed.',
+  'skills.invalidUrl':
+    'Enter owner/repo or a GitHub HTTPS repository, tree folder, or blob SKILL.md link.',
+  'skills.sourceNotFound':
+    'The specified branch, tag, folder, or SKILL.md file was not found.',
+  'skills.downloadFailed':
+    'Could not download this public repository. Check the source and the server’s GitHub connection, then retry.',
+  'skills.gitUnavailable':
+    'Git is not installed on the server. Install Git to import repositories.',
+  'skills.repositoryLimit':
+    'This repository or selection exceeds the import limits: 200 MB, 30,000 repository files, 500 skills, and 20 MB per file.',
+  'skills.unsafeRepository':
+    'The repository contains unsupported file paths and cannot be imported.',
+  'skills.unsafePath':
+    'The skill directory is inaccessible or contains a symbolic link.',
+  'skills.scanLimit':
+    'Too many scans are open. Close another import panel or wait for its scan to expire.',
+  'skills.scanExpired':
+    'The scan expired after 15 minutes. Scan again before installing.',
+  'skills.invalidSelection':
+    'Some selected skills are invalid or unavailable. Scan again and review your selection.',
+  'skills.conflict':
+    'An installation path already exists or is inside another skill. Existing files were kept. Scan again to update the list.',
+  'skills.notFound': 'This skill no longer exists. Refresh the list.',
+  'files.cancel': 'Cancel',
+  'files.failed': 'Could not complete the file operation. Please retry.',
+  'files.title': 'Files',
+  'files.root': 'Workspace root',
+  'files.createFile': 'New file',
+  'files.createFolder': 'New folder',
+  'files.rename': 'Rename',
+  'files.delete': 'Delete',
+  'files.actions': 'Actions for {{name}}',
+  'files.deleteHint':
+    'Permanently delete “{{path}}”? All files inside a folder will also be deleted.',
+  'files.name': 'Name',
+  'files.working': 'Working…',
+  'files.saved': 'File changes saved.',
+  'files.deleted': 'Deleted.',
+  'files.invalidName':
+    'Use a valid name without slashes, control characters, or . / .. segments.',
+  'files.exists': 'An entry with this name already exists.',
+  'files.notFound': 'This entry is no longer available. Refresh the file list.',
+  'files.forbidden':
+    'This entry is inaccessible. Symbolic links are not supported.',
+  'files.unavailable': 'The workspace is currently unavailable.',
+  'files.loading': 'Loading files…',
+  'files.retry': 'Retry',
+  'files.emptyFolder': 'Empty folder',
+  'files.empty': 'No files yet. Create a file or folder above.',
+  'files.directoryLimit':
+    'Showing the first 2,000 entries. Use search to find a file.',
+  'files.previewLimit':
+    'Preview is limited to 512 KB / 10,000 lines. Download to view the full file.',
+  'files.textPreview': 'File contents',
+  'files.refreshPreview': 'Reload file',
+  'files.download': 'Download file',
+  'files.binary':
+    'This file type has no inline preview. Download it to open locally.',
+  'files.mediaError':
+    'The browser could not display this media. Download it to open locally.',
+  'files.refresh': 'Refresh files',
+  'files.resizeTreeWidth': 'Drag to resize file tree width',
+  'files.resizeTreeHeight': 'Drag to resize file tree height',
+  'files.startChat':
+    'Start a conversation to create its workspace and manage files here.',
+  'files.searchPlaceholder': 'Search file names and contents…',
+  'files.search': 'Search files',
+  'files.clearSearch': 'Clear search',
+  'files.searching': 'Searching…',
+  'files.results': 'Matches',
+  'files.noResults': 'No matching files.',
+  'files.searchLimit':
+    'Some results were omitted because of search limits. Try a more specific query.',
+  'files.openFiles': 'Open files',
+  'files.closeFile': 'Close {{name}}',
+  'files.selectFile': 'Select a file to preview',
+  'files.previewHint':
+    'Open files in separate tabs. Preview images, audio, video, code, and plain text.',
   'projects.all': 'All projects',
   'projects.list': 'Project list',
   'projects.openNamed': 'Open {{name}} dashboard',
@@ -86,6 +212,12 @@ export const en = {
   'chat.reasoning.xhigh': 'Extra high',
   'chat.reasoning.max': 'Maximum',
   'chat.placeholder': 'Message Aime…',
+  'chat.commands.title': 'Quick commands',
+  'chat.commands.skills': 'Skills',
+  'chat.commands.loading': 'Loading commands…',
+  'chat.commands.empty': 'No commands available in this chat',
+  'chat.commands.noMatch': 'No matching commands',
+  'chat.commands.hint': '↑ ↓ navigate · Enter / Tab insert · Esc close',
   'chat.queuePlaceholder': 'Add a follow-up while Aime works…',
   'chat.message': 'Your message',
   'chat.send': 'Send message',
@@ -149,11 +281,59 @@ export const en = {
   'chat.toolParameters': 'Parameters',
   'chat.toolResult': 'Result',
   'chat.toolError': 'Error',
+  'chat.toolInteraction.questionTitle': 'Your input is needed',
+  'chat.toolInteraction.approvalTitle': 'Review tool execution',
+  'chat.toolInteraction.waiting': 'Waiting for you',
+  'chat.toolInteraction.completed': 'Responded',
+  'chat.toolInteraction.declined': 'Execution declined',
+  'chat.toolInteraction.approved': 'Approved. Continuing execution.',
+  'chat.toolInteraction.approvalPrompt': 'Allow {{tool}} to run?',
+  'chat.toolInteraction.resumePrompt':
+    '{{tool}} needs more information to continue.',
+  'chat.toolInteraction.details': 'View request details',
+  'chat.toolInteraction.chooseMany': 'Choose one or more options',
+  'chat.toolInteraction.chooseOne': 'Choose one option',
+  'chat.toolInteraction.otherAnswer': 'Or enter your own answer',
+  'chat.toolInteraction.answer': 'Your answer',
+  'chat.toolInteraction.resumeData': 'Additional data (JSON)',
+  'chat.toolInteraction.placeholder': 'Enter your answer…',
+  'chat.toolInteraction.jsonPlaceholder':
+    'Enter JSON matching the format in the request details',
+  'chat.toolInteraction.decline': 'Decline',
+  'chat.toolInteraction.approve': 'Approve',
+  'chat.toolInteraction.submit': 'Submit and continue',
+  'chat.toolInteraction.submitting': 'Submitting…',
+  'chat.toolInteraction.sent': 'Response submitted',
+  'chat.toolInteraction.invalidJson': 'Enter valid JSON.',
+  'chat.toolInteraction.failed':
+    'The tool failed. Check the conversation error.',
+  'chat.toolInteraction.unavailable':
+    'Waiting for tool state. Historical requests cannot be submitted again.',
+  'chat.errors.toolNotPending':
+    'This request has already been handled or is no longer available.',
   'chat.toolGroup': 'Tool calls · {{count}}',
+  'chat.backgroundTask': '{{toolName}} background task',
+  'chat.backgroundTasks': 'Background tasks',
+  'chat.backgroundTasksRunning': 'Running background tasks: {{count}}',
+  'chat.backgroundTasksUnavailable':
+    'Background task status is unavailable. Reconnecting…',
+  'chat.backgroundTaskStop': 'Stop {{name}}',
+  'chat.backgroundTaskStopped': 'Background task stopped',
+  'chat.backgroundTaskStopFailed':
+    'Could not stop the background task. Please retry.',
+  'chat.backgroundTaskNotFound': 'This background task is no longer available.',
   'chat.status.idle': 'Ready',
+  'chat.status.success': 'Completed',
+  'chat.status.failed': 'Failed',
+  'chat.status.tripwire': 'Guardrail triggered',
+  'chat.status.suspended': 'Waiting for response',
+  'chat.status.waiting': 'Waiting',
+  'chat.status.pending': 'Preparing',
+  'chat.status.canceled': 'Canceled',
+  'chat.status.bailed': 'Ended early',
+  'chat.status.paused': 'Paused',
+  'chat.status.skipped': 'Skipped',
   'chat.status.running': 'Running',
-  'chat.status.stopping': 'Stopping',
-  'chat.status.error': 'Needs attention',
   'chat.loading': 'Loading…',
   'chat.loadEarlier': 'Load earlier messages',
   'chat.toLatest': 'Jump to latest message',
@@ -191,6 +371,11 @@ export const en = {
     'The queue has reached its message or attachment limit. Wait for a response or remove a queued message.',
   'chat.errors.validation':
     'Check the message and attachments. Text supports up to 60,000 characters; images up to 2 MB each.',
+  'chat.errorTitle': 'Response failed',
+  'chat.retry': 'Retry',
+  'chat.retrying': 'Retrying…',
+  'chat.errors.retryUnavailable':
+    'No message to retry. Please send a new message.',
   'chat.errors.failed':
     'The response could not be completed. Check the model connection and try again.',
   'common.loading': 'Loading page…',

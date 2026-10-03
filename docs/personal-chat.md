@@ -43,6 +43,8 @@ Mastra 使用现有 PostgreSQL 中独立的 `mastra` schema，由官方 `Postgre
 
 每轮 Agent 开启 thread scope 的 Observational Memory，使用本轮解析出的模型。支持工具调用的模型接入受目录边界约束的 Mastra Workspace 和 filesystem path skills。工作目录为 `WORKSPACE_ROOT/users/<userId>/<yyyy-MM-dd>-<nanoid(6)>`，日期使用 Asia/Shanghai。全局与个人 `.agents/skills` 递归发现 `SKILL.md`，按包目录名作为 skill ID、相对父目录作为分组；个人同名包覆盖全局包。
 
+输入框以 `/` 开头时显示通用快捷命令菜单，技能统一位于“技能”分类下，再按相对父目录（如 `test`、`owner/repo`）分组。根目录技能直接显示在分类下；技能名和描述同一行展示，不使用图标。输入可过滤名称、描述和目录分组，方向键选择，Enter / Tab 或点击补全命令，保留后续文字。扫描遇到 `SKILL.md` 即视为技能包并停止向包内递归；ID 与命令名统一取包目录名，即使 frontmatter 的 `name` 不一致也会显示。目录列表与运行时共享同一读取适配层，仅在内存中规范技能名称，保留描述、正文和资源文件，不改写原始 `SKILL.md`；其他元数据继续使用 Mastra 校验。
+
 HTTP 仅提交新消息，AI SDK `useChat` 的 transport 收到接受响应后即可再次发送；独立 SSE 订阅负责更新消息。首次订阅发送缓存快照，之后只推送变化消息及线程状态，流式更新最多每 50ms 合并发送。重连刷新最新历史窗口后叠加实时消息，历史分页使用固定时间上界，避免后续新增消息导致分页移动。
 
 每个线程串行执行，消息 ID 支持重试去重。空闲时提交的消息直接保存并运行，不进入队列；已有任务执行时，新消息才排队。若停止后仍有暂停的排队消息，空闲时新提交的消息先直接运行，再继续剩余队列。队列最多 20 条且总序列化大小不超过 16 MiB；输入支持文字和最多 4 张图片，每张不超过 2 MiB。队列与近期已接受 ID 存在 Mastra thread metadata 中。立即消息通过 `prepareStep` 在当前工具调用完成后的下一步注入；若当前轮没有后续步骤，则紧接当前轮运行。停止会保留部分回复并暂停剩余队列，可继续或移除排队消息。
@@ -56,6 +58,16 @@ HTTP 仅提交新消息，AI SDK `useChat` 的 transport 收到接受响应后�
 侧栏和项目页共用会话内缓存，分页继续控制可见条数；实时更新不重置已加载页数。完整摘要用于统计每个项目正在执行的线程数，包含正在停止但执行器尚未退出的线程，不计暂停队列。项目折叠或未打开时也继续维护计数。HTTP 应答与当前聊天的消息 SSE 不覆盖全局订阅中较新的摘要。断线重连校准离线期间的新增、删除和权限变化，退出登录销毁订阅与缓存。
 
 项目成员权限在推送前复查，项目或成员变更刷新相关会话的导航；慢连接及内部故障关闭连接后由客户端重连。全量摘要初始化适用于当前单实例部署；线程规模增长后需改为摘要索引和可恢复的增量游标，避免每次重连读取全部摘要。
+
+## 后台任务数据
+
+每个线程 runtime 持有一个 `backgroundTaskManager.stream({ threadId, resourceId, abortSignal })` 订阅，使用服务端确认的 `user:<userId>` 或 `project:<projectId>` 归属。`GET /api/threads/:id` 和消息 SSE 的 snapshot/update 返回 `backgroundTasks`；前端通过 `useThreadChat().backgroundTasks` 读取。任务明细不进入全局导航摘要。
+
+任务记录由 Mastra 原生任务存储持久化，runtime 缓存活动任务和最近最多 100 条结束任务，不重复写入线程 metadata。初始化和订阅重连时从存储补齐，事件更新按任务 ID 合并；`background-task-started` 额外补齐尚在排队的任务。状态保留 `pending/running/suspended/completed/failed/cancelled/timed_out`，输出只保留最新一块 `lastOutput`，订阅故障通过 `backgroundTasksError` 报告。
+
+ChatPanel 标题旁用图标与数量显示当前线程的运行中任务，点击展开紧凑列表，每项可手动停止；归零时隐藏入口。`POST /api/threads/:id/background-tasks/:taskId/cancel` 校验线程访问权限及任务的 threadId/resourceId 后调用 Mastra `cancel(taskId)`，已结束任务重复停止为幂等操作。取消后的状态通过同一 SSE 更新，不刷新整个会话。
+
+浏览器断开、停止当前 Agent 轮次都不关闭 runtime 的任务订阅；订阅在 runtime 过期、线程／项目删除或服务关闭时释放。排队、运行中的任务阻止 runtime 过期；有活动任务时拒绝删除线程／项目。关闭订阅仅停止监听，不会取消任务。前台工具不产生这条流的后台生命周期事件，后台任务状态也不直接替代会话的运行状态。
 
 ## 接口
 

@@ -5,6 +5,7 @@ import { NavLink, useNavigate } from 'react-router';
 import { Home, LoaderCircle, LogOut } from 'lucide-react';
 import { Brand } from '@/components/brand';
 import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAuthSession } from '@/features/auth/session-context';
 import { authClient, isAdmin } from '@/features/auth/client';
 import { authErrorKey } from '@/features/auth/errors';
@@ -53,41 +54,43 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       <div className="px-5 pt-6 pb-8">
         <Brand />
       </div>
-      <nav
-        aria-label={t('nav.main')}
-        className="flex-1 space-y-7 overflow-y-auto px-3"
+      <ScrollArea
+        className="min-h-0 flex-1"
+        viewportProps={{ className: '[&>div]:block!' }}
       >
-        <div className="space-y-1">
-          <p className="px-3 pb-2 text-xs font-medium text-muted-foreground">
-            {t('common.workspace')}
-          </p>
-          <NavLink to="/" end className={linkClass} onClick={onNavigate}>
-            <Home className="size-4" />
-            {t('nav.home')}
-          </NavLink>
-          <ThreadSidebar onNavigate={onNavigate} />
-          <ProjectSidebar onNavigate={onNavigate} />
-        </div>
-        {admin && (
+        <nav aria-label={t('nav.main')} className="space-y-7 px-3">
           <div className="space-y-1">
             <p className="px-3 pb-2 text-xs font-medium text-muted-foreground">
-              {t('nav.admin')}
+              {t('common.workspace')}
             </p>
-            {adminNavigation.map(({ to, label, icon: Icon }) => (
-              <NavLink
-                key={to}
-                to={to}
-                end
-                className={linkClass}
-                onClick={onNavigate}
-              >
-                <Icon className="size-4" />
-                {t(label)}
-              </NavLink>
-            ))}
+            <NavLink to="/" end className={linkClass} onClick={onNavigate}>
+              <Home className="size-4" />
+              {t('nav.home')}
+            </NavLink>
+            <ThreadSidebar onNavigate={onNavigate} />
+            <ProjectSidebar onNavigate={onNavigate} />
           </div>
-        )}
-      </nav>
+          {admin && (
+            <div className="space-y-1">
+              <p className="px-3 pb-2 text-xs font-medium text-muted-foreground">
+                {t('nav.admin')}
+              </p>
+              {adminNavigation.map(({ to, label, icon: Icon }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end
+                  className={linkClass}
+                  onClick={onNavigate}
+                >
+                  <Icon className="size-4" />
+                  {t(label)}
+                </NavLink>
+              ))}
+            </div>
+          )}
+        </nav>
+      </ScrollArea>
       <div className="m-3 mt-5 space-y-3 border-t px-2 pt-4 pb-1">
         <div className="flex min-w-0 items-center gap-3">
           <div

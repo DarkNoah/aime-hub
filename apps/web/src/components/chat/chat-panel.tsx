@@ -1,3 +1,4 @@
+import { isThreadActive } from '@aime/shared/threads';
 import { useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MessageSquare, X } from 'lucide-react';
@@ -17,6 +18,8 @@ import { ChatComposer } from './chat-composer';
 import { ChatQueue } from './chat-queue';
 import { ChatWorkspace } from './chat-workspace';
 import { ChatMessages } from './chat-messages';
+import { ChatErrorCard } from './chat-error-card';
+import { ChatRunningTasks } from './chat-running-tasks';
 import { useThreadChat } from './use-thread-chat';
 import { PersonalChatSettingsProvider } from './personal-chat-settings-provider';
 
@@ -103,6 +106,7 @@ function ChatPanelSession({
         </div>
         <ChatComposer
           className={chatContentClassName}
+          projectId={projectId}
           onSend={async (input) => {
             // Create and accept the first message before navigation or unmount can occur.
             const thread =
@@ -129,26 +133,37 @@ function PanelHeader({
   status,
   onClose,
   actions,
+  details,
 }: {
   title: string;
   projectId?: string;
   status?: ThreadSummary['status'];
   onClose?: () => void;
   actions?: ReactNode;
+  details?: ReactNode;
 }) {
   const { t } = useTranslation();
   return (
     <header className="flex min-h-16 shrink-0 items-center gap-3 border-b px-4 @lg/chat:px-6">
       <div className="min-w-0 flex-1">
-        <h1 className="truncate text-sm font-semibold" title={title}>
-          {title}
-        </h1>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <h1 className="truncate text-sm font-semibold" title={title}>
+            {title}
+          </h1>
+          {details}
+        </div>
         <p className="mt-0.5 text-xs text-muted-foreground">
           {t(projectId ? 'projects.chat' : 'chat.personal')}
         </p>
       </div>
       {status && (
-        <Badge variant={status === 'error' ? 'destructive' : 'secondary'}>
+        <Badge
+          variant={
+            status === 'failed' || status === 'tripwire'
+              ? 'destructive'
+              : 'secondary'
+          }
+        >
           {t(`chat.status.${status}`)}
         </Badge>
       )}
@@ -178,8 +193,8 @@ function ExistingChat({
 }: ChatPanelProps & { threadId: string; onRetry: () => void }) {
   const { t } = useTranslation();
   const chat = useThreadChat(threadId, onThreadUpdated);
-  const running = chat.thread?.status === 'running';
-  const stopping = chat.thread?.status === 'stopping';
+  const running = isThreadActive(chat.thread?.status);
+  const stopping = chat.thread?.stopping ?? false;
   const notifyError = (cause: unknown) => toast.error(t(chatErrorKey(cause)));
   return (
     <section
@@ -187,6 +202,7 @@ function ExistingChat({
       aria-label={t(projectId ? 'projects.chat' : 'chat.personal')}
     >
       <ChatWorkspace
+        threadId={threadId}
         messages={chat.messages}
         loading={!chat.thread && !chat.error}
         hasEarlier={chat.hasEarlier}
@@ -195,17 +211,25 @@ function ExistingChat({
           title={chat.thread?.title || t('chat.new')}
           projectId={projectId}
           status={chat.thread?.status}
+          details={
+            <ChatRunningTasks
+              tasks={chat.backgroundTasks}
+              unavailable={!!chat.backgroundTasksError}
+              disabled={!chat.connected}
+              onStop={(taskId) =>
+                chatApi.cancelBackgroundTask(threadId, taskId)
+              }
+            />
+          }
           onClose={onClose}
           actions={headerActions}
         />
-        {!!(chat.error || chat.thread?.error) && (
+        {!!chat.error && (
           <div
             role="alert"
             className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-destructive/5 px-4 py-2 text-sm"
           >
-            <span className="flex-1">
-              {t(chatErrorKey(chat.error ?? chat.thread?.error))}
-            </span>
+            <span className="flex-1">{t(chatErrorKey(chat.error))}</span>
             {!!chat.error && (
               <Button variant="outline" size="sm" onClick={onRetry}>
                 {t('chat.reconnect')}
@@ -243,6 +267,9 @@ function ExistingChat({
               messages={chat.messages}
               running={running}
               activeMessageId={chat.activeMessageId}
+              toolInteractions={chat.toolInteractions}
+              onToolResponse={chat.respondToTool}
+              disabled={!chat.connected || running || stopping}
             />
             {chat.thread && !chat.messages.length && (
               <ConversationEmptyState
@@ -258,18 +285,36 @@ function ExistingChat({
                 {t('chat.thinking')}
               </p>
             )}
+            {chat.thread?.error && (
+              <ChatErrorCard
+                error={chat.thread.error}
+                disabled={
+                  !chat.connected || running || stopping || chat.sending
+                }
+                onRetry={async () => {
+                  await chatApi.retry(threadId);
+                }}
+              />
+            )}
           </ConversationContent>
           <ConversationScrollButton aria-label={t('chat.toLatest')} />
         </Conversation>
         {chat.thread && (
           <ChatComposer
             className={chatContentClassName}
+            threadId={threadId}
             disabled={!chat.connected}
             running={running}
             stopping={stopping}
             usage={chat.usage}
             queue={
-              <ChatQueue thread={chat.thread} disabled={!chat.connected} />
+              <ChatQueue
+                thread={chat.thread}
+                disabled={!chat.connected}
+                waitingForTool={chat.toolInteractions.some(
+                  (item) => !item.response,
+                )}
+              />
             }
             onSend={chat.send}
             onStop={async () => {

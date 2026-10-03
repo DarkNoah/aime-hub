@@ -20,6 +20,13 @@ export const chatSettingsSchema = z
   })
   .strict();
 export type ChatSettings = z.infer<typeof chatSettingsSchema>;
+export type ChatSkill = {
+  /** Canonical skill ID and command name, taken from the package directory. */
+  name: string;
+  description: string;
+  /** Parent directory relative to the skills root, e.g. owner/repo. */
+  group: string;
+};
 export const createThreadSchema = chatSettingsSchema.extend({
   title: z.string().trim().min(1).max(120).optional(),
   projectId: z
@@ -76,6 +83,44 @@ export const runInputSchema = chatSettingsSchema
   })
   .strict();
 export type RunInput = z.infer<typeof runInputSchema>;
+export const userQuestionSchema = z.object({
+  question: z.string().trim().min(1),
+  options: z
+    .array(
+      z.object({
+        label: z.string().trim().min(1),
+        description: z.string().optional(),
+      }),
+    )
+    .optional(),
+  selectionMode: z.enum(['single_select', 'multi_select']).optional(),
+});
+export type UserQuestion = z.infer<typeof userQuestionSchema>;
+export const toolResponseSchema = z.intersection(
+  z.object({ id: runInputSchema.shape.id }),
+  z.discriminatedUnion('action', [
+    z.object({ action: z.literal('resume'), data: z.json() }),
+    z.object({ action: z.literal('approve') }),
+    z.object({
+      action: z.literal('decline'),
+      reason: z.string().trim().max(2000).optional(),
+    }),
+  ]),
+);
+export type ToolResponse = z.infer<typeof toolResponseSchema>;
+export const toolInteractionSchema = z.object({
+  kind: z.enum(['approval', 'suspended']),
+  runId: z.string().min(1),
+  toolCallId: z.string().min(1),
+  toolName: z.string().min(1),
+  input: z.unknown().optional(),
+  suspendPayload: z.unknown().optional(),
+  resumeSchema: z.unknown().optional(),
+});
+export type ToolInteraction = z.infer<typeof toolInteractionSchema> & {
+  id: string;
+  response?: ToolResponse;
+};
 export const updateQueuedMessageSchema = z
   .object({
     text: z.string().trim().max(60000).optional(),
@@ -104,7 +149,24 @@ export type QueuedMessage = {
   isImmediate: boolean;
   createdAt: string;
 };
-export type ThreadStatus = 'idle' | 'running' | 'stopping' | 'error';
+// Matches Mastra's stream.status; idle is only for a thread with no run yet.
+export const threadStreamStatusSchema = z.enum([
+  'running',
+  'success',
+  'failed',
+  'tripwire',
+  'suspended',
+  'waiting',
+  'pending',
+  'canceled',
+  'bailed',
+  'paused',
+  'skipped',
+]);
+export type ThreadStreamStatus = z.infer<typeof threadStreamStatusSchema>;
+export type ThreadStatus = 'idle' | ThreadStreamStatus;
+export const isThreadActive = (status?: ThreadStatus) =>
+  status === 'running' || status === 'pending';
 export type ThreadSummary = ChatSettings & {
   id: string;
   projectId?: string | null;
@@ -113,6 +175,7 @@ export type ThreadSummary = ChatSettings & {
   createdAt: string;
   updatedAt: string;
   status: ThreadStatus;
+  stopping?: boolean;
   queue: QueuedMessage[];
   error: string | null;
 };
@@ -121,6 +184,35 @@ export type ThreadSnapshot<Message> = {
   messages: Message[];
   activeMessageId: string | null;
   usage?: ChatUsage | null;
+  toolInteractions?: ToolInteraction[];
+  backgroundTasks?: ThreadBackgroundTask[];
+  backgroundTasksError?: 'BACKGROUND_TASKS_UNAVAILABLE' | null;
+};
+// Thread-scoped view of Mastra's persisted tasks. Dates are serialized for SSE.
+export type ThreadBackgroundTask = {
+  id: string;
+  status:
+    | 'pending'
+    | 'running'
+    | 'suspended'
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'timed_out';
+  toolName: string;
+  toolCallId: string;
+  agentId: string;
+  runId: string;
+  args: Record<string, unknown>;
+  result?: unknown;
+  error?: { message: string };
+  createdAt: string;
+  startedAt?: string;
+  suspendedAt?: string;
+  completedAt?: string;
+  suspendPayload?: unknown;
+  // Only the latest output chunk is retained; this is not an unbounded event log.
+  lastOutput?: unknown;
 };
 // Usage from the latest completed LLM step, not a sum across context windows.
 export type ChatUsage = {

@@ -1,3 +1,4 @@
+import { isThreadActive } from '@aime/shared/threads';
 import { MoreHorizontal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThreadSummary } from '@aime/shared/threads';
@@ -31,8 +32,9 @@ export function ThreadListItems({
         <div
           key={thread.id}
           className={cn(
-            'group flex h-9 items-center rounded-md transition-colors hover:bg-accent/60',
-            thread.id === selectedId && 'bg-accent text-accent-foreground',
+            'group/thread flex h-9 w-full min-w-0 items-center rounded-md transition-colors',
+            thread.id === selectedId &&
+              'bg-card text-primary ring-1 ring-border',
           )}
         >
           <button
@@ -42,24 +44,27 @@ export function ThreadListItems({
             className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md pl-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
             onClick={() => onSelect(thread.id)}
           >
-            {thread.status === 'running' && (
+            {isThreadActive(thread.status) && (
               <ThreadStatusBadge
                 status={thread.status}
                 className="shrink-0 px-1 py-0 text-[10px]"
               />
             )}
             <ThreadActivityTitle
-              active={thread.status === 'running'}
+              active={isThreadActive(thread.status)}
               className="text-[13px]"
             >
               {thread.title || t('chat.new')}
             </ThreadActivityTitle>
-            {thread.status !== 'idle' && thread.status !== 'running' && (
-              <ThreadStatusBadge
-                status={thread.status}
-                className="shrink-0 px-1 py-0 text-[10px]"
-              />
-            )}
+            {thread.status !== 'idle' &&
+              thread.status !== 'success' &&
+              thread.status !== 'canceled' &&
+              !isThreadActive(thread.status) && (
+                <ThreadStatusBadge
+                  status={thread.status}
+                  className="shrink-0 px-1 py-0 text-[10px]"
+                />
+              )}
           </button>
           {(!canManage || canManage(thread)) && (
             <DropdownMenu>
@@ -67,7 +72,7 @@ export function ThreadListItems({
                 <Button
                   size="icon-sm"
                   variant="ghost"
-                  className="size-7 shrink-0"
+                  className="size-7 shrink-0 text-muted-foreground transition-opacity group-hover/thread:opacity-100 group-focus-within/thread:opacity-100 data-[state=open]:opacity-100 [@media(hover:hover)]:opacity-0"
                   aria-label={t('chat.actions', {
                     title: thread.title || t('chat.new'),
                   })}
@@ -82,8 +87,8 @@ export function ThreadListItems({
                 <DropdownMenuItem
                   className="text-destructive"
                   disabled={
-                    thread.status === 'running' ||
-                    thread.status === 'stopping' ||
+                    isThreadActive(thread.status) ||
+                    thread.stopping ||
                     !!thread.queue.length
                   }
                   onSelect={() => onAction(thread, 'delete')}

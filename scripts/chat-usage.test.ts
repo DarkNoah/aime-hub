@@ -56,6 +56,7 @@ test('usage is streamed before completion, replaces the previous step, and survi
     },
     async execute(value) {
       context = value;
+      value.onStatus('running');
       await new Promise<void>((resolve) => {
         finish = resolve;
       });

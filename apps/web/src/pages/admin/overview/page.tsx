@@ -1,9 +1,15 @@
-import { ArrowRight, Plug, Users, Settings2 } from 'lucide-react';
+import { ArrowRight, Plug, Users, Settings2, Sparkles } from 'lucide-react';
 import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { PageHeader } from '@/components/page-header';
 
 const modules = [
+  {
+    to: '/admin/skills',
+    title: 'nav.skills',
+    description: 'admin.skillsDescription',
+    icon: Sparkles,
+  },
   {
     to: '/admin/providers',
     title: 'nav.providers',

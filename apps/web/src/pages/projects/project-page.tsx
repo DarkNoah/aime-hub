@@ -1,3 +1,4 @@
+import { isThreadActive } from '@aime/shared/threads';
 import {
   useEffect,
   useState,
@@ -237,7 +238,7 @@ function ProjectSession({
       <div className="divide-y">
         {list.threads.map((thread) => (
           <div key={thread.id} className="flex items-center gap-3 py-4">
-            {thread.status === 'running' && (
+            {isThreadActive(thread.status) && (
               <ThreadStatusBadge status={thread.status} />
             )}
             <Link
@@ -246,7 +247,7 @@ function ProjectSession({
             >
               <h3 className="truncate text-sm font-medium">
                 <ThreadActivityTitle
-                  active={thread.status === 'running'}
+                  active={isThreadActive(thread.status)}
                   className="block"
                 >
                   {thread.title || t('chat.new')}
@@ -258,7 +259,7 @@ function ProjectSession({
                 })}
               </p>
             </Link>
-            {thread.status !== 'running' && (
+            {!isThreadActive(thread.status) && (
               <ThreadStatusBadge status={thread.status} />
             )}
             {(project.role !== 'member' ||

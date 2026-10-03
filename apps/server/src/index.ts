@@ -12,6 +12,7 @@ import { createChatRunner } from './modules/threads/runner.js';
 import { LanguageModelService } from './modules/models/language-model.js';
 import { ThreadService } from './modules/threads/service.js';
 import { ProjectService } from './modules/projects/service.js';
+import { SkillService } from './modules/skills/service.js';
 
 const env = loadEnv();
 const database = createDataSource(env.DATABASE_URL);
@@ -55,7 +56,9 @@ const threads = new ThreadService(
   memory,
   createChatRunner(mastra, models, workspaceRoot),
   projects,
+  mastra.backgroundTaskManager,
 );
+const skills = new SkillService(workspaceRoot);
 const server = createApp(
   auth,
   {
@@ -63,6 +66,7 @@ const server = createApp(
     webOrigin: env.WEB_ORIGIN,
   },
   { threads, models, projects, webOrigin: env.WEB_ORIGIN },
+  { service: skills, webOrigin: env.WEB_ORIGIN },
 ).listen(env.SERVER_PORT, '127.0.0.1', () => {
   console.log(`Aime Hub API: http://127.0.0.1:${env.SERVER_PORT}`);
 });
@@ -73,7 +77,11 @@ function shutdown() {
   void threads.shutdown().finally(() => {
     server.closeAllConnections();
     server.close(() => {
-      void Promise.all([mastra.shutdown(), database.destroy()])
+      void Promise.all([
+        mastra.shutdown(),
+        database.destroy(),
+        skills.dispose(),
+      ])
         .finally(() => pool.end())
         .catch(() => {
           process.exitCode = 1;

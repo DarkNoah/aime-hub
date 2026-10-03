@@ -29,16 +29,9 @@ function UsageRow({ label, tokens }: { label: string; tokens?: number }) {
 }
 
 export function ChatContextUsage({ usage }: { usage: ChatUsage }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const usedTokens = usage.totalTokens ?? 0;
   const hasLimit = usage.maxTokens !== null && usage.maxTokens > 0;
-  const tokens =
-    usage.totalTokens === undefined
-      ? '—'
-      : new Intl.NumberFormat(i18n.language, {
-          notation: 'compact',
-          maximumFractionDigits: 1,
-        }).format(usage.totalTokens);
   const modelId = usage.model.slice(usage.model.indexOf('/') + 1);
   const contextUsage: LanguageModelUsage = {
     ...usage,

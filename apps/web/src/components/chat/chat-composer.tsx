@@ -14,7 +14,6 @@ import {
   PromptInput,
   PromptInputBody,
   PromptInputFooter,
-  PromptInputTextarea,
   PromptInputSubmit,
   usePromptInputAttachments,
 } from '@/components/ai-elements/prompt-input';
@@ -24,6 +23,9 @@ import { ChatSettingsFields } from './chat-settings';
 import { ChatApiError, chatErrorKey } from './api';
 import { usePersonalChatSettings } from './use-personal-chat-settings';
 import { ChatContextUsage } from './chat-context-usage';
+import { ChatCommandTextarea } from './chat-command-textarea';
+import { useChatSkills } from './use-chat-skills';
+import { skillCommandGroup } from './skill-commands';
 
 function ComposerAttachments({ disabled }: { disabled: boolean }) {
   const { t } = useTranslation();
@@ -87,10 +89,14 @@ export function ChatComposer({
   onStop,
   queue,
   usage,
+  threadId,
+  projectId,
 }: {
   className?: string;
   queue?: ReactNode;
   usage?: ChatUsage | null;
+  threadId?: string;
+  projectId?: string;
   disabled?: boolean;
   running?: boolean;
   stopping?: boolean;
@@ -107,6 +113,11 @@ export function ChatComposer({
     retry: retrySettings,
   } = usePersonalChatSettings();
   const [text, setText] = useState('');
+  const [commandsOpen, setCommandsOpen] = useState(false);
+  const skillCatalog = useChatSkills(commandsOpen, threadId, projectId);
+  const commandGroups = [
+    skillCommandGroup(skillCatalog.skills, t('chat.commands.skills')),
+  ];
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
   const retryId = useRef<string | null>(null);
@@ -166,18 +177,21 @@ export function ChatComposer({
         >
           <ComposerAttachments disabled={pending} />
           <PromptInputBody>
-            <PromptInputTextarea
+            <ChatCommandTextarea
               value={text}
-              onChange={(event) => {
-                setText(event.target.value);
+              groups={commandGroups}
+              loading={skillCatalog.loading}
+              error={skillCatalog.error}
+              onRetry={skillCatalog.retry}
+              onOpenChange={setCommandsOpen}
+              onValueChange={(value) => {
+                setText(value);
                 retryId.current = null;
               }}
               disabled={pending || disabled || stopping}
               placeholder={t(
                 running ? 'chat.queuePlaceholder' : 'chat.placeholder',
               )}
-              aria-label={t('chat.message')}
-              className="max-h-44 min-h-20"
             />
           </PromptInputBody>
           <PromptInputFooter className="items-end gap-2">

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useLocation, useNavigate, useMatch } from 'react-router';
+import { useNavigate, useMatch } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { ChevronRight, MessageSquare, Plus } from 'lucide-react';
 import type { ThreadSummary } from '@aime/shared/threads';
@@ -17,7 +17,6 @@ import { ThreadDialog } from '@/components/chat/thread-dialogs';
 export function ThreadSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const location = useLocation();
   const selectedId = useMatch('/threads/:threadId')?.params.threadId;
   const { updateThread, removeThread } = useThreadList();
   const [open, setOpen] = useState(true);
@@ -32,14 +31,8 @@ export function ThreadSidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
       <Collapsible open={open} onOpenChange={setOpen}>
-        <div
-          className={cn(
-            'flex h-10 items-center rounded-lg',
-            location.pathname.startsWith('/threads') &&
-              'bg-card text-primary ring-1 ring-border',
-          )}
-        >
-          <CollapsibleTrigger className="flex h-full min-w-0 flex-1 items-center gap-3 rounded-lg px-3 text-sm outline-none hover:bg-accent/70 focus-visible:ring-2 focus-visible:ring-ring">
+        <div className={cn('flex h-10 items-center rounded-lg')}>
+          <CollapsibleTrigger className="flex h-full min-w-0 flex-1 items-center gap-3 rounded-lg px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <MessageSquare className="size-4 shrink-0" />
             <span className="font-medium">{t('nav.chats')}</span>
             <ChevronRight
@@ -61,7 +54,7 @@ export function ThreadSidebar({ onNavigate }: { onNavigate?: () => void }) {
           </Button>
         </div>
         <CollapsibleContent>
-          <div className="mt-1 mb-2 ml-5 border-l pl-2">
+          <div className="mt-1 mb-2 ml-2 border-l">
             <ThreadList
               selectedId={selectedId}
               onSelect={select}

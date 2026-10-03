@@ -17,7 +17,7 @@
     "format:check": "prettier --check .",
     "db:migrate": "tsx scripts/migrate.ts",
     "auth:create-admin": "tsx scripts/create-admin.ts",
-    "test": "tsx --test scripts/*.test.ts apps/web/src/i18n/*.test.ts apps/web/src/pages/admin/*/*.test.ts"
+    "test": "tsx --test scripts/*.test.ts apps/server/src/modules/threads/*.test.ts apps/web/src/i18n/*.test.ts apps/web/src/pages/admin/*/*.test.ts"
   },
   "devDependencies": {
     "@aime/auth": "workspace:*",

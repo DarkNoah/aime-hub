@@ -1,6 +1,6 @@
 import type { ComponentProps } from 'react';
 import { Checkbox as CheckboxPrimitive } from 'radix-ui';
-import { Check } from 'lucide-react';
+import { Check, Minus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export function Checkbox({
@@ -20,7 +20,11 @@ export function Checkbox({
         data-slot="checkbox-indicator"
         className="flex items-center justify-center text-current"
       >
-        <Check className="size-3.5" aria-hidden="true" />
+        {props.checked === 'indeterminate' ? (
+          <Minus className="size-3.5" aria-hidden="true" />
+        ) : (
+          <Check className="size-3.5" aria-hidden="true" />
+        )}
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   );

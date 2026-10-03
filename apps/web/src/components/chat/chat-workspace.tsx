@@ -1,6 +1,14 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import type { UIMessage } from 'ai';
-import { Braces, Columns2 } from 'lucide-react';
+import { Braces, Columns2, Files } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { usePanelRef } from 'react-resizable-panels';
 import { Button } from '@/components/ui/button';
@@ -14,10 +22,14 @@ import {
   SheetContent,
   SheetDescription,
   SheetTitle,
-  SheetTrigger,
 } from '@/components/ui/sheet';
 import { ChatRawMessages } from './chat-raw-messages';
 import { cn } from '@/lib/utils';
+import { useFileManager } from '@/components/file-manager/use-file-manager';
+
+const FileManager = lazy(
+  () => import('@/components/file-manager/file-manager'),
+);
 
 const EMPTY_MESSAGES: UIMessage[] = [];
 
@@ -27,11 +39,13 @@ export function ChatWorkspace({
   messages = EMPTY_MESSAGES,
   loading = false,
   hasEarlier = false,
+  threadId,
 }: {
   children: ReactNode;
   messages?: UIMessage[];
   loading?: boolean;
   hasEarlier?: boolean;
+  threadId?: string;
 }) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -42,7 +56,12 @@ export function ChatWorkspace({
   const [expanded, setExpanded] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [chatNarrow, setChatNarrow] = useState(false);
+  const [view, setView] = useState<'files' | 'messages'>('files');
   const floating = !compact && chatNarrow;
+  const files = useFileManager(
+    threadId,
+    view === 'files' && (compact ? drawerOpen : expanded),
+  );
 
   useEffect(() => {
     const container = containerRef.current;
@@ -56,17 +75,31 @@ export function ChatWorkspace({
     return () => observer.disconnect();
   }, []);
 
-  const content = (
-    <ChatRawMessages
-      messages={messages}
-      loading={loading}
-      hasEarlier={hasEarlier}
-      onClose={() => {
-        panelRef.current?.collapse();
-        toggleRef.current?.focus();
-      }}
-    />
-  );
+  const close = () => {
+    if (compact) setDrawerOpen(false);
+    else panelRef.current?.collapse();
+    toggleRef.current?.focus();
+  };
+  const title = t(view === 'files' ? 'files.title' : 'chat.inspector.title');
+  const content =
+    view === 'files' ? (
+      <Suspense
+        fallback={
+          <p role="status" className="p-4 text-sm text-muted-foreground">
+            {t('files.loading')}
+          </p>
+        }
+      >
+        <FileManager state={files} onClose={close} />
+      </Suspense>
+    ) : (
+      <ChatRawMessages
+        messages={messages}
+        loading={loading}
+        hasEarlier={hasEarlier}
+        onClose={close}
+      />
+    );
 
   return (
     <div ref={containerRef} className="relative flex min-h-0 min-w-0 flex-1">
@@ -120,19 +153,38 @@ export function ChatWorkspace({
               onResize={(size) => setExpanded(size.inPixels > 49)}
               className="flex h-full min-h-0 bg-muted/20"
             >
-              <div className="flex w-12 shrink-0 flex-col items-center border-r py-3">
+              <div className="flex w-12 shrink-0 flex-col items-center gap-2 border-r py-3">
                 <Button
                   ref={toggleRef}
-                  variant={expanded ? 'secondary' : 'ghost'}
+                  variant={expanded && view === 'files' ? 'secondary' : 'ghost'}
+                  size="icon-sm"
+                  aria-label={t('files.title')}
+                  title={t('files.title')}
+                  aria-expanded={expanded && view === 'files'}
+                  aria-controls={contentId}
+                  onClick={() => {
+                    setView('files');
+                    if (expanded && view === 'files')
+                      panelRef.current?.collapse();
+                    else panelRef.current?.expand();
+                  }}
+                >
+                  <Files className="size-4" aria-hidden="true" />
+                </Button>
+                <Button
+                  variant={
+                    expanded && view === 'messages' ? 'secondary' : 'ghost'
+                  }
                   size="icon-sm"
                   aria-label={t('chat.inspector.title')}
                   title={t('chat.inspector.title')}
-                  aria-expanded={expanded}
+                  aria-expanded={expanded && view === 'messages'}
                   aria-controls={contentId}
                   onClick={() => {
-                    if (panelRef.current?.isCollapsed())
-                      panelRef.current.expand();
-                    else panelRef.current?.collapse();
+                    setView('messages');
+                    if (expanded && view === 'messages')
+                      panelRef.current?.collapse();
+                    else panelRef.current?.expand();
                   }}
                 >
                   <Braces className="size-4" aria-hidden="true" />
@@ -140,7 +192,7 @@ export function ChatWorkspace({
               </div>
               <aside
                 id={contentId}
-                aria-label={t('chat.inspector.title')}
+                aria-label={title}
                 hidden={!expanded}
                 className="min-h-0 min-w-0 flex-1"
               >
@@ -152,34 +204,44 @@ export function ChatWorkspace({
       </ResizablePanelGroup>
       {compact && (
         <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
-          <div className="flex w-12 shrink-0 flex-col items-center border-l bg-muted/20 py-3">
-            <SheetTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={t('chat.inspector.title')}
-                title={t('chat.inspector.title')}
-              >
-                <Braces className="size-4" aria-hidden="true" />
-              </Button>
-            </SheetTrigger>
+          <div className="flex w-12 shrink-0 flex-col items-center gap-2 border-l bg-muted/20 py-3">
+            <Button
+              ref={toggleRef}
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t('files.title')}
+              title={t('files.title')}
+              onClick={() => {
+                setView('files');
+                setDrawerOpen(true);
+              }}
+            >
+              <Files className="size-4" aria-hidden="true" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t('chat.inspector.title')}
+              title={t('chat.inspector.title')}
+              onClick={() => {
+                setView('messages');
+                setDrawerOpen(true);
+              }}
+            >
+              <Braces className="size-4" aria-hidden="true" />
+            </Button>
           </div>
           <SheetContent
             className="w-full max-w-full gap-0 sm:max-w-lg"
             showCloseButton={false}
           >
-            <SheetTitle className="sr-only">
-              {t('chat.inspector.title')}
-            </SheetTitle>
+            <SheetTitle className="sr-only">{title}</SheetTitle>
             <SheetDescription className="sr-only">
-              {t('chat.inspector.hint')}
+              {t(
+                view === 'files' ? 'files.previewHint' : 'chat.inspector.hint',
+              )}
             </SheetDescription>
-            <ChatRawMessages
-              messages={messages}
-              loading={loading}
-              hasEarlier={hasEarlier}
-              onClose={() => setDrawerOpen(false)}
-            />
+            {content}
           </SheetContent>
         </Sheet>
       )}

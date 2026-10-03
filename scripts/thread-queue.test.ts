@@ -199,7 +199,7 @@ test('queue edits remain paused until resumed and persist across runtime restart
   });
   await restored.moveQueued('alice', thread.id, 'queued003', 'queued001');
   const state = await restored.getThread('alice', thread.id);
-  assert.equal(state.thread.status, 'idle');
+  assert.equal(state.thread.status, 'canceled');
   assert.deepEqual(
     state.thread.queue.map((item) => item.id),
     ['queued003', 'queued001', 'queued002'],

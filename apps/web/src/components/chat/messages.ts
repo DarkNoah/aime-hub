@@ -9,10 +9,20 @@ export type ChatMessagePart =
   | { type: 'part'; part: UIMessage['parts'][number]; index: number }
   | { type: 'tools'; tools: (ToolUIPart | DynamicToolUIPart)[]; id: string };
 
-export function groupMessageParts(message: UIMessage): ChatMessagePart[] {
+export function groupMessageParts(
+  message: UIMessage,
+  interactiveToolIds?: Set<string>,
+): ChatMessagePart[] {
   const groups: ChatMessagePart[] = [];
   for (const [index, part] of message.parts.entries()) {
-    if (isToolUIPart(part)) {
+    if (
+      isToolUIPart(part) &&
+      !(
+        part.type === 'tool-ask_user' ||
+        (part.type === 'dynamic-tool' && part.toolName === 'ask_user')
+      ) &&
+      !interactiveToolIds?.has(part.toolCallId)
+    ) {
       const previous = groups.at(-1);
       if (previous?.type === 'tools') previous.tools.push(part);
       else

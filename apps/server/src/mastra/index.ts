@@ -10,6 +10,13 @@ export function createMastraRuntime(pool: Pool, schemaName = 'mastra') {
     agents: {},
     workflows: {},
     storage,
+    backgroundTasks: {
+      enabled: true,
+      globalConcurrency: 10,
+      perAgentConcurrency: 5,
+      backpressure: 'queue',
+      // defaultTimeoutMs: 300_000,
+    },
   });
   return { mastra, storage, memory };
 }

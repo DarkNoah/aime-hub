@@ -5,6 +5,7 @@ import type { StorageThreadType } from '@mastra/core/memory';
 import type { UIMessage } from 'ai';
 import type {
   ChatSettings,
+  ChatSkill,
   MessagePage,
   RunInput,
   ThreadSnapshot,
@@ -13,16 +14,29 @@ import type {
   UpdateQueuedMessage,
   QueuedMessageDetail,
   ChatUsage,
+  ToolInteraction,
+  ToolResponse,
+  ThreadStatus,
+  ThreadStreamStatus,
+  ThreadBackgroundTask,
 } from '@aime/shared/threads';
 import {
   runInputSchema,
   updateQueuedMessageSchema,
+  toolResponseSchema,
+  threadStreamStatusSchema,
 } from '@aime/shared/threads';
 import type { ProjectSummary } from '@aime/shared/projects';
-import { ThreadError } from './errors.js';
+import { ThreadError, threadErrorMessage } from './errors.js';
 import type { ProjectThreadAccess } from '../projects/service.js';
 import { threadScope } from './scope.js';
 import { ThreadNavigationFeed } from './navigation-feed.js';
+import { validateToolResponse } from './tool-interactions.js';
+import {
+  ThreadBackgroundTasks,
+  isBackgroundTaskActive,
+  type ThreadBackgroundTaskManager,
+} from './background-tasks.js';
 
 type Subscription = {
   userId: string;
@@ -32,23 +46,34 @@ type Subscription = {
   pending: Promise<void>;
 };
 
-type Pending = RunInput & { createdAt: string };
+type RunnerInput = RunInput & {
+  resume?: {
+    interactionId: string;
+    runId: string;
+    toolCallId: string;
+    response: ToolResponse;
+  };
+};
+type Pending = RunnerInput & { createdAt: string };
 type ThreadData = {
+  status: ThreadStatus;
   queue: Pending[];
   activeId: string | null;
   acceptedIds: string[];
   reasoningEffort: ChatSettings['reasoningEffort'];
   error: string | null;
+  failedInput: RunnerInput | null;
   paused: boolean;
   autoTitle: boolean;
   usage: ChatUsage | null;
+  toolInteractions: (ToolInteraction & { settings: ChatSettings })[];
 };
 type Runtime = {
   thread: StorageThreadType;
   data: ThreadData;
   messages: UIMessage[];
   changedMessages: Map<string, UIMessage>;
-  status: ThreadSummary['status'];
+  stopping: boolean;
   activeMessageId: string | null;
   controller?: AbortController;
   job?: Promise<void>;
@@ -56,9 +81,13 @@ type Runtime = {
   expiry?: ReturnType<typeof setTimeout>;
   broadcast?: ReturnType<typeof setTimeout>;
   navigationSignature?: string;
+  backgroundTasks: ThreadBackgroundTask[];
+  backgroundObserver?: ThreadBackgroundTasks;
+  backgroundTasksError: 'BACKGROUND_TASKS_UNAVAILABLE' | null;
 };
 
 export interface ChatRunner {
+  listSkills?(userId: string, projectId?: string): Promise<ChatSkill[]>;
   validate(
     userId: string,
     input: RunInput | ChatSettings,
@@ -67,12 +96,17 @@ export interface ChatRunner {
   createWorkspace(userId: string, projectId?: string): Promise<string>;
   execute(context: {
     thread: StorageThreadType;
-    input: RunInput;
+    input: RunnerInput;
     signal: AbortSignal;
     onMessage: (message: UIMessage) => void;
     onUsage: (usage: ChatUsage) => Promise<void>;
+    onStatus: (status: ThreadStreamStatus) => void;
     takeImmediate: () => Promise<RunInput[]>;
-  }): Promise<void>;
+    onBackgroundTaskStarted?: (taskId: string) => Promise<void>;
+  }): Promise<{
+    status: ThreadStreamStatus;
+    toolInteractions: ToolInteraction[];
+  } | void>;
 }
 
 type ThreadMemory = Pick<
@@ -87,14 +121,17 @@ type ThreadMemory = Pick<
 >;
 const PAGE_SIZE = 40;
 const initialData = (): ThreadData => ({
+  status: 'idle',
   queue: [],
   activeId: null,
   acceptedIds: [],
   reasoningEffort: 'auto',
   error: null,
+  failedInput: null,
   paused: false,
   autoTitle: true,
   usage: null,
+  toolInteractions: [],
 });
 function dataOf(thread: StorageThreadType): ThreadData {
   const defaults = initialData();
@@ -105,9 +142,21 @@ function dataOf(thread: StorageThreadType): ThreadData {
     ...thread.metadata,
   };
   // Only retain our runtime fields; Mastra/OM metadata must not be replayed on save.
-  return Object.fromEntries(
+  const data = Object.fromEntries(
     Object.keys(defaults).map((key) => [key, metadata[key]]),
   ) as ThreadData;
+  // Threads created before stream statuses were persisted retain recoverable HITL state.
+  if (thread.metadata?.status === undefined) {
+    data.status = data.error
+      ? 'failed'
+      : data.toolInteractions.some((item) => !item.response)
+        ? 'suspended'
+        : 'idle';
+  } else if (data.status !== 'idle') {
+    data.status =
+      threadStreamStatusSchema.safeParse(data.status).data ?? 'failed';
+  }
+  return data;
 }
 const messageText = (input: RunInput) =>
   input.parts
@@ -128,6 +177,7 @@ export class ThreadService {
     private memory: ThreadMemory,
     private runner: ChatRunner,
     private projects?: ProjectThreadAccess,
+    private backgroundTaskManager?: ThreadBackgroundTaskManager,
   ) {}
 
   subscribeNavigation(
@@ -259,15 +309,17 @@ export class ThreadService {
       reasoningEffort: data.reasoningEffort,
       createdAt: new Date(thread.createdAt).toISOString(),
       updatedAt: new Date(thread.updatedAt).toISOString(),
-      status:
-        runtime?.status ?? (data.activeId || data.error ? 'error' : 'idle'),
+      status: data.activeId && !runtime ? 'failed' : data.status,
+      ...(runtime?.stopping ? { stopping: true } : {}),
       error: data.activeId && !runtime ? 'RUN_INTERRUPTED' : data.error,
-      queue: data.queue.map((input) => ({
-        id: input.id,
-        text: messageText(input).slice(0, 200),
-        isImmediate: input.isImmediate,
-        createdAt: input.createdAt,
-      })),
+      queue: data.queue
+        .filter((input) => !input.resume)
+        .map((input) => ({
+          id: input.id,
+          text: messageText(input).slice(0, 200),
+          isImmediate: input.isImmediate,
+          createdAt: input.createdAt,
+        })),
     };
   }
 
@@ -277,6 +329,19 @@ export class ThreadService {
       messages: runtime.messages,
       activeMessageId: runtime.activeMessageId,
       usage: runtime.data.usage,
+      backgroundTasks: runtime.backgroundTasks,
+      backgroundTasksError: runtime.backgroundTasksError,
+      toolInteractions: runtime.data.toolInteractions.map((item) => ({
+        id: item.id,
+        kind: item.kind,
+        runId: item.runId,
+        toolCallId: item.toolCallId,
+        toolName: item.toolName,
+        input: item.input,
+        suspendPayload: item.suspendPayload,
+        resumeSchema: item.resumeSchema,
+        response: item.response,
+      })),
     };
   }
 
@@ -333,10 +398,20 @@ export class ThreadService {
 
   private release(runtime: Runtime) {
     clearTimeout(runtime.expiry);
-    if (runtime.job || runtime.listeners.size) return;
+    if (
+      this.closing ||
+      runtime.job ||
+      runtime.listeners.size ||
+      runtime.backgroundTasks.some(
+        (task) => task.status === 'pending' || task.status === 'running',
+      )
+    )
+      return;
     runtime.expiry = setTimeout(() => {
-      if (!runtime.job && !runtime.listeners.size)
+      if (!runtime.job && !runtime.listeners.size) {
+        void runtime.backgroundObserver?.stop();
         this.runtimes.delete(runtime.thread.id);
+      }
     }, 15 * 60_000);
     runtime.expiry.unref();
   }
@@ -358,6 +433,12 @@ export class ThreadService {
     });
   }
 
+  private backgroundFailed(runtime: Runtime, error: unknown) {
+    console.error('Thread background task subscription failed', error);
+    runtime.backgroundTasksError = 'BACKGROUND_TASKS_UNAVAILABLE';
+    this.publish(runtime);
+  }
+
   private async runtime(userId: string, id: string) {
     const thread = await this.accessible(userId, id);
     const cached = this.runtimes.get(id);
@@ -367,6 +448,7 @@ export class ThreadService {
       data.activeId = null;
       data.error = 'RUN_INTERRUPTED';
       data.paused = true;
+      data.status = 'failed';
     }
     const history = await this.history(userId, id);
     const runtime: Runtime = {
@@ -374,13 +456,36 @@ export class ThreadService {
       data,
       messages: history.messages,
       changedMessages: new Map(),
-      status: data.error ? 'error' : 'idle',
+      stopping: false,
       activeMessageId: null,
       listeners: new Set(),
+      backgroundTasks: [],
+      backgroundTasksError: null,
     };
     if (dataOf(thread).activeId || thread.metadata?.aime !== undefined)
       await this.save(runtime);
     this.runtimes.set(id, runtime);
+    if (this.backgroundTaskManager) {
+      runtime.backgroundObserver = new ThreadBackgroundTasks(
+        this.backgroundTaskManager,
+        { threadId: id, resourceId: thread.resourceId! },
+        (tasks) => {
+          runtime.backgroundTasks = tasks;
+          runtime.backgroundTasksError = null;
+          this.publish(runtime, true);
+          this.release(runtime);
+        },
+        (error) => this.backgroundFailed(runtime, error),
+      );
+      try {
+        await runtime.backgroundObserver.ready;
+      } catch (error) {
+        await runtime.backgroundObserver.stop();
+        clearTimeout(runtime.broadcast);
+        this.runtimes.delete(id);
+        throw error;
+      }
+    }
     this.release(runtime);
     return runtime;
   }
@@ -458,6 +563,32 @@ export class ThreadService {
     );
   }
 
+  async workspaceDirectory(userId: string, id: string) {
+    const thread = await this.accessible(userId, id);
+    const path = thread.metadata?.workspace;
+    if (typeof path !== 'string' || !path)
+      throw new ThreadError('WORKSPACE_UNAVAILABLE', 404);
+    return path;
+  }
+
+  async listSkills(
+    userId: string,
+    scope: { threadId?: string; projectId?: string } = {},
+  ): Promise<ChatSkill[]> {
+    let projectId = scope.projectId;
+    if (scope.threadId) {
+      const thread = await this.accessible(userId, scope.threadId);
+      projectId = threadScope(thread.resourceId).projectId;
+    } else if (projectId) {
+      await this.projectAccess(userId, projectId);
+    }
+    const skills = (await this.runner.listSkills?.(userId, projectId)) ?? [];
+    // Membership or ownership can change while the filesystem is being read.
+    if (scope.threadId) await this.accessible(userId, scope.threadId);
+    else if (projectId) await this.projectAccess(userId, projectId);
+    return skills;
+  }
+
   async history(
     userId: string,
     id: string,
@@ -526,9 +657,10 @@ export class ThreadService {
       const runtime = await this.runtime(userId, id);
       if (runtime.data.acceptedIds.includes(input.id))
         return this.summary(runtime.thread, runtime);
-      if (runtime.status === 'stopping')
-        throw new ThreadError('THREAD_STOPPING', 409);
-      const direct = !runtime.job;
+      if (runtime.stopping) throw new ThreadError('THREAD_STOPPING', 409);
+      const direct =
+        !runtime.job &&
+        !runtime.data.toolInteractions.some((item) => !item.response);
       if (
         !direct &&
         (runtime.data.queue.length >= 20 ||
@@ -555,6 +687,7 @@ export class ThreadService {
         -200,
       );
       runtime.data.error = null;
+      runtime.data.failedInput = null;
       runtime.data.paused = false;
       runtime.data.reasoningEffort = input.reasoningEffort;
       runtime.thread.metadata = {
@@ -579,6 +712,64 @@ export class ThreadService {
       }
       if (direct) this.start(runtime, pending);
       else this.publish(runtime);
+      return this.summary(runtime.thread, runtime);
+    });
+  }
+
+  respondToTool(
+    userId: string,
+    id: string,
+    interactionId: string,
+    raw: ToolResponse,
+  ) {
+    return this.scopeLocked(userId, id, async () => {
+      if (this.closing) throw new ThreadError('SERVER_STOPPING', 503);
+      const response = toolResponseSchema.parse(raw);
+      const runtime = await this.runtime(userId, id);
+      if (runtime.data.acceptedIds.includes(response.id))
+        return this.summary(runtime.thread, runtime);
+      const interaction = runtime.data.toolInteractions.find(
+        (item) => item.id === interactionId && !item.response,
+      );
+      if (!interaction) throw new ThreadError('TOOL_NOT_PENDING', 409);
+      if (runtime.job || runtime.data.queue.some((item) => item.resume))
+        throw new ThreadError('THREAD_BUSY', 409);
+      validateToolResponse(interaction, response);
+      await this.runner.validate(
+        userId,
+        interaction.settings,
+        threadScope(runtime.thread.resourceId).projectId,
+      );
+      const previous = structuredClone(runtime.data);
+      runtime.data.queue.unshift({
+        ...interaction.settings,
+        id: response.id,
+        parts: [],
+        isImmediate: false,
+        createdBy: userId,
+        createdAt: new Date().toISOString(),
+        resume: {
+          interactionId,
+          runId: interaction.runId,
+          toolCallId: interaction.toolCallId,
+          response,
+        },
+      });
+      runtime.data.acceptedIds = [
+        ...runtime.data.acceptedIds,
+        response.id,
+      ].slice(-200);
+      runtime.data.paused = false;
+      runtime.data.error = null;
+      runtime.data.failedInput = null;
+      try {
+        await this.save(runtime);
+      } catch (error) {
+        runtime.data = previous;
+        throw error;
+      }
+      this.start(runtime);
+      this.publish(runtime);
       return this.summary(runtime.thread, runtime);
     });
   }
@@ -616,20 +807,22 @@ export class ThreadService {
     this.upsert(runtime, message);
   }
 
-  private start(runtime: Runtime, direct?: RunInput) {
+  private start(runtime: Runtime, direct?: RunnerInput) {
     if (
       runtime.job ||
       runtime.data.paused ||
       this.closing ||
+      (runtime.data.toolInteractions.some((item) => !item.response) &&
+        !(direct ?? runtime.data.queue[0])?.resume) ||
       (!direct && !runtime.data.queue.length)
     )
       return;
-    runtime.status = 'running';
+    runtime.data.status = 'pending';
     this.publish(runtime);
     clearTimeout(runtime.expiry);
     runtime.job = this.drain(runtime, direct)
       .catch(() => {
-        runtime.status = 'error';
+        runtime.data.status = 'failed';
         runtime.data.error = 'CHAT_FAILED';
         runtime.data.paused = true;
       })
@@ -637,35 +830,52 @@ export class ThreadService {
         runtime.job = undefined;
         runtime.controller = undefined;
         runtime.activeMessageId = null;
-        runtime.status = runtime.data.error ? 'error' : 'idle';
+        runtime.stopping = false;
         this.publish(runtime);
         this.release(runtime);
         if (!runtime.data.paused) this.start(runtime);
       });
   }
 
-  private async drain(runtime: Runtime, direct?: RunInput) {
+  private async drain(runtime: Runtime, direct?: RunnerInput) {
     while (!runtime.data.paused && !this.closing) {
       const input = await this.locked(runtime.thread.id, async () => {
-        if (runtime.data.paused || (!direct && !runtime.data.queue.length))
+        if (
+          runtime.data.paused ||
+          (!direct && !runtime.data.queue.length) ||
+          (runtime.data.toolInteractions.some((item) => !item.response) &&
+            !(direct ?? runtime.data.queue[0])?.resume)
+        )
           return null;
         const next = direct ?? runtime.data.queue[0];
         runtime.controller = new AbortController();
-        if (!direct) await this.accept(runtime, next);
+        if (!direct && !next.resume) await this.accept(runtime, next);
         if (direct) direct = undefined;
         else runtime.data.queue.shift();
         runtime.data.activeId = next.id;
-        runtime.status = 'running';
+        runtime.data.status = 'pending';
         await this.save(runtime);
         this.publish(runtime);
         return next;
       });
       if (!input) break;
       try {
-        await this.runner.execute({
+        const result = await this.runner.execute({
           thread: runtime.thread,
           input,
           signal: runtime.controller!.signal,
+          onBackgroundTaskStarted: async (taskId) => {
+            try {
+              await runtime.backgroundObserver?.refresh(taskId);
+            } catch (error) {
+              this.backgroundFailed(runtime, error);
+            }
+          },
+          onStatus: (status) => {
+            if (runtime.data.status === status) return;
+            runtime.data.status = status;
+            this.publish(runtime);
+          },
           onMessage: (message) => {
             this.upsert(runtime, message);
             runtime.activeMessageId = message.id;
@@ -679,7 +889,11 @@ export class ThreadService {
             }),
           takeImmediate: () =>
             this.locked(runtime.thread.id, async () => {
-              if (runtime.data.paused || runtime.controller?.signal.aborted)
+              if (
+                runtime.data.paused ||
+                runtime.data.toolInteractions.some((item) => !item.response) ||
+                runtime.controller?.signal.aborted
+              )
                 return [];
               const immediate = runtime.data.queue.filter(
                 (item) => item.isImmediate,
@@ -696,17 +910,65 @@ export class ThreadService {
               return immediate;
             }),
         });
+        await this.locked(runtime.thread.id, async () => {
+          runtime.data.failedInput = null;
+          const interactions = runtime.data.toolInteractions.map(
+            (interaction) =>
+              interaction.id === input.resume?.interactionId
+                ? { ...interaction, response: input.resume.response }
+                : interaction,
+          );
+          for (const interaction of result?.toolInteractions ?? []) {
+            // A tool can suspend again with the same call ID; keep only its newest request.
+            const index = interactions.findIndex(
+              (item) => item.toolCallId === interaction.toolCallId,
+            );
+            const pending = {
+              ...interaction,
+              settings: {
+                model: input.model,
+                reasoningEffort: input.reasoningEffort,
+              },
+            };
+            if (index < 0) interactions.push(pending);
+            else interactions[index] = pending;
+          }
+          const completed = interactions
+            .filter((item) => item.response)
+            .slice(-100);
+          runtime.data.toolInteractions = [
+            ...completed,
+            ...interactions.filter((item) => !item.response),
+          ];
+          // Native runners return stream.status verbatim. Legacy runners without
+          // a result keep the same lifecycle semantics.
+          runtime.data.status =
+            result?.status ??
+            (runtime.controller?.signal.aborted
+              ? 'canceled'
+              : runtime.data.toolInteractions.some((item) => !item.response)
+                ? 'suspended'
+                : 'success');
+          if (runtime.data.status !== 'success') runtime.data.paused = true;
+        });
       } catch (error) {
+        if (
+          runtime.data.status === 'pending' ||
+          runtime.data.status === 'running'
+        )
+          runtime.data.status = runtime.controller?.signal.aborted
+            ? 'canceled'
+            : 'failed';
         if (!runtime.controller?.signal.aborted) {
-          runtime.data.error =
-            error instanceof ThreadError ? error.code : 'CHAT_FAILED';
+          runtime.data.error = threadErrorMessage(error);
+          runtime.data.failedInput = structuredClone(input);
           runtime.data.paused = true;
         }
       }
       await this.locked(runtime.thread.id, async () => {
         runtime.data.activeId = null;
         runtime.activeMessageId = null;
-        runtime.status = runtime.data.error ? 'error' : 'idle';
+        runtime.stopping = false;
         runtime.messages = runtime.messages.slice(-80);
         await this.save(runtime);
         this.publish(runtime);
@@ -718,9 +980,83 @@ export class ThreadService {
     return this.scopeLocked(userId, id, async () => {
       const runtime = await this.runtime(userId, id);
       runtime.data.paused = true;
-      if (runtime.job) runtime.status = 'stopping';
+      if (runtime.job) runtime.stopping = true;
       runtime.controller?.abort();
       await this.save(runtime);
+      this.publish(runtime);
+      return this.summary(runtime.thread, runtime);
+    });
+  }
+
+  cancelBackgroundTask(userId: string, id: string, taskId: string) {
+    return this.scopeLocked(userId, id, async () => {
+      const thread = await this.accessible(userId, id);
+      const manager = this.backgroundTaskManager;
+      if (!manager) throw new ThreadError('BACKGROUND_TASKS_UNAVAILABLE', 503);
+      const task = await manager.getTask(taskId);
+      if (
+        !task ||
+        task.threadId !== id ||
+        task.resourceId !== thread.resourceId
+      )
+        throw new ThreadError('BACKGROUND_TASK_NOT_FOUND', 404);
+      // Mastra cancellation aborts the tool and is idempotent for terminal tasks.
+      await manager.cancel(taskId);
+      const runtime = this.runtimes.get(id);
+      if (runtime?.backgroundObserver) {
+        try {
+          await runtime.backgroundObserver.refresh(taskId);
+        } catch (error) {
+          this.backgroundFailed(runtime, error);
+        }
+      }
+    });
+  }
+
+  retry(userId: string, id: string) {
+    return this.scopeLocked(userId, id, async () => {
+      if (this.closing) throw new ThreadError('SERVER_STOPPING', 503);
+      const runtime = await this.runtime(userId, id);
+      // Duplicate clicks must not enqueue another copy of the failed run.
+      if (runtime.job || !runtime.data.error)
+        return this.summary(runtime.thread, runtime);
+      let input = runtime.data.failedInput;
+      if (!input) {
+        // Older threads and interrupted runs may only have their stored messages.
+        const message = [...runtime.messages]
+          .reverse()
+          .find((item) => item.role === 'user');
+        if (!message) throw new ThreadError('RETRY_UNAVAILABLE', 409);
+        input = runInputSchema.parse({
+          id: message.id,
+          parts: message.parts,
+          model: runtime.thread.metadata?.model ?? null,
+          reasoningEffort: runtime.data.reasoningEffort,
+          isImmediate: false,
+        });
+      }
+      if (
+        !input.resume &&
+        runtime.data.toolInteractions.some((item) => !item.response)
+      )
+        throw new ThreadError('RETRY_UNAVAILABLE', 409);
+      await this.runner.validate(
+        userId,
+        input,
+        threadScope(runtime.thread.resourceId).projectId,
+      );
+      const previous = structuredClone(runtime.data);
+      runtime.data.error = null;
+      runtime.data.paused = false;
+      runtime.data.activeId = input.id;
+      try {
+        await this.save(runtime);
+      } catch (error) {
+        runtime.data = previous;
+        throw error;
+      }
+      // Reuse the accepted input ID; do not insert a second user message.
+      this.start(runtime, input);
       this.publish(runtime);
       return this.summary(runtime.thread, runtime);
     });
@@ -878,9 +1214,17 @@ export class ThreadService {
     return this.scopeLocked(userId, id, async () => {
       const thread = await this.accessible(userId, id);
       await this.manageable(userId, thread);
-      const runtime = this.runtimes.get(id);
+      const runtime = await this.runtime(userId, id);
+      const activeTasks = await this.backgroundTaskManager?.listTasks({
+        threadId: id,
+        resourceId: thread.resourceId!,
+        status: ['pending', 'running', 'suspended'],
+        perPage: 1,
+      });
       if (
         runtime?.job ||
+        activeTasks?.tasks.length ||
+        runtime.backgroundTasks.some(isBackgroundTaskActive) ||
         dataOf(await this.accessible(userId, id)).queue.length
       )
         throw new ThreadError('THREAD_BUSY', 409);
@@ -889,6 +1233,7 @@ export class ThreadService {
         clearTimeout(runtime.broadcast);
       }
       await this.memory.deleteThread(id);
+      await runtime.backgroundObserver?.stop();
       this.navigation.publish(thread.resourceId!, {
         type: 'remove',
         id,
@@ -896,7 +1241,7 @@ export class ThreadService {
       });
       if (runtime) {
         runtime.data.error = 'THREAD_NOT_FOUND';
-        runtime.status = 'error';
+        runtime.data.status = 'failed';
         this.publish(runtime);
         runtime.listeners.clear();
       }
@@ -914,12 +1259,25 @@ export class ThreadService {
         subscription.revoked?.();
         runtime.listeners.delete(subscription);
       }
+      if (!userId) {
+        clearTimeout(runtime.expiry);
+        clearTimeout(runtime.broadcast);
+        void runtime.backgroundObserver?.stop();
+        this.runtimes.delete(runtime.thread.id);
+        continue;
+      }
       this.release(runtime);
     }
   }
 
   withProjectDeletion<T>(projectId: string, remove: () => Promise<T>) {
     return this.locked(`project:${projectId}`, async () => {
+      const activeTasks = await this.backgroundTaskManager?.listTasks({
+        resourceId: `project:${projectId}`,
+        status: ['pending', 'running', 'suspended'],
+        perPage: 1,
+      });
+      if (activeTasks?.tasks.length) throw new ThreadError('PROJECT_BUSY', 409);
       let page = 0;
       while (true) {
         const result = await this.memory.listThreads({
@@ -953,7 +1311,10 @@ export class ThreadService {
       clearTimeout(runtime.broadcast);
     }
     await Promise.allSettled(
-      [...this.runtimes.values()].map((runtime) => runtime.job),
+      [...this.runtimes.values()].flatMap((runtime) => [
+        runtime.job,
+        runtime.backgroundObserver?.stop(),
+      ]),
     );
   }
 }

@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import { LoaderCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import type { chatErrorKey } from '@/components/chat/api';
 
 // Fetch only in response to a scroll or an explicit click. An intersection
@@ -27,22 +28,26 @@ export function SidebarPageList({
 }) {
   const { t } = useTranslation();
   return (
-    <nav
-      aria-label={label}
-      tabIndex={0}
-      className="overflow-y-auto overscroll-contain rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      style={{ maxHeight }}
-      onScroll={(event) => {
-        if (
-          event.target !== event.currentTarget ||
-          loading ||
-          error ||
-          !hasMore
-        )
-          return;
-        const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
-        if (scrollTop > 0 && scrollHeight - clientHeight - scrollTop < 24)
-          void loadMore();
+    <ScrollArea
+      className="overflow-hidden rounded-md"
+      viewportProps={{
+        role: 'navigation',
+        'aria-label': label,
+        tabIndex: 0,
+        className: 'overscroll-contain [&>div]:block!',
+        style: { maxHeight },
+        onScroll: (event) => {
+          if (
+            event.target !== event.currentTarget ||
+            loading ||
+            error ||
+            !hasMore
+          )
+            return;
+          const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
+          if (scrollTop > 0 && scrollHeight - clientHeight - scrollTop < 24)
+            void loadMore();
+        },
       }}
     >
       {children}
@@ -73,6 +78,6 @@ export function SidebarPageList({
           </Button>
         )
       )}
-    </nav>
+    </ScrollArea>
   );
 }

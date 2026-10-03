@@ -7,6 +7,9 @@ import type {
   ThreadSnapshot,
   ThreadSummary,
   ChatUsage,
+  ToolInteraction,
+  ToolResponse,
+  ThreadBackgroundTask,
 } from '@aime/shared/threads';
 import { chatApi, ChatApiError, createThreadTransport } from './api';
 import { mergeMessages } from './messages';
@@ -18,6 +21,14 @@ export function useThreadChat(
   const [thread, setThread] = useState<ThreadSummary | null>(null);
   const [connected, setConnected] = useState(false);
   const [usage, setUsage] = useState<ChatUsage | null>(null);
+  const [backgroundTasks, setBackgroundTasks] = useState<
+    ThreadBackgroundTask[]
+  >([]);
+  const [backgroundTasksError, setBackgroundTasksError] =
+    useState<ThreadSnapshot<UIMessage>['backgroundTasksError']>(null);
+  const [toolInteractions, setToolInteractions] = useState<ToolInteraction[]>(
+    [],
+  );
   const [error, setError] = useState<unknown>(null);
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
   const [history, setHistory] = useState<MessagePage<UIMessage> | null>(null);
@@ -77,6 +88,9 @@ export function useThreadChat(
           updateThread(snapshot.thread);
           setActiveMessageId(snapshot.activeMessageId);
           setUsage(snapshot.usage ?? null);
+          setBackgroundTasks(snapshot.backgroundTasks ?? []);
+          setBackgroundTasksError(snapshot.backgroundTasksError ?? null);
+          setToolInteractions(snapshot.toolInteractions ?? []);
           const queued = new Set(snapshot.thread.queue.map((item) => item.id));
           if (recovering)
             recoveredMessages = mergeMessages(
@@ -128,6 +142,9 @@ export function useThreadChat(
           setMessages([]);
           setThread(null);
           setUsage(null);
+          setBackgroundTasks([]);
+          setBackgroundTasksError(null);
+          setToolInteractions([]);
           setHistory(null);
           setError(new ChatApiError('PROJECT_NOT_FOUND'));
         });
@@ -188,6 +205,12 @@ export function useThreadChat(
   return {
     thread,
     usage,
+    backgroundTasks,
+    backgroundTasksError,
+    toolInteractions,
+    respondToTool: async (interactionId: string, response: ToolResponse) => {
+      await chatApi.respondToTool(threadId, interactionId, response);
+    },
     messages,
     connected,
     error,

@@ -35,8 +35,17 @@ export function ThreadStatusBadge({
   const label = t(`chat.status.${status}`);
   return (
     <Badge
-      variant={status === 'error' ? 'destructive' : 'secondary'}
-      className={cn('shrink-0', className)}
+      variant={
+        status === 'failed' || status === 'tripwire'
+          ? 'destructive'
+          : 'secondary'
+      }
+      className={cn(
+        'shrink-0',
+        status === 'suspended' &&
+          'bg-amber-500/10 text-amber-700 dark:text-amber-300',
+        className,
+      )}
       title={label}
       aria-label={label}
     >

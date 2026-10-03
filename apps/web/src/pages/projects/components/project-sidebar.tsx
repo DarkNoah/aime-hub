@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { Link, useLocation, useMatch, useNavigate } from 'react-router';
+import { Link, useMatch, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { ArrowUpRight, ChevronRight, Folder, Plus } from 'lucide-react';
 import type { ProjectSummary } from '@aime/shared/projects';
@@ -26,7 +26,6 @@ import { ProjectSheet } from './project-sheet';
 export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const location = useLocation();
   const activeProjectId = useMatch('/projects/:projectId/*')?.params.projectId;
   const { projects } = useProjectNavigation();
   const list = useSyncExternalStore(
@@ -43,14 +42,8 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
       <Collapsible open={open} onOpenChange={setOpen}>
-        <div
-          className={cn(
-            'flex h-10 items-center rounded-lg',
-            location.pathname.startsWith('/projects') &&
-              'bg-card text-primary ring-1 ring-border',
-          )}
-        >
-          <CollapsibleTrigger className="flex h-full min-w-0 flex-1 items-center gap-3 rounded-lg px-3 text-sm outline-none hover:bg-accent/70 focus-visible:ring-2 focus-visible:ring-ring">
+        <div className={cn('flex h-10 items-center rounded-lg')}>
+          <CollapsibleTrigger className="flex h-full min-w-0 flex-1 items-center gap-3 rounded-lg px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <Folder className="size-4 shrink-0" />
             <span className="font-medium">{t('nav.projects')}</span>
             <ChevronRight
@@ -72,7 +65,7 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
           </Button>
         </div>
         <CollapsibleContent forceMount hidden={!open}>
-          <div className="mt-1 mb-2 ml-5 border-l pl-2">
+          <div className="mt-1 mb-2 ml-2 border-l ">
             <Link
               to="/projects"
               onClick={onNavigate}

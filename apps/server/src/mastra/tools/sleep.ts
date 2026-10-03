@@ -23,6 +23,12 @@ export const sleep = createTool({
     elapsedMs: z.number(),
     completedAt: z.string(),
   }),
+  background: {
+    enabled: true,
+    defaultDisposition: 'deferred',
+    // timeoutMs: 600_000,
+    // maxRetries: 1,
+  },
   execute: async ({ durationMs }, context) => {
     const startedAt = performance.now();
     await setTimeout(durationMs, undefined, { signal: context?.abortSignal });

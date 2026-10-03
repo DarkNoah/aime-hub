@@ -26,13 +26,18 @@ export function ResizableHandle({
     <Separator
       data-slot="resizable-handle"
       className={cn(
-        'relative flex w-px items-center justify-center bg-border outline-none after:absolute after:inset-y-0 after:-left-1 after:w-2 hover:bg-primary focus-visible:bg-primary focus-visible:ring-2 focus-visible:ring-ring data-[separator=active]:bg-primary',
+        'group/resizable-handle relative flex w-px shrink-0 items-center justify-center bg-border outline-none after:absolute hover:bg-primary focus-visible:bg-primary focus-visible:ring-2 focus-visible:ring-ring data-[separator=active]:bg-primary',
+        'aria-[orientation=vertical]:after:inset-y-0 aria-[orientation=vertical]:after:-left-1 aria-[orientation=vertical]:after:w-2',
+        'aria-[orientation=horizontal]:h-px aria-[orientation=horizontal]:w-full aria-[orientation=horizontal]:after:inset-x-0 aria-[orientation=horizontal]:after:-top-1 aria-[orientation=horizontal]:after:h-2',
         className,
       )}
       {...props}
     >
-      <span className="z-10 flex h-6 w-3 items-center justify-center rounded-sm border bg-muted">
-        <GripVertical className="size-3" aria-hidden="true" />
+      <span className="z-10 flex h-6 w-3 items-center justify-center rounded-sm border bg-muted group-aria-[orientation=horizontal]/resizable-handle:h-3 group-aria-[orientation=horizontal]/resizable-handle:w-6">
+        <GripVertical
+          className="size-3 group-aria-[orientation=horizontal]/resizable-handle:rotate-90"
+          aria-hidden="true"
+        />
       </span>
     </Separator>
   );

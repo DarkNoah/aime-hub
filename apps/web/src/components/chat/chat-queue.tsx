@@ -1,3 +1,4 @@
+import { isThreadActive } from '@aime/shared/threads';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -38,9 +39,11 @@ import { chatApi, chatErrorKey } from './api';
 export function ChatQueue({
   thread,
   disabled,
+  waitingForTool = false,
 }: {
   thread: ThreadSummary;
   disabled?: boolean;
+  waitingForTool?: boolean;
 }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState<string | null>(null);
@@ -79,15 +82,19 @@ export function ChatQueue({
       aria-busy={pending}
       className="mx-3 -mb-3 gap-0 rounded-b-none rounded-t-xl border-b-0 bg-muted/50 px-1.5 pt-1 pb-3 shadow-none"
     >
-      {thread.status !== 'running' && thread.status !== 'stopping' && (
+      {!isThreadActive(thread.status) && !thread.stopping && (
         <div className="flex items-center justify-between gap-2 px-2 py-1">
           <Badge variant="secondary" className="text-xs">
-            {t('chat.queuePaused')}
+            {t(
+              waitingForTool
+                ? 'chat.toolInteraction.waiting'
+                : 'chat.queuePaused',
+            )}
           </Badge>
           <Button
             variant="ghost"
             size="sm"
-            disabled={unavailable}
+            disabled={unavailable || waitingForTool}
             onClick={() => void change(() => chatApi.resume(thread.id))}
           >
             <Play className="size-3" />

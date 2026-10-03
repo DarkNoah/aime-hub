@@ -47,6 +47,11 @@ const AdminProvidersPage = lazy(() =>
     default: m.AdminProvidersPage,
   })),
 );
+const AdminSkillsPage = lazy(() =>
+  import('@/pages/admin/skills/page').then((m) => ({
+    default: m.AdminSkillsPage,
+  })),
+);
 const NotFoundPage = lazy(() =>
   import('@/pages/errors/not-found-page').then((m) => ({
     default: m.NotFoundPage,
@@ -97,6 +102,7 @@ export function App() {
                       element={<AdminProvidersPage />}
                     />
                     <Route path="/admin/users" element={<AdminUsersPage />} />
+                    <Route path="/admin/skills" element={<AdminSkillsPage />} />
                     <Route
                       path="/admin/settings"
                       element={<AdminSettingsPage />}
