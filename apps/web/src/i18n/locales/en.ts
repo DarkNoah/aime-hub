@@ -47,6 +47,14 @@ export const en = {
   'skills.removeHint':
     '“{{name}}” and its bundled files will be deleted from the shared skill directory. Future conversation runs will no longer load it.',
   'skills.removeSuccess': 'Skill removed.',
+  'skills.removeGroup': 'Delete group',
+  'skills.removeGroupNamed': 'Delete group {{name}}',
+  'skills.removeGroupTitle': 'Delete all skills in this group?',
+  'skills.removeGroupHint':
+    'Permanently delete all skills in “{{name}}” ({{count}} in total) and their bundled files, including skills hidden by the current search. Future conversation runs will no longer load them.',
+  'skills.removeGroupSuccess': 'Deleted {{count}} skills from the group.',
+  'skills.groupChanged':
+    'The skills in this group have changed. Refresh the list and confirm the group again.',
   'skills.invalidUrl':
     'Enter owner/repo or a GitHub HTTPS repository, tree folder, or blob SKILL.md link.',
   'skills.sourceNotFound':

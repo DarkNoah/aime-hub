@@ -45,6 +45,13 @@ export const zhCN = {
   'skills.removeHint':
     '将从共享技能目录删除「{{name}}」及其附带文件，后续会话运行将不再加载此技能。',
   'skills.removeSuccess': '技能已移除。',
+  'skills.removeGroup': '删除整组',
+  'skills.removeGroupNamed': '删除分组 {{name}}',
+  'skills.removeGroupTitle': '删除此分组的全部技能？',
+  'skills.removeGroupHint':
+    '将永久删除「{{name}}」分组内全部 {{count}} 个技能及其附带文件，包括被当前搜索条件隐藏的技能。后续会话运行将不再加载这些技能。',
+  'skills.removeGroupSuccess': '已删除分组内的 {{count}} 个技能。',
+  'skills.groupChanged': '此分组的技能已发生变化，请刷新列表后重新确认。',
   'skills.invalidUrl':
     '请输入 owner/repo 或 GitHub HTTPS 仓库、tree 文件夹、blob SKILL.md 链接。',
   'skills.sourceNotFound': '找不到指定的分支、标签、文件夹或 SKILL.md 文件。',

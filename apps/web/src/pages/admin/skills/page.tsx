@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  ChevronRight,
   Folder,
   FolderGit2,
   Loader2,
@@ -19,6 +20,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -29,6 +35,10 @@ import {
 import { skillErrorKey, skillRequest } from './api';
 import { ImportSkillsSheet } from './components/import-skills-sheet';
 
+type SkillRemoval =
+  | { kind: 'skill'; skill: InstalledSkill }
+  | { kind: 'group'; group: string; skills: InstalledSkill[] };
+
 export function AdminSkillsPage() {
   const { t } = useTranslation();
   const [catalog, setCatalog] = useState<InstalledSkills>();
@@ -37,7 +47,7 @@ export function AdminSkillsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [importing, setImporting] = useState(false);
-  const [removing, setRemoving] = useState<InstalledSkill>();
+  const [removing, setRemoving] = useState<SkillRemoval>();
   const [pending, setPending] = useState(false);
   const submitting = useRef(false);
   useEffect(() => {
@@ -95,22 +105,39 @@ export function AdminSkillsPage() {
     submitting.current = true;
     setPending(true);
     try {
-      await skillRequest('', {
-        method: 'DELETE',
-        body: JSON.stringify({ path: removing.path }),
-      });
+      let removed: string[];
+      if (removing.kind === 'group') {
+        removed = await skillRequest<string[]>('/groups', {
+          method: 'DELETE',
+          body: JSON.stringify({
+            group: removing.group,
+            paths: removing.skills.map((skill) => skill.path),
+          }),
+        });
+      } else {
+        await skillRequest('', {
+          method: 'DELETE',
+          body: JSON.stringify({ path: removing.skill.path }),
+        });
+        removed = [removing.skill.path];
+      }
+      const removedPaths = new Set(removed);
       setCatalog((current) =>
         current
           ? {
               ...current,
               skills: current.skills.filter(
-                (skill) => skill.path !== removing.path,
+                (skill) => !removedPaths.has(skill.path),
               ),
             }
           : current,
       );
       setRemoving(undefined);
-      toast.success(t('skills.removeSuccess'));
+      toast.success(
+        removing.kind === 'group'
+          ? t('skills.removeGroupSuccess', { count: removed.length })
+          : t('skills.removeSuccess'),
+      );
     } catch (cause) {
       toast.error(t(skillErrorKey(cause)));
     } finally {
@@ -186,70 +213,121 @@ export function AdminSkillsPage() {
           viewportProps={{ 'aria-busy': loading }}
         >
           {visible.length ? (
-            [...groups].map(([group, skills]) => (
-              <section key={group} aria-label={group || t('skills.localGroup')}>
-                <h2 className="flex items-center gap-2 border-b bg-muted/50 px-4 py-3 text-sm font-medium sm:px-5">
+            [...groups].map(([group, skills]) => {
+              const label = group || t('skills.localGroup');
+              const heading = (
+                <>
                   <Folder
                     className="size-4 shrink-0 text-muted-foreground"
                     aria-hidden="true"
                   />
-                  <span className="min-w-0 break-all">
-                    {group || t('skills.localGroup')}
-                  </span>
+                  <span className="min-w-0 break-all">{label}</span>
                   <span className="ml-auto text-xs tabular-nums text-muted-foreground">
                     {skills.length}
                   </span>
-                </h2>
-                <div className="divide-y">
-                  {skills.map((skill) => (
-                    <article
-                      key={skill.path}
-                      className="flex items-start gap-3 px-4 py-4 sm:px-5"
-                    >
-                      <Sparkles
-                        className="mt-1 size-4 shrink-0 text-primary"
-                        aria-hidden="true"
-                      />
-                      <div className="min-w-0 flex-1 space-y-1.5">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="break-all text-sm font-medium">
-                            {skill.name}
-                          </h3>
-                          <Badge
-                            variant={skill.valid ? 'secondary' : 'destructive'}
+                </>
+              );
+              return (
+                <Collapsible key={group} defaultOpen asChild>
+                  <section aria-label={label}>
+                    <div className="flex items-center border-b bg-muted/50">
+                      <h2 className="min-w-0 flex-1 text-sm font-medium">
+                        {group ? (
+                          <CollapsibleTrigger className="flex w-full items-center gap-2 px-4 py-3 text-left outline-none transition-colors  focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-5 [&[data-state=open]>svg:first-child]:rotate-90">
+                            <ChevronRight
+                              className="size-4 shrink-0 text-muted-foreground transition-transform"
+                              aria-hidden="true"
+                            />
+                            {heading}
+                          </CollapsibleTrigger>
+                        ) : (
+                          <div className="flex items-center gap-2 px-4 py-3 sm:px-5">
+                            {heading}
+                          </div>
+                        )}
+                      </h2>
+                      {group ? (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="mr-3 shrink-0"
+                          disabled={loading || pending}
+                          aria-label={t('skills.removeGroupNamed', {
+                            name: group,
+                          })}
+                          title={t('skills.removeGroupNamed', { name: group })}
+                          onClick={() =>
+                            setRemoving({
+                              kind: 'group',
+                              group,
+                              skills: catalog.skills.filter(
+                                (skill) => skill.group === group,
+                              ),
+                            })
+                          }
+                        >
+                          <Trash2 className="text-muted-foreground" />
+                        </Button>
+                      ) : null}
+                    </div>
+                    <CollapsibleContent>
+                      <div className="divide-y">
+                        {skills.map((skill) => (
+                          <article
+                            key={skill.path}
+                            className="flex items-start gap-3 px-4 py-4 sm:px-5"
                           >
-                            {t(
-                              skill.valid
-                                ? 'skills.installed'
-                                : 'skills.invalid',
-                            )}
-                          </Badge>
-                        </div>
-                        {skill.description ? (
-                          <p className="line-clamp-2 text-sm leading-6 text-muted-foreground">
-                            {skill.description}
-                          </p>
-                        ) : null}
-                        <p className="break-all font-mono text-xs text-muted-foreground">
-                          {skill.path ? `${skill.path}/` : ''}SKILL.md
-                        </p>
+                            <Sparkles
+                              className="mt-1 size-4 shrink-0 text-primary"
+                              aria-hidden="true"
+                            />
+                            <div className="min-w-0 flex-1 space-y-1.5">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="break-all text-sm font-medium">
+                                  {skill.name}
+                                </h3>
+                                <Badge
+                                  variant={
+                                    skill.valid ? 'secondary' : 'destructive'
+                                  }
+                                >
+                                  {t(
+                                    skill.valid
+                                      ? 'skills.installed'
+                                      : 'skills.invalid',
+                                  )}
+                                </Badge>
+                              </div>
+                              {skill.description ? (
+                                <p className="line-clamp-2 text-sm leading-6 text-muted-foreground">
+                                  {skill.description}
+                                </p>
+                              ) : null}
+                              <p className="break-all font-mono text-xs text-muted-foreground">
+                                {skill.path ? `${skill.path}/` : ''}SKILL.md
+                              </p>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              disabled={!skill.path || loading}
+                              aria-label={t('skills.removeNamed', {
+                                name: skill.name,
+                              })}
+                              onClick={() =>
+                                setRemoving({ kind: 'skill', skill })
+                              }
+                            >
+                              <Trash2 className="text-muted-foreground" />
+                            </Button>
+                          </article>
+                        ))}
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        disabled={!skill.path || loading}
-                        aria-label={t('skills.removeNamed', {
-                          name: skill.name,
-                        })}
-                        onClick={() => setRemoving(skill)}
-                      >
-                        <Trash2 className="text-muted-foreground" />
-                      </Button>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            ))
+                    </CollapsibleContent>
+                  </section>
+                </Collapsible>
+              );
+            })
           ) : (
             <p className="px-5 py-16 text-center text-sm text-muted-foreground">
               {t('skills.noMatches')}
@@ -287,14 +365,36 @@ export function AdminSkillsPage() {
       >
         <DialogContent showCloseButton={!pending}>
           <DialogHeader>
-            <DialogTitle>{t('skills.removeTitle')}</DialogTitle>
+            <DialogTitle>
+              {t(
+                removing?.kind === 'group'
+                  ? 'skills.removeGroupTitle'
+                  : 'skills.removeTitle',
+              )}
+            </DialogTitle>
             <DialogDescription>
-              {t('skills.removeHint', { name: removing?.name ?? '' })}
+              {removing?.kind === 'group'
+                ? t('skills.removeGroupHint', {
+                    name: removing.group,
+                    count: removing.skills.length,
+                  })
+                : t('skills.removeHint', { name: removing?.skill.name ?? '' })}
             </DialogDescription>
           </DialogHeader>
           <code className="break-all text-xs text-muted-foreground">
-            {removing?.path}
+            {removing?.kind === 'group' ? removing.group : removing?.skill.path}
           </code>
+          {removing?.kind === 'group' ? (
+            <ScrollArea className="h-40 rounded-md border">
+              <ul className="space-y-2 p-3 text-sm">
+                {removing.skills.map((skill) => (
+                  <li key={skill.path} className="break-all">
+                    {skill.name}
+                  </li>
+                ))}
+              </ul>
+            </ScrollArea>
+          ) : null}
           <DialogFooter>
             <Button
               variant="outline"
@@ -309,7 +409,11 @@ export function AdminSkillsPage() {
               onClick={() => void remove()}
             >
               {pending ? <Loader2 className="animate-spin" /> : <Trash2 />}
-              {t('skills.remove')}
+              {t(
+                removing?.kind === 'group'
+                  ? 'skills.removeGroup'
+                  : 'skills.remove',
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

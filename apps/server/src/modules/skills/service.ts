@@ -7,6 +7,7 @@ import {
   readdir,
   rename,
   rm,
+  rmdir,
   writeFile,
 } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -373,6 +374,55 @@ export class SkillService {
       )
         throw new SkillError('SKILL_NOT_FOUND', 404);
       await rm(target, { recursive: true });
+    });
+  }
+
+  removeGroup(group: string, expectedPaths: string[]) {
+    return this.exclusive(async () => {
+      if (!safeRepositoryPath(group))
+        throw new SkillError('SKILL_UNSAFE_PATH', 403);
+      const groupDirectory = await this.directory(group.split('/'));
+      if (!groupDirectory) throw new SkillError('SKILL_NOT_FOUND', 404);
+      const skills = (await this.list()).skills.filter(
+        (skill) => skill.group === group,
+      );
+      if (!skills.length) throw new SkillError('SKILL_NOT_FOUND', 404);
+      const expected = new Set(expectedPaths);
+      // Require the exact group that was presented in the confirmation dialog.
+      if (
+        expected.size !== skills.length ||
+        skills.some((skill) => !expected.has(skill.path))
+      )
+        throw new SkillError('SKILL_GROUP_CHANGED', 409);
+      const targets: { path: string; directory: string }[] = [];
+      for (const skill of skills) {
+        const directory = await this.directory(skill.path.split('/'));
+        if (!directory) throw new SkillError('SKILL_GROUP_CHANGED', 409);
+        targets.push({ path: skill.path, directory });
+      }
+      // Only remove the skills shown in this group, not sibling groups or loose files.
+      const staging = await mkdtemp(
+        join(this.workspaceRoot, '.agents', '.skill-remove-'),
+      );
+      const moved: { original: string; staged: string }[] = [];
+      try {
+        for (const target of targets) {
+          const staged = join(staging, basename(target.directory));
+          await rename(target.directory, staged);
+          moved.push({ original: target.directory, staged });
+        }
+      } catch (error) {
+        for (const entry of moved.reverse())
+          await rename(entry.staged, entry.original);
+        await rm(staging, { recursive: true, force: true });
+        throw error;
+      }
+      await rm(staging, { recursive: true, force: true });
+      // Prune an empty group while preserving separate subgroups or loose files.
+      await rmdir(groupDirectory).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOTEMPTY' && error.code !== 'ENOENT') throw error;
+      });
+      return targets.map((target) => target.path);
     });
   }
 

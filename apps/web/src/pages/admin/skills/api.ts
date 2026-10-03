@@ -14,6 +14,7 @@ const errorKeys = {
   SKILL_INVALID_SELECTION: 'skills.invalidSelection',
   SKILL_CONFLICT: 'skills.conflict',
   SKILL_NOT_FOUND: 'skills.notFound',
+  SKILL_GROUP_CHANGED: 'skills.groupChanged',
   VALIDATION_ERROR: 'skills.invalidUrl',
   UNAUTHORIZED: 'errors.sessionExpired',
   FORBIDDEN: 'errors.forbidden',

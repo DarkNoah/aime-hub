@@ -3,6 +3,7 @@ import {
   scanSkillsSchema,
   installSkillsSchema,
   removeSkillSchema,
+  removeSkillGroupSchema,
 } from '@aime/shared/skills';
 import type { SkillService } from './service.js';
 import { SkillError } from './errors.js';
@@ -35,6 +36,10 @@ export function skillRoutes(service: SkillService) {
   router.delete('/', async (req, res) => {
     await service.remove(removeSkillSchema.parse(req.body).path);
     res.sendStatus(204);
+  });
+  router.delete('/groups', async (req, res) => {
+    const { group, paths } = removeSkillGroupSchema.parse(req.body);
+    res.json(await service.removeGroup(group, paths));
   });
   router.use(((error, _req, res, next) => {
     if (error instanceof SkillError)

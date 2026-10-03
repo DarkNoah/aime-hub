@@ -12,6 +12,12 @@ export const installSkillsSchema = z
 export const removeSkillSchema = z
   .object({ path: z.string().min(1).max(2048) })
   .strict();
+export const removeSkillGroupSchema = z
+  .object({
+    group: z.string().min(1).max(2048),
+    paths: z.array(z.string().min(1).max(2048)).min(1).max(500),
+  })
+  .strict();
 
 export type InstalledSkill = {
   path: string;

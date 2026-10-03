@@ -450,6 +450,62 @@ test('admin skills API enforces session, role, same-origin and selection validat
     ).status,
     204,
   );
+  const batch = await request('/install', {
+    method: 'POST',
+    body: JSON.stringify({
+      scanId: scan.id,
+      paths: ['skills/analysis/SKILL.md', 'skills/research/SKILL.md'],
+    }),
+  });
+  assert.equal(batch.status, 201);
+  const batchPaths = ((await batch.json()) as { path: string }[]).map(
+    (skill) => skill.path,
+  );
+  const groupBody = JSON.stringify({ group: 'owner/repo', paths: batchPaths });
+  for (const [headers, status] of [
+    [{ 'x-test-role': '' }, 401],
+    [{ 'x-test-role': 'user' }, 403],
+    [{ origin: 'https://evil.test' }, 403],
+  ] as const) {
+    assert.equal(
+      (await request('/groups', { method: 'DELETE', headers, body: groupBody }))
+        .status,
+      status,
+    );
+  }
+  assert.equal(
+    (
+      await request('/groups', {
+        method: 'DELETE',
+        body: JSON.stringify({ group: '', paths: batchPaths }),
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request('/groups', {
+        method: 'DELETE',
+        body: JSON.stringify({
+          group: 'owner/repo',
+          paths: batchPaths.slice(0, 1),
+        }),
+      })
+    ).status,
+    409,
+  );
+  const deletedGroup = await request('/groups', {
+    method: 'DELETE',
+    body: groupBody,
+  });
+  assert.equal(deletedGroup.status, 200);
+  assert.deepEqual(
+    ((await deletedGroup.json()) as string[]).sort(),
+    batchPaths.sort(),
+  );
+  await assert.rejects(stat(join(service.root, 'owner/repo')), {
+    code: 'ENOENT',
+  });
   assert.equal(
     (await request(`/scans/${scan.id}`, { method: 'DELETE' })).status,
     204,
@@ -463,4 +519,72 @@ test('admin skills API enforces session, role, same-origin and selection validat
     ).status,
     410,
   );
+});
+
+test('group removal deletes exactly the confirmed group and preserves adjacent groups and loose files', async (t) => {
+  const { service, workspace } = await fixture(t);
+  const scan = await service.scan('owner/repo');
+  const installed = await service.install(scan.id, [
+    'skills/analysis/SKILL.md',
+    'skills/research/SKILL.md',
+  ]);
+  for (const path of [
+    'owner/repo/nested/keep',
+    'owner/repository/keep',
+    'local',
+  ]) {
+    await mkdir(join(service.root, path), { recursive: true });
+    await writeFile(join(service.root, path, 'SKILL.md'), manifest('keep'));
+  }
+  await writeFile(
+    join(service.root, 'owner/repo/README.md'),
+    'Keep loose files',
+  );
+  const expected = installed.map((skill) => skill.path);
+  await assert.rejects(
+    service.removeGroup('owner/repo', expected.slice(0, 1)),
+    { code: 'SKILL_GROUP_CHANGED' },
+  );
+  await assert.rejects(
+    service.removeGroup('owner/repo', [...expected, 'owner/repository/keep']),
+    { code: 'SKILL_GROUP_CHANGED' },
+  );
+  assert.equal((await service.list()).skills.length, 5);
+  for (const group of ['', '..', '../outside', '/absolute', 'owner\\repo'])
+    await assert.rejects(service.removeGroup(group, expected), {
+      code: 'SKILL_UNSAFE_PATH',
+    });
+  assert.deepEqual(
+    (await service.removeGroup('owner/repo', expected)).sort(),
+    expected.sort(),
+  );
+  assert.deepEqual(
+    (await service.list()).skills.map((skill) => skill.path).sort(),
+    ['local', 'owner/repo/nested/keep', 'owner/repository/keep'],
+  );
+  assert.equal(
+    await readFile(join(service.root, 'owner/repo/README.md'), 'utf8'),
+    'Keep loose files',
+  );
+  assert.deepEqual(await readdir(join(workspace, '.agents')), ['skills']);
+  await assert.rejects(service.removeGroup('owner/repo', expected), {
+    code: 'SKILL_NOT_FOUND',
+  });
+});
+
+test('group removal rejects a symlink group without deleting any targets', async (t) => {
+  const { service } = await fixture(t);
+  const scan = await service.scan('owner/repo');
+  const installed = await service.install(scan.id, [
+    'skills/analysis/SKILL.md',
+  ]);
+  await symlink(join(service.root, 'owner/repo'), join(service.root, 'linked'));
+  await assert.rejects(
+    service.removeGroup(
+      'linked',
+      installed.map((skill) => skill.path),
+    ),
+    { code: 'SKILL_UNSAFE_PATH' },
+  );
+  assert.equal((await service.list()).skills.length, 1);
 });
