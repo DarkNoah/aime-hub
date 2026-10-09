@@ -1,13 +1,10 @@
+import { openSessionStub } from './fixtures/thread-session.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { setTimeout as delay } from 'node:timers/promises';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  ThreadService,
-  type ChatRunner,
-} from '../apps/server/src/modules/threads/service.js';
+import { ThreadService } from '../apps/server/src/modules/threads/service.js';
 import { ThreadError } from '../apps/server/src/modules/threads/errors.js';
 import {
   discoverPersonalSkills,
@@ -102,13 +99,6 @@ const input = (id: string, isImmediate = false): RunInput => ({
   isImmediate,
   parts: [{ type: 'text', text: id }],
 });
-async function until(check: () => boolean | Promise<boolean>) {
-  for (let count = 0; count < 200; count++) {
-    if (await check()) return;
-    await delay(10);
-  }
-  throw new Error('Timed out waiting for expected thread state');
-}
 const baseRunner = {
   async validate() {},
   async createWorkspace() {
@@ -120,7 +110,7 @@ test('personal ownership is enforced for every thread operation', async (t) => {
   const { memory } = fakeMemory();
   const service = new ThreadService(memory, {
     ...baseRunner,
-    async execute() {},
+    open: openSessionStub,
   });
   t.after(() => service.shutdown());
   const thread = await service.createThread('alice', settings);
@@ -129,8 +119,7 @@ test('personal ownership is enforced for every thread operation', async (t) => {
     () => service.history('bob', thread.id),
     () => service.run('bob', thread.id, input('message01')),
     () => service.abort('bob', thread.id),
-    () => service.resume('bob', thread.id),
-    () => service.cancelQueued('bob', thread.id, 'message01'),
+    () => service.clearQueue('bob', thread.id),
     () => service.updateThread('bob', thread.id, { title: 'stolen' }),
     () => service.deleteThread('bob', thread.id),
     () => service.subscribe('bob', thread.id, () => {}),
@@ -147,7 +136,7 @@ test('thread lists paginate ten records at a time without crossing ownership', a
   const { memory } = fakeMemory();
   const service = new ThreadService(memory, {
     ...baseRunner,
-    async execute() {},
+    open: openSessionStub,
   });
   t.after(() => service.shutdown());
   for (let i = 0; i < 23; i++) await service.createThread('alice', settings);
@@ -178,7 +167,7 @@ test('sidebar paging shares requests and preserves live edits and deletions duri
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     status: 'idle',
-    queue: [],
+    queueCount: 0,
     error: null,
   });
   const requested: number[] = [];
@@ -239,230 +228,11 @@ test('sidebar retries the failed page and ignores a cancelled request', async ()
   assert.equal(resource.getSnapshot().page, 0);
 });
 
-test('idle submissions run directly without appearing in persisted or published queues', async (t) => {
-  const { memory, messages } = fakeMemory();
-  const persistedQueues: string[][] = [];
-  const publishedQueues: string[][] = [];
-  const updateThread = memory.updateThread.bind(memory);
-  memory.updateThread = async (args) => {
-    const data = args.metadata as { queue: RunInput[] };
-    persistedQueues.push(data.queue.map((item) => item.id));
-    return updateThread(args);
-  };
-  const started: string[] = [];
-  const service = new ThreadService(memory, {
-    ...baseRunner,
-    async execute({ input, signal }) {
-      assert.ok(messages.has(input.id));
-      started.push(input.id);
-      await new Promise<void>((resolve) => {
-        if (signal.aborted) resolve();
-        else signal.addEventListener('abort', () => resolve(), { once: true });
-      });
-    },
-  });
-  t.after(() => service.shutdown());
-  const thread = await service.createThread('alice', settings);
-  await service.subscribe('alice', thread.id, (snapshot) => {
-    publishedQueues.push(snapshot.thread.queue.map((item) => item.id));
-  });
-  for (const isImmediate of [false, true]) {
-    const message = input(isImmediate ? 'message02' : 'message01', isImmediate);
-    const accepted = await service.run('alice', thread.id, message);
-    assert.equal(accepted.status, 'pending');
-    assert.deepEqual(accepted.queue, []);
-    assert.ok(messages.has(message.id));
-    await until(() => started.includes(message.id));
-    await service.run('alice', thread.id, message);
-    assert.equal(started.filter((id) => id === message.id).length, 1);
-    await service.abort('alice', thread.id);
-    await until(
-      async () =>
-        (await service.getThread('alice', thread.id)).thread.status ===
-        'canceled',
-    );
-  }
-  assert.ok(persistedQueues.length > 0);
-  assert.ok(publishedQueues.length > 0);
-  assert.ok(persistedQueues.every((queue) => queue.length === 0));
-  assert.ok(publishedQueues.every((queue) => queue.length === 0));
-});
-
-test('failed direct admission can be retried without losing or duplicating the message', async (t) => {
-  const { memory } = fakeMemory();
-  const started: string[] = [];
-  const service = new ThreadService(memory, {
-    ...baseRunner,
-    async execute({ input }) {
-      started.push(input.id);
-    },
-  });
-  t.after(() => service.shutdown());
-  const thread = await service.createThread('alice', settings);
-  const saveMessages = memory.saveMessages.bind(memory);
-  memory.saveMessages = async () => {
-    throw new Error('Message storage unavailable');
-  };
-  await assert.rejects(service.run('alice', thread.id, input('message01')));
-  assert.deepEqual(started, []);
-  assert.deepEqual((await service.getThread('alice', thread.id)).messages, []);
-  memory.saveMessages = saveMessages;
-  const updateThread = memory.updateThread.bind(memory);
-  memory.updateThread = async () => {
-    throw new Error('Storage unavailable');
-  };
-  await assert.rejects(service.run('alice', thread.id, input('message01')));
-  assert.deepEqual(started, []);
-  assert.equal(
-    (await service.getThread('alice', thread.id)).thread.status,
-    'idle',
-  );
-  memory.updateThread = updateThread;
-  const accepted = await service.run('alice', thread.id, input('message01'));
-  assert.deepEqual(accepted.queue, []);
-  await until(() => started.length === 1);
-  assert.deepEqual(started, ['message01']);
-});
-
-test('disconnect never aborts a run; concurrent submissions serialize and retries are idempotent', async (t) => {
-  const { memory } = fakeMemory();
-  let active = 0;
-  let maximum = 0;
-  const started: string[] = [];
-  const gates: Array<() => void> = [];
-  const service = new ThreadService(memory, {
-    ...baseRunner,
-    async execute({ input, onMessage }) {
-      active++;
-      maximum = Math.max(maximum, active);
-      started.push(input.id);
-      await new Promise<void>((resolve) => gates.push(resolve));
-      onMessage({
-        id: `reply-${input.id}`,
-        role: 'assistant',
-        parts: [{ type: 'text', text: input.id }],
-      });
-      active--;
-    },
-  });
-  t.after(async () => {
-    gates.forEach((resolve) => resolve());
-    await service.shutdown();
-  });
-  const thread = await service.createThread('alice', settings);
-  let updates = 0;
-  const unsubscribe = await service.subscribe(
-    'alice',
-    thread.id,
-    () => updates++,
-  );
-  await service.run('alice', thread.id, input('message01'));
-  await until(() => started.length === 1);
-  unsubscribe();
-  const previousUpdates = updates;
-  await Promise.all([
-    service.run('alice', thread.id, input('message02')),
-    service.run('alice', thread.id, input('message03')),
-    service.run('alice', thread.id, input('message02')),
-  ]);
-  assert.equal(
-    (await service.getThread('alice', thread.id)).thread.queue.length,
-    2,
-  );
-  gates.shift()!();
-  await until(() => started.length === 2);
-  gates.shift()!();
-  await until(() => started.length === 3);
-  gates.shift()!();
-  await until(
-    async () =>
-      (await service.getThread('alice', thread.id)).thread.status === 'success',
-  );
-  assert.equal(maximum, 1);
-  assert.deepEqual(started, ['message01', 'message02', 'message03']);
-  assert.equal(updates, previousUpdates);
-  const snapshot = await service.getThread('alice', thread.id);
-  assert.equal(
-    snapshot.messages.filter((message) => message.role === 'assistant').length,
-    3,
-  );
-});
-
-test('immediate input joins at a step boundary while normal messages stay queued; stop pauses the queue', async (t) => {
-  const { memory } = fakeMemory();
-  let context: Parameters<ChatRunner['execute']>[0] | undefined;
-  let executions = 0;
-  const service = new ThreadService(memory, {
-    ...baseRunner,
-    async execute(value) {
-      context = value;
-      executions++;
-      await new Promise<void>((resolve) => {
-        if (value.signal.aborted) resolve();
-        else
-          value.signal.addEventListener('abort', () => resolve(), {
-            once: true,
-          });
-      });
-    },
-  });
-  t.after(() => service.shutdown());
-  const thread = await service.createThread('alice', settings);
-  await service.run('alice', thread.id, input('message01'));
-  await until(() => !!context);
-  await service.run('alice', thread.id, input('message02'));
-  await service.run('alice', thread.id, input('message03', true));
-  assert.deepEqual(
-    (await context!.takeImmediate()).map((message) => message.id),
-    ['message03'],
-  );
-  assert.deepEqual(
-    (await service.getThread('alice', thread.id)).thread.queue.map(
-      (message) => message.id,
-    ),
-    ['message02'],
-  );
-  await service.abort('alice', thread.id);
-  await until(
-    async () =>
-      (await service.getThread('alice', thread.id)).thread.status ===
-      'canceled',
-  );
-  assert.equal(executions, 1);
-  await service.resume('alice', thread.id);
-  await until(() => executions === 2);
-});
-
-test('restart marks unfinished work interrupted and retains queued messages for explicit resume', async (t) => {
-  const { memory, threads } = fakeMemory();
-  let runs = 0;
-  const service = new ThreadService(memory, {
-    ...baseRunner,
-    async execute() {
-      runs++;
-    },
-  });
-  t.after(() => service.shutdown());
-  const thread = await service.createThread('alice', settings);
-  const stored = threads.get(thread.id)!;
-  stored.metadata = {
-    ...stored.metadata,
-    activeId: 'previous-run',
-    queue: [{ ...input('message02'), createdAt: new Date().toISOString() }],
-  };
-  const snapshot = await service.getThread('alice', thread.id);
-  assert.equal(snapshot.thread.error, 'RUN_INTERRUPTED');
-  assert.equal(snapshot.thread.queue.length, 1);
-  assert.equal(runs, 0);
-  await service.resume('alice', thread.id);
-  await until(() => runs === 1);
-});
-
 test('fixed history pagination does not shift when new messages arrive, even with equal timestamps', async (t) => {
   const { memory, messages } = fakeMemory();
   const service = new ThreadService(memory, {
     ...baseRunner,
-    async execute() {},
+    open: openSessionStub,
   });
   t.after(() => service.shutdown());
   const thread = await service.createThread('alice', settings);

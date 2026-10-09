@@ -1,5 +1,12 @@
 import { isThreadActive } from '@aime/shared/threads';
-import { useRef, useState, type ReactNode } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import type { UIMessage } from 'ai';
 import { useTranslation } from 'react-i18next';
 import { MessageSquare, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -11,12 +18,12 @@ import {
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { chatApi, chatErrorKey } from './api';
+import { chatApi, chatErrorKey, ChatApiError } from './api';
 import { ChatComposer } from './chat-composer';
 import { ChatQueue } from './chat-queue';
 import { ChatWorkspace } from './chat-workspace';
+import { LoadingState } from '@/components/loading-state';
 import { ChatMessages } from './chat-messages';
 import { ChatErrorCard } from './chat-error-card';
 import { ChatRunningTasks } from './chat-running-tasks';
@@ -34,6 +41,18 @@ export type ChatPanelProps = {
   onClose?: () => void;
   headerActions?: ReactNode;
   className?: string;
+  navigation?: ReactNode;
+  draftKey?: number;
+};
+
+type WorkspaceSnapshot = {
+  threadId?: string;
+  messages?: UIMessage[];
+  loading?: boolean;
+  hasEarlier?: boolean;
+};
+type SessionProps = ChatPanelProps & {
+  onWorkspaceChange: (snapshot: WorkspaceSnapshot) => void;
 };
 
 /** Container-sized chat surface. No router, viewport positioning, or page-shell dependencies.
@@ -45,12 +64,53 @@ export function ChatPanel(props: ChatPanelProps) {
       initialSettings={props.initialSettings}
       projectId={props.projectId}
     >
-      <ChatPanelSession
-        key={`${props.projectId ?? 'personal'}:${props.threadId ?? 'new'}`}
+      <ChatPanelWorkspace
+        key={
+          props.projectId
+            ? `project:${props.projectId}`
+            : `personal:${props.threadId ?? 'new'}`
+        }
         {...props}
       />
     </PersonalChatSettingsProvider>
   );
+}
+
+/** The workspace belongs to the project; only the conversation gets a thread key. */
+function ChatPanelWorkspace(props: ChatPanelProps) {
+  const { t } = useTranslation();
+  const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>({});
+  return (
+    <section
+      className={cn(
+        'flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-card',
+        props.className,
+      )}
+      aria-label={t(props.projectId ? 'projects.chat' : 'chat.personal')}
+    >
+      <ChatWorkspace {...snapshot}>
+        <ChatPanelSession
+          key={props.threadId ?? `new:${props.draftKey ?? 0}`}
+          {...props}
+          onWorkspaceChange={setSnapshot}
+        />
+      </ChatWorkspace>
+    </section>
+  );
+}
+
+/** Publish live inspector data without placing its layout inside the keyed chat. */
+function WorkspaceMessages({
+  onChange,
+  ...snapshot
+}: WorkspaceSnapshot & {
+  onChange: (snapshot: WorkspaceSnapshot) => void;
+}) {
+  const { threadId, messages, loading, hasEarlier } = snapshot;
+  useLayoutEffect(() => {
+    onChange({ threadId, messages, loading, hasEarlier });
+  }, [onChange, threadId, messages, loading, hasEarlier]);
+  return null;
 }
 
 function ChatPanelSession({
@@ -60,80 +120,86 @@ function ChatPanelSession({
   onThreadUpdated,
   onClose,
   headerActions,
-  className,
-}: ChatPanelProps) {
+  navigation,
+  onWorkspaceChange,
+}: SessionProps) {
   const { t } = useTranslation();
   const [created, setCreated] = useState<ThreadSummary | null>(null);
   const draftThread = useRef<ThreadSummary | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const activeId = threadId ?? created?.id;
   const [retry, setRetry] = useState(0);
-  const shell = cn(
-    'flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-card',
-    className,
-  );
   if (activeId)
     return (
-      <ExistingChat
+      <ExistingChatSession
         key={`${activeId}:${retry}`}
         threadId={activeId}
         projectId={projectId}
         onThreadUpdated={onThreadUpdated}
         onClose={onClose}
         headerActions={headerActions}
-        className={shell}
+        navigation={navigation}
+        onWorkspaceChange={onWorkspaceChange}
         onRetry={() => setRetry((value) => value + 1)}
       />
     );
   return (
-    <section
-      className={shell}
-      aria-label={t(projectId ? 'projects.chat' : 'chat.personal')}
-    >
-      <ChatWorkspace>
-        <PanelHeader
-          title={t('chat.new')}
-          projectId={projectId}
-          onClose={onClose}
-          actions={headerActions}
+    <>
+      <WorkspaceMessages onChange={onWorkspaceChange} />
+      <PanelHeader
+        title={t('chat.new')}
+        projectId={projectId}
+        onClose={onClose}
+        actions={headerActions}
+        navigation={navigation}
+      />
+      <div className="flex min-h-0 flex-1 overflow-auto">
+        <ConversationEmptyState
+          title={t('chat.welcome')}
+          description={t('chat.welcomeHint')}
+          icon={<MessageSquare className="size-7 text-primary" />}
+          className="m-auto max-w-lg [&_h3]:text-xl [&_p]:mt-3 [&_p]:leading-7"
         />
-        <div className="flex min-h-0 flex-1 overflow-auto">
-          <ConversationEmptyState
-            title={t('chat.welcome')}
-            description={t('chat.welcomeHint')}
-            icon={<MessageSquare className="size-7 text-primary" />}
-            className="m-auto max-w-lg [&_h3]:text-xl [&_p]:mt-3 [&_p]:leading-7"
-          />
-        </div>
-        <ChatComposer
-          className={chatContentClassName}
-          projectId={projectId}
-          onSend={async (input) => {
-            // Create and accept the first message before navigation or unmount can occur.
-            const thread =
-              draftThread.current ??
-              (await chatApi.create({
-                model: input.model,
-                reasoningEffort: input.reasoningEffort,
-                projectId,
-              }));
-            draftThread.current = thread;
-            const updated = await chatApi.run(thread.id, input);
+      </div>
+      <ChatComposer
+        className={chatContentClassName}
+        projectId={projectId}
+        onSend={async (input) => {
+          // Create and accept the first message before navigation or unmount can occur.
+          const thread =
+            draftThread.current ??
+            (await chatApi.create({
+              model: input.model,
+              reasoningEffort: input.reasoningEffort,
+              projectId,
+            }));
+          draftThread.current = thread;
+          const updated = await chatApi.run(thread.id, input);
+          if (mounted.current) {
             setCreated(updated);
             onThreadCreated?.(updated);
-          }}
-        />
-      </ChatWorkspace>
-    </section>
+          } else {
+            // A completed submission must not navigate away from a newer selection.
+            onThreadUpdated?.(updated);
+          }
+        }}
+      />
+    </>
   );
 }
 
 function PanelHeader({
   title,
-  projectId,
-  status,
   onClose,
   actions,
   details,
+  navigation,
 }: {
   title: string;
   projectId?: string;
@@ -141,10 +207,14 @@ function PanelHeader({
   onClose?: () => void;
   actions?: ReactNode;
   details?: ReactNode;
+  navigation?: ReactNode;
 }) {
   const { t } = useTranslation();
   return (
-    <header className="flex min-h-16 shrink-0 items-center gap-3 border-b px-4 @lg/chat:px-6">
+    <header
+      data-chat-header
+      className="flex min-h-12 shrink-0 items-center gap-2 border-b px-4 @lg/chat:gap-3 @lg/chat:px-6"
+    >
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
           <h1 className="truncate text-sm font-semibold" title={title}>
@@ -152,12 +222,13 @@ function PanelHeader({
           </h1>
           {details}
         </div>
-        <p className="mt-0.5 text-xs text-muted-foreground">
+        {/* <p className="mt-0.5 text-xs text-muted-foreground">
           {t(projectId ? 'projects.chat' : 'chat.personal')}
-        </p>
+        </p> */}
       </div>
-      {status && (
+      {/* {status && (
         <Badge
+          className="shrink-0"
           variant={
             status === 'failed' || status === 'tripwire'
               ? 'destructive'
@@ -166,8 +237,9 @@ function PanelHeader({
         >
           {t(`chat.status.${status}`)}
         </Badge>
-      )}
+      )} */}
       {actions}
+      {navigation}
       {onClose && (
         <Button
           variant="ghost"
@@ -182,147 +254,199 @@ function PanelHeader({
   );
 }
 
+function ExistingChatSession(
+  props: SessionProps & { threadId: string; onRetry: () => void },
+) {
+  const { t } = useTranslation();
+  const [ready, setReady] = useState(!props.projectId);
+  const [error, setError] = useState<ReturnType<typeof chatErrorKey> | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!props.projectId) return;
+    const controller = new AbortController();
+    void chatApi
+      .get(props.threadId, controller.signal)
+      .then(({ thread }) => {
+        if (controller.signal.aborted) return;
+        if (thread.projectId !== props.projectId)
+          throw new ChatApiError('THREAD_NOT_FOUND');
+        setReady(true);
+      })
+      .catch((cause) => {
+        if (!controller.signal.aborted) setError(chatErrorKey(cause));
+      });
+    return () => controller.abort();
+  }, [props.threadId, props.projectId]);
+  if (ready) return <ExistingChat {...props} />;
+  return (
+    <>
+      <WorkspaceMessages onChange={props.onWorkspaceChange} loading={!error} />
+      <PanelHeader
+        title={t('chat.new')}
+        projectId={props.projectId}
+        actions={props.headerActions}
+        navigation={props.navigation}
+        onClose={props.onClose}
+      />
+      {error ? (
+        <div role="alert" className="space-y-3 p-6">
+          <p>{t(error)}</p>
+          <Button variant="outline" onClick={props.onRetry}>
+            {t('chat.reconnect')}
+          </Button>
+        </div>
+      ) : (
+        <LoadingState className="p-6" />
+      )}
+    </>
+  );
+}
+
 function ExistingChat({
   threadId,
   projectId,
   onThreadUpdated,
   onClose,
   headerActions,
-  className,
+  navigation,
+  onWorkspaceChange,
   onRetry,
-}: ChatPanelProps & { threadId: string; onRetry: () => void }) {
+}: SessionProps & { threadId: string; onRetry: () => void }) {
   const { t } = useTranslation();
   const chat = useThreadChat(threadId, onThreadUpdated);
   const running = isThreadActive(chat.thread?.status);
-  const stopping = chat.thread?.stopping ?? false;
+  const [stopping, setStopping] = useState(false);
   const notifyError = (cause: unknown) => toast.error(t(chatErrorKey(cause)));
   return (
-    <section
-      className={className}
-      aria-label={t(projectId ? 'projects.chat' : 'chat.personal')}
-    >
-      <ChatWorkspace
+    <>
+      <WorkspaceMessages
+        onChange={onWorkspaceChange}
         threadId={threadId}
         messages={chat.messages}
         loading={!chat.thread && !chat.error}
         hasEarlier={chat.hasEarlier}
-      >
-        <PanelHeader
-          title={chat.thread?.title || t('chat.new')}
-          projectId={projectId}
-          status={chat.thread?.status}
-          details={
-            <ChatRunningTasks
-              tasks={chat.backgroundTasks}
-              unavailable={!!chat.backgroundTasksError}
+      />
+      <PanelHeader
+        title={chat.thread?.title || t('chat.new')}
+        projectId={projectId}
+        status={chat.thread?.status}
+        details={
+          <ChatRunningTasks
+            tasks={chat.backgroundTasks}
+            unavailable={!!chat.backgroundTasksError}
+            disabled={!chat.connected}
+            onStop={(taskId) => chatApi.cancelBackgroundTask(threadId, taskId)}
+          />
+        }
+        onClose={onClose}
+        actions={headerActions}
+        navigation={navigation}
+      />
+      {!!chat.error && (
+        <div
+          role="alert"
+          className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-destructive/5 px-4 py-2 text-sm"
+        >
+          <span className="flex-1">{t(chatErrorKey(chat.error))}</span>
+          {!!chat.error && (
+            <Button variant="outline" size="sm" onClick={onRetry}>
+              {t('chat.reconnect')}
+            </Button>
+          )}
+        </div>
+      )}
+      <Conversation className="min-h-0" initial="instant" resize="instant">
+        <ConversationContent
+          data-chat-messages
+          className={cn(chatContentClassName, 'gap-6 py-6')}
+        >
+          {chat.hasEarlier && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mx-auto"
+              disabled={chat.loadingHistory}
+              onClick={() => void chat.loadEarlier().catch(notifyError)}
+            >
+              {t(chat.loadingHistory ? 'chat.loading' : 'chat.loadEarlier')}
+            </Button>
+          )}
+          {!chat.thread && !chat.error && (
+            <div
+              role="status"
+              aria-label={t('chat.loading')}
+              className="space-y-5 motion-safe:animate-pulse"
+            >
+              <div className="h-4 w-1/3 rounded bg-muted" />
+              <div className="h-20 w-4/5 rounded-lg bg-muted" />
+              <div className="ml-auto h-14 w-3/5 rounded-lg bg-muted" />
+            </div>
+          )}
+          <ChatMessages
+            messages={chat.messages}
+            running={running}
+            activeMessageId={chat.activeMessageId}
+            toolInteractions={chat.toolInteractions}
+            onToolResponse={chat.respondToTool}
+            disabled={!chat.connected || running || stopping}
+          />
+          {chat.thread && !chat.messages.length && (
+            <ConversationEmptyState
+              title={t('chat.welcome')}
+              description={t('chat.welcomeHint')}
+            />
+          )}
+          {running && !chat.activeMessageId && (
+            <p
+              role="status"
+              className="text-sm text-muted-foreground motion-safe:animate-pulse"
+            >
+              {t('chat.thinking')}
+            </p>
+          )}
+          {chat.thread?.error && (
+            <ChatErrorCard
+              error={chat.thread.error}
+              disabled={!chat.connected || running || stopping || chat.sending}
+              onRetry={async () => {
+                await chatApi.retry(threadId);
+              }}
+            />
+          )}
+        </ConversationContent>
+        <ConversationScrollButton aria-label={t('chat.toLatest')} />
+      </Conversation>
+      {chat.thread && (
+        <ChatComposer
+          className={chatContentClassName}
+          threadId={threadId}
+          disabled={!chat.connected}
+          running={running}
+          stopping={stopping}
+          usage={chat.usage}
+          goal={chat.goal}
+          onClearGoal={chat.clearGoal}
+          queue={
+            <ChatQueue
+              thread={chat.thread}
               disabled={!chat.connected}
-              onStop={(taskId) =>
-                chatApi.cancelBackgroundTask(threadId, taskId)
-              }
+              waitingForTool={chat.toolInteractions.some(
+                (item) => !item.response,
+              )}
             />
           }
-          onClose={onClose}
-          actions={headerActions}
-        />
-        {!!chat.error && (
-          <div
-            role="alert"
-            className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-destructive/5 px-4 py-2 text-sm"
-          >
-            <span className="flex-1">{t(chatErrorKey(chat.error))}</span>
-            {!!chat.error && (
-              <Button variant="outline" size="sm" onClick={onRetry}>
-                {t('chat.reconnect')}
-              </Button>
-            )}
-          </div>
-        )}
-        <Conversation className="min-h-0" initial="instant" resize="instant">
-          <ConversationContent
-            className={cn(chatContentClassName, 'gap-6 py-6')}
-          >
-            {chat.hasEarlier && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="mx-auto"
-                disabled={chat.loadingHistory}
-                onClick={() => void chat.loadEarlier().catch(notifyError)}
-              >
-                {t(chat.loadingHistory ? 'chat.loading' : 'chat.loadEarlier')}
-              </Button>
-            )}
-            {!chat.thread && !chat.error && (
-              <div
-                role="status"
-                aria-label={t('chat.loading')}
-                className="space-y-5 motion-safe:animate-pulse"
-              >
-                <div className="h-4 w-1/3 rounded bg-muted" />
-                <div className="h-20 w-4/5 rounded-lg bg-muted" />
-                <div className="ml-auto h-14 w-3/5 rounded-lg bg-muted" />
-              </div>
-            )}
-            <ChatMessages
-              messages={chat.messages}
-              running={running}
-              activeMessageId={chat.activeMessageId}
-              toolInteractions={chat.toolInteractions}
-              onToolResponse={chat.respondToTool}
-              disabled={!chat.connected || running || stopping}
-            />
-            {chat.thread && !chat.messages.length && (
-              <ConversationEmptyState
-                title={t('chat.welcome')}
-                description={t('chat.welcomeHint')}
-              />
-            )}
-            {running && !chat.activeMessageId && (
-              <p
-                role="status"
-                className="text-sm text-muted-foreground motion-safe:animate-pulse"
-              >
-                {t('chat.thinking')}
-              </p>
-            )}
-            {chat.thread?.error && (
-              <ChatErrorCard
-                error={chat.thread.error}
-                disabled={
-                  !chat.connected || running || stopping || chat.sending
-                }
-                onRetry={async () => {
-                  await chatApi.retry(threadId);
-                }}
-              />
-            )}
-          </ConversationContent>
-          <ConversationScrollButton aria-label={t('chat.toLatest')} />
-        </Conversation>
-        {chat.thread && (
-          <ChatComposer
-            className={chatContentClassName}
-            threadId={threadId}
-            disabled={!chat.connected}
-            running={running}
-            stopping={stopping}
-            usage={chat.usage}
-            queue={
-              <ChatQueue
-                thread={chat.thread}
-                disabled={!chat.connected}
-                waitingForTool={chat.toolInteractions.some(
-                  (item) => !item.response,
-                )}
-              />
-            }
-            onSend={chat.send}
-            onStop={async () => {
+          onSend={chat.send}
+          onStop={async () => {
+            setStopping(true);
+            try {
               await chatApi.abort(threadId);
-            }}
-          />
-        )}
-      </ChatWorkspace>
-    </section>
+            } finally {
+              setStopping(false);
+            }
+          }}
+        />
+      )}
+    </>
   );
 }

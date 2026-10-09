@@ -21,12 +21,9 @@ import {
 } from '@/components/ui/dialog';
 import {
   modelFormInput,
-  modelPath,
   providerErrorKey,
+  providerApi,
   providerFormInput,
-  providerPath,
-  providerRequest,
-  providersPath,
 } from '@/pages/admin/providers/api';
 import type { ErrorKey } from '@/i18n/config';
 import { ProviderTypeSelector } from './provider-type-selector';
@@ -55,6 +52,7 @@ export function ProviderActionDialog({
   const [confirmation, setConfirmation] = useState('');
   const provider = action.kind === 'provider' ? action.provider : undefined;
   const [providerType, setProviderType] = useState(provider?.type ?? 'openai');
+  const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? '');
   const model = action.kind === 'model' ? action.model : undefined;
   const [limits, setLimits] = useState({
     limitContext: String(model?.limitContext ?? ''),
@@ -86,10 +84,11 @@ export function ProviderActionDialog({
     if (submitting.current || (deleting && confirmation !== deleteName)) return;
     const form = new FormData(event.currentTarget);
     setError(null);
-    let body: unknown;
+    let providerBody: ReturnType<typeof providerFormInput> | undefined;
+    let modelBody: ReturnType<typeof modelFormInput> | undefined;
     try {
-      if (action.kind === 'provider') body = providerFormInput(form);
-      else if (action.kind === 'model') body = modelFormInput(form);
+      if (action.kind === 'provider') providerBody = providerFormInput(form);
+      else if (action.kind === 'model') modelBody = modelFormInput(form);
     } catch (cause) {
       setError(providerErrorKey(cause));
       return;
@@ -98,28 +97,18 @@ export function ProviderActionDialog({
     setPending(true);
     try {
       let savedProvider: ProviderSummary | undefined;
-      if (action.kind === 'provider') {
-        savedProvider = await providerRequest<ProviderSummary>(
-          provider ? providerPath(provider.id) : providersPath,
-          {
-            method: provider ? 'PATCH' : 'POST',
-            body: JSON.stringify(body),
-          },
-        );
-      } else if (action.kind === 'model') {
-        await providerRequest(modelPath(action.providerId, model?.id), {
-          method: model ? 'PATCH' : 'POST',
-          body: JSON.stringify(body),
-        });
+      if (action.kind === 'provider' && providerBody) {
+        savedProvider = provider
+          ? await providerApi.update(provider.id, providerBody)
+          : await providerApi.create(providerBody);
+      } else if (action.kind === 'model' && modelBody) {
+        if (model)
+          await providerApi.updateModel(action.providerId, model.id, modelBody);
+        else await providerApi.createModel(action.providerId, modelBody);
       } else if (action.kind === 'deleteProvider') {
-        await providerRequest(providerPath(action.provider.id), {
-          method: 'DELETE',
-        });
-      } else {
-        await providerRequest(
-          modelPath(action.model.providerId, action.model.id),
-          { method: 'DELETE' },
-        );
+        await providerApi.remove(action.provider.id);
+      } else if (action.kind === 'deleteModel') {
+        await providerApi.removeModel(action.model.providerId, action.model.id);
       }
       onSuccess(savedProvider);
     } catch (cause) {
@@ -195,14 +184,33 @@ export function ProviderActionDialog({
                   <Label htmlFor="provider-type">{t('providers.type')}</Label>
                   <ProviderTypeSelector
                     value={providerType}
-                    onChange={setProviderType}
+                    onChange={(type) => {
+                      setProviderType(type);
+                      if (
+                        !baseUrl ||
+                        ['https://serpapi.com', 'https://r.jina.ai'].includes(
+                          baseUrl,
+                        )
+                      )
+                        setBaseUrl(
+                          type === 'serpapi'
+                            ? 'https://serpapi.com'
+                            : type === 'jina-ai'
+                              ? 'https://r.jina.ai'
+                              : '',
+                        );
+                    }}
                     disabled={pending}
                   />
                   <p className="text-xs text-muted-foreground">
                     {t(
-                      providerType === 'mineru'
-                        ? 'providers.configOnlyHint'
-                        : 'providers.typeHint',
+                      providerType === 'serpapi'
+                        ? 'providers.searchHint'
+                        : providerType === 'jina-ai'
+                          ? 'providers.fetchHint'
+                          : providerType === 'mineru'
+                            ? 'providers.configOnlyHint'
+                            : 'providers.typeHint',
                     )}
                   </p>
                 </div>
@@ -214,13 +222,18 @@ export function ProviderActionDialog({
                     type="url"
                     required
                     maxLength={2048}
-                    defaultValue={provider?.baseUrl ?? ''}
+                    value={baseUrl}
+                    onChange={(event) => setBaseUrl(event.target.value)}
                   />
                   <p className="text-xs text-muted-foreground">
                     {t(
-                      providerType === 'mineru'
-                        ? 'providers.otherUrlHint'
-                        : 'providers.urlHint',
+                      providerType === 'serpapi'
+                        ? 'providers.searchUrlHint'
+                        : providerType === 'jina-ai'
+                          ? 'providers.fetchUrlHint'
+                          : providerType === 'mineru'
+                            ? 'providers.otherUrlHint'
+                            : 'providers.urlHint',
                     )}
                   </p>
                 </div>
@@ -467,7 +480,7 @@ export function ProviderActionDialog({
               disabled={pending || (deleting && confirmation !== deleteName)}
               className={
                 deleting
-                  ? 'bg-destructive text-white hover:bg-destructive/90'
+                  ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
                   : undefined
               }
             >

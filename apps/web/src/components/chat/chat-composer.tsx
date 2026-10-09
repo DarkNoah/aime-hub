@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowUp, Paperclip, Square, X } from 'lucide-react';
+import { ArrowUp, Paperclip, Square } from 'lucide-react';
 import { nanoid } from 'nanoid';
 import { toast } from 'sonner';
 import {
@@ -9,7 +9,18 @@ import {
   runInputSchema,
   type RunInput,
   type ChatUsage,
+  type ThreadGoal,
 } from '@aime/shared/threads';
+import {
+  Attachment,
+  AttachmentHoverCard,
+  AttachmentHoverCardContent,
+  AttachmentHoverCardTrigger,
+  AttachmentInfo,
+  AttachmentPreview,
+  AttachmentRemove,
+  Attachments,
+} from '@/components/ai-elements/attachments';
 import {
   PromptInput,
   PromptInputBody,
@@ -20,46 +31,57 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ChatSettingsFields } from './chat-settings';
-import { ChatApiError, chatErrorKey } from './api';
+import { chatApi, ChatApiError, chatErrorKey } from './api';
 import { usePersonalChatSettings } from './use-personal-chat-settings';
 import { ChatContextUsage } from './chat-context-usage';
 import { ChatCommandTextarea } from './chat-command-textarea';
 import { useChatSkills } from './use-chat-skills';
 import { skillCommandGroup } from './skill-commands';
+import { consumeCompactCommand, consumeGoalCommand } from './slash-command';
+import { ChatGoal } from './chat-goal';
 
 function ComposerAttachments({ disabled }: { disabled: boolean }) {
   const { t } = useTranslation();
   const attachments = usePromptInputAttachments();
+
+  if (attachments.files.length === 0) return null;
+
   return (
-    <>
-      {attachments.files.length > 0 && (
-        <div className="flex flex-wrap gap-2 px-3 pt-3">
-          {attachments.files.map((file) => (
-            <div
-              key={file.id}
-              className="relative size-16 overflow-hidden rounded-md border"
+    <Attachments variant="inline" className="w-full min-w-0 px-3 pt-3">
+      {attachments.files.map((file) => (
+        <AttachmentHoverCard key={file.id}>
+          <AttachmentHoverCardTrigger asChild>
+            <Attachment
+              data={file}
+              onRemove={() => attachments.remove(file.id)}
+              className="max-w-full min-w-0"
+              tabIndex={0}
             >
-              <img
-                src={file.url}
-                alt={file.filename ?? t('chat.image')}
-                className="size-full object-cover"
-              />
-              <Button
-                type="button"
-                variant="secondary"
-                size="icon-sm"
-                className="absolute top-0 right-0 size-6"
+              <AttachmentPreview />
+              <AttachmentInfo className="max-w-48" />
+              <AttachmentRemove
+                className="shrink-0 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
                 disabled={disabled}
-                aria-label={t('chat.removeImage')}
-                onClick={() => attachments.remove(file.id)}
-              >
-                <X />
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
-    </>
+                label={t('chat.removeImage')}
+              />
+            </Attachment>
+          </AttachmentHoverCardTrigger>
+          <AttachmentHoverCardContent
+            side="top"
+            className="max-w-[min(20rem,calc(100vw-2rem))]"
+          >
+            <img
+              src={file.url}
+              alt={file.filename ?? t('chat.image')}
+              className="max-h-64 w-full rounded object-contain"
+            />
+            <p className="mt-2 break-all text-sm">
+              {file.filename ?? t('chat.image')}
+            </p>
+          </AttachmentHoverCardContent>
+        </AttachmentHoverCard>
+      ))}
+    </Attachments>
   );
 }
 function AttachButton({ disabled }: { disabled: boolean }) {
@@ -91,12 +113,16 @@ export function ChatComposer({
   usage,
   threadId,
   projectId,
+  goal,
+  onClearGoal,
 }: {
   className?: string;
   queue?: ReactNode;
   usage?: ChatUsage | null;
   threadId?: string;
   projectId?: string;
+  goal?: ThreadGoal | null;
+  onClearGoal?: () => Promise<void>;
   disabled?: boolean;
   running?: boolean;
   stopping?: boolean;
@@ -113,18 +139,83 @@ export function ChatComposer({
     retry: retrySettings,
   } = usePersonalChatSettings();
   const [text, setText] = useState('');
+  const [goalDraft, setGoalDraft] = useState(false);
+  const [closingGoal, setClosingGoal] = useState(false);
   const [commandsOpen, setCommandsOpen] = useState(false);
   const skillCatalog = useChatSkills(commandsOpen, threadId, projectId);
   const commandGroups = [
-    skillCommandGroup(skillCatalog.skills, t('chat.commands.skills')),
+    {
+      id: 'builtin',
+      sections: [
+        {
+          id: 'builtin',
+          items: [
+            {
+              id: 'command:compact',
+              name: 'compact',
+              description: t('chat.compression.command'),
+              action: 'compact' as const,
+            },
+            {
+              id: 'command:goal',
+              name: 'goal',
+              description: t('chat.goal.command'),
+              action: 'goal' as const,
+            },
+          ],
+        },
+      ],
+    },
+    skillCommandGroup(
+      skillCatalog.skills.filter(
+        (skill) => !['goal', 'compact'].includes(skill.name.toLowerCase()),
+      ),
+      t('chat.commands.skills'),
+    ),
   ];
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
   const retryId = useRef<string | null>(null);
   const unavailable =
-    disabled || loadingSettings || savingSettings || !!settingsError;
+    disabled ||
+    closingGoal ||
+    loadingSettings ||
+    savingSettings ||
+    !!settingsError;
+  const showStop = (running || stopping) && !text.trim() && !!onStop;
+  const submitLabel = showStop
+    ? t(stopping ? 'chat.stopping' : 'chat.stop')
+    : t(running && !goalDraft ? 'chat.queueSend' : 'chat.send');
+
+  async function compact() {
+    if (pendingRef.current) return;
+    if (!threadId) {
+      toast.info(t('chat.compression.noThread'));
+      return;
+    }
+    if (running || stopping) {
+      toast.error(t('chat.compression.busy'));
+      return;
+    }
+    if (disabled || closingGoal) return;
+    pendingRef.current = true;
+    setPending(true);
+    const toastId = toast.loading(t('chat.compression.running'));
+    try {
+      const result = await chatApi.compact(threadId);
+      if (result.observed)
+        toast.success(t('chat.compression.completed'), { id: toastId });
+      else toast.info(t('chat.compression.empty'), { id: toastId });
+    } catch (cause) {
+      toast.error(t(chatErrorKey(cause)), { id: toastId });
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
+    }
+  }
   return (
     <div
+      data-chat-composer
       className={cn('shrink-0 space-y-2 bg-card p-3 @lg/chat:p-5', className)}
     >
       <div>
@@ -141,19 +232,41 @@ export function ChatComposer({
           maxFiles={MAX_CHAT_FILES}
           maxFileSize={MAX_IMAGE_BYTES}
           onError={() => toast.error(t('chat.imageHint'))}
+          onSubmitCapture={(event) => {
+            const body = consumeCompactCommand(text);
+            if (body === null) return;
+            // A pasted command follows the same local action path. Bypass
+            // PromptInput submission so attachments and the remaining draft survive.
+            event.preventDefault();
+            event.stopPropagation();
+            setText(body);
+            void compact();
+          }}
           onSubmit={async ({ text: draft, files }) => {
             if (unavailable || stopping || pendingRef.current)
               throw new Error('Unavailable');
-            if (!draft.trim() && !files.length) throw new Error('Empty');
+            const goalText = consumeGoalCommand(draft);
+            const body = (goalText ?? draft).trim();
+            const startGoal = goalDraft || goalText !== null;
+            if (goalText !== null) {
+              setGoalDraft(true);
+              setText(goalText);
+            }
+            if (startGoal && !body) {
+              toast.error(t('chat.goal.textRequired'));
+              throw new Error('Goal requires text');
+            }
+            if (!body && !files.length) throw new Error('Empty');
             const id = retryId.current ?? nanoid();
             retryId.current = id;
             const result = runInputSchema.safeParse({
               id,
               ...settings,
-              isImmediate: false,
+              isImmediate: startGoal,
+              ...(startGoal ? { goal: true } : {}),
               parts: [
                 ...files,
-                ...(draft.trim() ? [{ type: 'text', text: draft.trim() }] : []),
+                ...(body ? [{ type: 'text', text: body }] : []),
               ],
             });
             if (!result.success) {
@@ -165,6 +278,7 @@ export function ChatComposer({
             try {
               await onSend(result.data);
               setText('');
+              setGoalDraft(false);
               retryId.current = null;
             } catch (cause) {
               toast.error(t(chatErrorKey(cause)));
@@ -184,13 +298,30 @@ export function ChatComposer({
               error={skillCatalog.error}
               onRetry={skillCatalog.retry}
               onOpenChange={setCommandsOpen}
+              onCommand={(item) => {
+                if (item.action === 'compact') {
+                  void compact();
+                } else if (item.action === 'goal') {
+                  setGoalDraft(goal?.status !== 'active');
+                  toast.success(t('chat.goal.enabled'));
+                }
+              }}
               onValueChange={(value) => {
-                setText(value);
+                const body = consumeGoalCommand(value);
+                if (body !== null) {
+                  setGoalDraft(goal?.status !== 'active');
+                  toast.success(t('chat.goal.enabled'));
+                }
+                setText(body ?? value);
                 retryId.current = null;
               }}
-              disabled={pending || disabled || stopping}
+              disabled={pending || disabled || stopping || closingGoal}
               placeholder={t(
-                running ? 'chat.queuePlaceholder' : 'chat.placeholder',
+                goalDraft
+                  ? 'chat.goal.placeholder'
+                  : running
+                    ? 'chat.queuePlaceholder'
+                    : 'chat.placeholder',
               )}
             />
           </PromptInputBody>
@@ -217,31 +348,46 @@ export function ChatComposer({
                   pending || stopping || loadingSettings || !!settingsError
                 }
               />
+              {(goalDraft || goal) && (
+                <ChatGoal
+                  disabled={!!disabled || pending || closingGoal}
+                  onClose={() => {
+                    if (closingGoal) return;
+                    setClosingGoal(true);
+                    void (
+                      goal && onClearGoal ? onClearGoal() : Promise.resolve()
+                    )
+                      .then(() => {
+                        setGoalDraft(false);
+                        toast.success(t('chat.goal.closed'));
+                      })
+                      .catch((cause) => toast.error(t(chatErrorKey(cause))))
+                      .finally(() => setClosingGoal(false));
+                  }}
+                />
+              )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              {(running || stopping) && onStop && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={stopping}
-                  onClick={() =>
-                    void onStop().catch((cause) =>
-                      toast.error(t(chatErrorKey(cause))),
-                    )
-                  }
-                >
-                  <Square className="size-3" />
-                  {t(stopping ? 'chat.stopping' : 'chat.stop')}
-                </Button>
-              )}
               <PromptInputSubmit
-                disabled={pending || unavailable || stopping}
-                status={pending ? 'submitted' : 'ready'}
-                aria-label={t(running ? 'chat.queueSend' : 'chat.send')}
-                title={t('chat.send')}
+                disabled={
+                  showStop ? stopping : pending || unavailable || stopping
+                }
+                status={
+                  pending ? 'submitted' : showStop ? 'streaming' : 'ready'
+                }
+                onStop={
+                  showStop
+                    ? () => {
+                        void onStop().catch((cause) =>
+                          toast.error(t(chatErrorKey(cause))),
+                        );
+                      }
+                    : undefined
+                }
+                aria-label={submitLabel}
+                title={submitLabel}
               >
-                <ArrowUp />
+                {showStop ? <Square className="size-3" /> : <ArrowUp />}
               </PromptInputSubmit>
             </div>
           </PromptInputFooter>

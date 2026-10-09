@@ -1,0 +1,77 @@
+import { implement, ORPCError, ValidationError } from '@orpc/server';
+import { apiContract } from '@aime/shared/rpc';
+import { hasAdminRole } from '@aime/shared';
+import type { Auth } from '@aime/auth';
+import { ThreadError } from '../modules/threads/errors.js';
+import { ProviderError } from '../modules/providers/network.js';
+import { SkillError } from '../modules/skills/errors.js';
+import { EnvironmentVariableError } from '../modules/environment-variables/errors.js';
+
+export type RpcContext = {
+  auth: Auth;
+  headers: Headers;
+  webOrigin?: string;
+  method: string;
+};
+
+export function mapRpcError(error: unknown): never {
+  if (
+    error instanceof ThreadError ||
+    error instanceof ProviderError ||
+    error instanceof SkillError ||
+    error instanceof EnvironmentVariableError
+  )
+    throw new ORPCError(error.code, {
+      status: error.status,
+      message: error.code,
+    });
+  if (error instanceof ORPCError) {
+    if (error.code === 'BAD_REQUEST' && error.cause instanceof ValidationError)
+      throw new ORPCError('VALIDATION_ERROR', {
+        status: 400,
+        message: 'VALIDATION_ERROR',
+      });
+    throw error;
+  }
+  // Never send provider credentials, database details or local paths to clients.
+  console.error(
+    '请求处理失败',
+    error instanceof Error ? error.name : 'UnknownError',
+  );
+  throw new ORPCError('INTERNAL_ERROR', {
+    status: 500,
+    message: '服务暂时不可用，请稍后重试',
+  });
+}
+
+const implementation = implement(apiContract).$context<RpcContext>();
+export const rpc = implementation.use(async ({ context, path, next }) => {
+  try {
+    const session = await context.auth.api.getSession({
+      headers: context.headers,
+    });
+    if (!session) throw new ORPCError('UNAUTHORIZED');
+    const admin =
+      path[0] === 'skills' ||
+      path[0] === 'environmentVariables' ||
+      path[0] === 'requestLogs' ||
+      path[0] === 'tools' ||
+      (path[0] === 'providers' && path[1] !== 'available');
+    if (admin && !hasAdminRole(session.user.role))
+      throw new ORPCError('FORBIDDEN');
+    if (
+      !['GET', 'HEAD', 'OPTIONS'].includes(context.method) &&
+      (!context.webOrigin ||
+        context.headers.get('origin') !== new URL(context.webOrigin).origin)
+    )
+      throw new ORPCError('FORBIDDEN');
+    return await next({ context: { userId: session.user.id } });
+  } catch (error) {
+    mapRpcError(error);
+  }
+});
+
+export function required<T>(service: T | undefined): T {
+  if (!service) throw new ORPCError('NOT_IMPLEMENTED');
+  return service;
+}

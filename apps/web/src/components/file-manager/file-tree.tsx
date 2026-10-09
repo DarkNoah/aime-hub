@@ -1,10 +1,12 @@
 import { useTranslation } from 'react-i18next';
+import { HardDrive } from 'lucide-react';
 import {
   FileTree as ElementsFileTree,
   FileTreeFile,
   FileTreeFolder,
 } from '@/components/ai-elements/file-tree';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { EntryActions, type EntryAction } from './entry-actions';
 import { parentPath } from './state';
 import type { FileManagerState } from './use-file-manager';
@@ -110,9 +112,13 @@ function Directory({
         const nodeProps = {
           'data-file-node': true,
           'data-path': entry.path,
-          'aria-label': entry.name,
+          'aria-label': entry.isMount
+            ? `/${entry.path} · ${t('files.mountPoint')}`
+            : entry.name,
           'aria-level': depth + 1,
-          title: entry.path,
+          title: entry.isMount
+            ? `/${entry.path} · ${t('files.mountProtected')}`
+            : entry.path,
           onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => {
             const target = event.target as HTMLElement;
             if (
@@ -150,11 +156,21 @@ function Directory({
           <FileTreeFolder
             key={entry.path}
             path={entry.path}
-            name={entry.name}
+            name={entry.isMount ? `${entry.path}` : entry.name}
             className="min-w-0 rounded outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             renderRow={(row) => (
               <EntryActions entry={entry} onAction={onAction}>
                 {row}
+                {entry.isMount && (
+                  <Badge
+                    variant="secondary"
+                    className="shrink-0 gap-1 px-1.5 py-0 text-[10px]"
+                    title={t('files.mountProtected')}
+                  >
+                    <HardDrive className="size-3" />
+                    {/* {t('files.mountPoint')} */}
+                  </Badge>
+                )}
               </EntryActions>
             )}
             {...nodeProps}

@@ -1,3 +1,4 @@
+import { sessionStub } from './fixtures/thread-session.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -46,19 +47,18 @@ for (const status of [
 ] satisfies ThreadStreamStatus[]) {
   test(`native ${status} status survives cleanup, navigation SSE and reopening`, async (t) => {
     const { memory, threads } = fakeMemory();
-    let context: Parameters<ChatRunner['execute']>[0] | undefined;
+    let context: Parameters<ChatRunner['open']>[0] | undefined;
     let finish!: () => void;
     const runner: ChatRunner = {
       ...base,
-      async execute(value) {
+      async open(value) {
         context = value;
-        value.onStatus('running');
-        await new Promise<void>((resolve) => {
-          finish = resolve;
+        finish = () => value.onEvent({ type: 'status', status, runId: 'run' });
+        return sessionStub({
+          async send() {
+            value.onEvent({ type: 'status', status: 'running', runId: 'run' });
+          },
         });
-        value.onStatus(status);
-        // Status is authoritative even when there is no tool interaction payload.
-        return { status, toolInteractions: [] };
       },
     };
     const service = new ThreadService(memory, runner);
@@ -115,89 +115,71 @@ for (const status of [
   });
 }
 
-test('stop retains the live stream status until cancellation finishes', async (t) => {
-  const { memory } = fakeMemory();
-  let finish!: () => void;
-  let started = false;
-  const service = new ThreadService(memory, {
-    ...base,
-    async execute({ onStatus, signal }) {
-      onStatus('running');
-      started = true;
-      await new Promise<void>((resolve) => {
-        finish = resolve;
-      });
-      assert.equal(signal.aborted, true);
-      onStatus('canceled');
-      return { status: 'canceled', toolInteractions: [] };
-    },
-  });
-  t.after(async () => {
-    finish?.();
-    await service.shutdown();
-  });
-  const thread = await service.createThread('alice', settings);
-  await service.run('alice', thread.id, input);
-  await until(() => started);
-  const stopping = await service.abort('alice', thread.id);
-  assert.equal(stopping.status, 'running');
-  assert.equal(stopping.stopping, true);
-  finish();
-  await until(async () => {
-    const snapshot = await service.getThread('alice', thread.id);
-    return snapshot.thread.status === 'canceled' && !snapshot.thread.stopping;
-  });
-});
-
-test('failures before a stream exists are persisted as failed', async (t) => {
+test('stop clears native pending input and ignores a late cancellation error', async (t) => {
   const { memory, threads } = fakeMemory();
+  let aborts = 0;
   const service = new ThreadService(memory, {
     ...base,
-    async execute() {
-      throw new Error('Model setup failed');
+    async open({ onEvent }) {
+      return sessionStub({
+        async send() {
+          onEvent({ type: 'status', status: 'running', runId: 'run' });
+        },
+        abort() {
+          aborts++;
+          onEvent({ type: 'queue', count: 0 });
+          onEvent({
+            type: 'error',
+            error: new Error('The operation was aborted'),
+            runId: 'run',
+          });
+          onEvent({ type: 'status', status: 'canceled', runId: 'run' });
+        },
+      });
     },
   });
   t.after(() => service.shutdown());
   const thread = await service.createThread('alice', settings);
   await service.run('alice', thread.id, input);
-  await until(
-    () =>
-      threads.get(thread.id)?.metadata?.status === 'failed' &&
-      threads.get(thread.id)?.metadata?.activeId === null,
-  );
-  const snapshot = await service.getThread('alice', thread.id);
-  assert.equal(snapshot.thread.status, 'failed');
-  assert.equal(snapshot.thread.error, 'Model setup failed');
-  assert.equal(threads.get(thread.id)?.metadata?.error, 'Model setup failed');
-});
-
-test('errors raised while stopping do not persist a failure message', async (t) => {
-  const { memory, threads } = fakeMemory();
-  let started = false;
-  const service = new ThreadService(memory, {
-    ...base,
-    async execute({ onStatus, signal }) {
-      onStatus('running');
-      started = true;
-      await new Promise<void>((resolve) => {
-        signal.addEventListener('abort', () => resolve(), { once: true });
-      });
-      throw new Error('The operation was aborted');
-    },
-  });
-  t.after(() => service.shutdown());
-  const thread = await service.createThread('alice', settings);
-  await service.run('alice', thread.id, input);
-  await until(() => started);
-  await service.abort('alice', thread.id);
-  await until(
-    () =>
-      threads.get(thread.id)?.metadata?.status === 'canceled' &&
-      threads.get(thread.id)?.metadata?.activeId === null,
-  );
-  assert.equal(threads.get(thread.id)?.metadata?.error, null);
+  await until(() => threads.get(thread.id)?.metadata?.status === 'running');
+  const stopped = await service.abort('alice', thread.id);
+  assert.equal(stopped.status, 'canceled');
+  assert.equal(aborts, 1);
+  await delay(0);
   assert.equal(
     (await service.getThread('alice', thread.id)).thread.error,
     null,
   );
+});
+
+test('failed admission leaves the input retryable without a phantom run', async (t) => {
+  const { memory } = fakeMemory();
+  let fail = true;
+  let calls = 0;
+  const service = new ThreadService(memory, {
+    ...base,
+    async open({ onEvent }) {
+      return sessionStub({
+        async send() {
+          if (fail) throw new Error('Model setup failed');
+          calls++;
+          onEvent({ type: 'status', status: 'success', runId: 'run' });
+        },
+      });
+    },
+  });
+  t.after(() => service.shutdown());
+  const thread = await service.createThread('alice', settings);
+  await assert.rejects(
+    service.run('alice', thread.id, input),
+    /Model setup failed/,
+  );
+  assert.equal(
+    (await service.getThread('alice', thread.id)).thread.status,
+    'idle',
+  );
+  fail = false;
+  await service.run('alice', thread.id, input);
+  await service.run('alice', thread.id, input);
+  assert.equal(calls, 1);
 });

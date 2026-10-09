@@ -1,4 +1,4 @@
-import { Navigate, Outlet } from 'react-router';
+import { Navigate, Outlet } from '@tanstack/react-router';
 import { useAuthSession } from '@/features/auth/session-context';
 import { isAdmin } from '@/features/auth/client';
 

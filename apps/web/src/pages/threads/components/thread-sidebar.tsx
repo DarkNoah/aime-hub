@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, useMatch } from 'react-router';
+import { useNavigate, useParams } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { ChevronRight, MessageSquare, Plus } from 'lucide-react';
 import type { ThreadSummary } from '@aime/shared/threads';
@@ -17,7 +17,8 @@ import { ThreadDialog } from '@/components/chat/thread-dialogs';
 export function ThreadSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const selectedId = useMatch('/threads/:threadId')?.params.threadId;
+  const params = useParams({ strict: false });
+  const selectedId = params.projectId ? undefined : params.threadId;
   const { updateThread, removeThread } = useThreadList();
   const [open, setOpen] = useState(true);
   const [action, setAction] = useState<{
@@ -25,7 +26,9 @@ export function ThreadSidebar({ onNavigate }: { onNavigate?: () => void }) {
     mode: 'rename' | 'delete';
   } | null>(null);
   const select = (id?: string) => {
-    navigate(id ? `/threads/${id}` : '/threads');
+    if (id)
+      void navigate({ to: '/threads/$threadId', params: { threadId: id } });
+    else void navigate({ to: '/threads' });
     onNavigate?.();
   };
   return (
@@ -54,7 +57,7 @@ export function ThreadSidebar({ onNavigate }: { onNavigate?: () => void }) {
           </Button>
         </div>
         <CollapsibleContent>
-          <div className="mt-1 mb-2 ml-2 border-l">
+          <div className="mt-1 mb-2 ">
             <ThreadList
               selectedId={selectedId}
               onSelect={select}

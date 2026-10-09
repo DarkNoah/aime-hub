@@ -55,11 +55,7 @@ export function createThreadNavigationResource(
       }
       counts = new Map();
       for (const thread of threads.values()) {
-        // Stopping still owns execution until the runner acknowledges cancellation.
-        if (
-          thread.projectId &&
-          (isThreadActive(thread.status) || thread.stopping)
-        )
+        if (thread.projectId && isThreadActive(thread.status))
           counts.set(thread.projectId, (counts.get(thread.projectId) ?? 0) + 1);
       }
       listeners.forEach((listener) => listener());

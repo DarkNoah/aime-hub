@@ -1,159 +1,89 @@
-import type { UIMessage, ChatTransport } from 'ai';
 import type {
   ChatSettings,
-  ChatSkill,
-  MessagePage,
   RunInput,
-  ThreadList,
-  ThreadSummary,
-  ThreadSnapshot,
-  UpdateQueuedMessage,
-  QueuedMessageDetail,
   ToolResponse,
+  UpdateQueuedMessage,
 } from '@aime/shared/threads';
+import { api, apiErrorCode } from '../../lib/rpc.js';
 
 export class ChatApiError extends Error {
   constructor(public code: string) {
     super(code);
   }
 }
-export async function chatRequest<T>(
-  path: string,
-  init?: RequestInit,
-  base = '/api/threads',
-): Promise<T> {
-  const response = await fetch(`${base}${path}`, {
-    ...init,
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-  });
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new ChatApiError(data.code ?? 'CHAT_FAILED');
-  }
-  return response.status === 204 ? (undefined as T) : response.json();
-}
 export const chatApi = {
   skills: (
     scope: { threadId?: string; projectId?: string },
     signal?: AbortSignal,
-  ) => {
-    const query = new URLSearchParams();
-    if (scope.threadId) query.set('threadId', scope.threadId);
-    else if (scope.projectId) query.set('projectId', scope.projectId);
-    return chatRequest<ChatSkill[]>(`/skills?${query}`, { signal });
-  },
+  ) => api.threads.skills({ query: scope }, { signal }),
   list: (page = 0, signal?: AbortSignal, projectId?: string, perPage = 10) =>
-    chatRequest<ThreadList>(
-      `?page=${page}&perPage=${perPage}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''}`,
-      { signal },
-    ),
-  get: (id: string, signal?: AbortSignal) =>
-    chatRequest<ThreadSnapshot<UIMessage>>(`/${id}`, { signal }),
+    api.threads.list({ query: { page, perPage, projectId } }, { signal }),
+  get: (threadId: string, signal?: AbortSignal) =>
+    api.threads.get({ params: { threadId } }, { signal }),
   create: (settings: ChatSettings & { projectId?: string }) =>
-    chatRequest<ThreadSummary>('', {
-      method: 'POST',
-      body: JSON.stringify(settings),
-    }),
-  update: (id: string, input: Partial<ChatSettings> & { title?: string }) =>
-    chatRequest<ThreadSummary>(`/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(input),
-    }),
-  remove: (id: string) => chatRequest<void>(`/${id}`, { method: 'DELETE' }),
-  run: (id: string, input: RunInput) =>
-    chatRequest<ThreadSummary>(`/${id}/messages`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    }),
-  history: (id: string, page = 0, anchor?: string, signal?: AbortSignal) =>
-    chatRequest<MessagePage<UIMessage>>(
-      `/${id}/history?page=${page}${anchor ? `&anchor=${encodeURIComponent(anchor)}` : ''}`,
+    api.threads.create({ body: settings }),
+  update: (
+    threadId: string,
+    input: Partial<ChatSettings> & { title?: string },
+  ) => api.threads.update({ params: { threadId }, body: input }),
+  remove: (threadId: string) => api.threads.remove({ params: { threadId } }),
+  run: (threadId: string, input: RunInput) =>
+    api.threads.run({ params: { threadId }, body: input }),
+  history: (
+    threadId: string,
+    page = 0,
+    anchor?: string,
+    signal?: AbortSignal,
+  ) =>
+    api.threads.history(
+      { params: { threadId }, query: { page, anchor } },
       { signal },
     ),
-  abort: (id: string) =>
-    chatRequest<ThreadSummary>(`/${id}/abort`, { method: 'POST' }),
-  cancelBackgroundTask: (id: string, taskId: string) =>
-    chatRequest<void>(
-      `/${id}/background-tasks/${encodeURIComponent(taskId)}/cancel`,
-      { method: 'POST' },
-    ),
-  respondToTool: (id: string, interactionId: string, response: ToolResponse) =>
-    chatRequest<ThreadSummary>(
-      `/${id}/tool-interactions/${encodeURIComponent(interactionId)}`,
-      {
-        method: 'POST',
-        body: JSON.stringify(response),
-      },
-    ),
-  resume: (id: string) =>
-    chatRequest<ThreadSummary>(`/${id}/resume`, { method: 'POST' }),
-  retry: (id: string) =>
-    chatRequest<ThreadSummary>(`/${id}/retry`, { method: 'POST' }),
-  cancel: (id: string, messageId: string) =>
-    chatRequest<ThreadSummary>(`/${id}/queue/${messageId}`, {
-      method: 'DELETE',
+  abort: (threadId: string) => api.threads.abort({ params: { threadId } }),
+  compact: (threadId: string) => api.threads.compact({ params: { threadId } }),
+  clearGoal: (threadId: string) =>
+    api.threads.clearGoal({ params: { threadId } }),
+  cancelBackgroundTask: (threadId: string, taskId: string) =>
+    api.threads.cancelBackgroundTask({ params: { threadId, taskId } }),
+  respondToTool: (
+    threadId: string,
+    interactionId: string,
+    response: ToolResponse,
+  ) =>
+    api.threads.respondToTool({
+      params: { threadId, interactionId },
+      body: response,
     }),
-  queued: (id: string, messageId: string, signal?: AbortSignal) =>
-    chatRequest<QueuedMessageDetail>(`/${id}/queue/${messageId}`, { signal }),
-  updateQueued: (id: string, messageId: string, input: UpdateQueuedMessage) =>
-    chatRequest<ThreadSummary>(`/${id}/queue/${messageId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(input),
+  retry: (threadId: string) => api.threads.retry({ params: { threadId } }),
+  queued: (threadId: string, messageId: string, signal?: AbortSignal) =>
+    api.threads.queued({ params: { threadId, messageId } }, { signal }),
+  updateQueued: (
+    threadId: string,
+    messageId: string,
+    body: UpdateQueuedMessage,
+  ) => api.threads.updateQueued({ params: { threadId, messageId }, body }),
+  moveQueued: (threadId: string, messageId: string, beforeId: string | null) =>
+    api.threads.moveQueued({
+      params: { threadId },
+      body: { id: messageId, beforeId },
     }),
-  moveQueued: (id: string, messageId: string, beforeId: string | null) =>
-    chatRequest<ThreadSummary>(`/${id}/queue`, {
-      method: 'PATCH',
-      body: JSON.stringify({ id: messageId, beforeId }),
-    }),
-  preferences: () => chatRequest<ChatSettings>('/preferences'),
+  cancel: (threadId: string, messageId: string) =>
+    api.threads.cancelQueued({ params: { threadId, messageId } }),
+  clearQueue: (threadId: string) =>
+    api.threads.clearQueue({ params: { threadId } }),
+  preferences: () => api.threads.preferences(),
   projectPreferences: (projectId: string) =>
-    chatRequest<ChatSettings>(
-      `/${projectId}/preferences`,
-      undefined,
-      '/api/projects',
-    ),
+    api.projects.preferences({ params: { projectId } }),
   savePreferences: (settings: ChatSettings) =>
-    chatRequest<ChatSettings>('/preferences', {
-      method: 'PUT',
-      body: JSON.stringify(settings),
-    }),
+    api.threads.savePreferences({ body: settings }),
 };
 
-// HTTP acknowledges submission; an independent SSE subscription is authoritative for execution.
-// Returning an empty stream lets useChat send another message while the server queues work.
-export function createThreadTransport(
-  onAccepted: (thread: ThreadSummary) => void,
-): ChatTransport<UIMessage> {
-  return {
-    async sendMessages({ chatId, messages, body }) {
-      const message = messages[messages.length - 1];
-      if (message.role !== 'user') throw new ChatApiError('VALIDATION_ERROR');
-      const thread = await chatApi.run(chatId, {
-        ...body,
-        id: message.id,
-        parts: message.parts,
-      } as RunInput);
-      onAccepted(thread);
-      return new ReadableStream({
-        start(controller) {
-          controller.close();
-        },
-      });
-    },
-    async reconnectToStream() {
-      return null;
-    },
-  };
-}
-
 export function chatErrorKey(error: unknown) {
-  const code =
-    error instanceof ChatApiError
-      ? error.code
-      : typeof error === 'string'
-        ? error
-        : '';
+  const code = apiErrorCode(error)
+    ? apiErrorCode(error)
+    : typeof error === 'string'
+      ? error
+      : '';
   switch (code) {
     case 'UNAUTHORIZED':
       return 'errors.sessionExpired';
@@ -183,19 +113,20 @@ export function chatErrorKey(error: unknown) {
       return 'chat.errors.retryUnavailable';
     case 'THREAD_BUSY':
       return 'chat.errors.busy';
+    case 'COMPACTION_BUSY':
+      return 'chat.compression.busy';
     case 'TOOL_NOT_PENDING':
       return 'chat.errors.toolNotPending';
     case 'BACKGROUND_TASK_NOT_FOUND':
       return 'chat.backgroundTaskNotFound';
     case 'BACKGROUND_TASKS_UNAVAILABLE':
       return 'chat.backgroundTaskStopFailed';
-    case 'THREAD_STOPPING':
-      return 'chat.errors.stopping';
-    case 'QUEUE_FULL':
-      return 'chat.errors.queueFull';
     case 'QUEUED_MESSAGE_NOT_FOUND':
       return 'chat.errors.queuedGone';
-    case 'MESSAGE_TOO_LARGE':
+    case 'QUEUE_UPDATE_FAILED':
+      return 'chat.errors.queueUpdateFailed';
+    case 'TOOL_RESPONSE_REQUIRED':
+      return 'chat.toolInteraction.waiting';
     case 'VALIDATION_ERROR':
       return 'chat.errors.validation';
     default:

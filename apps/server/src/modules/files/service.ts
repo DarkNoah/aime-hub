@@ -10,7 +10,7 @@ import { ThreadError } from '../threads/errors.js';
 import { filePath, validatePath } from './paths.js';
 
 export const TEXT_LIMIT = 512 * 1024;
-const media: Record<string, [FilePreview['kind'], string]> = {
+export const media: Record<string, [FilePreview['kind'], string]> = {
   '.png': ['image', 'image/png'],
   '.jpg': ['image', 'image/jpeg'],
   '.jpeg': ['image', 'image/jpeg'],
@@ -55,6 +55,7 @@ export async function listFiles(
   const entries: FileListing['entries'] = [];
   let truncated = false;
   for await (const entry of directory) {
+    if (entry.name.startsWith('._')) continue;
     if (!entry.isDirectory() && !entry.isFile()) continue;
     if (entries.length === 2000) {
       truncated = true;

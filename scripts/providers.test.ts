@@ -1,3 +1,4 @@
+import { createNodeServer } from '../apps/server/src/server.js';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
@@ -108,8 +109,13 @@ test('provider schema 标准化、默认值及 partial 更新不注入默认值'
   }
 });
 
-test('models.dev keys and MinerU round-trip through create/update validation with stable groups', () => {
-  for (const type of [...Object.keys(languageModelProviders), 'mineru']) {
+test('models.dev keys and custom providers round-trip through create/update validation with stable groups', () => {
+  for (const type of [
+    ...Object.keys(languageModelProviders),
+    'mineru',
+    'serpapi',
+    'jina-ai',
+  ]) {
     assert.equal(
       providerInputSchema.parse({ name: type, type, baseUrl }).type,
       type,
@@ -117,7 +123,9 @@ test('models.dev keys and MinerU round-trip through create/update validation wit
     assert.equal(providerUpdateSchema.parse({ type }).type, type);
     assert.equal(
       providerGroup(type),
-      type === 'mineru' ? 'other' : 'languageModel',
+      ['mineru', 'serpapi', 'jina-ai'].includes(type)
+        ? 'other'
+        : 'languageModel',
     );
   }
   for (const type of [
@@ -441,7 +449,10 @@ test(
     const httpResponses: Record<string, unknown> = {};
     const httpFake = fakeJson(httpResponses);
     const service = new ProviderService(database, httpFake.request);
-    server = createApp(auth, { service, webOrigin }).listen(0, '127.0.0.1');
+    server = createNodeServer(createApp(auth, { service, webOrigin })).listen(
+      0,
+      '127.0.0.1',
+    );
     await once(server, 'listening');
     const address = server.address();
     assert.ok(address && typeof address !== 'string');

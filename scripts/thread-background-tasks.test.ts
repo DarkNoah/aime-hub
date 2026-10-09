@@ -1,3 +1,4 @@
+import { openSessionStub, sessionStub } from './fixtures/thread-session.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -25,7 +26,7 @@ const runner: ChatRunner = {
   async createWorkspace() {
     return 'workspace';
   },
-  async execute() {},
+  open: openSessionStub,
 };
 const task = (
   id: string,
@@ -211,14 +212,17 @@ test('turn abort and browser disconnect retain the observer; reopening restores 
     memory,
     {
       ...runner,
-      async execute({ signal, thread, onBackgroundTaskStarted }) {
-        bg.tasks.set('queued', task('queued', thread.id, 'pending'));
-        await onBackgroundTaskStarted?.('queued');
-        started = true;
-        await new Promise<void>((resolve) =>
-          signal.addEventListener('abort', () => resolve(), { once: true }),
-        );
-        return { status: 'canceled', toolInteractions: [] };
+      async open({ thread, onEvent }) {
+        return sessionStub({
+          async send() {
+            bg.emit(
+              task('queued', thread.id, 'pending'),
+              'background-task-started',
+            );
+            onEvent({ type: 'status', status: 'running', runId: 'run' });
+            started = true;
+          },
+        });
       },
     },
     undefined,
@@ -233,7 +237,12 @@ test('turn abort and browser disconnect retain the observer; reopening restores 
     parts: [{ type: 'text', text: 'sleep' }],
     isImmediate: false,
   });
-  await until(() => started);
+  await until(
+    async () =>
+      started &&
+      (await service.getThread('alice', thread.id)).backgroundTasks?.[0]
+        ?.status === 'pending',
+  );
   assert.equal(
     (await service.getThread('alice', thread.id)).backgroundTasks?.[0]?.status,
     'pending',
@@ -409,13 +418,21 @@ test('manual cancellation verifies task scope and refreshes the task without sto
     memory,
     {
       ...runner,
-      async execute({ signal, onStatus }) {
-        foregroundSignal = signal;
-        onStatus('running');
-        started = true;
-        await new Promise<void>((resolve) =>
-          signal.addEventListener('abort', () => resolve(), { once: true }),
-        );
+      async open({ onEvent }) {
+        const controller = new AbortController();
+        foregroundSignal = controller.signal;
+        return sessionStub({
+          async send() {
+            started = true;
+            onEvent({ type: 'status', status: 'running', runId: 'run' });
+          },
+          abort() {
+            controller.abort();
+          },
+          async close() {
+            controller.abort();
+          },
+        });
       },
     },
     undefined,

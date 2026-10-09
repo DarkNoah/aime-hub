@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { Link, useMatch, useNavigate } from 'react-router';
+import { Link, useParams, useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { ArrowUpRight, ChevronRight, Folder, Plus } from 'lucide-react';
 import type { ProjectSummary } from '@aime/shared/projects';
@@ -21,13 +21,16 @@ import { ThreadDialog } from '@/components/chat/thread-dialogs';
 import { useAuthSession } from '@/features/auth/session-context';
 import { cn } from '@/lib/utils';
 import { useProjectNavigation } from '../use-project-navigation';
-import { ProjectSheet } from './project-sheet';
+import { ProjectDialog } from './project-dialog';
+import { ProjectActions } from './project-actions';
+import { Badge } from '@/components/ui/badge';
 
 export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const activeProjectId = useMatch('/projects/:projectId/*')?.params.projectId;
-  const { projects } = useProjectNavigation();
+  const activeProjectId = useParams({ strict: false }).projectId;
+  const navigation = useProjectNavigation();
+  const { projects } = navigation;
   const list = useSyncExternalStore(
     projects.subscribe,
     projects.getSnapshot,
@@ -65,7 +68,7 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
           </Button>
         </div>
         <CollapsibleContent forceMount hidden={!open}>
-          <div className="mt-1 mb-2 ml-2 border-l ">
+          <div className="mt-1 mb-2 ">
             <Link
               to="/projects"
               onClick={onNavigate}
@@ -105,13 +108,16 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
         </CollapsibleContent>
       </Collapsible>
       {creating && (
-        <ProjectSheet
+        <ProjectDialog
           onClose={() => setCreating(false)}
           onSaved={(project) => {
-            projects.update(project);
+            navigation.updateProject(project);
             setExpanded((current) => ({ ...current, [project.id]: true }));
             setOpen(true);
-            navigate(`/projects/${project.id}`);
+            void navigate({
+              to: '/projects/$projectId',
+              params: { projectId: project.id },
+            });
             onNavigate?.();
           }}
         />
@@ -134,10 +140,10 @@ function ProjectItem({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { data } = useAuthSession();
-  const match = useMatch('/projects/:projectId/threads/:threadId');
-  const activeProjectId = useMatch('/projects/:projectId/*')?.params.projectId;
+  const params = useParams({ strict: false });
+  const activeProjectId = useParams({ strict: false }).projectId;
   const selectedId =
-    match?.params.projectId === project.id ? match.params.threadId : undefined;
+    params.projectId === project.id ? params.threadId : undefined;
   const navigation = useProjectNavigation();
   const runningCount = useProjectRunningCount(project.id);
   const resource = navigation.threads(project.id);
@@ -154,7 +160,16 @@ function ProjectItem({
     if (open && resource.getSnapshot().page < 0) void resource.loadMore();
   }, [open, resource]);
   const select = (id?: string) => {
-    navigate(`/projects/${project.id}/threads${id ? `/${id}` : ''}`);
+    if (id)
+      void navigate({
+        to: '/projects/$projectId/threads/$threadId',
+        params: { projectId: project.id, threadId: id },
+      });
+    else
+      void navigate({
+        to: '/projects/$projectId/threads',
+        params: { projectId: project.id },
+      });
     onNavigate?.();
   };
   return (
@@ -185,22 +200,12 @@ function ProjectItem({
           <ThreadActivityTitle active={runningCount > 0}>
             {project.name}
           </ThreadActivityTitle>
+          {project.pinned && (
+            <Badge variant="secondary" className="shrink-0 px-1 text-[10px]">
+              {t('projects.pinned')}
+            </Badge>
+          )}
         </CollapsibleTrigger>
-        <Button
-          asChild
-          variant="ghost"
-          size="icon-sm"
-          className="size-7 shrink-0"
-          title={t('projects.openNamed', { name: project.name })}
-        >
-          <Link
-            to={`/projects/${project.id}`}
-            onClick={onNavigate}
-            aria-label={t('projects.openNamed', { name: project.name })}
-          >
-            <ArrowUpRight className="size-3.5" />
-          </Link>
-        </Button>
         <Button
           variant="ghost"
           size="icon-sm"
@@ -211,9 +216,15 @@ function ProjectItem({
         >
           <Plus className="size-3.5" />
         </Button>
+        <ProjectActions
+          project={project}
+          showOpen
+          onNavigate={onNavigate}
+          className="size-7 shrink-0"
+        />
       </div>
       <CollapsibleContent forceMount hidden={!open}>
-        <div className="ml-3 border-l pl-1">
+        <div className="">
           <SidebarPageList
             {...list}
             label={t('projects.threadList', { name: project.name })}

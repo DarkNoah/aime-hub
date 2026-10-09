@@ -11,6 +11,8 @@ export function validateToolResponse(
   interaction: ToolInteraction,
   response: ToolResponse,
 ) {
+  if (interaction.toolName === 'ask_user' && response.action === 'decline')
+    return;
   if ((interaction.kind === 'suspended') !== (response.action === 'resume'))
     throw new ThreadError('VALIDATION_ERROR', 400);
   if (response.action !== 'resume') return;

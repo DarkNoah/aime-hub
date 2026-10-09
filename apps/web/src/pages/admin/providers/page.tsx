@@ -35,22 +35,17 @@ import {
 } from '@/pages/admin/providers/components/provider-action-dialog';
 import { ProviderModelsSection } from '@/pages/admin/providers/components/provider-models-section';
 import { ModelDefaultsSection } from '@/pages/admin/providers/components/model-defaults-section';
-import {
-  modelPath,
-  providerErrorKey,
-  providerPath,
-  providerRequest,
-  providersPath,
-} from '@/pages/admin/providers/api';
+import { providerErrorKey, providerApi } from '@/pages/admin/providers/api';
 import { useProviderResource } from '@/pages/admin/providers/hooks/use-provider-resource';
 
 export function AdminProvidersPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState('');
   const [revision, setRevision] = useState(0);
-  const providers = useProviderResource<ProviderSummary[]>(
-    providersPath,
+  const providers = useProviderResource(
+    'providers',
     revision,
+    providerApi.list,
   );
   const [selected, setSelected] = useState<string | null>(null);
   const [modelsOpen, setModelsOpen] = useState(false);
@@ -77,19 +72,24 @@ export function AdminProvidersPage() {
     setAction(next);
   }
   async function mutate(
-    path: string,
-    method: string,
-    body?: unknown,
-    sync = false,
+    mutation:
+      | { kind: 'provider'; id: string; enabled: boolean }
+      | { kind: 'model'; providerId: string; id: string; enabled: boolean }
+      | { kind: 'sync'; id: string },
   ) {
     if (submitting.current || defaultsPending || action) return;
     submitting.current = true;
     setPending(true);
     try {
-      const result = await providerRequest<SyncResult | ProviderSummary>(path, {
-        method,
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      });
+      const sync = mutation.kind === 'sync';
+      const result =
+        mutation.kind === 'provider'
+          ? await providerApi.update(mutation.id, { enabled: mutation.enabled })
+          : mutation.kind === 'model'
+            ? await providerApi.updateModel(mutation.providerId, mutation.id, {
+                enabled: mutation.enabled,
+              })
+            : await providerApi.sync(mutation.id);
       toast.success(
         sync
           ? t('models.synced', result as SyncResult)
@@ -101,7 +101,7 @@ export function AdminProvidersPage() {
               : undefined,
         },
       );
-      if (!sync && method === 'PATCH' && !path.includes('/models')) {
+      if (mutation.kind === 'provider') {
         const saved = result as ProviderSummary;
         providers.updateData((items) =>
           items.map((item) => (item.id === saved.id ? saved : item)),
@@ -283,7 +283,13 @@ export function AdminProvidersPage() {
                                 </>
                               ) : (
                                 <Badge variant="outline">
-                                  {t('providers.configOnly')}
+                                  {t(
+                                    provider.type === 'serpapi'
+                                      ? 'providers.webSearch'
+                                      : provider.type === 'jina-ai'
+                                        ? 'providers.webFetch'
+                                        : 'providers.configOnly',
+                                  )}
                                 </Badge>
                               )}
                               <KeyRound
@@ -336,13 +342,11 @@ export function AdminProvidersPage() {
                               })}
                               className="mx-2"
                               onCheckedChange={(enabled) =>
-                                void mutate(
-                                  providerPath(provider.id),
-                                  'PATCH',
-                                  {
-                                    enabled,
-                                  },
-                                )
+                                void mutate({
+                                  kind: 'provider',
+                                  id: provider.id,
+                                  enabled,
+                                })
                               }
                             />
                             <Button
@@ -408,16 +412,12 @@ export function AdminProvidersPage() {
               busy={busy}
               onAction={openAction}
               onClose={() => setModelsOpen(false)}
-              onSync={() =>
-                void mutate(
-                  `${providerPath(selected)}/sync`,
-                  'POST',
-                  undefined,
-                  true,
-                )
-              }
+              onSync={() => void mutate({ kind: 'sync', id: selected })}
               onToggle={(model, enabled) =>
-                void mutate(modelPath(selected, model.id), 'PATCH', {
+                void mutate({
+                  kind: 'model',
+                  providerId: selected,
+                  id: model.id,
                   enabled,
                 })
               }

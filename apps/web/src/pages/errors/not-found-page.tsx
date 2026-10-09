@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router';
+import { Link } from '@tanstack/react-router';
 import { Button } from '@/components/ui/button';
 
 export function NotFoundPage() {

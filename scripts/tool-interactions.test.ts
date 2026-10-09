@@ -1,3 +1,5 @@
+import { sessionStub } from './fixtures/thread-session.js';
+import type { ChatSession } from '../apps/server/src/modules/threads/session.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -43,6 +45,30 @@ const base = {
     return 'workspace';
   },
 };
+test('ask_user can be declined without an answer while other response rules still apply', () => {
+  const response = { id: 'response1', action: 'decline' } as const;
+  assert.doesNotThrow(() =>
+    validateToolResponse(
+      {
+        ...question,
+        resumeSchema: { type: 'array', items: { type: 'string' } },
+      },
+      response,
+    ),
+  );
+  assert.doesNotThrow(() => validateToolResponse(approval, response));
+  assert.throws(
+    () =>
+      validateToolResponse({ ...question, toolName: 'review_plan' }, response),
+    { code: 'VALIDATION_ERROR' },
+  );
+  assert.throws(
+    () =>
+      validateToolResponse(question, { id: 'response1', action: 'approve' }),
+    { code: 'VALIDATION_ERROR' },
+  );
+});
+
 test('generic suspension responses follow the serialized resume schema before consumption', () => {
   const interaction: ToolInteraction = {
     ...question,
@@ -98,15 +124,29 @@ async function until(check: () => Promise<boolean>) {
   throw new Error('Timed out waiting for tool interaction');
 }
 
-test('pending interactions survive restart, pause ordinary queue work, and resume the exact run once', async (t) => {
+test('pending interactions survive restart, block new input, and resume the exact run once', async (t) => {
   const { memory } = fakeMemory();
-  const seen: Parameters<ChatRunner['execute']>[0]['input'][] = [];
+  const seen: Parameters<ChatSession['respond']>[] = [];
+  let sends = 0;
   const runner: ChatRunner = {
     ...base,
-    async execute({ input }) {
-      seen.push(input);
-      if (input.id === 'message01')
-        return { status: 'suspended', toolInteractions: [question, approval] };
+    async open({ onEvent }) {
+      return sessionStub({
+        async send() {
+          sends++;
+          for (const interaction of [question, approval])
+            onEvent({ type: 'interaction', interaction, settings });
+          onEvent({ type: 'status', status: 'suspended', runId: 'run-1' });
+        },
+        async respond(...args) {
+          seen.push(args);
+          onEvent({
+            type: 'status',
+            status: seen.length === 1 ? 'suspended' : 'success',
+            runId: 'run-1',
+          });
+        },
+      });
     },
   };
   const first = new ThreadService(memory, runner);
@@ -124,9 +164,10 @@ test('pending interactions survive restart, pause ordinary queue work, and resum
     (await service.getThread('alice', thread.id)).toolInteractions?.length,
     2,
   );
-  await service.run('alice', thread.id, input('message02'));
-  await service.resume('alice', thread.id);
-  assert.equal(seen.length, 1);
+  await assert.rejects(service.run('alice', thread.id, input('message02')), {
+    code: 'TOOL_RESPONSE_REQUIRED',
+  });
+  assert.equal(sends, 1);
   await assert.rejects(
     service.respondToTool('bob', thread.id, question.id, {
       id: 'response1',
@@ -169,13 +210,11 @@ test('pending interactions survive restart, pause ordinary queue work, and resum
       (await service.getThread('alice', thread.id)).thread.status ===
       'suspended',
   );
-  assert.equal(seen.length, 2);
-  assert.deepEqual(seen[1].resume, {
-    interactionId: question.id,
-    runId: 'run-1',
-    toolCallId: 'call-1',
-    response,
-  });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0][0].id, question.id);
+  assert.equal(seen[0][0].runId, 'run-1');
+  assert.equal(seen[0][0].toolCallId, 'call-1');
+  assert.deepEqual(seen[0][1], response);
   await assert.rejects(
     service.respondToTool('alice', thread.id, question.id, {
       id: 'response2',
@@ -193,38 +232,41 @@ test('pending interactions survive restart, pause ordinary queue work, and resum
     async () =>
       (await service.getThread('alice', thread.id)).thread.status === 'success',
   );
-  assert.equal(seen.length, 4);
-  assert.equal(seen[2].resume?.response.action, 'decline');
-  assert.equal(seen[3].id, 'message02');
+  assert.equal(seen.length, 2);
+  assert.equal(seen[1][1].action, 'decline');
   const snapshot = await service.getThread('alice', thread.id);
   assert.equal(
     snapshot.toolInteractions?.filter((item) => item.response).length,
     2,
   );
-  assert.equal(snapshot.thread.queue.length, 0);
-  assert.equal(
-    snapshot.messages.filter((message) => message.role === 'user').length,
-    2,
-  );
+  assert.equal(snapshot.thread.queueCount, 0);
 });
 
 test('a tool can request more input on the same call without reusing the previous approval', async (t) => {
   const { memory } = fakeMemory();
   const service = new ThreadService(memory, {
     ...base,
-    async execute({ input }) {
-      return {
-        status: 'suspended',
-        toolInteractions: input.resume
-          ? [
-              {
-                ...question,
-                id: 'question-2',
-                suspendPayload: { question: 'Any additional notes?' },
-              },
-            ]
-          : [approval],
+    async open({ onEvent }) {
+      const suspend = (interaction: typeof question) => {
+        onEvent({ type: 'interaction', interaction, settings });
+        onEvent({
+          type: 'status',
+          status: 'suspended',
+          runId: interaction.runId,
+        });
       };
+      return sessionStub({
+        async send() {
+          suspend(approval);
+        },
+        async respond() {
+          suspend({
+            ...question,
+            id: 'question-2',
+            suspendPayload: { question: 'Any additional notes?' },
+          });
+        },
+      });
     },
   });
   t.after(() => service.shutdown());

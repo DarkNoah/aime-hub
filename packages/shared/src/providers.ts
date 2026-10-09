@@ -3,15 +3,22 @@ import { thinkingLevels } from './threads.js';
 import { languageModelProviders } from './provider-catalog.js';
 
 export { languageModelProviders };
+export const otherProviders = {
+  mineru: 'MinerU',
+  serpapi: 'SerpAPI',
+  'jina-ai': 'Jina AI',
+} as const;
 export const providerGroups = ['languageModel', 'other'] as const;
 export function providerGroup(type: string) {
-  return type === 'mineru' ? 'other' : 'languageModel';
+  return Object.hasOwn(otherProviders, type) ? 'other' : 'languageModel';
 }
 export const providerTypeSchema = z.enum([
   ...(Object.keys(languageModelProviders) as Array<
     keyof typeof languageModelProviders
   >),
   'mineru',
+  'serpapi',
+  'jina-ai',
 ]);
 
 const metadata = z.record(z.string(), z.unknown());

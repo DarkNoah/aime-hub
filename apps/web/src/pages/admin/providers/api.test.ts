@@ -1,3 +1,8 @@
+import {
+  mockRpcFetch,
+  rpcResponse,
+  rpcFailure,
+} from '../../../../../../scripts/fixtures/rpc-client.js';
 import { onModelsInvalidated } from '../../../features/models/resource';
 import {
   modelOptions,
@@ -15,10 +20,9 @@ import {
 } from '@aime/shared/providers';
 import {
   modelFormInput,
-  modelPath,
   providerErrorKey,
   providerFormInput,
-  providerRequest,
+  providerApi,
 } from './api';
 
 function providerForm() {
@@ -78,8 +82,15 @@ test('provider form rejects unsafe URLs', () => {
   }
 });
 
-test('provider form saves the selected models.dev key or MinerU without resetting it to OpenAI', () => {
-  for (const type of ['anthropic', 'deepseek', 'google', 'mineru']) {
+test('provider form saves language model and custom provider types without resetting them to OpenAI', () => {
+  for (const type of [
+    'anthropic',
+    'deepseek',
+    'google',
+    'mineru',
+    'serpapi',
+    'jina-ai',
+  ]) {
     const form = providerForm();
     form.set('type', type);
     assert.equal(providerFormInput(form).type, type);
@@ -163,16 +174,18 @@ test('token presets and custom values persist, clearing either limit restores nu
   }
 });
 
-test('slash and reserved characters in model IDs stay in an encoded query parameter', () => {
+test('model identifiers remain intact in typed RPC input', async (context) => {
   const id = 'vendor/model?variant=1&name=#图像';
-  assert.equal(
-    modelPath('provider', id),
-    `/api/admin/providers/provider/models?modelId=${encodeURIComponent(id)}`,
-  );
-  const url = new URL(modelPath('provider', id), 'https://example.com');
-  assert.equal(url.pathname, '/api/admin/providers/provider/models');
-  assert.equal(url.searchParams.get('modelId'), id);
-  assert.equal(modelPath('provider'), '/api/admin/providers/provider/models');
+  let actual: unknown;
+  mockRpcFetch(context, async (request) => {
+    actual = (await request.json()).json;
+    return rpcResponse(null);
+  });
+  await providerApi.removeModel('provider', id);
+  assert.deepEqual(actual, {
+    params: { providerId: 'provider' },
+    query: { modelId: id },
+  });
 });
 
 test('default options require enabled providers and models; images require output, not input', () => {
@@ -294,64 +307,29 @@ test('all API error codes map to localized safe messages', () => {
   );
 });
 
-test('API consumes direct JSON, handles 204 and sends same-origin JSON requests', async (context) => {
-  const responses = [
-    new Response(JSON.stringify([{ id: 'p1' }])),
-    new Response(null, { status: 204 }),
-    new Response(JSON.stringify({ code: 'MODEL_IN_USE' }), { status: 409 }),
-    new Response('no session', { status: 401 }),
-  ];
-  const calls: RequestInit[] = [];
-  context.mock.method(
-    globalThis,
-    'fetch',
-    async (_path: string, init: RequestInit) => {
-      calls.push(init);
-      return responses.shift()!;
-    },
-  );
-  assert.deepEqual(await providerRequest('/api/admin/providers'), [
-    { id: 'p1' },
-  ]);
-  assert.equal(
-    await providerRequest(modelPath('p1', 'vendor/model'), {
-      method: 'DELETE',
-    }),
-    undefined,
-  );
-  await assert.rejects(
-    providerRequest('/api/admin/providers/p1', {
-      method: 'PATCH',
-      body: '{"enabled":false}',
-    }),
-    { code: 'MODEL_IN_USE' },
-  );
-  await assert.rejects(providerRequest('/api/admin/providers'), {
-    code: 'UNAUTHORIZED',
-  });
-  assert.equal(calls[0].credentials, 'same-origin');
-  assert.deepEqual(calls[2].headers, { 'Content-Type': 'application/json' });
-});
-
 test('successful provider writes invalidate the shared catalog; reads and failed writes do not', async (context) => {
   let invalidations = 0;
   const stop = onModelsInvalidated(() => invalidations++);
   context.after(stop);
   const responses = [
-    Response.json([]),
-    Response.json({}),
-    new Response(null, { status: 204 }),
-    Response.json({ code: 'CONFLICT' }, { status: 409 }),
+    rpcResponse([]),
+    rpcResponse({}),
+    rpcResponse(null),
+    rpcFailure('CONFLICT', 409),
   ];
-  context.mock.method(globalThis, 'fetch', async () => responses.shift()!);
-  await providerRequest('/api/admin/providers');
+  mockRpcFetch(context, () => responses.shift()!);
+  await providerApi.list();
   assert.equal(invalidations, 0);
-  await providerRequest(modelPath('p1'), { method: 'POST', body: '{}' });
+  await providerApi.updateModel('p1', 'model', { enabled: true });
   assert.equal(invalidations, 1);
-  await providerRequest(modelPath('p1', 'model'), { method: 'DELETE' });
+  await providerApi.removeModel('p1', 'model');
   assert.equal(invalidations, 2);
   await assert.rejects(
-    providerRequest('/api/admin/providers', { method: 'POST', body: '{}' }),
+    providerApi.create({
+      name: 'test',
+      type: 'openai',
+      baseUrl: 'https://example.com',
+    }),
   );
   assert.equal(invalidations, 2);
 });

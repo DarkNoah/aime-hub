@@ -1,9 +1,29 @@
-import { ArrowRight, Plug, Users, Settings2, Sparkles } from 'lucide-react';
-import { Link } from 'react-router';
+import {
+  ArrowRight,
+  FileJson2,
+  Plug,
+  Users,
+  Settings2,
+  Sparkles,
+  TerminalSquare,
+} from 'lucide-react';
+import { Link } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { PageHeader } from '@/components/page-header';
 
 const modules = [
+  {
+    to: '/admin/request-logs',
+    title: 'nav.requestLogs',
+    description: 'admin.requestLogsDescription',
+    icon: FileJson2,
+  },
+  {
+    to: '/admin/environment-variables',
+    title: 'nav.environmentVariables',
+    description: 'admin.environmentVariablesDescription',
+    icon: TerminalSquare,
+  },
   {
     to: '/admin/skills',
     title: 'nav.skills',

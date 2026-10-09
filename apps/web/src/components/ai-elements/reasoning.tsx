@@ -6,19 +6,21 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { cjk } from '@streamdown/cjk';
 import { code } from '@streamdown/code';
 import { math } from '@streamdown/math';
 import { mermaid } from '@streamdown/mermaid';
 import { BrainIcon, ChevronDownIcon } from 'lucide-react';
-import type { ComponentProps, ReactNode } from 'react';
+import type { ComponentProps, CSSProperties, ReactNode } from 'react';
 import {
   createContext,
   memo,
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -202,12 +204,73 @@ export type ReasoningContentProps = ComponentProps<
   typeof CollapsibleContent
 > & {
   children: string;
+  /** Constrains the content height and follows new content to the bottom. */
+  maxHeight?: CSSProperties['maxHeight'];
 };
 
 const streamdownPlugins = { cjk, code, math, mermaid };
 
+const updateScrollMask = (viewport: HTMLDivElement) => {
+  const { scrollTop, scrollHeight, clientHeight } = viewport;
+  const fadeTop = scrollTop > 1 ? '12px' : '0px';
+  const fadeBottom =
+    scrollHeight - clientHeight - scrollTop > 1 ? '12px' : '0px';
+
+  // Only fade edges with hidden content, keeping the latest line readable.
+  viewport.style.maskImage =
+    fadeTop === '0px' && fadeBottom === '0px'
+      ? 'none'
+      : `linear-gradient(to bottom, transparent, black ${fadeTop}, black calc(100% - ${fadeBottom}), transparent)`;
+};
+
+function ReasoningScrollArea({
+  children,
+  maxHeight,
+}: Pick<ReasoningContentProps, 'children' | 'maxHeight'>) {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    viewport.scrollTop = viewport.scrollHeight;
+    updateScrollMask(viewport);
+  }, []);
+
+  useLayoutEffect(() => {
+    scrollToBottom();
+  }, [children, maxHeight, scrollToBottom]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const content = contentRef.current;
+    if (!viewport || !content) return;
+
+    // Markdown, diagrams, and wrapping can change height after text renders.
+    const observer = new ResizeObserver(scrollToBottom);
+    observer.observe(viewport);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [scrollToBottom]);
+
+  return (
+    <ScrollArea
+      viewportProps={{
+        ref: viewportRef,
+        className: 'h-auto overscroll-y-contain [&>div]:block!',
+        style: { maxHeight },
+        onScroll: (event) => updateScrollMask(event.currentTarget),
+      }}
+    >
+      <div ref={contentRef} className="min-w-0 pr-3">
+        <Streamdown plugins={streamdownPlugins}>{children}</Streamdown>
+      </div>
+    </ScrollArea>
+  );
+}
+
 export const ReasoningContent = memo(
-  ({ className, children, ...props }: ReasoningContentProps) => (
+  ({ className, children, maxHeight, ...props }: ReasoningContentProps) => (
     <CollapsibleContent
       className={cn(
         'mt-4 text-sm',
@@ -216,7 +279,13 @@ export const ReasoningContent = memo(
       )}
       {...props}
     >
-      <Streamdown plugins={streamdownPlugins}>{children}</Streamdown>
+      {maxHeight === undefined ? (
+        <Streamdown plugins={streamdownPlugins}>{children}</Streamdown>
+      ) : (
+        <ReasoningScrollArea maxHeight={maxHeight}>
+          {children}
+        </ReasoningScrollArea>
+      )}
     </CollapsibleContent>
   ),
 );

@@ -1,8 +1,9 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Outlet, useLocation } from 'react-router';
+import { Link, Outlet, useLocation, useParams } from '@tanstack/react-router';
 import { ChevronRight, Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ThemeToggle } from '@/components/theme/theme-toggle';
 import {
   Sheet,
   SheetContent,
@@ -14,6 +15,7 @@ import { LoadingState } from '@/components/loading-state';
 import { useAuthSession } from '@/features/auth/session-context';
 import { ThreadListProvider } from '@/pages/threads/thread-list-provider';
 import { ProjectNavigationProvider } from '@/pages/projects/navigation-provider';
+import { ProjectBreadcrumb } from '@/pages/projects/components/project-breadcrumb';
 import { PersonalChatSettingsProvider } from '@/components/chat/personal-chat-settings-provider';
 import { ThreadNavigationProvider } from '@/components/chat/thread-navigation-provider';
 import { Sidebar } from './sidebar';
@@ -38,6 +40,7 @@ function LayoutContent() {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const location = useLocation();
+  const { projectId } = useParams({ strict: false });
   const isProject = location.pathname.startsWith('/projects');
   const isChat =
     location.pathname.startsWith('/threads') ||
@@ -99,7 +102,7 @@ function LayoutContent() {
             </SheetContent>
           </Sheet>
           <div className="flex min-w-0 items-center gap-2 text-sm">
-            <span className="hidden text-muted-foreground sm:inline">
+            <span className="hidden shrink-0 text-muted-foreground sm:inline">
               {t(
                 location.pathname.startsWith('/admin')
                   ? 'nav.admin'
@@ -107,14 +110,29 @@ function LayoutContent() {
               )}
             </span>
             <ChevronRight
-              className="hidden size-3.5 text-muted-foreground sm:block"
+              className="hidden size-3.5 shrink-0 text-muted-foreground sm:block"
               aria-hidden="true"
             />
-            <span className="truncate font-medium">{t(title)}</span>
+            {projectId ? (
+              <>
+                <Link
+                  to="/projects"
+                  className="shrink-0 rounded-sm font-medium outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {t(title)}
+                </Link>
+                <ProjectBreadcrumb projectId={projectId} />
+              </>
+            ) : (
+              <span className="truncate font-medium">{t(title)}</span>
+            )}
           </div>
-          <span className="ml-auto hidden rounded-md bg-muted px-2.5 py-1 text-xs sm:inline-block text-muted-foreground">
-            {t('nav.initialVersion')}
-          </span>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <span className="hidden rounded-md bg-muted px-2.5 py-1 text-xs text-muted-foreground sm:inline-block">
+              {t('nav.initialVersion')}
+            </span>
+            <ThemeToggle />
+          </div>
         </header>
         <main
           id="main-content"

@@ -8,7 +8,6 @@ import test from 'node:test';
 import type { LanguageModelService } from '../models/language-model.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import assert from 'node:assert/strict';
-import type { ThreadStreamStatus } from '@aime/shared/threads';
 import { ThreadService } from './service.js';
 import { setTimeout as delay } from 'node:timers/promises';
 for (const approvalAction of [undefined, 'approve', 'decline'] as const) {
@@ -91,109 +90,115 @@ for (const approvalAction of [undefined, 'approve', 'decline'] as const) {
       } as unknown as LanguageModelService,
       root,
     );
+    const service = new ThreadService(memory, runner);
     try {
-      const workspace = await runner.createWorkspace('alice');
-      const thread = await memory.createThread({
-        threadId: 'probe-thread',
-        resourceId: 'user:alice',
-        metadata: { workspace },
-      });
-      const messages = new Map<string, import('ai').UIMessage>();
-      const statuses: ThreadStreamStatus[] = [];
-      const context: Parameters<typeof runner.execute>[0] = {
-        thread,
-        input: {
-          id: 'message01',
-          model: null,
-          reasoningEffort: 'auto',
-          parts: [{ type: 'text', text: 'Ask me' }],
-          isImmediate: false,
-        },
-        signal: new AbortController().signal,
-        onMessage: (m) => messages.set(m.id, structuredClone(m)),
-        onUsage: async () => {},
-        onStatus: (status) => statuses.push(status),
-        takeImmediate: async () => [],
+      const settings = { model: null, reasoningEffort: 'auto' } as const;
+      const thread = await service.createThread('alice', settings);
+      const waitFor = async (check: () => Promise<boolean>) => {
+        for (let i = 0; i < 300; i++) {
+          if (await check()) return;
+          await delay(10);
+        }
+        assert.fail(
+          JSON.stringify(await service.getThread('alice', thread.id)),
+        );
       };
-      let result = await runner.execute(context);
-      assert.equal(result?.toolInteractions.length, 1);
-      assert.ok(result);
-      assert.equal(result.status, 'suspended');
-      assert.equal(statuses.at(-1), 'suspended');
-      assert.ok(statuses.includes('running'));
+      await service.run('alice', thread.id, {
+        ...settings,
+        id: 'message01',
+        parts: [{ type: 'text', text: 'Ask me' }],
+        isImmediate: false,
+      });
+      await waitFor(
+        async () =>
+          (await service.getThread('alice', thread.id)).thread.status ===
+          'suspended',
+      );
+      let pending = (
+        await service.getThread('alice', thread.id)
+      ).toolInteractions!.find((item) => !item.response)!;
       if (approvalAction) {
-        const pending = result.toolInteractions[0];
         assert.equal(pending.kind, 'approval');
-        result = await runner.execute({
-          ...context,
-          input: {
-            ...context.input,
-            id: 'approval1',
-            parts: [],
-            resume: {
-              interactionId: pending.id,
-              runId: pending.runId,
-              toolCallId: pending.toolCallId,
-              response: { id: 'approval1', action: approvalAction },
-            },
-          },
+        await service.respondToTool('alice', thread.id, pending.id, {
+          id: 'approval1',
+          action: approvalAction,
         });
-        assert.ok(result);
         if (approvalAction === 'decline') {
-          assert.equal(result.status, 'success');
-          assert.equal(statuses.at(-1), 'success');
-          assert.deepEqual(result.toolInteractions, []);
+          await waitFor(
+            async () =>
+              (await service.getThread('alice', thread.id)).thread.status ===
+              'success',
+          );
           assert.equal(count, 2);
           return;
         }
-        assert.equal(result.toolInteractions[0]?.kind, 'suspended');
-        assert.equal(result.status, 'suspended');
+        await waitFor(
+          async () =>
+            (
+              await service.getThread('alice', thread.id)
+            ).toolInteractions?.some(
+              (item) => !item.response && item.kind === 'suspended',
+            ) === true,
+        );
+        pending = (
+          await service.getThread('alice', thread.id)
+        ).toolInteractions!.find((item) => !item.response)!;
       }
-      const interaction = result.toolInteractions[0];
-      const resumed = await runner.execute({
-        ...context,
-        input: {
-          ...context.input,
-          id: 'response1',
-          parts: [],
-          resume: {
-            interactionId: interaction.id,
-            runId: interaction.runId,
-            toolCallId: interaction.toolCallId,
-            response: { id: 'response1', action: 'resume', data: ['A', 'B'] },
-          },
-        },
+      await service.respondToTool('alice', thread.id, pending.id, {
+        id: 'response1',
+        action: 'resume',
+        data: ['A', 'B'],
       });
-      assert.deepEqual(resumed, { status: 'success', toolInteractions: [] });
-      assert.equal(statuses.at(-1), 'success');
-      assert.equal(messages.size, 1);
+      await waitFor(
+        async () =>
+          (await service.getThread('alice', thread.id)).thread.status ===
+          'success',
+      );
+      const messages = (
+        await service.getThread('alice', thread.id)
+      ).messages.filter((message) => message.role === 'assistant');
+      assert.equal(messages.length, 2, JSON.stringify(messages, null, 2));
+      assert.equal(
+        messages
+          .flatMap((message) => message.parts)
+          .filter((part) => 'toolCallId' in part && part.toolCallId === 'ask-1')
+          .length,
+        1,
+      );
       assert.ok(
-        [...messages.values()].some((m) =>
-          m.parts.some(
-            (p) => p.type === 'text' && p.text.includes('Continued'),
+        messages.some((message) =>
+          message.parts.some(
+            (part) => part.type === 'text' && part.text.includes('Continued'),
           ),
         ),
       );
       assert.ok(
-        [...messages.values()].some((m) =>
-          m.parts.some(
-            (p) =>
-              'toolCallId' in p &&
-              p.toolCallId === 'ask-1' &&
-              'output' in p &&
-              JSON.stringify(p.output).includes('User answered: A, B'),
+        messages.some((message) =>
+          message.parts.some(
+            (part) =>
+              'toolCallId' in part &&
+              part.toolCallId === 'ask-1' &&
+              'output' in part &&
+              JSON.stringify(part.output).includes('User answered: A, B'),
           ),
         ),
       );
     } finally {
+      await service.shutdown();
+      await mastra.shutdown();
       askUserTool.requireApproval = previousApproval;
       await rm(root, { recursive: true, force: true });
     }
   });
 }
 
-for (const repeatQuestion of [false, true]) {
-  test(`answering a native suspended tool updates before the next model reply (suspend again=${repeatQuestion})`, async (t) => {
+for (const [action, repeatQuestion] of [
+  ['resume', false],
+  ['resume', true],
+  ['decline', false],
+  ['decline', true],
+] as const) {
+  test(`${action} a native suspended tool updates before the next model reply (suspend again=${repeatQuestion})`, async (t) => {
     const root = await mkdtemp('/tmp/hitl-service-');
     const storage = new InMemoryStore();
     const memory = new Memory({ storage, options: { generateTitle: false } });
@@ -204,10 +209,12 @@ for (const repeatQuestion of [false, true]) {
     });
     let resumed = false;
     let calls = 0;
+    let continuationPrompt = '';
     const model = new MastraLanguageModelV2Mock({
-      doStream: async () => {
+      doStream: async ({ prompt }) => {
         const initial = ++calls <= (repeatQuestion ? 2 : 1);
         if (!initial) {
+          continuationPrompt = JSON.stringify(prompt);
           resumed = true;
           await gate;
         }
@@ -264,7 +271,9 @@ for (const repeatQuestion of [false, true]) {
     const thread = await service.createThread('alice', settings);
     const statuses: string[] = [];
     await service.subscribe('alice', thread.id, (snapshot) =>
-      statuses.push(snapshot.thread.status),
+      statuses.push(
+        `${snapshot.thread.status}${snapshot.thread.error ? ': ' + snapshot.thread.error : ''}`,
+      ),
     );
     await service.run('alice', thread.id, {
       ...settings,
@@ -291,7 +300,9 @@ for (const repeatQuestion of [false, true]) {
       'alice',
       thread.id,
       interaction.id,
-      { id: 'response1', action: 'resume', data: 'Yes' },
+      action === 'decline'
+        ? { id: 'response1', action }
+        : { id: 'response1', action, data: 'Yes' },
     );
     assert.equal(accepted.status, 'pending');
     if (repeatQuestion) {
@@ -312,7 +323,9 @@ for (const repeatQuestion of [false, true]) {
         'alice',
         thread.id,
         next.id,
-        { id: 'response2', action: 'resume', data: 'Yes again' },
+        action === 'decline'
+          ? { id: 'response2', action }
+          : { id: 'response2', action, data: 'Yes again' },
       );
       assert.equal(acceptedAgain.status, 'pending');
     }
@@ -324,11 +337,28 @@ for (const repeatQuestion of [false, true]) {
     );
     assert.ok(statuses.includes('pending'));
     assert.ok(statuses.includes('running'));
+    if (action === 'decline') {
+      assert.match(
+        continuationPrompt,
+        /The user declined to answer this question\./,
+      );
+    }
     release();
     await waitFor(
       async () =>
         (await service.getThread('alice', thread.id)).thread.status ===
         'success',
     );
+    if (action === 'decline') {
+      await service.shutdown();
+      const restored = new ThreadService(memory, runner);
+      t.after(() => restored.shutdown());
+      const snapshot = await restored.getThread('alice', thread.id);
+      assert.equal(
+        snapshot.toolInteractions?.find((item) => item.id === interaction.id)
+          ?.response?.action,
+        'decline',
+      );
+    }
   });
 }

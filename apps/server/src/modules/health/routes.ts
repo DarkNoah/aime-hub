@@ -1,7 +1,5 @@
-import { Router } from 'express';
+import { Hono } from 'hono';
 
 export function healthRoutes() {
-  const router = Router();
-  router.get('/health', (_req, res) => res.json({ status: 'ok' }));
-  return router;
+  return new Hono().get('/health', (c) => c.json({ status: 'ok' }));
 }

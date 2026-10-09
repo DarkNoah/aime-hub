@@ -36,6 +36,7 @@ const itemVariants = cva(
     variants: {
       variant: {
         default: 'bg-transparent',
+        ghost: 'bg-transparent hover:bg-accent/50 focus-within:bg-accent/50',
         outline: 'border-border',
         muted: 'bg-muted/50',
       },

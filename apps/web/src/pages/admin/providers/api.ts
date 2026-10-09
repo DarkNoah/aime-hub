@@ -1,6 +1,11 @@
+import { api } from '../../../lib/rpc.js';
+import type { z } from 'zod';
 import { invalidateAvailableModels } from '../../../features/models/resource';
 import {
   modelInputSchema,
+  modelUpdateSchema,
+  providerUpdateSchema,
+  type ModelDefaults,
   providerInputSchema,
   type ModelInput,
   type ProviderInput,
@@ -37,51 +42,49 @@ export function providerErrorKey(error: unknown): ErrorKey {
   return 'errors.generic';
 }
 
-export const providersPath = '/api/admin/providers';
-export const defaultsPath = '/api/admin/settings/models';
-export function providerPath(id: string) {
-  return `${providersPath}/${encodeURIComponent(id)}`;
+// Keep invalidation next to successful writes, shared by all provider editors.
+async function write<T>(request: Promise<T>) {
+  const result = await request;
+  invalidateAvailableModels();
+  return result;
 }
-export function modelPath(providerId: string, id?: string) {
-  const path = `${providerPath(providerId)}/models`;
-  return id === undefined ? path : `${path}?modelId=${encodeURIComponent(id)}`;
-}
-
-export async function providerRequest<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
-  const response = await fetch(path, {
-    ...options,
-    credentials: 'same-origin',
-    headers: {
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...options.headers,
-    },
-  });
-  if (!response.ok) {
-    const fallback = {
-      code:
-        response.status === 401
-          ? 'UNAUTHORIZED'
-          : response.status === 403
-            ? 'FORBIDDEN'
-            : response.status === 429
-              ? 'RATE_LIMITED'
-              : 'INTERNAL_ERROR',
-    };
-    throw await response.json().catch(() => fallback);
-  }
-  if (
-    options.method &&
-    !['GET', 'HEAD'].includes(options.method.toUpperCase()) &&
-    (path === providersPath || path.startsWith(`${providersPath}/`))
-  ) {
-    invalidateAvailableModels();
-  }
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
-}
+export const providerApi = {
+  list: (signal?: AbortSignal) => api.providers.list(undefined, { signal }),
+  get: (providerId: string, signal?: AbortSignal) =>
+    api.providers.get({ params: { providerId } }, { signal }),
+  models: (providerId: string, signal?: AbortSignal) =>
+    api.providers.models({ params: { providerId } }, { signal }),
+  create: (body: z.input<typeof providerInputSchema>) =>
+    write(api.providers.create({ body })),
+  update: (providerId: string, body: z.input<typeof providerUpdateSchema>) =>
+    write(api.providers.update({ params: { providerId }, body })),
+  remove: (providerId: string) =>
+    write(api.providers.remove({ params: { providerId } })),
+  createModel: (providerId: string, body: z.input<typeof modelInputSchema>) =>
+    write(api.providers.createModel({ params: { providerId }, body })),
+  updateModel: (
+    providerId: string,
+    modelId: string,
+    body: z.input<typeof modelUpdateSchema>,
+  ) =>
+    write(
+      api.providers.updateModel({
+        params: { providerId },
+        query: { modelId },
+        body,
+      }),
+    ),
+  removeModel: (providerId: string, modelId: string) =>
+    write(
+      api.providers.removeModel({ params: { providerId }, query: { modelId } }),
+    ),
+  sync: (providerId: string) =>
+    write(api.providers.sync({ params: { providerId } })),
+  defaults: (signal?: AbortSignal) =>
+    api.providers.defaults(undefined, { signal }),
+  saveDefaults: (body: ModelDefaults) =>
+    write(api.providers.saveDefaults({ body })),
+};
 
 // Metadata is not editable here; omit it so PATCH preserves its saved value.
 const providerFormSchema = providerInputSchema.omit({ metadata: true });

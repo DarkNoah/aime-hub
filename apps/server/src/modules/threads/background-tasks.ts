@@ -14,7 +14,7 @@ const activeStatuses = ['pending', 'running', 'suspended'] as const;
 export const isBackgroundTaskActive = (task: ThreadBackgroundTask) =>
   activeStatuses.some((status) => status === task.status);
 
-function summarize(task: BackgroundTask): ThreadBackgroundTask {
+function summarizeBackgroundTask(task: BackgroundTask): ThreadBackgroundTask {
   return {
     id: task.id,
     status: task.status,
@@ -111,7 +111,7 @@ export class ThreadBackgroundTasks {
       orderDirection: 'desc',
     });
     for (const task of recent.tasks)
-      if (this.belongs(task)) tasks.set(task.id, summarize(task));
+      if (this.belongs(task)) tasks.set(task.id, summarizeBackgroundTask(task));
     // Keep older active tasks even when there are more than 100 recent results.
     for (let page = 0; ; page++) {
       const result = await this.manager.listTasks({
@@ -122,7 +122,8 @@ export class ThreadBackgroundTasks {
         orderDirection: 'desc',
       });
       for (const task of result.tasks)
-        if (this.belongs(task)) tasks.set(task.id, summarize(task));
+        if (this.belongs(task))
+          tasks.set(task.id, summarizeBackgroundTask(task));
       if (
         this.controller.signal.aborted ||
         !result.tasks.length ||
@@ -152,7 +153,7 @@ export class ThreadBackgroundTasks {
       if (!task || !this.belongs(task) || this.controller.signal.aborted)
         return;
       this.tasks.set(taskId, {
-        ...summarize(task),
+        ...summarizeBackgroundTask(task),
         lastOutput: output ? output.value : previous?.lastOutput,
       });
       this.publish();

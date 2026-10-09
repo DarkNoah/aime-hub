@@ -28,6 +28,7 @@ export function ChatCommandTextarea({
   error,
   onRetry,
   onOpenChange,
+  onCommand,
 }: {
   value: string;
   onValueChange: (value: string) => void;
@@ -38,6 +39,7 @@ export function ChatCommandTextarea({
   error?: TranslationKey;
   onRetry: () => void;
   onOpenChange: (open: boolean) => void;
+  onCommand?: (item: SlashCommandItem) => void;
 }) {
   const { t } = useTranslation();
   const id = useId();
@@ -74,7 +76,10 @@ export function ChatCommandTextarea({
 
   function complete(item: SlashCommandItem) {
     if (!command) return;
-    const next = completeSlashCommand(value, command.end, item.name);
+    const next = item.action
+      ? { text: value.slice(command.end).replace(/^\s+/, ''), caret: 0 }
+      : completeSlashCommand(value, command.end, item.name);
+    if (item.action) onCommand?.(item);
     onValueChange(next.text);
     setDismissed(true);
     requestAnimationFrame(() => {
@@ -193,14 +198,14 @@ export function ChatCommandTextarea({
             aria-label={t('chat.commands.title')}
             className="max-h-none overflow-hidden"
           >
-            {loading ? (
+            {loading && matches.length === 0 ? (
               <p
                 role="status"
                 className="px-3 py-5 text-sm text-muted-foreground"
               >
                 {t('chat.commands.loading')}
               </p>
-            ) : error ? (
+            ) : error && matches.length === 0 ? (
               <div
                 role="alert"
                 className="flex items-center justify-between gap-3 px-3 py-4 text-sm"
@@ -234,9 +239,11 @@ export function ChatCommandTextarea({
                 <div className="space-y-2 p-1">
                   {filteredGroups.map((group) => (
                     <div key={group.id} role="group" aria-label={group.label}>
-                      <div className="px-2.5 pt-2 pb-1 text-xs font-medium text-muted-foreground">
-                        {group.label}
-                      </div>
+                      {group.label && (
+                        <div className="px-2.5 pt-2 pb-1 text-xs font-medium text-muted-foreground">
+                          {group.label}
+                        </div>
+                      )}
                       {group.sections.map((section) => (
                         <div
                           key={section.id}

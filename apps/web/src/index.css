@@ -2,6 +2,9 @@
 @import 'tw-animate-css';
 @import 'streamdown/styles.css';
 
+/* Follow the app theme, not the operating system's color preference. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Support both hoisted and isolated pnpm dependency layouts. */
 @source '../node_modules/streamdown/dist/*.js';
 @source '../../../node_modules/streamdown/dist/*.js';
@@ -21,18 +24,19 @@
   --color-card: var(--card);
   --color-card-foreground: var(--foreground);
   --color-primary: var(--primary);
-  --color-primary-foreground: #ffffff;
-  --color-secondary: #eef2ef;
-  --color-secondary-foreground: #3f4942;
-  --color-muted: #f1f4f2;
-  --color-muted-foreground: #5e6b63;
-  --color-accent: #e9eee8;
-  --color-accent-foreground: #263e32;
-  --color-destructive: #b42332;
-  --color-border: #e0e6e2;
-  --color-input: #d4ddd6;
-  --color-ring: #416c53;
-  --color-sidebar: #f0f3f1;
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
 }
 
 :root {
@@ -43,10 +47,48 @@
   --foreground: #202d25;
   --card: #ffffff;
   --primary: #305640;
+  --primary-foreground: #ffffff;
+  --secondary: #eef2ef;
+  --secondary-foreground: #3f4942;
+  --muted: #f1f4f2;
+  --muted-foreground: #5e6b63;
+  --accent: #e9eee8;
+  --accent-foreground: #263e32;
+  --destructive: #b42332;
+  --destructive-foreground: #ffffff;
+  --border: #e0e6e2;
+  --input: #d4ddd6;
+  --ring: #416c53;
+  --sidebar: #f0f3f1;
+  --selection: #dce9d8;
+  --selection-foreground: #203729;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+.dark {
+  color-scheme: dark;
+  --background: #111a15;
+  --foreground: #e5eee8;
+  --card: #19241d;
+  --primary: #99c8a7;
+  --primary-foreground: #14251a;
+  --secondary: #25352b;
+  --secondary-foreground: #dce9e0;
+  --muted: #202e25;
+  --muted-foreground: #a5b7aa;
+  --accent: #2c4032;
+  --accent-foreground: #e3f1e7;
+  --destructive: #ed8493;
+  --destructive-foreground: #321219;
+  --border: #34463a;
+  --input: #43594a;
+  --ring: #99c8a7;
+  --sidebar: #152019;
+  --selection: #3b5e45;
+  --selection-foreground: #f0f8f2;
 }
 
 @layer base {
@@ -72,8 +114,8 @@
     text-wrap: pretty;
   }
   ::selection {
-    background: #dce9d8;
-    color: #203729;
+    background: var(--selection);
+    color: var(--selection-foreground);
   }
 }
 

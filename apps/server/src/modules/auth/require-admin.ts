@@ -1,21 +1,15 @@
-import type { RequestHandler } from 'express';
-import { fromNodeHeaders } from 'better-auth/node';
+import type { MiddlewareHandler } from 'hono';
 import { hasAdminRole } from '@aime/shared';
 import type { Auth } from '@aime/auth';
+import type { HttpEnv } from '../../http.js';
 
-export function requireAdmin(auth: Auth): RequestHandler {
-  return async (req, res, next) => {
-    const session = await auth.api.getSession({
-      headers: fromNodeHeaders(req.headers),
-    });
+export function requireAdmin(auth: Auth): MiddlewareHandler<HttpEnv> {
+  return async (c, next) => {
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
     if (!session)
-      return res
-        .status(401)
-        .json({ code: 'UNAUTHORIZED', message: '请先登录' });
+      return c.json({ code: 'UNAUTHORIZED', message: '请先登录' }, 401);
     if (!hasAdminRole(session.user.role))
-      return res
-        .status(403)
-        .json({ code: 'FORBIDDEN', message: '需要管理员权限' });
-    next();
+      return c.json({ code: 'FORBIDDEN', message: '需要管理员权限' }, 403);
+    await next();
   };
 }

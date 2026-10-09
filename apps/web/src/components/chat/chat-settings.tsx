@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useContext, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Brain } from 'lucide-react';
 import { thinkingLevels, type ChatSettings } from '@aime/shared/threads';
@@ -12,6 +12,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { Slider } from '@/components/ui/slider';
+import { FloatingChatContext } from './layout-context';
 
 export function ChatSettingsFields({
   value,
@@ -23,6 +24,7 @@ export function ChatSettingsFields({
   disabled?: boolean;
 }) {
   const { t } = useTranslation();
+  const floating = useContext(FloatingChatContext);
   const { defaults } = useAvailableModels();
   const effectiveEffort =
     value.reasoningEffort === 'auto'
@@ -45,6 +47,7 @@ export function ChatSettingsFields({
           allowNone={false}
           textOnly
           compact
+          iconOnly={floating}
         />
       </div>
       <Popover onOpenChange={() => setPreview(null)}>
@@ -59,7 +62,7 @@ export function ChatSettingsFields({
             title={`${t('chat.reasoningLevel')}: ${t(`chat.reasoning.${effectiveEffort}`)}`}
           >
             <Brain className="size-4" />
-            <span className="hidden @md/chat:inline">
+            <span className={floating ? 'sr-only' : 'hidden @md/chat:inline'}>
               {t(`chat.reasoning.${effectiveEffort}`)}
             </span>
           </Button>

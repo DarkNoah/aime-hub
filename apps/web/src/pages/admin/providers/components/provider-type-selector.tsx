@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Check, ChevronsUpDown } from 'lucide-react';
 import {
   languageModelProviders,
+  otherProviders,
   providerGroups,
   type ProviderInput,
 } from '@aime/shared/providers';
@@ -23,7 +24,7 @@ import {
 
 const groups = {
   languageModel: Object.entries(languageModelProviders),
-  other: [['mineru', 'MinerU']],
+  other: Object.entries(otherProviders),
 } as const;
 
 export function ProviderTypeSelector({

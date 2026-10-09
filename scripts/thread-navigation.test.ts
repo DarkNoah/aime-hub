@@ -1,3 +1,5 @@
+import { openSessionStub, sessionStub } from './fixtures/thread-session.js';
+import { createNodeServer } from '../apps/server/src/server.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { once } from 'node:events';
@@ -24,6 +26,8 @@ const project: ProjectSummary = {
   id: 'project123456789',
   name: 'Project',
   role: 'owner',
+  pinned: false,
+  archived: false,
   createdBy: 'alice',
   createdAt: '2026-10-02T00:00:00.000Z',
   updatedAt: '2026-10-02T00:00:00.000Z',
@@ -39,7 +43,7 @@ const thread = (
   createdAt: project.createdAt,
   updatedAt: project.updatedAt,
   status,
-  queue: [],
+  queueCount: 0,
   error: null,
 });
 async function until(check: () => boolean) {
@@ -53,8 +57,8 @@ async function until(check: () => boolean) {
 test('global summaries follow background runs, queue, rename, deletion and membership without opening a chat', async (t) => {
   const { memory } = fakeMemory();
   const members = new Set(['alice', 'bob']);
-  let context: Parameters<ChatRunner['execute']>[0] | undefined;
-  let finish: (() => void) | undefined;
+  let context: Parameters<ChatRunner['open']>[0] | undefined;
+
   const service = new ThreadService(
     memory,
     {
@@ -62,14 +66,15 @@ test('global summaries follow background runs, queue, rename, deletion and membe
       async createWorkspace() {
         return '/tmp/test';
       },
-      async execute(value) {
+      async open(value) {
         context = value;
-        value.onStatus('running');
-        await new Promise<void>((resolve) => {
-          finish = resolve;
-          value.signal.addEventListener('abort', resolve as () => void, {
-            once: true,
-          });
+        return sessionStub({
+          async send() {
+            value.onEvent({ type: 'status', status: 'running', runId: 'run' });
+          },
+          clearQueue() {
+            value.onEvent({ type: 'queue', count: 0 });
+          },
         });
       },
     },
@@ -140,10 +145,14 @@ test('global summaries follow background runs, queue, rename, deletion and membe
   );
   await delay(60);
   const beforeTokens = alice.length;
-  context!.onMessage({
-    id: 'answer',
-    role: 'assistant',
-    parts: [{ type: 'text', text: 'token' }],
+  context!.onEvent({
+    type: 'message',
+    active: true,
+    message: {
+      id: 'answer',
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'token' }],
+    },
   });
   await delay(80);
   assert.equal(
@@ -151,27 +160,14 @@ test('global summaries follow background runs, queue, rename, deletion and membe
     beforeTokens,
     'token updates do not rebroadcast unchanged summaries',
   );
-  await service.run('bob', shared.id, {
-    ...settings,
-    id: 'message02',
-    parts: [{ type: 'text', text: 'Queued' }],
-    isImmediate: false,
-  });
+  context!.onEvent({ type: 'queue', count: 1 });
   await until(
-    () => (latest() as { thread: ThreadSummary }).thread.queue.length === 1,
+    () => (latest() as { thread: ThreadSummary }).thread.queueCount === 1,
   );
-  await service.cancelQueued('bob', shared.id, 'message02');
+  await service.clearQueue('bob', shared.id);
   await service.abort('bob', shared.id);
   await until(
     () => (latest() as { thread: ThreadSummary }).thread.status === 'canceled',
-  );
-  assert.ok(
-    alice.some(
-      (event) =>
-        event.type === 'upsert' &&
-        event.thread.stopping &&
-        event.thread.status === 'running',
-    ),
   );
   await service.updateThread('alice', shared.id, {
     title: 'Renamed elsewhere',
@@ -214,7 +210,6 @@ test('global summaries follow background runs, queue, rename, deletion and membe
       reconnect[0].threads.length === 1 &&
       reconnect[0].threads[0].title === 'Offline edit',
   );
-  finish?.();
 });
 
 test('events arriving during initial snapshot are delivered after it, and disposal cancels pending sends', async () => {
@@ -263,7 +258,6 @@ test('global cache counts all project runs, preserves paging and reconciles offl
       `thread-${String(i).padStart(2, '0')}`,
       i < 3 ? 'running' : i === 3 ? 'pending' : 'idle',
     ),
-    ...(i === 3 ? { stopping: true } : {}),
   }));
   global.receive({ type: 'snapshot', threads: items, projects: [project] });
   assert.equal(
@@ -324,7 +318,6 @@ test('global cache counts all project runs, preserves paging and reconciles offl
 });
 
 test('navigation HTTP SSE requires authentication and broadcasts create/edit/delete to another connection', async (t) => {
-  const { createServer } = await import('node:http');
   const { createApp } = await import('../apps/server/src/app.js');
   const { memory } = fakeMemory();
   const service = new ThreadService(memory, {
@@ -332,7 +325,7 @@ test('navigation HTTP SSE requires authentication and broadcasts create/edit/del
     async createWorkspace() {
       return '/tmp/test';
     },
-    async execute() {},
+    open: openSessionStub,
   });
   const auth = {
     api: {
@@ -347,7 +340,7 @@ test('navigation HTTP SSE requires authentication and broadcasts create/edit/del
     models: {} as never,
     webOrigin: 'http://localhost:5173',
   });
-  const server = createServer(app);
+  const server = createNodeServer(app);
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const address = server.address();
@@ -379,12 +372,8 @@ test('navigation HTTP SSE requires authentication and broadcasts create/edit/del
     const end = buffer.indexOf('\n\n');
     const frame = buffer.slice(0, end);
     buffer = buffer.slice(end + 2);
-    return JSON.parse(
-      frame
-        .split('\n')
-        .find((line) => line.startsWith('data: '))!
-        .slice(6),
-    );
+    const data = frame.split('\n').find((line) => line.startsWith('data: '));
+    return data ? JSON.parse(data.slice(6)) : next();
   }
   assert.equal((await next()).type, 'snapshot');
   const request = async (path: string, method: string, body?: object) =>

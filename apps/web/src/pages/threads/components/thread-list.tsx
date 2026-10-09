@@ -36,7 +36,7 @@ export function ThreadList({
 
   return (
     <ScrollArea
-      className="overflow-hidden pr-2"
+      className="overflow-hidden pr-3"
       viewportProps={{
         ref: scrollRef,
         role: 'navigation',

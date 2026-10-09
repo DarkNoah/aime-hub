@@ -23,7 +23,7 @@
 **User Stories / Acceptance Criteria**：
 
 - As a 创建者, I want to 创建并维护项目 so that 相关聊天有统一入口。
-  - `/projects` 展示项目列表；通过 Sheet 创建或编辑名称；项目 ID 自动生成 16 位 nanoid。
+  - `/projects` 展示项目列表；通过 Dialog 创建项目或编辑名称；项目 ID 自动生成 16 位 nanoid。
   - `/projects/:projectId` 展示项目线程、成员及设置；更新单项保留列表分页和滚动位置。
   - 左侧“项目”可折叠；首次加载 5 个项目，向下滚动或点击“加载更多项目”每次追加 5 个。
   - 点击项目名称展开聊天，首次按需加载 5 条，列表最多占 5 行高度；超出后向下滚动或点击“更多聊天”分页追加。仪表盘和新聊天使用独立入口。
@@ -44,7 +44,7 @@
 
 ## 3. AI System Requirements
 
-**Tool Requirements**：复用已安装的 Mastra、Memory、Observational Memory、Workspace、AI SDK 与模型供应商服务。项目工作目录为 `WORKSPACE_ROOT/projects/<projectId>/`；项目 `.agents/skills` 覆盖同名全局 skill，不加载个人 skills。
+**Tool Requirements**：复用已安装的 Mastra、Memory、Observational Memory、Workspace、AI SDK 与模型供应商服务。项目管理目录为 `WORKSPACE_ROOT/projects/<projectId>/`，文件存储按下面的路径模式配置；项目 `.agents/skills` 覆盖同名全局 skill，不加载个人 skills。
 
 **Evaluation Strategy**：使用本机确定性模型服务检查双用户消息一致、排队串行、停止与恢复、模型优先级和权限。真实供应商的回答质量、多模态及长上下文 OM 验收另行记录，不能由模拟测试替代。
 
@@ -86,3 +86,21 @@
 - `pnpm typecheck`、`pnpm lint`、`pnpm build` 通过，Lint 仍为现有 17 条警告；开启本机数据库集成测试后，107 项测试通过，无跳过。
 - 新增列表缓存回归，覆盖 5 条分页、项目间线程隔离、请求合并、编辑/删除与在途响应合并、取消及失败重试；真实 HTTP 测试验证 12 条数据按 5/5/2 返回和分页参数边界。
 - 隔离浏览器 fixture 中实测 12 个项目、每个 12 条聊天：首次 5 条，滚动追加到 10/12 条，末页停止；折叠后保留 12 条缓存及滚动位置；聊天重命名同步到仪表盘。390px 移动端选择项目聊天后关闭导航，无横向溢出。
+
+### 项目列表归档与置顶（2026-10-07）
+
+- 项目列表与侧栏保留“新建聊天”快捷按钮，其余行操作集中在“更多”菜单中：项目管理者可编辑名称、归档或取消归档，所有成员可置顶或取消置顶。置顶仅影响当前用户，保存在成员关系中；归档对所有成员生效。
+- 默认列表和侧栏隐藏已归档项目；项目列表中的“已归档”页签支持访问和恢复。归档保留成员、模型配置、聊天与工作文件，不停止聊天执行或撤销访问权限。列表局部更新，保留已加载分页和聊天缓存。
+- 部署前运行 `pnpm db:migrate`，迁移 `ProjectListState1780000003000` 为项目增加 `archived`、成员增加 `pinned`，历史数据默认均为 `false`。列表接口支持 `status=active|archived|all`（默认 `active`），`PATCH /api/projects/:projectId` 支持 `archived`，`PATCH /api/projects/:projectId/pin` 接受 `pinned`。
+
+### 项目文件存储（2026-10-07）
+
+- 创建项目使用 Dialog，默认选择简单路径模式。简单模式只选择 LocalFilesystem 或 AgentFS，两种模式都不填写本地目录或数据库路径。当前编辑 Dialog 仍只修改项目名称。
+- `<workspace>` 指服务端 `WORKSPACE_ROOT`。简单模式目录为 `<workspace>/projects/<projectId>/`；AgentFS 数据库为同级 `<workspace>/projects/<projectId>.db`。
+- 复合模式配置 1–16 项，每项仅保存 `provider` 与 `mountPath`。`mountPath` 是单层名称，如 `local`、`data`、`tmp`，不带 `/`，不能使用 `.`、`..`、反斜杠或控制字符，最多 64 个字符，不区分大小写判重。第一项 LocalFilesystem 默认名为 `local`，新增项自动使用不重复名称。
+- 复合模式每项的物理目录为 `<workspace>/projects/<projectId>/<mountPath>/`；AgentFS 数据库为 `<workspace>/projects/<projectId>-<mountPath>.db`，放在挂载目录外。Mastra [manual composition](https://mastra.ai/docs/sandbox/filesystem#manual-composition) 的 `CompositeFilesystem` 使用 `/<mountPath>` 路由文件工具；终端工作目录为项目目录，使用相对路径 `<mountPath>/file`。
+- AgentFS 由服务端运行 `agentfs mount --foreground --auto-unmount` 真实挂载，macOS 使用 NFS、Linux 使用 FUSE。服务端 PATH 中须有 `agentfs`（本次验证为 0.6.4，与 SDK 一致），并具备对应系统挂载能力。数据库通过独立短进程初始化，释放 SDK 文件锁后再挂载。所有读写均通过挂载目录，文件工具、文件侧栏和 LocalSandbox 访问同一份文件。
+- 挂载在首次访问时启动，由单服务进程共享至正常关闭；关闭单个请求或聊天 Workspace 不会卸载其他请求正在使用的存储。服务停止后统一卸载；挂载失败、丢失、挂载点非空或被其他进程占用都会报错，不退回普通本地目录。异常强杀后若残留挂载，需要先卸载再重启。
+- 创建接口保存 `metadata.workspace`；详情接口返回配置，修改名称和模型偏好保留配置。没有此字段的历史项目默认使用简单 LocalFilesystem。直接使用上述 `projects/` 布局，不执行旧目录或数据库迁移。存储初始化、文件系统组合与 AgentFS 挂载生命周期统一放在现有 `modules/threads/workspace.ts` 中。
+- 文件访问前检查项目成员权限；支持列表、预览、搜索、增删改及下载，预览最多 512 KiB，原生下载支持 Range。挂载节点不能通过文件侧栏删除或重命名，符号链接检查沿用本地文件边界。项目 `.agents/skills` 在挂载完成后读取，不加载成员个人 skills。
+- 验证真实挂载：`TEST_AGENTFS_MOUNT=1 node --import tsx --test scripts/workspace-files.test.ts`。使用临时数据库与挂载点，覆盖终端双向读写、复合目录、并发共享、关闭/重挂载持久性和 HTTP 下载；未设置该变量时跳过需要系统挂载权限的部分。

@@ -9,7 +9,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { StatusBadge } from '@/components/status-badge';
 import { ModelCapabilities } from './model-capabilities';
 import type { ProviderAction } from '@/pages/admin/providers/components/provider-action-dialog';
-import { modelPath, providerPath } from '@/pages/admin/providers/api';
+import { providerApi } from '@/pages/admin/providers/api';
 import { useProviderResource } from '@/pages/admin/providers/hooks/use-provider-resource';
 
 export function ProviderModelsSection({
@@ -33,12 +33,14 @@ export function ProviderModelsSection({
   const [search, setSearch] = useState('');
   const [retry, setRetry] = useState(0);
   const detail = useProviderResource<ProviderDetail>(
-    providerPath(providerId),
+    `provider:${providerId}`,
     revision + retry,
+    (signal) => providerApi.get(providerId, signal),
   );
   const models = useProviderResource<ProviderModel[]>(
-    modelPath(providerId),
+    `models:${providerId}`,
     revision + retry,
+    (signal) => providerApi.models(providerId, signal),
   );
   const loading = detail.loading || models.loading;
   const error = detail.error || models.error;

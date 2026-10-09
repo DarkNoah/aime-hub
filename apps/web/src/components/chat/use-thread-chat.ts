@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useChat } from '@ai-sdk/react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UIMessage } from 'ai';
 import type {
   MessagePage,
@@ -10,8 +9,9 @@ import type {
   ToolInteraction,
   ToolResponse,
   ThreadBackgroundTask,
+  ThreadGoal,
 } from '@aime/shared/threads';
-import { chatApi, ChatApiError, createThreadTransport } from './api';
+import { chatApi, ChatApiError } from './api';
 import { mergeMessages } from './messages';
 
 export function useThreadChat(
@@ -21,6 +21,7 @@ export function useThreadChat(
   const [thread, setThread] = useState<ThreadSummary | null>(null);
   const [connected, setConnected] = useState(false);
   const [usage, setUsage] = useState<ChatUsage | null>(null);
+  const [goal, setGoal] = useState<ThreadGoal | null>(null);
   const [backgroundTasks, setBackgroundTasks] = useState<
     ThreadBackgroundTask[]
   >([]);
@@ -33,7 +34,6 @@ export function useThreadChat(
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
   const [history, setHistory] = useState<MessagePage<UIMessage> | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
-  const sendError = useRef<unknown>(null);
   const changeCallback = useRef(onThreadUpdated);
   const lastSummary = useRef('');
   useEffect(() => {
@@ -47,14 +47,8 @@ export function useThreadChat(
       changeCallback.current?.(value);
     }
   }, []);
-  const transport = useMemo(() => createThreadTransport(setThread), []);
-  const { messages, setMessages, sendMessage, status, clearError } = useChat({
-    id: threadId,
-    transport,
-    onError: (cause) => {
-      sendError.current = cause;
-    },
-  });
+  const [messages, setMessages] = useState<UIMessage[]>([]);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -88,18 +82,23 @@ export function useThreadChat(
           updateThread(snapshot.thread);
           setActiveMessageId(snapshot.activeMessageId);
           setUsage(snapshot.usage ?? null);
+          setGoal(snapshot.goal ?? null);
           setBackgroundTasks(snapshot.backgroundTasks ?? []);
           setBackgroundTasksError(snapshot.backgroundTasksError ?? null);
           setToolInteractions(snapshot.toolInteractions ?? []);
-          const queued = new Set(snapshot.thread.queue.map((item) => item.id));
           if (recovering)
             recoveredMessages = mergeMessages(
               recoveredMessages,
               snapshot.messages,
+              false,
+              snapshot.removedMessageIds,
             );
           setMessages((current) =>
-            mergeMessages(current, snapshot.messages).filter(
-              (message) => !queued.has(message.id),
+            mergeMessages(
+              current,
+              snapshot.messages,
+              false,
+              snapshot.removedMessageIds,
             ),
           );
         };
@@ -142,6 +141,7 @@ export function useThreadChat(
           setMessages([]);
           setThread(null);
           setUsage(null);
+          setGoal(null);
           setBackgroundTasks([]);
           setBackgroundTasksError(null);
           setToolInteractions([]);
@@ -166,23 +166,11 @@ export function useThreadChat(
   }, [threadId, setMessages, updateThread]);
 
   async function send(input: RunInput) {
-    sendError.current = null;
-    clearError();
-    await sendMessage(
-      { id: input.id, role: 'user', parts: input.parts },
-      {
-        body: {
-          model: input.model,
-          reasoningEffort: input.reasoningEffort,
-          isImmediate: input.isImmediate,
-        },
-      },
-    );
-    if (sendError.current) {
-      setMessages((current) =>
-        current.filter((message) => message.id !== input.id),
-      );
-      throw sendError.current;
+    setSubmitting(true);
+    try {
+      updateThread(await chatApi.run(threadId, input));
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -205,6 +193,11 @@ export function useThreadChat(
   return {
     thread,
     usage,
+    goal,
+    clearGoal: async () => {
+      await chatApi.clearGoal(threadId);
+      setGoal(null);
+    },
     backgroundTasks,
     backgroundTasksError,
     toolInteractions,
@@ -219,6 +212,6 @@ export function useThreadChat(
     loadEarlier,
     hasEarlier: history?.hasMore ?? false,
     loadingHistory,
-    sending: status === 'submitted' || status === 'streaming',
+    sending: submitting,
   };
 }

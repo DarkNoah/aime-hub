@@ -87,9 +87,7 @@ export function ThreadListItems({
                 <DropdownMenuItem
                   className="text-destructive"
                   disabled={
-                    isThreadActive(thread.status) ||
-                    thread.stopping ||
-                    !!thread.queue.length
+                    isThreadActive(thread.status) || thread.queueCount > 0
                   }
                   onSelect={() => onAction(thread, 'delete')}
                 >

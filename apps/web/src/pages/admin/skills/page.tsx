@@ -1,3 +1,4 @@
+import { api } from '@/lib/rpc';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -32,7 +33,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { skillErrorKey, skillRequest } from './api';
+import { skillErrorKey } from './api';
 import { ImportSkillsSheet } from './components/import-skills-sheet';
 
 type SkillRemoval =
@@ -52,7 +53,7 @@ export function AdminSkillsPage() {
   const submitting = useRef(false);
   useEffect(() => {
     const controller = new AbortController();
-    void skillRequest<InstalledSkills>('', { signal: controller.signal }).then(
+    void api.skills.list(undefined, { signal: controller.signal }).then(
       (data) => {
         if (!controller.signal.aborted) {
           setCatalog(data);
@@ -107,18 +108,14 @@ export function AdminSkillsPage() {
     try {
       let removed: string[];
       if (removing.kind === 'group') {
-        removed = await skillRequest<string[]>('/groups', {
-          method: 'DELETE',
-          body: JSON.stringify({
+        removed = await api.skills.removeGroup({
+          body: {
             group: removing.group,
             paths: removing.skills.map((skill) => skill.path),
-          }),
+          },
         });
       } else {
-        await skillRequest('', {
-          method: 'DELETE',
-          body: JSON.stringify({ path: removing.skill.path }),
-        });
+        await api.skills.remove({ body: { path: removing.skill.path } });
         removed = [removing.skill.path];
       }
       const removedPaths = new Set(removed);

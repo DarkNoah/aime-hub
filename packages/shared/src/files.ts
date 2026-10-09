@@ -4,6 +4,7 @@ export type FileEntry = {
   name: string;
   path: string;
   kind: 'file' | 'directory';
+  isMount?: boolean;
 };
 export type FileListing = { entries: FileEntry[]; truncated: boolean };
 export type FilePreview = {

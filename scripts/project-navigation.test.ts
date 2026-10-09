@@ -12,6 +12,8 @@ const project = (id: string): ProjectSummary => ({
   name: id,
   createdBy: 'alice',
   role: 'owner',
+  pinned: false,
+  archived: false,
   createdAt: '2026-10-02T00:00:00.000Z',
   updatedAt: '2026-10-02T00:00:00.000Z',
 });
@@ -22,7 +24,7 @@ const thread = (id: string, projectId: string): ThreadSummary => ({
   model: null,
   reasoningEffort: 'auto',
   status: 'idle',
-  queue: [],
+  queueCount: 0,
   error: null,
 });
 
@@ -130,4 +132,95 @@ test('project paging retries the failed page and ignores cancelled responses', a
     resource.getSnapshot().projects.map((item) => item.id),
     ['current'],
   );
+});
+
+test('pinning reorders loaded projects and unpinning restores their position without resetting pagination', async () => {
+  const navigation = createProjectNavigationResource();
+  const items = Array.from({ length: 12 }, (_, index) =>
+    project(String(index).padStart(2, '0')),
+  );
+  navigation.synchronize(items, []);
+  await navigation.projects.loadMore();
+  const before = navigation.projects.getSnapshot();
+  const target = before.projects[7];
+  navigation.updateProject({ ...target, pinned: true });
+  assert.equal(navigation.projects.getSnapshot().projects[0].id, target.id);
+  assert.equal(navigation.projects.getSnapshot().projects.length, 10);
+  assert.equal(navigation.projects.getSnapshot().page, before.page);
+  navigation.updateProject(target);
+  assert.deepEqual(navigation.projects.getSnapshot().projects, before.projects);
+  navigation.cancel();
+});
+
+test('archive and restore move projects between lists while retaining project chat caches', async () => {
+  const navigation = createProjectNavigationResource();
+  const active = { ...project('a'), pinned: true };
+  const archived = { ...active, archived: true };
+  const conversation = thread('chat', active.id);
+  navigation.synchronize([active], [conversation]);
+  const chats = navigation.threads(active.id);
+  navigation.updateProject(archived);
+  assert.deepEqual(navigation.projects.getSnapshot().projects, []);
+  assert.deepEqual(navigation.archivedProjects.getSnapshot().projects, [
+    archived,
+  ]);
+  assert.equal(navigation.projects.getSnapshot().hasMore, false);
+  navigation.synchronize([archived], [conversation]);
+  assert.equal(navigation.threads(active.id), chats);
+  assert.deepEqual(chats.getSnapshot().threads, [conversation]);
+  navigation.updateProject(active);
+  assert.deepEqual(navigation.projects.getSnapshot().projects, [active]);
+  assert.deepEqual(navigation.archivedProjects.getSnapshot().projects, []);
+  navigation.removeProject(active.id);
+  assert.deepEqual(navigation.projects.getSnapshot().projects, []);
+  assert.deepEqual(navigation.archivedProjects.getSnapshot().projects, []);
+  navigation.cancel();
+});
+
+test('a stale in-flight list cannot restore an archived project or overwrite a pin', async () => {
+  let resolve!: (page: ProjectList) => void;
+  const navigation = createProjectNavigationResource(
+    async () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  const loading = navigation.projects.loadMore();
+  navigation.updateProject({ ...project('a'), archived: true });
+  navigation.updateProject({ ...project('b'), pinned: true });
+  resolve({
+    projects: [project('a'), project('b'), project('c')],
+    page: 0,
+    hasMore: false,
+  });
+  await loading;
+  assert.deepEqual(
+    navigation.projects
+      .getSnapshot()
+      .projects.map(({ id, pinned }) => ({ id, pinned })),
+    [
+      { id: 'b', pinned: true },
+      { id: 'c', pinned: false },
+    ],
+  );
+  assert.equal(navigation.archivedProjects.getSnapshot().projects[0].id, 'a');
+  navigation.cancel();
+});
+
+test('archived pagination requests its own filter and does not leak into the active list', async () => {
+  const navigation = createProjectNavigationResource(
+    async (page = 0, _signal, perPage, status) => {
+      assert.equal(status, 'archived');
+      assert.equal(perPage, 5);
+      return {
+        projects: [{ ...project('archived'), archived: true }],
+        page,
+        hasMore: false,
+      };
+    },
+  );
+  await navigation.archivedProjects.loadMore();
+  assert.equal(navigation.archivedProjects.getSnapshot().projects.length, 1);
+  assert.equal(navigation.projects.getSnapshot().page, -1);
+  navigation.cancel();
 });

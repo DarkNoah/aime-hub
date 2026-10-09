@@ -39,6 +39,8 @@ export class Project extends ProjectTimestamps {
   createdBy!: string;
   @Column({ type: 'jsonb', default: {} })
   metadata!: Record<string, unknown>;
+  @Column({ type: 'boolean', default: false })
+  archived!: boolean;
 }
 
 @Entity('project_members')
@@ -57,6 +59,8 @@ export class ProjectMember extends ProjectTimestamps {
   userId!: string;
   @Column({ type: 'text' })
   role!: 'owner' | 'admin' | 'member';
+  @Column({ type: 'boolean', default: false })
+  pinned!: boolean;
 
   @ManyToOne(() => Project, { nullable: false, onDelete: 'CASCADE' })
   @JoinColumn({

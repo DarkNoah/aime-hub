@@ -1,3 +1,4 @@
+import { createNodeServer } from '../apps/server/src/server.js';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
@@ -45,7 +46,7 @@ test(
       );
       await initialMigrations.runMigrations();
       const auth = createAuth(authConfig);
-      server = createApp(auth).listen(0, '127.0.0.1');
+      server = createNodeServer(createApp(auth)).listen(0, '127.0.0.1');
       await once(server, 'listening');
       const address = server.address();
       assert.ok(address && typeof address !== 'string');

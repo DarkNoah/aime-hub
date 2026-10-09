@@ -104,7 +104,7 @@ export function ThreadDialog({
               type="submit"
               className={
                 mode === 'delete'
-                  ? 'bg-destructive text-white hover:bg-destructive/90'
+                  ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
                   : undefined
               }
               disabled={pending || (mode === 'rename' && !title.trim())}

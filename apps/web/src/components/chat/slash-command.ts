@@ -2,6 +2,7 @@ export type SlashCommandItem = {
   id: string;
   name: string;
   description: string;
+  action?: 'goal' | 'compact';
 };
 
 export type SlashCommandSection = {
@@ -12,7 +13,7 @@ export type SlashCommandSection = {
 
 export type SlashCommandGroup = {
   id: string;
-  label: string;
+  label?: string;
   sections: SlashCommandSection[];
 };
 
@@ -54,4 +55,17 @@ export function completeSlashCommand(text: string, end: number, name: string) {
     text: command + separator + suffix,
     caret: command.length + 1,
   };
+}
+
+/** Built-in mode commands are consumed locally, never sent as prompt text. */
+export function consumeGoalCommand(text: string): string | null {
+  return /^\/goal(?:\s|$)/i.test(text)
+    ? text.replace(/^\/goal(?:\s+|$)/i, '')
+    : null;
+}
+
+export function consumeCompactCommand(text: string): string | null {
+  return /^\/compact(?:\s|$)/i.test(text)
+    ? text.replace(/^\/compact(?:\s+|$)/i, '')
+    : null;
 }

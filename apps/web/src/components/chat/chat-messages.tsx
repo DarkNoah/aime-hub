@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Copy, LoaderCircle } from 'lucide-react';
+import { Copy, LoaderCircle, ScanText } from 'lucide-react';
 import { toast } from 'sonner';
 import { isToolUIPart, type UIMessage } from 'ai';
 import type { ToolInteraction, ToolResponse } from '@aime/shared/threads';
@@ -30,8 +30,14 @@ import {
 } from '@/components/ai-elements/tool';
 import { Button } from '@/components/ui/button';
 import { ChatBackgroundTask } from './chat-background-task';
-import { ChatToolInteraction } from './chat-tool-interaction';
-import { groupChatMessages, groupMessageParts } from './messages';
+import { ChatMessageCompression } from './chat-message-compression';
+import { ChatToolRenderer } from './tool-renderers';
+import { useMessagePreview } from './message-preview/context';
+import {
+  groupChatMessages,
+  groupMessageParts,
+  type ChatMessagePart,
+} from './messages';
 
 export function ChatMessages({
   messages,
@@ -51,7 +57,10 @@ export function ChatMessages({
   ) => Promise<void>;
   disabled?: boolean;
 }) {
-  const rows = groupChatMessages(messages);
+  const rows = groupChatMessages(
+    messages,
+    new Set(toolInteractions.map((item) => item.toolCallId)),
+  );
   const lastMessageId = messages.at(-1)?.id;
   const visibleToolIds = new Set(
     messages.flatMap((message) =>
@@ -60,10 +69,11 @@ export function ChatMessages({
   );
   return (
     <>
-      {rows.map(({ message, sourceIds }) => (
+      {rows.map(({ message, sourceIds, parts }) => (
         <ChatMessage
           key={message.id}
           message={message}
+          parts={parts}
           streaming={
             running && !!activeMessageId && sourceIds.includes(activeMessageId)
           }
@@ -79,7 +89,7 @@ export function ChatMessages({
           (item) => !item.response && !visibleToolIds.has(item.toolCallId),
         )
         .map((interaction) => (
-          <ChatToolInteraction
+          <ChatToolRenderer
             key={interaction.id}
             interaction={interaction}
             onRespond={onToolResponse}
@@ -92,6 +102,7 @@ export function ChatMessages({
 
 export const ChatMessage = memo(function ChatMessage({
   message,
+  parts,
   streaming,
   showReasoning,
   isLastMessage = false,
@@ -100,6 +111,7 @@ export const ChatMessage = memo(function ChatMessage({
   disabled,
 }: {
   message: UIMessage;
+  parts?: ChatMessagePart[];
   streaming: boolean;
   showReasoning: boolean;
   isLastMessage?: boolean;
@@ -111,6 +123,14 @@ export const ChatMessage = memo(function ChatMessage({
   disabled?: boolean;
 }) {
   const { t } = useTranslation();
+  const openPreview = useMessagePreview();
+  const groupedParts =
+    parts ??
+    groupMessageParts(
+      message,
+      new Set(toolInteractions.map((item) => item.toolCallId)),
+    );
+  if (message.parts.length > 0 && groupedParts.length === 0) return null;
   const text = message.parts
     .filter((part) => part.type === 'text')
     .map((part) => part.text)
@@ -121,23 +141,32 @@ export const ChatMessage = memo(function ChatMessage({
   );
   return (
     <Message from={message.role} className="w-full min-w-0 max-w-full">
-      {streaming && (
-        <LoaderCircle
-          className="mb-2 size-3 animate-spin text-muted-foreground"
-          aria-label={t('chat.running')}
-        />
-      )}
-      <MessageContent className="min-w-0 max-w-full overflow-hidden text-sm leading-7 [overflow-wrap:anywhere] group-[.is-assistant]:w-full">
-        {groupMessageParts(
-          message,
-          new Set(toolInteractions.map((item) => item.toolCallId)),
-        ).map((item) => {
+      <MessageContent
+        data-chat-message-content
+        className="min-w-0 max-w-full overflow-hidden text-sm leading-7 [overflow-wrap:anywhere] group-[.is-assistant]:w-full"
+      >
+        {groupedParts.map((item) => {
+          if (item.type === 'compression') {
+            return (
+              <ChatMessageCompression
+                key={`compression-${item.compression.cycleId}`}
+                compression={item.compression}
+                onPreview={
+                  openPreview &&
+                  (item.compression.status === 'completed' ||
+                    item.compression.status === 'buffered')
+                    ? () => openPreview(item.part)
+                    : undefined
+                }
+              />
+            );
+          }
           if (item.type === 'tools') {
             return (
               <ChainOfThought
                 // Reset the default only when the message becomes history.
                 key={`${item.id}:${isLastMessage ? 'last-message' : 'history'}`}
-                defaultOpen={isLastMessage}
+                defaultOpen={false}
                 className="min-w-0"
               >
                 <ChainOfThoughtHeader>
@@ -161,6 +190,9 @@ export const ChatMessage = memo(function ChatMessage({
                               ? { type: tool.type, toolName: tool.toolName }
                               : { type: tool.type })}
                             state={tool.state}
+                            onPreview={
+                              openPreview ? () => openPreview(tool) : undefined
+                            }
                           />
                           <ToolContent>
                             {tool.input !== undefined && (
@@ -185,13 +217,28 @@ export const ChatMessage = memo(function ChatMessage({
               (item) => item.toolCallId === part.toolCallId,
             );
             return (
-              <ChatToolInteraction
+              <div
                 key={interaction?.id ?? part.toolCallId}
-                interaction={interaction}
-                tool={part}
-                onRespond={onToolResponse}
-                disabled={disabled}
-              />
+                className="min-w-0 space-y-1"
+              >
+                {openPreview && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto flex h-7 gap-1.5 text-xs text-muted-foreground"
+                    onClick={() => openPreview(part)}
+                  >
+                    <ScanText className="size-3.5" aria-hidden="true" />
+                    {t('chat.preview.open')}
+                  </Button>
+                )}
+                <ChatToolRenderer
+                  interaction={interaction}
+                  tool={part}
+                  onRespond={onToolResponse}
+                  disabled={disabled}
+                />
+              </div>
             );
           }
           if (part.type === 'data-background-task-completed') {
@@ -212,7 +259,7 @@ export const ChatMessage = memo(function ChatMessage({
               />
             );
           }
-          if (part.type === 'text')
+          if (part.type === 'text' && part.state !== 'streaming')
             return message.role === 'user' ? (
               <p key={index} className="whitespace-pre-wrap">
                 {part.text}
@@ -243,7 +290,7 @@ export const ChatMessage = memo(function ChatMessage({
                     )
                   }
                 />
-                <ReasoningContent>{part.text}</ReasoningContent>
+                <ReasoningContent maxHeight={100}>{part.text}</ReasoningContent>
               </Reasoning>
             );
           }
@@ -276,6 +323,12 @@ export const ChatMessage = memo(function ChatMessage({
         >
           <Copy className="size-3.5" aria-hidden="true" />
         </Button>
+      )}
+      {streaming && (
+        <LoaderCircle
+          className="mb-2 size-3 animate-spin text-muted-foreground"
+          aria-label={t('chat.running')}
+        />
       )}
     </Message>
   );

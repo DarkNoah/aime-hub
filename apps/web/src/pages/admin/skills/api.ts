@@ -33,32 +33,6 @@ export function skillErrorKey(error: unknown): TranslationKey {
   return 'errors.generic';
 }
 
-export async function skillRequest<T>(
-  path = '',
-  options: RequestInit = {},
-): Promise<T> {
-  const response = await fetch(`/api/admin/skills${path}`, {
-    ...options,
-    credentials: 'same-origin',
-    headers: {
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...options.headers,
-    },
-  });
-  if (!response.ok)
-    throw await response.json().catch(() => ({
-      code:
-        response.status === 401
-          ? 'UNAUTHORIZED'
-          : response.status === 403
-            ? 'FORBIDDEN'
-            : 'INTERNAL_ERROR',
-    }));
-  return response.status === 204
-    ? (undefined as T)
-    : (response.json() as Promise<T>);
-}
-
 // A lightweight input hint; the server remains authoritative for refs and paths.
 export function isSkillSourceInput(input: string) {
   return /^(?:https:\/\/github\.com\/)?[a-zA-Z0-9-]+\/[a-zA-Z0-9_.-]+(?:\/(?:tree|blob)\/[^\s?#]+)?\/?$/.test(

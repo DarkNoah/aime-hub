@@ -76,6 +76,7 @@ export function EntryActions({
         {entry.path && (
           <>
             <DropdownMenuItem
+              disabled={entry.isMount}
               onSelect={() => onAction({ operation: 'rename', entry })}
             >
               <Pencil />
@@ -83,6 +84,7 @@ export function EntryActions({
             </DropdownMenuItem>
             <DropdownMenuItem
               variant="destructive"
+              disabled={entry.isMount}
               onSelect={() => onAction({ operation: 'delete', entry })}
             >
               <Trash2 />

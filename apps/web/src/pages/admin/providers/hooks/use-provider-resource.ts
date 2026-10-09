@@ -1,17 +1,22 @@
-import { useEffect, useState } from 'react';
-import { providerErrorKey, providerRequest } from '../api';
+import { useEffect, useState, useEffectEvent } from 'react';
+import { providerErrorKey } from '../api';
 import type { ErrorKey } from '@/i18n/config';
 
-export function useProviderResource<T>(path: string, revision: number) {
-  const key = JSON.stringify([path, revision]);
+export function useProviderResource<T>(
+  resourceKey: string,
+  revision: number,
+  load: (signal: AbortSignal) => Promise<T>,
+) {
+  const key = JSON.stringify([resourceKey, revision]);
   const [result, setResult] = useState<{
     key: string;
     data?: T;
     error?: ErrorKey;
   }>();
+  const request = useEffectEvent(load);
   useEffect(() => {
     const controller = new AbortController();
-    void providerRequest<T>(path, { signal: controller.signal }).then(
+    void request(controller.signal).then(
       (data) => {
         if (!controller.signal.aborted) setResult({ key, data });
       },
@@ -21,7 +26,7 @@ export function useProviderResource<T>(path: string, revision: number) {
       },
     );
     return () => controller.abort();
-  }, [path, key]);
+  }, [key]);
   return {
     loading: result?.key !== key,
     data: result?.key === key ? result.data : undefined,

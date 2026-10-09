@@ -4,9 +4,9 @@
 
 ## 组件与目录
 
-- `apps/web/src/components/chat/`：完整、可嵌入的 `ChatPanel`，包括消息、推理过程、工具结果、图片、模型设置、输入、队列、运行状态和历史分页。通信 Hook 与 transport 同目录组织，无 React Router、页面高度或定位依赖。
+- `apps/web/src/components/chat/`：完整、可嵌入的 `ChatPanel`，包括消息、推理过程、工具结果、图片、模型设置、输入、队列、运行状态和历史分页。通信 Hook 与 API 同目录组织，无 React Router、页面高度或定位依赖。
 - `apps/web/src/pages/threads/`：页面路由适配、侧栏聊天折叠列表、会话共享状态、重命名／删除 Dialog。列表每页 10 条，向下滚动自动加载；更新单项保留分页与滚动位置，页面不再单独显示一列列表。
-- `apps/server/src/modules/threads/`：权限、HTTP/SSE、运行队列、动态 Agent 工厂、工作目录与 skills 发现。
+- `apps/server/src/modules/threads/`：权限、HTTP/SSE、原生队列接入、动态 Agent 工厂、工作目录与 skills 发现。
 - `apps/server/src/modules/models/language-model.ts`：个人模型配置、统一模型解析和供应商思考参数转换。
 - `apps/server/src/mastra/storage.ts`：Mastra PostgreSQL 存储与历史查询用 Memory 配置。
 - `apps/server/src/mastra/index.ts`：参照 `ui-dojo/src/mastra/index.ts` 集中创建 Mastra 实例，注册系统 Agent、Workflow 和共享存储；由服务启动入口创建一次，通过依赖注入供动态聊天 Agent 使用。HTTP/SSE 仍由业务路由提供，不启用 Mastra apiRoutes。
@@ -41,21 +41,33 @@ Mastra 使用现有 PostgreSQL 中独立的 `mastra` schema，由官方 `Postgre
 
 模型优先级为当前消息／线程选择、个人默认、系统默认。系统默认由供应商管理页面配置；`.env` 中预留的 `OPENAI_API_KEY`／`DEFAULT_MODEL` 不作为绕过供应商管理的隐式连接。供应商凭据只在服务端解析，模型 ID 含斜杠时保留完整后缀。
 
-每轮 Agent 开启 thread scope 的 Observational Memory，使用本轮解析出的模型。支持工具调用的模型接入受目录边界约束的 Mastra Workspace 和 filesystem path skills。工作目录为 `WORKSPACE_ROOT/users/<userId>/<yyyy-MM-dd>-<nanoid(6)>`，日期使用 Asia/Shanghai。全局与个人 `.agents/skills` 递归发现 `SKILL.md`，按包目录名作为 skill ID、相对父目录作为分组；个人同名包覆盖全局包。
+每个线程的 Agent session 开启 thread scope 的 Observational Memory，使用创建 session 时解析的模型；每轮对话模型按输入设置选择。支持工具调用的模型接入受目录边界约束的 Mastra Workspace 和 filesystem path skills。工作目录为 `WORKSPACE_ROOT/users/<userId>/<yyyy-MM-dd>-<nanoid(6)>`，日期使用 Asia/Shanghai。全局与个人 `.agents/skills` 递归发现 `SKILL.md`，按包目录名作为 skill ID、相对父目录作为分组；个人同名包覆盖全局包。
 
 输入框以 `/` 开头时显示通用快捷命令菜单，技能统一位于“技能”分类下，再按相对父目录（如 `test`、`owner/repo`）分组。根目录技能直接显示在分类下；技能名和描述同一行展示，不使用图标。输入可过滤名称、描述和目录分组，方向键选择，Enter / Tab 或点击补全命令，保留后续文字。扫描遇到 `SKILL.md` 即视为技能包并停止向包内递归；ID 与命令名统一取包目录名，即使 frontmatter 的 `name` 不一致也会显示。目录列表与运行时共享同一读取适配层，仅在内存中规范技能名称，保留描述、正文和资源文件，不改写原始 `SKILL.md`；其他元数据继续使用 Mastra 校验。
 
-HTTP 仅提交新消息，AI SDK `useChat` 的 transport 收到接受响应后即可再次发送；独立 SSE 订阅负责更新消息。首次订阅发送缓存快照，之后只推送变化消息及线程状态，流式更新最多每 50ms 合并发送。重连刷新最新历史窗口后叠加实时消息，历史分页使用固定时间上界，避免后续新增消息导致分页移动。
+HTTP 仅提交新消息，收到接受响应后即可再次发送；服务端通过 `agent.subscribeToThread()` 观察所有原生运行，再由独立 SSE 订阅更新界面。首次订阅发送缓存快照，之后只推送变化消息及线程状态，流式更新最多每 50ms 合并发送。重连刷新最新历史窗口后叠加实时消息，历史分页使用固定时间上界，避免后续新增消息导致分页移动。
 
-每个线程串行执行，消息 ID 支持重试去重。空闲时提交的消息直接保存并运行，不进入队列；已有任务执行时，新消息才排队。若停止后仍有暂停的排队消息，空闲时新提交的消息先直接运行，再继续剩余队列。队列最多 20 条且总序列化大小不超过 16 MiB；输入支持文字和最多 4 张图片，每张不超过 2 MiB。队列与近期已接受 ID 存在 Mastra thread metadata 中。立即消息通过 `prepareStep` 在当前工具调用完成后的下一步注入；若当前轮没有后续步骤，则紧接当前轮运行。停止会保留部分回复并暂停剩余队列，可继续或移除排队消息。
+普通消息直接调用 Mastra `queueMessage(message, target)`，空闲时唤醒运行，忙碌时按 FIFO 等待下一轮。即时输入调用 `sendMessage(message, target)`，由 Mastra 在后续步骤处理。两者都使用 `ifIdle.streamOptions.untilIdle: true`；工具恢复使用 `resumeStreamUntilIdle()`，后台任务完成后的续跑由 Mastra 处理。应用不再保存新消息的队列数组，也不自行取出或注入下一轮消息。
 
-输入框不再提供发送模式下拉框，新消息默认按排队方式提交，空闲线程仍直接运行。待发消息以紧贴输入框上沿的窄条列表展示，支持拖动手柄排序、方向键或菜单上移／下移、删除，以及通过 shadcn Toggle 切换「立即」。选中「立即」时在当前轮下一步注入，未选中则按队列顺序运行。点击消息或菜单编辑会打开 Dialog，读取完整文字，修改时保留图片附件、作者与模型设置。队列变更通过同一线程锁持久化并以 SSE 同步，已开始执行或已移除的消息拒绝修改；暂停队列的编辑不会自动恢复运行。
+消息 ID 支持提交去重。原生 user signal 的 metadata 保存客户端消息 ID、作者和设置，历史与实时订阅都映射到同一用户消息 ID。输入支持文字和最多 4 张图片，每张不超过 2 MiB。服务端 `prepareStep` 只读取已消费 signal 的模型设置，不提取应用队列。
+
+输入框默认使用 FIFO 提交。队列区显示 `subscribeThreadEvents()` 的待处理数量，并保留编辑、拖动排序、即时切换、逐条取消和清空。`PendingInputs` 仅缓存已提交的 signal ID 与输入内容作为展示副本，不持久化执行队列、不启动或取出下一轮。编辑／排序通过 `cancelQueuedMessages({ signalIds })` 取消受影响的后缀，只对 `cancelledSignalIds` 中确认取消成功的输入调用 `queueMessage()`／`sendMessage()` 重新提交。若目标或排序锚点已进入执行，则恢复其他已取消项的原顺序并返回冲突，绝不重复提交已执行项。重入队失败的内容显示为“未提交”草稿，需用户显式重试。取消后重入队不是原子重排，目前按单进程部署；不把本地取消回执当作跨进程确认。清空调用 `cancelQueuedMessages()`，保留当前回复；停止调用 `abortThreadStream({ clearPendingSignals: true })`，终止当前运行并清空待处理消息。审批或补充输入通过原工具交互恢复，等待期间拒绝新的普通输入。
+
+升级前 thread metadata 中的旧队列，在下次创建原生 session 时逐条交给官方队列，成功接收后移除旧草稿。新的待处理消息只保存在 Mastra 当前进程队列中，进程重启后不恢复；已消费并持久化的消息、线程与工具交互仍可读取。
+
+## 目标模式
+
+输入 `/goal` 或在快捷命令中选择它会立即开启目标模式，不发送聊天消息。输入框下方工具栏显示目标 Badge，仅包含左侧关闭按钮和「目标」／「Goal」标签，下一条文字消息作为目标；只有图片的消息不能创建目标。新聊天和项目聊天使用同一入口，技能列表加载失败不影响内置命令。
+
+目标通过 Mastra `Agent.setObjective()` 持久化到 thread state，评估模型复用当前聊天模型，默认最多评估 50 次。新目标使用即时输入进入当前轮；后续消息继续围绕原目标，重复请求不会重置评估预算。Mastra 原生目标循环负责续跑、完成、等待用户及预算耗尽／评估失败暂停，应用不另建执行循环。聊天快照与 SSE 返回 `goal`，界面仅显示目标 Badge，重新打开聊天时从原生存储恢复目标。
+
+点击 Badge 上的关闭按钮会清除目标。目标仍处于 active 状态时，关闭同时停止当前执行并清空待处理输入；服务端等待当前流结束后清除目标，防止正在运行的评估把目标重新写回。关闭已完成或已暂停目标不会停止普通回复。尚未发送的目标模式只属于当前输入草稿；已经提交的目标跨页面刷新保留，进程重启后在下一条消息时继续评估。
 
 ## 全局线程导航
 
 登录后的布局维护一条 `GET /api/threads/events` SSE，覆盖个人线程和有权限访问的全部项目线程。首次连接及重连发送线程摘要、项目摘要快照，后续按线程推送新增、修改、删除和运行状态；不会传输消息历史和回复正文，也不会随回复 token 重复广播未变化的摘要。
 
-侧栏和项目页共用会话内缓存，分页继续控制可见条数；实时更新不重置已加载页数。完整摘要用于统计每个项目正在执行的线程数，包含正在停止但执行器尚未退出的线程，不计暂停队列。项目折叠或未打开时也继续维护计数。HTTP 应答与当前聊天的消息 SSE 不覆盖全局订阅中较新的摘要。断线重连校准离线期间的新增、删除和权限变化，退出登录销毁订阅与缓存。
+侧栏和项目页共用会话内缓存，分页继续控制可见条数；实时更新不重置已加载页数。完整摘要用于统计每个项目正在执行的线程数，依据原生运行状态统计，不把待处理数量当作运行数量。项目折叠或未打开时也继续维护计数。HTTP 应答与当前聊天的消息 SSE 不覆盖全局订阅中较新的摘要。断线重连校准离线期间的新增、删除和权限变化，退出登录销毁订阅与缓存。
 
 项目成员权限在推送前复查，项目或成员变更刷新相关会话的导航；慢连接及内部故障关闭连接后由客户端重连。全量摘要初始化适用于当前单实例部署；线程规模增长后需改为摘要索引和可恢复的增量游标，避免每次重连读取全部摘要。
 
@@ -67,7 +79,7 @@ HTTP 仅提交新消息，AI SDK `useChat` 的 transport 收到接受响应后�
 
 ChatPanel 标题旁用图标与数量显示当前线程的运行中任务，点击展开紧凑列表，每项可手动停止；归零时隐藏入口。`POST /api/threads/:id/background-tasks/:taskId/cancel` 校验线程访问权限及任务的 threadId/resourceId 后调用 Mastra `cancel(taskId)`，已结束任务重复停止为幂等操作。取消后的状态通过同一 SSE 更新，不刷新整个会话。
 
-浏览器断开、停止当前 Agent 轮次都不关闭 runtime 的任务订阅；订阅在 runtime 过期、线程／项目删除或服务关闭时释放。排队、运行中的任务阻止 runtime 过期；有活动任务时拒绝删除线程／项目。关闭订阅仅停止监听，不会取消任务。前台工具不产生这条流的后台生命周期事件，后台任务状态也不直接替代会话的运行状态。
+浏览器断开、停止当前 Agent 轮次都不关闭 runtime 的任务订阅；订阅在 runtime 过期、线程／项目删除或服务关闭时释放。排队、运行中的任务阻止 runtime 过期；有活动任务时拒绝删除线程／项目。关闭订阅仅停止监听，不会取消任务。前台工具不产生这条流的后台生命周期事件，后台任务状态也不直接替代会话的运行状态。该订阅只负责展示，不再通过任务完成回调创建应用续跑队列。
 
 ## 接口
 
@@ -82,22 +94,23 @@ ChatPanel 标题旁用图标与数量显示当前线程的运行中任务，点�
 | `GET /api/threads/:id/history?page=0&anchor=...` | 消息分页 |
 | `GET /api/threads/:id/messages` | SSE：snapshot、update、expired |
 | `POST /api/threads/:id/messages` | 接受新消息，返回 202 |
-| `POST /api/threads/:id/abort` | 停止当前轮并暂停队列 |
-| `POST /api/threads/:id/resume` | 继续队列 |
-| `GET /api/threads/:id/queue/:messageId` | 获取待发消息完整文字与附件存在标记 |
-| `PATCH /api/threads/:id/queue/:messageId` | 修改待发文字或立即标记 |
-| `PATCH /api/threads/:id/queue` | 将指定待发消息移到另一条之前，beforeId 为 null 时移到末尾 |
-| `DELETE /api/threads/:id/queue/:messageId` | 移除排队消息 |
+| `POST /api/threads/:id/abort` | 停止当前轮并清空待处理消息 |
+| `POST /api/threads/:id/retry` | 使用已有历史重试失败运行 |
+| `DELETE /api/threads/:id/goal` | 关闭目标模式；活动目标同时停止当前执行 |
+| `DELETE /api/threads/:id/queue` | 清空官方待处理队列，保留当前运行 |
+| `GET /api/threads/:id/queue/:messageId` | 获取已提交输入的展示副本 |
+| `PATCH /api/threads/:id/queue/:messageId` | 取消并重新提交修改后的文字／即时模式 |
+| `PATCH /api/threads/:id/queue` | 取消受影响输入后按新顺序提交 |
+| `DELETE /api/threads/:id/queue/:messageId` | 取消选定原生 signal |
 | `GET /api/threads/preferences` | 获取个人默认配置 |
 | `PUT /api/threads/preferences` | 保存个人默认配置 |
 
 ## 验证与部署边界
 
-- `scripts/thread-navigation.test.ts`：后台运行状态、项目权限隔离与撤销、摘要去重、连接初始化事件顺序、重连校准、完整运行数、分页保留及真实 HTTP/SSE 广播。使用内存存储与确定性执行器。
-- `scripts/threads.test.ts`：归属权限、每页 10 条、列表并发请求合并与增量更新、分页重试、并发串行化、断开订阅不停止、重复提交、立即／排队、暂停恢复、进程重启提示、固定历史分页、附件验证、历史合并和 skills 覆盖。
-- `scripts/thread-queue.test.ts`：完整文字编辑与附件保留、立即标记切换、排序后的实际执行顺序、并发新增保留、权限、过期消息拒绝、保存失败回滚、暂停与重启持久化，以及 HTTP 接口校验。
-- `scripts/chat-preferences.test.ts`：共享默认配置读取、连续修改按序保存、失败恢复与重试、会话退出取消待发写入。
-- `scripts/threads.integration.test.ts`：真实 PostgreSQL、Mastra Memory、Agent、HTTP/SSE 与本机 OpenAI 兼容测试服务；包含持久化 ID 一致性、停止保存部分回复、队列恢复、Workspace 工具调用后的立即注入。需要 `TEST_DATABASE_URL`，只创建并清理随机命名的测试 schema。
-- 浏览器验证使用隔离测试服务，已覆盖实际页面的发送、多轮、刷新，以及 390px 窄屏与独立 420×620 容器中的排队、停止、继续。侧栏验证了 10→20→23 条自动分页、折叠展开、重命名保留滚动位置及移动导航选中后收起。没有调用真实供应商；真实模型的思考等级、图片理解和长上下文触发 OM 仍需配置对应供应商后验收。
+- `apps/server/src/modules/threads/native-queue.test.ts` 使用真实 Mastra Agent、Memory 和可控模型测试 FIFO、即时输入、断线、停止、重试、取消重入队编辑／排序和历史消息 ID；不调用外部模型。
+- `apps/server/src/modules/threads/goals.test.ts` 使用原生 Agent／Memory 和模型 mock 验证目标评估续跑、完成、暂停、关闭竞态、重载恢复、普通消息隔离与接口权限；不代表真实供应商验收。
+- `runner.test.ts`、`runner-cancellation.test.ts`、`background-tasks.test.ts` 覆盖原生工具审批／恢复、取消后的保存与后台续跑。PostgreSQL 用例需要测试数据库。
+- `scripts/thread-queue.test.ts` 验证原生 session 接入、权限、旧草稿交接和队列 HTTP 接口；状态、导航、历史分页、成员隔离仍由相应脚本覆盖。
+- 本次队列迁移未以真实供应商或真实浏览器验收。UI 与流式行为仍需在配置供应商的环境中验收。
 
-当前运行队列由一个服务进程持有，部署时使用单实例。页面关闭不会中断运行；进程重启不能继续原模型连接，会提示中断，保留已写入消息与队列供用户继续。多实例需要共享执行锁和事件通道后再启用。反向代理需关闭 SSE 缓冲并允许长连接。
+当前官方运行队列由一个服务进程持有，部署时使用单实例。页面关闭不会中断运行；进程重启不能继续原模型连接或恢复待处理队列。多实例需要共享执行协调和事件通道后再启用。反向代理需关闭 SSE 缓冲并允许长连接。

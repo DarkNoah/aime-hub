@@ -1,3 +1,4 @@
+import { createNodeServer } from '../apps/server/src/server.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { execFile } from 'node:child_process';
@@ -380,10 +381,12 @@ test('admin skills API enforces session, role, same-origin and selection validat
       },
     },
   } as unknown as Auth;
-  const server = createApp(auth, undefined, undefined, {
-    service,
-    webOrigin,
-  }).listen(0, '127.0.0.1');
+  const server = createNodeServer(
+    createApp(auth, undefined, undefined, {
+      service,
+      webOrigin,
+    }),
+  ).listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(async () => {
     server.closeAllConnections();

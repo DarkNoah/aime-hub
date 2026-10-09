@@ -49,6 +49,12 @@ export async function requestProviderJson(
   urlString: string,
   apiKey?: string,
   maxBytes = 2_000_000,
+  options: {
+    query?: Record<string, string>;
+    apiKeyParameter?: string;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  } = {},
 ): Promise<unknown> {
   const url = new URL(urlString);
   if (
@@ -60,12 +66,24 @@ export async function requestProviderJson(
     url.search
   )
     throw new ProviderError('INVALID_URL');
+  for (const [key, value] of Object.entries(options.query ?? {}))
+    url.searchParams.set(key, value);
+  if (apiKey && options.apiKeyParameter)
+    url.searchParams.set(options.apiKeyParameter, apiKey);
+  const timeout = AbortSignal.timeout(options.timeoutMs ?? 15000);
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, timeout])
+    : timeout;
   const hostname = url.hostname.replace(/^\[|\]$/g, '');
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
   try {
+    signal.throwIfAborted();
     const addresses = await Promise.race([
       lookup(hostname, { all: true, verbatim: true }),
       new Promise<never>((_, reject) => {
+        onAbort = () => reject(new ProviderError('UPSTREAM_ERROR', 502));
+        signal.addEventListener('abort', onAbort, { once: true });
         timer = setTimeout(
           () => reject(new ProviderError('UPSTREAM_ERROR', 502)),
           5000,
@@ -83,10 +101,12 @@ export async function requestProviderJson(
         url,
         {
           method: 'GET',
-          signal: AbortSignal.timeout(15000),
+          signal,
           headers: {
             accept: 'application/json',
-            ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+            ...(apiKey && !options.apiKeyParameter
+              ? { authorization: `Bearer ${apiKey}` }
+              : {}),
           },
           lookup: (_hostname, options, callback) => {
             if (options.all) callback(null, [address]);
@@ -127,5 +147,6 @@ export async function requestProviderJson(
     throw new ProviderError('UPSTREAM_ERROR', 502);
   } finally {
     clearTimeout(timer);
+    if (onAbort) signal.removeEventListener('abort', onAbort);
   }
 }

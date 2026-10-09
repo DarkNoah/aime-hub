@@ -1,4 +1,3 @@
-import { isThreadActive } from '@aime/shared/threads';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -8,7 +7,7 @@ import {
   GripVertical,
   MoreHorizontal,
   Pencil,
-  Play,
+  RotateCcw,
   Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -17,6 +16,7 @@ import { Queue, QueueItem } from '@/components/ai-elements/queue';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Toggle } from '@/components/ui/toggle';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import {
@@ -55,6 +55,7 @@ export function ChatQueue({
     after: boolean;
   } | null>(null);
   const unavailable = disabled || pending;
+  const items = thread.queue ?? [];
 
   async function change(action: () => Promise<unknown>) {
     if (disabled || pendingRef.current) return false;
@@ -75,190 +76,211 @@ export function ChatQueue({
   const move = (id: string, beforeId: string | null) => {
     void change(() => chatApi.moveQueued(thread.id, id, beforeId));
   };
-  if (!thread.queue.length) return null;
+  if (!items.length) return null;
   return (
     <Queue
-      aria-label={t('chat.queued', { count: thread.queue.length })}
+      aria-label={t('chat.queued', { count: items.length })}
       aria-busy={pending}
       className="mx-3 -mb-3 gap-0 rounded-b-none rounded-t-xl border-b-0 bg-muted/50 px-1.5 pt-1 pb-3 shadow-none"
     >
-      {!isThreadActive(thread.status) && !thread.stopping && (
-        <div className="flex items-center justify-between gap-2 px-2 py-1">
-          <Badge variant="secondary" className="text-xs">
-            {t(
-              waitingForTool
-                ? 'chat.toolInteraction.waiting'
-                : 'chat.queuePaused',
-            )}
-          </Badge>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={unavailable || waitingForTool}
-            onClick={() => void change(() => chatApi.resume(thread.id))}
-          >
-            <Play className="size-3" />
-            {t('chat.resumeQueue')}
-          </Button>
-        </div>
-      )}
-      <ul
-        className="max-h-36 overflow-y-auto overscroll-contain"
-        onDragLeave={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null))
-            setDropTarget(null);
-        }}
-      >
-        {thread.queue.map((item, index) => (
-          <QueueItem
-            key={item.id}
-            className={cn(
-              'relative flex-row items-center gap-1 px-0.5 py-0 text-xs',
-              dragging === item.id && 'opacity-50',
-            )}
-            onDragOver={(event) => {
-              if (!dragging || unavailable) return;
-              event.preventDefault();
-              event.stopPropagation();
-              event.dataTransfer.dropEffect = 'move';
-              const bounds = event.currentTarget.getBoundingClientRect();
-              setDropTarget({
-                id: item.id,
-                after: event.clientY > bounds.top + bounds.height / 2,
-              });
-            }}
-            onDrop={(event) => {
-              if (!dragging || unavailable) return;
-              event.preventDefault();
-              event.stopPropagation();
-              const source = dragging;
-              const after = dropTarget?.id === item.id && dropTarget.after;
-              const beforeId = after
-                ? (thread.queue[index + 1]?.id ?? null)
-                : item.id;
-              setDragging(null);
+      <div className="flex items-center justify-between gap-2 px-2 py-1">
+        <Badge variant="secondary" className="text-xs">
+          {t(waitingForTool ? 'chat.toolInteraction.waiting' : 'chat.queued', {
+            count: thread.queueCount,
+          })}
+        </Badge>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={unavailable}
+          onClick={() => void change(() => chatApi.clearQueue(thread.id))}
+        >
+          <Trash2 className="size-3" />
+          {t('chat.clearQueue')}
+        </Button>
+      </div>
+      <ScrollArea className="[&_[data-slot=scroll-area-viewport]]:max-h-36">
+        <ul
+          className="overscroll-contain"
+          onDragLeave={(event) => {
+            if (
+              !event.currentTarget.contains(event.relatedTarget as Node | null)
+            )
               setDropTarget(null);
-              if (source !== item.id && source !== beforeId)
-                move(source, beforeId);
-            }}
-          >
-            {dropTarget?.id === item.id && dragging !== item.id && (
-              <span
-                className={cn(
-                  'pointer-events-none absolute inset-x-1 h-px bg-primary',
-                  dropTarget.after ? 'bottom-0' : 'top-0',
-                )}
-              />
-            )}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="cursor-grab text-muted-foreground active:cursor-grabbing"
-              disabled={unavailable}
-              draggable={!unavailable}
-              aria-label={t('chat.queueDrag')}
-              title={t('chat.queueDrag')}
-              onDragStart={(event) => {
-                event.dataTransfer.effectAllowed = 'move';
-                event.dataTransfer.setData('text/plain', item.id);
-                setDragging(item.id);
+          }}
+        >
+          {items.map((item, index) => (
+            <QueueItem
+              key={item.id}
+              className={cn(
+                'relative flex-row items-center gap-1 px-0.5 py-0 text-xs',
+                dragging === item.id && 'opacity-50',
+              )}
+              onDragOver={(event) => {
+                if (!dragging || unavailable) return;
+                event.preventDefault();
+                event.stopPropagation();
+                event.dataTransfer.dropEffect = 'move';
+                const bounds = event.currentTarget.getBoundingClientRect();
+                setDropTarget({
+                  id: item.id,
+                  after: event.clientY > bounds.top + bounds.height / 2,
+                });
               }}
-              onDragEnd={() => {
+              onDrop={(event) => {
+                if (!dragging || unavailable) return;
+                event.preventDefault();
+                event.stopPropagation();
+                const source = dragging;
+                const after = dropTarget?.id === item.id && dropTarget.after;
+                const beforeId = after
+                  ? (items[index + 1]?.id ?? null)
+                  : item.id;
                 setDragging(null);
                 setDropTarget(null);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'ArrowUp' && index > 0) {
-                  event.preventDefault();
-                  move(item.id, thread.queue[index - 1].id);
-                } else if (
-                  event.key === 'ArrowDown' &&
-                  index < thread.queue.length - 1
-                ) {
-                  event.preventDefault();
-                  move(item.id, thread.queue[index + 2]?.id ?? null);
-                }
+                if (source !== item.id && source !== beforeId)
+                  move(source, beforeId);
               }}
             >
-              <GripVertical className="size-3.5" />
-            </Button>
-            <button
-              type="button"
-              disabled={unavailable}
-              onClick={() => setEditing(item.id)}
-              className="min-w-0 flex-1 truncate rounded px-1 py-2 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-              aria-label={t('chat.editQueuedMessage', {
-                text: item.text || t('chat.image'),
-              })}
-            >
-              {item.text || t('chat.image')}
-            </button>
-            <Toggle
-              pressed={item.isImmediate}
-              disabled={unavailable}
-              aria-label={t('chat.queueImmediate')}
-              title={t('chat.queueImmediateHint')}
-              onPressedChange={(isImmediate) =>
-                void change(() =>
-                  chatApi.updateQueued(thread.id, item.id, { isImmediate }),
-                )
-              }
-            >
-              <CornerDownRight />
-              {t('chat.queueImmediate')}
-            </Toggle>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              disabled={unavailable}
-              className="text-muted-foreground hover:text-destructive"
-              aria-label={t('chat.cancelQueued')}
-              title={t('chat.cancelQueued')}
-              onClick={() =>
-                void change(() => chatApi.cancel(thread.id, item.id))
-              }
-            >
-              <Trash2 className="size-3.5" />
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  disabled={unavailable}
-                  aria-label={t('chat.queueActions')}
-                  className="text-muted-foreground"
-                >
-                  <MoreHorizontal />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => setEditing(item.id)}>
-                  <Pencil />
-                  {t('chat.editQueued')}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={index === 0}
-                  onSelect={() => move(item.id, thread.queue[index - 1].id)}
-                >
-                  <ArrowUp />
-                  {t('chat.queueMoveUp')}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={index === thread.queue.length - 1}
-                  onSelect={() =>
-                    move(item.id, thread.queue[index + 2]?.id ?? null)
+              {dropTarget?.id === item.id && dragging !== item.id && (
+                <span
+                  className={cn(
+                    'pointer-events-none absolute inset-x-1 h-px bg-primary',
+                    dropTarget.after ? 'bottom-0' : 'top-0',
+                  )}
+                />
+              )}
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="cursor-grab text-muted-foreground active:cursor-grabbing"
+                disabled={unavailable}
+                draggable={!unavailable}
+                aria-label={t('chat.queueDrag')}
+                title={t('chat.queueDrag')}
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = 'move';
+                  event.dataTransfer.setData('text/plain', item.id);
+                  setDragging(item.id);
+                }}
+                onDragEnd={() => {
+                  setDragging(null);
+                  setDropTarget(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowUp' && index > 0) {
+                    event.preventDefault();
+                    move(item.id, items[index - 1].id);
+                  } else if (
+                    event.key === 'ArrowDown' &&
+                    index < items.length - 1
+                  ) {
+                    event.preventDefault();
+                    move(item.id, items[index + 2]?.id ?? null);
                   }
-                >
-                  <ArrowDown />
-                  {t('chat.queueMoveDown')}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </QueueItem>
-        ))}
-      </ul>
-      {editing && thread.queue.some((item) => item.id === editing) && (
+                }}
+              >
+                <GripVertical className="size-3.5" />
+              </Button>
+              <button
+                type="button"
+                disabled={unavailable}
+                onClick={() => setEditing(item.id)}
+                className="min-w-0 flex-1 truncate rounded px-1 py-2 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                aria-label={t('chat.editQueuedMessage', {
+                  text: item.text || t('chat.image'),
+                })}
+              >
+                {item.text || t('chat.image')}
+              </button>
+              {item.failed && (
+                <>
+                  <Badge variant="destructive">
+                    {t('chat.queueNotSubmitted')}
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={unavailable}
+                    aria-label={t('chat.queueRetry')}
+                    title={t('chat.queueRetry')}
+                    onClick={() =>
+                      void change(() =>
+                        chatApi.updateQueued(thread.id, item.id, {
+                          isImmediate: item.isImmediate,
+                        }),
+                      )
+                    }
+                  >
+                    <RotateCcw className="size-3.5" />
+                  </Button>
+                </>
+              )}
+              <Toggle
+                pressed={item.isImmediate}
+                disabled={unavailable}
+                aria-label={t('chat.queueImmediate')}
+                title={t('chat.queueImmediateHint')}
+                onPressedChange={(isImmediate) =>
+                  void change(() =>
+                    chatApi.updateQueued(thread.id, item.id, { isImmediate }),
+                  )
+                }
+              >
+                <CornerDownRight />
+                {t('chat.queueImmediate')}
+              </Toggle>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                disabled={unavailable}
+                className="text-muted-foreground hover:text-destructive"
+                aria-label={t('chat.cancelQueued')}
+                title={t('chat.cancelQueued')}
+                onClick={() =>
+                  void change(() => chatApi.cancel(thread.id, item.id))
+                }
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={unavailable}
+                    aria-label={t('chat.queueActions')}
+                    className="text-muted-foreground"
+                  >
+                    <MoreHorizontal />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => setEditing(item.id)}>
+                    <Pencil />
+                    {t('chat.editQueued')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={index === 0}
+                    onSelect={() => move(item.id, items[index - 1].id)}
+                  >
+                    <ArrowUp />
+                    {t('chat.queueMoveUp')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={index === items.length - 1}
+                    onSelect={() => move(item.id, items[index + 2]?.id ?? null)}
+                  >
+                    <ArrowDown />
+                    {t('chat.queueMoveDown')}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </QueueItem>
+          ))}
+        </ul>
+      </ScrollArea>
+      {editing && items.some((item) => item.id === editing) && (
         <QueuedMessageDialog
           key={editing}
           threadId={thread.id}

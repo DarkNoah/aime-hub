@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChatPanel } from '@/components/chat';
@@ -7,7 +7,7 @@ import { LoadingState } from '@/components/loading-state';
 import { useThreadList } from './use-thread-list';
 
 export function ThreadsPage() {
-  const { threadId } = useParams();
+  const { threadId } = useParams({ strict: false });
   return <ThreadPageSession key={threadId ?? 'new'} threadId={threadId} />;
 }
 
@@ -27,7 +27,9 @@ function ThreadPageSession({ threadId }: { threadId?: string }) {
       .then(({ thread }) => {
         if (controller.signal.aborted) return;
         if (thread.projectId)
-          navigate(`/projects/${thread.projectId}/threads/${thread.id}`, {
+          void navigate({
+            to: '/projects/$projectId/threads/$threadId',
+            params: { projectId: thread.projectId, threadId: thread.id },
             replace: true,
           });
         else setReady(true);
@@ -49,7 +51,10 @@ function ThreadPageSession({ threadId }: { threadId?: string }) {
       threadId={threadId}
       onThreadCreated={(thread) => {
         updateThread(thread);
-        navigate(`/threads/${thread.id}`);
+        void navigate({
+          to: '/threads/$threadId',
+          params: { threadId: thread.id },
+        });
       }}
       onThreadUpdated={updateThread}
     />

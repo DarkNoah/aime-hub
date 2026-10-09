@@ -3,7 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f6f7f4" />
+    <meta name="theme-color" content="#f8faf9" />
+    <script>
+      // Apply the saved preference before the first paint, even before React loads.
+      (() => {
+        let theme;
+        try {
+          theme = localStorage.getItem('theme:v1');
+        } catch {
+          // Storage can be unavailable; the system preference still works.
+        }
+        const dark =
+          theme === 'dark' ||
+          (theme !== 'light' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.classList.toggle('dark', dark);
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+        document
+          .querySelector('meta[name="theme-color"]')
+          .setAttribute('content', dark ? '#111a15' : '#f8faf9');
+      })();
+    </script>
     <meta name="description" content="Aime Hub · Your AI workspace" />
     <title>Aime Hub · Workspace</title>
   </head>

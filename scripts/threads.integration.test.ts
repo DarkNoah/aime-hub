@@ -1,3 +1,4 @@
+import { createNodeServer } from '../apps/server/src/server.js';
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -18,7 +19,7 @@ import {
 } from '@aime/db';
 import { createApp } from '../apps/server/src/app.js';
 import { createMastraRuntime } from '../apps/server/src/mastra/index.js';
-import { createPersonalChatRunner } from '../apps/server/src/modules/threads/runner.js';
+import { createChatRunner } from '../apps/server/src/modules/threads/runner.js';
 import { ThreadService } from '../apps/server/src/modules/threads/service.js';
 import { LanguageModelService } from '../apps/server/src/modules/models/language-model.js';
 import { ProviderService } from '../apps/server/src/modules/providers/service.js';
@@ -171,7 +172,7 @@ test(
     const projects = new ProjectService(database);
     threads = new ThreadService(
       memory,
-      createPersonalChatRunner(mastra, models, directory),
+      createChatRunner(mastra, models, directory),
       projects,
     );
     const auth = {
@@ -201,10 +202,12 @@ test(
             })
           : new Response(null, { status: 404 }),
     } as unknown as Auth;
-    server = createApp(
-      auth,
-      { service: providers, webOrigin: browserOrigin },
-      { threads, models, projects, webOrigin: browserOrigin },
+    server = createNodeServer(
+      createApp(
+        auth,
+        { service: providers, webOrigin: browserOrigin },
+        { threads, models, projects, webOrigin: browserOrigin },
+      ),
     ).listen(browserVerify ? browserPort : 0, '127.0.0.1');
     await once(server, 'listening');
     const address = server.address();
@@ -376,8 +379,8 @@ test(
         'canceled',
     );
     assert.equal(
-      (await threads.getThread('alice', thread.id)).thread.queue.length,
-      1,
+      (await threads.getThread('alice', thread.id)).thread.queueCount,
+      0,
     );
     assert.equal(requests.length, 2);
     const stoppedHistory = await threads.history('alice', thread.id);
@@ -387,7 +390,11 @@ test(
       ),
       'Stopped partial reply is persisted',
     );
-    assert.equal((await request(`/${thread.id}/resume`, 'POST')).status, 200);
+    assert.equal((await request(`/${thread.id}/resume`, 'POST')).status, 404);
+    await request(`/${thread.id}/messages`, 'POST', {
+      ...input,
+      id: 'fixture-message-4',
+    });
     await until(async () => requests.length === 3);
     release!();
     await until(
@@ -450,7 +457,7 @@ test(
       2,
     );
     assert.equal(
-      (await threads.getThread('alice', toolThread.id)).thread.queue.length,
+      (await threads.getThread('alice', toolThread.id)).thread.queueCount,
       0,
     );
     // The same real Mastra runner, native memory and local provider also serve shared project threads.

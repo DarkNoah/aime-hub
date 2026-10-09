@@ -12,7 +12,13 @@ type Snapshot = {
   error: ReturnType<typeof chatErrorKey> | null;
 };
 
-export function createProjectListResource(loadPage = projectApi.list) {
+export function createProjectListResource(
+  loadPage = projectApi.list,
+  archived = false,
+) {
+  const matches = (project: ProjectSummary) => !!project.archived === archived;
+  const pinnedFirst = (items: ProjectSummary[]) =>
+    [...items].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned));
   let liveProjects: ProjectSummary[] | undefined;
   let snapshot: Snapshot = {
     projects: [],
@@ -35,7 +41,7 @@ export function createProjectListResource(loadPage = projectApi.list) {
       const size = snapshot.projects.length + 5;
       publish({
         ...snapshot,
-        projects: liveProjects.slice(0, size),
+        projects: pinnedFirst(liveProjects).slice(0, size),
         page: snapshot.page + 1,
         hasMore: liveProjects.length > size,
         loading: false,
@@ -54,12 +60,15 @@ export function createProjectListResource(loadPage = projectApi.list) {
         if (signal.aborted) return;
         const known = new Set(snapshot.projects.map((project) => project.id));
         publish({
-          projects: [
+          projects: pinnedFirst([
             ...snapshot.projects,
             ...result.projects.filter(
-              (project) => !known.has(project.id) && !removed.has(project.id),
+              (project) =>
+                matches(project) &&
+                !known.has(project.id) &&
+                !removed.has(project.id),
             ),
-          ],
+          ]),
           page: result.page,
           hasMore: result.hasMore,
           loading: false,
@@ -74,8 +83,27 @@ export function createProjectListResource(loadPage = projectApi.list) {
     })();
     return pending;
   }
+  function remove(id: string) {
+    removed.add(id);
+    if (liveProjects)
+      liveProjects = liveProjects.filter((project) => project.id !== id);
+    publish({
+      ...snapshot,
+      projects: liveProjects
+        ? pinnedFirst(liveProjects).slice(
+            0,
+            Math.max(5, snapshot.projects.length),
+          )
+        : snapshot.projects.filter((item) => item.id !== id),
+      hasMore: liveProjects
+        ? liveProjects.length > Math.max(5, snapshot.projects.length)
+        : snapshot.hasMore,
+    });
+  }
   return {
     getSnapshot: () => snapshot,
+    getProject: (id: string) =>
+      (liveProjects ?? snapshot.projects).find((project) => project.id === id),
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => {
@@ -84,6 +112,7 @@ export function createProjectListResource(loadPage = projectApi.list) {
     },
     loadMore,
     synchronize(projects: ProjectSummary[]) {
+      projects = projects.filter(matches);
       controller?.abort();
       pending = undefined;
       removed.clear();
@@ -107,7 +136,7 @@ export function createProjectListResource(loadPage = projectApi.list) {
       const size = Math.max(5, snapshot.projects.length);
       publish({
         ...snapshot,
-        projects: liveProjects.slice(0, size),
+        projects: pinnedFirst(liveProjects).slice(0, size),
         page: Math.max(0, snapshot.page),
         hasMore: liveProjects.length > size,
         loading: false,
@@ -115,6 +144,10 @@ export function createProjectListResource(loadPage = projectApi.list) {
       });
     },
     update(project: ProjectSummary) {
+      if (!matches(project)) {
+        remove(project.id);
+        return;
+      }
       removed.delete(project.id);
       if (liveProjects)
         liveProjects = liveProjects.some((item) => item.id === project.id)
@@ -124,22 +157,24 @@ export function createProjectListResource(loadPage = projectApi.list) {
           : [project, ...liveProjects];
       publish({
         ...snapshot,
-        projects: snapshot.projects.some((item) => item.id === project.id)
-          ? snapshot.projects.map((item) =>
-              item.id === project.id ? project : item,
+        projects: liveProjects
+          ? pinnedFirst(liveProjects).slice(
+              0,
+              Math.max(5, snapshot.projects.length),
             )
-          : [project, ...snapshot.projects],
+          : pinnedFirst(
+              snapshot.projects.some((item) => item.id === project.id)
+                ? snapshot.projects.map((item) =>
+                    item.id === project.id ? project : item,
+                  )
+                : [project, ...snapshot.projects],
+            ),
+        hasMore: liveProjects
+          ? liveProjects.length > Math.max(5, snapshot.projects.length)
+          : snapshot.hasMore,
       });
     },
-    remove(id: string) {
-      removed.add(id);
-      if (liveProjects)
-        liveProjects = liveProjects.filter((project) => project.id !== id);
-      publish({
-        ...snapshot,
-        projects: snapshot.projects.filter((item) => item.id !== id),
-      });
-    },
+    remove,
     cancel() {
       controller?.abort();
       pending = undefined;
@@ -155,6 +190,10 @@ export function createProjectNavigationResource(
   loadThreads = chatApi.list,
 ) {
   const projects = createProjectListResource(loadProjects);
+  const archivedProjects = createProjectListResource(
+    (page, signal, perPage) => loadProjects(page, signal, perPage, 'archived'),
+    true,
+  );
   let liveThreads: ThreadSummary[] | undefined;
   const threads = new Map<
     string,
@@ -162,6 +201,11 @@ export function createProjectNavigationResource(
   >();
   return {
     projects,
+    archivedProjects,
+    updateProject(project: ProjectSummary) {
+      projects.update(project);
+      archivedProjects.update(project);
+    },
     threads(projectId: string) {
       let resource = threads.get(projectId);
       if (!resource) {
@@ -180,6 +224,7 @@ export function createProjectNavigationResource(
     synchronize(nextProjects: ProjectSummary[], nextThreads: ThreadSummary[]) {
       liveThreads = nextThreads;
       projects.synchronize(nextProjects);
+      archivedProjects.synchronize(nextProjects);
       const allowed = new Set(nextProjects.map((project) => project.id));
       threads.forEach((resource, id) => {
         resource.synchronize(
@@ -208,11 +253,13 @@ export function createProjectNavigationResource(
         liveThreads = liveThreads.filter((thread) => thread.projectId !== id);
       threads.get(id)?.synchronize([]);
       projects.remove(id);
+      archivedProjects.remove(id);
       threads.get(id)?.cancel();
       threads.delete(id);
     },
     cancel() {
       projects.cancel();
+      archivedProjects.cancel();
       threads.forEach((resource) => resource.cancel());
     },
   };

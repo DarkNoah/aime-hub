@@ -1,3 +1,4 @@
+import { openSessionStub, sessionStub } from './fixtures/thread-session.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -47,18 +48,21 @@ test('step usage preserves unknown and zero counts and does not double-count rea
 
 test('usage is streamed before completion, replaces the previous step, and survives reopening', async (t) => {
   const { memory, threads } = fakeMemory();
-  let context: Parameters<ChatRunner['execute']>[0] | undefined;
+  let context: Parameters<ChatRunner['open']>[0] | undefined;
   let finish!: () => void;
   const service = new ThreadService(memory, {
     async validate() {},
     async createWorkspace() {
       return 'test-workspace';
     },
-    async execute(value) {
+    async open(value) {
       context = value;
-      value.onStatus('running');
-      await new Promise<void>((resolve) => {
-        finish = resolve;
+      finish = () =>
+        value.onEvent({ type: 'status', status: 'success', runId: 'run' });
+      return sessionStub({
+        async send() {
+          value.onEvent({ type: 'status', status: 'running', runId: 'run' });
+        },
       });
     },
   });
@@ -97,8 +101,10 @@ test('usage is streamed before completion, replaces the previous step, and survi
     totalTokens: 170,
   };
   try {
-    await context.onUsage(first);
-    await context.onUsage(second);
+    context.onEvent({ type: 'usage', usage: first });
+    await delay(0);
+    context.onEvent({ type: 'usage', usage: second });
+    await delay(0);
     assert.deepEqual(threads.get(thread.id)?.metadata?.usage, second);
     assert.equal(
       Object.hasOwn(threads.get(thread.id)!.metadata!, 'aime'),
@@ -122,7 +128,7 @@ test('usage is streamed before completion, replaces the previous step, and survi
       async createWorkspace() {
         return 'test';
       },
-      async execute() {},
+      open: openSessionStub,
     });
     t.after(() => reopened.shutdown());
     assert.deepEqual(

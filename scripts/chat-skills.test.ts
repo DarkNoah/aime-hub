@@ -1,3 +1,5 @@
+import { openSessionStub } from './fixtures/thread-session.js';
+import { createNodeServer } from '../apps/server/src/server.js';
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -15,11 +17,25 @@ import type { LanguageModelService } from '../apps/server/src/modules/models/lan
 import { fakeMemory } from './fixtures/thread-memory.js';
 import {
   completeSlashCommand,
+  consumeGoalCommand,
   filterCommandGroups,
   getSlashCommand,
   type SlashCommandGroup,
 } from '../apps/web/src/components/chat/slash-command.js';
 import { skillCommandGroup } from '../apps/web/src/components/chat/skill-commands.js';
+
+test('goal mode commands are consumed immediately and retain the objective body', () => {
+  assert.equal(consumeGoalCommand('/goal'), '');
+  assert.equal(consumeGoalCommand('/goal 修复并测试'), '修复并测试');
+  assert.equal(consumeGoalCommand('/GOAL\nFinish this'), 'Finish this');
+  for (const value of [
+    '/goals',
+    '/goal/file',
+    'explain /goal',
+    '/goal-setting',
+  ])
+    assert.equal(consumeGoalCommand(value), null);
+});
 
 test('slash completion only targets the leading command at a collapsed caret and preserves the prompt', () => {
   assert.deepEqual(getSlashCommand('/', 1), { query: '', end: 1 });
@@ -209,7 +225,7 @@ test('skills API authenticates drafts and existing chats, derives thread scope a
       async createWorkspace() {
         return '/unused';
       },
-      async execute() {},
+      open: openSessionStub,
       async listSkills(userId, projectId) {
         reads.push({ userId, projectId });
         if (revokeOnRead) member = false;
@@ -250,11 +266,13 @@ test('skills API authenticates drafts and existing chats, derives thread scope a
       },
     },
   } as unknown as Auth;
-  const server = createApp(auth, undefined, {
-    threads: service,
-    models: {} as LanguageModelService,
-    webOrigin: 'http://localhost:5173',
-  }).listen(0, '127.0.0.1');
+  const server = createNodeServer(
+    createApp(auth, undefined, {
+      threads: service,
+      models: {} as LanguageModelService,
+      webOrigin: 'http://localhost:5173',
+    }),
+  ).listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(async () => {
     server.closeAllConnections();

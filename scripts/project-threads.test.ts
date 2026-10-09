@@ -1,3 +1,4 @@
+import { openSessionStub, sessionStub } from './fixtures/thread-session.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
@@ -57,7 +58,7 @@ const runner = {
   async createWorkspace(_userId: string, id?: string) {
     return id ? `/workspace/projects/${id}` : '/workspace/users/alice/test';
   },
-  async execute() {},
+  open: openSessionStub,
 };
 
 test('project role changes reject owner removal and admin privilege escalation', () => {
@@ -119,8 +120,7 @@ test('project thread access covers all commands, preserves personal isolation an
     () => service.deleteThread('outsider', shared.id),
     () => service.run('outsider', shared.id, input('outsider1')),
     () => service.abort('outsider', shared.id),
-    () => service.resume('outsider', shared.id),
-    () => service.cancelQueued('outsider', shared.id, 'any'),
+    () => service.clearQueue('outsider', shared.id),
     () => service.getThread('bob', personal.id),
     () => service.updateThread('bob', shared.id, { title: 'not mine' }),
     () => service.deleteThread('bob', shared.id),
@@ -137,8 +137,7 @@ test('members observe one shared runtime; revocation closes subscriptions and de
   const { memory, threads } = fakeMemory();
   const access = projectAccess();
   let release: (() => void) | undefined;
-  let active = 0;
-  let maxActive = 0;
+  let opened = 0;
   const validated: Array<string | undefined> = [];
   const service = new ThreadService(
     memory,
@@ -147,21 +146,24 @@ test('members observe one shared runtime; revocation closes subscriptions and de
       async validate(_userId, _input, id) {
         validated.push(id);
       },
-      async execute({ input: request, onMessage, onStatus, signal }) {
-        onStatus('running');
-        maxActive = Math.max(maxActive, ++active);
-        onMessage({
-          id: `reply-${request.id}`,
-          role: 'assistant',
-          parts: [{ type: 'text', text: 'shared reply' }],
+      async open({ onEvent }) {
+        opened++;
+        return sessionStub({
+          async send(request) {
+            onEvent({ type: 'status', status: 'running', runId: request.id });
+            onEvent({
+              type: 'message',
+              active: true,
+              message: {
+                id: `reply-${request.id}`,
+                role: 'assistant',
+                parts: [{ type: 'text', text: 'shared reply' }],
+              },
+            });
+            release = () =>
+              onEvent({ type: 'status', status: 'success', runId: request.id });
+          },
         });
-        await new Promise<void>((resolve) => {
-          release = resolve;
-          signal.addEventListener('abort', resolve as () => void, {
-            once: true,
-          });
-        });
-        active--;
       },
     },
     access,
@@ -202,7 +204,6 @@ test('members observe one shared runtime; revocation closes subscriptions and de
     () => service.withProjectDeletion(projectId, async () => {}),
     (error: ThreadError) => error.code === 'PROJECT_BUSY',
   );
-  await service.run('alice', thread.id, input('message02'));
   off();
   assert.equal(
     (await service.getThread('alice', thread.id)).thread.status,
@@ -213,17 +214,14 @@ test('members observe one shared runtime; revocation closes subscriptions and de
   assert.equal(revoked, true);
   const count = bob.length;
   release!();
-  await until(
-    () =>
-      !!active && threads.get(thread.id)?.metadata?.activeId === 'message02',
-  );
+  await until(() => threads.get(thread.id)?.metadata?.status === 'success');
   await service.abort('alice', thread.id);
   await until(
     async () =>
       (await service.getThread('alice', thread.id)).thread.status ===
       'canceled',
   );
-  assert.equal(maxActive, 1);
+  assert.equal(opened, 1);
   assert.equal(bob.length, count);
   await assert.rejects(() => service.history('bob', thread.id), ThreadError);
   const stored = threads.get(thread.id)!;

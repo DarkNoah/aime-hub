@@ -110,7 +110,7 @@ for (const scenario of [
     const stored = await memory.getThreadById({ threadId: thread.id });
     assert.equal(stored?.metadata?.error, expected);
     assert.equal(stored?.metadata?.status, 'failed');
-    assert.equal(stored?.metadata?.paused, true);
+    assert.equal(stored?.metadata?.queue, undefined);
     assert.equal(errors.at(-1), expected);
     await service.shutdown();
     service = new ThreadService(memory, runner);

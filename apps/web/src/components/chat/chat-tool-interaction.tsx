@@ -1,8 +1,6 @@
-import { useId, useRef, useState } from 'react';
+import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, CircleHelp, LoaderCircle, ShieldCheck, X } from 'lucide-react';
-import { nanoid } from 'nanoid';
-import { toast } from 'sonner';
 import type { DynamicToolUIPart, ToolUIPart } from 'ai';
 import {
   userQuestionSchema,
@@ -24,7 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import { chatErrorKey } from './api';
+import { useToolResponse } from './tool-renderers/use-tool-response';
 
 export type ToolInteractionProps = {
   interaction?: ToolInteraction;
@@ -43,14 +41,14 @@ export function ChatToolInteraction({
   const inputId = useId();
   const [selected, setSelected] = useState<string[]>([]);
   const [text, setText] = useState('');
-  const [pending, setPending] = useState(false);
-  const [submitted, setSubmitted] = useState<ToolResponse>();
-  const [error, setError] = useState<
-    ReturnType<typeof chatErrorKey> | 'chat.toolInteraction.invalidJson'
-  >();
-  const sending = useRef(false);
-  // Keep the request ID when retrying an acknowledgement lost to a disconnect.
-  const request = useRef<{ signature: string; id: string } | null>(null);
+  const { response, pending, error, setError, submit } = useToolResponse({
+    interaction,
+    disabled:
+      disabled ||
+      tool?.state === 'output-available' ||
+      tool?.state === 'output-denied',
+    onRespond,
+  });
   const toolName =
     interaction?.toolName ??
     (tool?.type === 'dynamic-tool' ? tool.toolName : tool?.type.slice(5));
@@ -61,7 +59,6 @@ export function ChatToolInteraction({
       : undefined;
   const multi = question?.selectionMode === 'multi_select';
   const approval = interaction?.kind === 'approval';
-  const response = interaction?.response ?? submitted;
   const hasOutput = tool?.state === 'output-available';
   const rejected =
     response?.action === 'decline' || tool?.state === 'output-denied';
@@ -103,29 +100,6 @@ export function ChatToolInteraction({
     typeof schema === 'object' &&
     'type' in schema &&
     schema.type === 'string';
-
-  async function submit(action: Omit<ToolResponse, 'id'>) {
-    if (unavailable || sending.current || !interaction || !onRespond) return;
-    sending.current = true;
-    setPending(true);
-    setError(undefined);
-    const signature = JSON.stringify(action);
-    if (request.current?.signature !== signature)
-      request.current = { signature, id: nanoid() };
-    const value = { ...action, id: request.current.id } as ToolResponse;
-    try {
-      await onRespond(interaction.id, value);
-      setSubmitted(value);
-      toast.success(t('chat.toolInteraction.sent'));
-    } catch (cause) {
-      const key = chatErrorKey(cause);
-      setError(key);
-      toast.error(t(key));
-    } finally {
-      sending.current = false;
-      setPending(false);
-    }
-  }
 
   function submitAnswer() {
     let data: ToolResponse & { action: 'resume' };
@@ -324,28 +298,28 @@ export function ChatToolInteraction({
             </p>
           )}
           <ConfirmationActions className="w-full flex-wrap">
+            {(approval || question) && (
+              <ConfirmationAction
+                variant="outline"
+                disabled={unavailable}
+                onClick={() => void submit({ action: 'decline' })}
+              >
+                <X />
+                {t('chat.toolInteraction.decline')}
+              </ConfirmationAction>
+            )}
             {approval ? (
-              <>
-                <ConfirmationAction
-                  variant="outline"
-                  disabled={unavailable}
-                  onClick={() => void submit({ action: 'decline' })}
-                >
-                  <X />
-                  {t('chat.toolInteraction.decline')}
-                </ConfirmationAction>
-                <ConfirmationAction
-                  disabled={unavailable}
-                  onClick={() => void submit({ action: 'approve' })}
-                >
-                  {pending ? (
-                    <LoaderCircle className="animate-spin" />
-                  ) : (
-                    <Check />
-                  )}
-                  {t('chat.toolInteraction.approve')}
-                </ConfirmationAction>
-              </>
+              <ConfirmationAction
+                disabled={unavailable}
+                onClick={() => void submit({ action: 'approve' })}
+              >
+                {pending ? (
+                  <LoaderCircle className="animate-spin" />
+                ) : (
+                  <Check />
+                )}
+                {t('chat.toolInteraction.approve')}
+              </ConfirmationAction>
             ) : (
               <ConfirmationAction
                 type="submit"

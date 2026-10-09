@@ -6,16 +6,23 @@
     ".": "./src/index.ts",
     "./env": "./src/env.ts",
     "./providers": "./src/providers.ts",
+    "./tools": "./src/tools.ts",
     "./threads": "./src/threads.ts",
+    "./thread-messages": "./src/thread-messages.ts",
     "./projects": "./src/projects.ts",
     "./files": "./src/files.ts",
-    "./skills": "./src/skills.ts"
+    "./skills": "./src/skills.ts",
+    "./environment-variables": "./src/environment-variables.ts",
+    "./request-logs": "./src/request-logs.ts",
+    "./rpc": "./src/rpc/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@orpc/contract": "^1.15.4",
+    "dotenv": "^17.2.0",
     "zod": "^4.1.0",
-    "dotenv": "^17.2.0"
+    "ai": "^6.0.0"
   }
 }

@@ -1,6 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import type { FileListing, FileMutation } from '@aime/shared/files';
-import { filesApi, fileErrorKey } from './api';
+import { fileErrorKey } from './api';
+import { createWorkspaceFileClient } from './workspace-client';
 import { parentPath, renameTabs, withinPath, type FileTab } from './state';
 
 type Directory = Partial<FileListing> & {
@@ -9,6 +16,12 @@ type Directory = Partial<FileListing> & {
 };
 
 export function useFileManager(threadId: string | undefined, visible: boolean) {
+  const [client] = useState(createWorkspaceFileClient);
+  const [available, setAvailable] = useState(!!threadId);
+  if (threadId && !available) setAvailable(true);
+  useLayoutEffect(() => {
+    client.setThread(threadId);
+  }, [client, threadId]);
   const [directories, setDirectories] = useState<Record<string, Directory>>({});
   const [expanded, setExpanded] = useState(new Set<string>());
   const [tabs, setTabs] = useState<FileTab[]>([]);
@@ -17,7 +30,7 @@ export function useFileManager(threadId: string | undefined, visible: boolean) {
   const requests = useRef(new Map<string, AbortController>());
   const loadDirectory = useCallback(
     async (path: string) => {
-      if (!threadId) return;
+      if (!available) return;
       requests.current.get(path)?.abort();
       const controller = new AbortController();
       requests.current.set(path, controller);
@@ -26,7 +39,7 @@ export function useFileManager(threadId: string | undefined, visible: boolean) {
         [path]: { ...previous[path], loading: true, error: undefined },
       }));
       try {
-        const listing = await filesApi.list(threadId, path, controller.signal);
+        const listing = await client.list(path, controller.signal);
         if (!controller.signal.aborted)
           setDirectories((previous) => ({ ...previous, [path]: listing }));
       } catch (error) {
@@ -44,7 +57,7 @@ export function useFileManager(threadId: string | undefined, visible: boolean) {
           requests.current.delete(path);
       }
     },
-    [threadId],
+    [client, available],
   );
   useEffect(() => {
     const pending = requests.current;
@@ -52,19 +65,37 @@ export function useFileManager(threadId: string | undefined, visible: boolean) {
       pending.forEach((controller) => controller.abort());
       pending.clear();
     };
-  }, [threadId]);
+  }, []);
   useEffect(() => {
     if (visible) void loadDirectory('');
   }, [visible, loadDirectory]);
 
-  function openFile(path: string, line?: number) {
+  const openFile = useCallback((path: string, line?: number) => {
     setTabs((previous) =>
       previous.some((tab) => tab.path === path)
         ? previous.map((tab) => (tab.path === path ? { path, line } : tab))
         : [...previous, { path, line }],
     );
     setSelected(path);
-  }
+  }, []);
+  const revealFile = useCallback(
+    (path: string) => {
+      // Tool paths may be relative to '.', while the file API uses root-relative paths.
+      const relativePath = path.replace(/^(\.\/)+/, '');
+      openFile(relativePath);
+      const parents: string[] = [];
+      let parent = parentPath(relativePath);
+      while (parent) {
+        parents.push(parent);
+        parent = parentPath(parent);
+      }
+      setExpanded((previous) => new Set([...previous, ...parents]));
+      // Refresh ancestors as a tool may just have created the plan file.
+      ['', ...parents].forEach((directory) => void loadDirectory(directory));
+      setRevision((value) => value + 1);
+    },
+    [loadDirectory, openFile],
+  );
   function closeTab(path: string) {
     const index = tabs.findIndex((tab) => tab.path === path);
     const next = tabs.filter((tab) => tab.path !== path);
@@ -90,8 +121,8 @@ export function useFileManager(threadId: string | undefined, visible: boolean) {
     setRevision((value) => value + 1);
   }
   async function mutate(input: FileMutation) {
-    if (!threadId) return;
-    const result = await filesApi.mutate(threadId, input);
+    if (!available) return;
+    const result = await client.mutate(input);
     // Invalidate old directory requests before adjusting descendant paths.
     requests.current.forEach((controller) => controller.abort());
     requests.current.clear();
@@ -154,7 +185,8 @@ export function useFileManager(threadId: string | undefined, visible: boolean) {
     setRevision((value) => value + 1);
   }
   return {
-    threadId,
+    client,
+    available,
     directories,
     expanded,
     tabs,
@@ -162,6 +194,7 @@ export function useFileManager(threadId: string | undefined, visible: boolean) {
     revision,
     loadDirectory,
     openFile,
+    revealFile,
     closeTab,
     setSelected,
     changeExpanded,

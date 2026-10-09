@@ -31,7 +31,10 @@ export const sleep = createTool({
   },
   execute: async ({ durationMs }, context) => {
     const startedAt = performance.now();
-    await setTimeout(durationMs, undefined, { signal: context?.abortSignal });
+    try{
+      await setTimeout(durationMs, undefined, { signal: context?.abortSignal });
+    }catch{ /* empty */ }
+
 
     return {
       status: context?.abortSignal?.aborted === true ? 'aborted' : 'completed',

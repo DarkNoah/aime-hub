@@ -1,3 +1,4 @@
+import { api, apiErrorCode } from '../../lib/rpc.js';
 import type { AvailableModels } from '@aime/shared/providers';
 
 export type ModelsError =
@@ -36,32 +37,22 @@ export function createModelsResource() {
     publish({ ...snapshot, loading: true, error: undefined });
     pending = (async () => {
       try {
-        const response = await fetch('/api/models', {
-          method: 'GET',
-          credentials: 'same-origin',
-          signal,
-        });
-        if (!response.ok) {
-          if (requestVersion === version)
-            publish({
-              providers: [],
-              loading: false,
-              error:
-                response.status === 401
-                  ? 'errors.sessionExpired'
-                  : 'errors.server',
-            });
-          return;
-        }
-        const data = (await response.json()) as AvailableModels;
+        const data = await api.providers.available(undefined, { signal });
         if (requestVersion === version) publish({ ...data, loading: false });
       } catch (error) {
         if (requestVersion === version)
           publish({
             ...snapshot,
+            ...(apiErrorCode(error) === 'UNAUTHORIZED'
+              ? { providers: [] }
+              : {}),
             loading: false,
             error:
-              error instanceof TypeError ? 'errors.network' : 'errors.server',
+              apiErrorCode(error) === 'UNAUTHORIZED'
+                ? 'errors.sessionExpired'
+                : error instanceof TypeError
+                  ? 'errors.network'
+                  : 'errors.server',
           });
       } finally {
         if (requestVersion === version) pending = undefined;

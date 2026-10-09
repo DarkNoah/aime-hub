@@ -7,26 +7,45 @@ import type {
   ProjectRole,
   ProjectSummary,
   ProjectUser,
+  ProjectCreateInput,
+  ProjectUpdateInput,
+  ProjectListStatus,
   ProjectMember as MemberSummary,
+} from '@aime/shared/projects';
+import {
+  projectCreateSchema,
+  projectWorkspaceSchema,
+  defaultProjectWorkspace,
 } from '@aime/shared/projects';
 import { chatSettingsSchema, type ChatSettings } from '@aime/shared/threads';
 import { ThreadError } from '../threads/errors.js';
 import { requireMemberChange, requireProjectManager } from './permissions.js';
 
 export interface ProjectThreadAccess {
-  list?(userId: string, page?: number, perPage?: number): Promise<ProjectList>;
+  list?(
+    userId: string,
+    page?: number,
+    perPage?: number,
+    status?: ProjectListStatus,
+  ): Promise<ProjectList>;
   assertMember(
     userId: string,
     projectId: string,
   ): Promise<{ role: ProjectRole }>;
 }
 
-function summary(project: Project, role: ProjectRole): ProjectSummary {
+function summary(
+  project: Project,
+  role: ProjectRole,
+  pinned = false,
+): ProjectSummary {
   return {
     id: project.id,
     name: project.name,
     createdBy: project.createdBy,
     role,
+    pinned,
+    archived: project.archived,
     createdAt: project.createdAt.toISOString(),
     updatedAt: project.updatedAt.toISOString(),
   };
@@ -45,7 +64,7 @@ export class ProjectService implements ProjectThreadAccess {
       manager.findOneBy(ProjectMember, { projectId, userId }),
     ]);
     if (!project || !member) throw new ThreadError('PROJECT_NOT_FOUND', 404);
-    return { project, role: member.role };
+    return { project, role: member.role, member };
   }
 
   async assertMember(userId: string, projectId: string) {
@@ -54,15 +73,23 @@ export class ProjectService implements ProjectThreadAccess {
   }
 
   async get(userId: string, projectId: string): Promise<ProjectDetail> {
-    const { project, role } = await this.access(userId, projectId);
+    const { project, role, member } = await this.access(userId, projectId);
     return {
-      ...summary(project, role),
+      ...summary(project, role, member.pinned),
       settings: chatSettingsSchema.parse(project.metadata.chat ?? {}),
+      workspace: projectWorkspaceSchema.parse(
+        project.metadata.workspace ?? defaultProjectWorkspace,
+      ),
     };
   }
 
-  async list(userId: string, page = 0, perPage = 20): Promise<ProjectList> {
-    const projects = await this.database
+  async list(
+    userId: string,
+    page = 0,
+    perPage = 20,
+    status: ProjectListStatus = 'active',
+  ): Promise<ProjectList> {
+    const query = this.database
       .getRepository(Project)
       .createQueryBuilder('project')
       .innerJoin(
@@ -71,35 +98,43 @@ export class ProjectService implements ProjectThreadAccess {
         'member.project_id = project.id AND member.user_id = :userId AND member.deleted_at IS NULL',
         { userId },
       )
-      .orderBy('project.updatedAt', 'DESC')
+      .addSelect('member.pinned', 'project_pinned')
+      .orderBy('project_pinned', 'DESC')
+      .addOrderBy('project.updatedAt', 'DESC')
       .addOrderBy('project.id', 'DESC')
       .skip(page * perPage)
-      .take(perPage + 1)
-      .getMany();
+      .take(perPage + 1);
+    if (status !== 'all')
+      query.andWhere('project.archived = :archived', {
+        archived: status === 'archived',
+      });
+    const projects = await query.getMany();
     const members = await this.database.manager.findBy(ProjectMember, {
       userId,
     });
-    const roles = new Map(
-      members.map((member) => [member.projectId, member.role]),
+    const membership = new Map(
+      members.map((member) => [member.projectId, member]),
     );
     return {
-      projects: projects
-        .slice(0, perPage)
-        .map((project) => summary(project, roles.get(project.id)!)),
+      projects: projects.slice(0, perPage).map((project) => {
+        const member = membership.get(project.id)!;
+        return summary(project, member.role, member.pinned);
+      }),
       page,
       hasMore: projects.length > perPage,
     };
   }
 
-  async create(userId: string, input: { name: string }) {
+  async create(userId: string, input: ProjectCreateInput) {
+    const parsed = projectCreateSchema.parse(input);
     return this.database.transaction(async (manager) => {
       const project = await manager.save(
         Project,
         manager.create(Project, {
           id: nanoid(16),
-          name: input.name,
+          name: parsed.name,
           createdBy: userId,
-          metadata: {},
+          metadata: { workspace: parsed.workspace },
         }),
       );
       await manager.save(
@@ -113,6 +148,7 @@ export class ProjectService implements ProjectThreadAccess {
       return {
         ...summary(project, 'owner'),
         settings: chatSettingsSchema.parse({}),
+        workspace: parsed.workspace,
       };
     });
   }
@@ -125,6 +161,7 @@ export class ProjectService implements ProjectThreadAccess {
       manager: EntityManager,
       project: Project,
       role: ProjectRole,
+      member: ProjectMember,
     ) => Promise<T>,
   ) {
     return this.database.transaction(async (manager) => {
@@ -133,16 +170,25 @@ export class ProjectService implements ProjectThreadAccess {
         lock: { mode: 'pessimistic_write' },
       });
       if (!locked) throw new ThreadError('PROJECT_NOT_FOUND', 404);
-      const { project, role } = await this.access(userId, id, manager);
-      return action(manager, project, role);
+      const { project, role, member } = await this.access(userId, id, manager);
+      return action(manager, project, role, member);
     });
   }
 
-  update(userId: string, id: string, input: { name: string }) {
-    return this.mutate(userId, id, async (manager, project, role) => {
+  update(userId: string, id: string, input: ProjectUpdateInput) {
+    return this.mutate(userId, id, async (manager, project, role, member) => {
       requireProjectManager(role);
-      project.name = input.name;
-      return summary(await manager.save(project), role);
+      if (input.name !== undefined) project.name = input.name;
+      if (input.archived !== undefined) project.archived = input.archived;
+      return summary(await manager.save(project), role, member.pinned);
+    });
+  }
+
+  pin(userId: string, id: string, pinned: boolean) {
+    return this.mutate(userId, id, async (manager, project, role, member) => {
+      member.pinned = pinned;
+      await manager.save(member);
+      return summary(project, role, member.pinned);
     });
   }
 

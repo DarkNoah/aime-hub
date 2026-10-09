@@ -22,11 +22,18 @@ export function createThreadListResource(
     error: null,
   };
   let pending: Promise<void> | undefined;
+  let catalog = snapshot;
   let controller: AbortController | undefined;
   const removed = new Set<string>();
   const listeners = new Set<() => void>();
   const publish = (next: Snapshot) => {
     snapshot = next;
+    // Pickers search the complete navigation feed without expanding the sidebar's page.
+    catalog = {
+      ...next,
+      threads: liveThreads ?? next.threads,
+      hasMore: liveThreads ? false : next.hasMore,
+    };
     listeners.forEach((listener) => listener());
   };
   function loadMore(): Promise<void> {
@@ -76,6 +83,7 @@ export function createThreadListResource(
   }
   return {
     getSnapshot: () => snapshot,
+    getCatalogSnapshot: () => catalog,
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => {

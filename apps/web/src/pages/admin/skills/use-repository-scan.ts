@@ -1,7 +1,8 @@
+import { api } from '@/lib/rpc';
 import { useEffect, useState } from 'react';
 import type { SkillScan } from '@aime/shared/skills';
 import type { TranslationKey } from '@/i18n/config';
-import { isSkillSourceInput, skillErrorKey, skillRequest } from './api';
+import { isSkillSourceInput, skillErrorKey } from './api';
 
 export function useRepositoryScan() {
   const [input, setInput] = useState('');
@@ -19,27 +20,25 @@ export function useRepositoryScan() {
     const controller = new AbortController();
     let scanId: string | undefined;
     const discard = (id: string) => {
-      void skillRequest(`/scans/${id}`, { method: 'DELETE' }).catch(() => {});
+      void api.skills.discard({ params: { id } }).catch(() => {});
     };
     const timer = window.setTimeout(() => {
-      void skillRequest<SkillScan>('/scans', {
-        method: 'POST',
-        body: JSON.stringify({ url }),
-        signal: controller.signal,
-      }).then(
-        (data) => {
-          if (controller.signal.aborted) {
-            discard(data.id);
-            return;
-          }
-          scanId = data.id;
-          setResult({ key, data });
-        },
-        (error: unknown) => {
-          if (!controller.signal.aborted)
-            setResult({ key, error: skillErrorKey(error) });
-        },
-      );
+      void api.skills
+        .scan({ body: { url } }, { signal: controller.signal })
+        .then(
+          (data) => {
+            if (controller.signal.aborted) {
+              discard(data.id);
+              return;
+            }
+            scanId = data.id;
+            setResult({ key, data });
+          },
+          (error: unknown) => {
+            if (!controller.signal.aborted)
+              setResult({ key, error: skillErrorKey(error) });
+          },
+        );
     }, 700);
     return () => {
       window.clearTimeout(timer);

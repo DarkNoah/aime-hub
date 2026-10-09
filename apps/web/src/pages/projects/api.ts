@@ -1,45 +1,40 @@
-import type {
-  ProjectDetail,
-  ProjectList,
-  ProjectMember,
-  ProjectSummary,
-  ProjectUser,
-} from '@aime/shared/projects';
 import type { ChatSettings } from '@aime/shared/threads';
-import { chatRequest } from '../../components/chat/api.js';
+import type {
+  ProjectCreateInput,
+  ProjectListStatus,
+} from '@aime/shared/projects';
+import { api } from '../../lib/rpc.js';
 
-const request = <T>(path: string, init?: RequestInit) =>
-  chatRequest<T>(path, init, '/api/projects');
-const body = (method: string, input: unknown) => ({
-  method,
-  body: JSON.stringify(input),
-});
 export const projectApi = {
-  list: (page = 0, signal?: AbortSignal, perPage = 20) =>
-    request<ProjectList>(`?page=${page}&perPage=${perPage}`, { signal }),
-  get: (id: string, signal?: AbortSignal) =>
-    request<ProjectDetail>(`/${id}`, { signal }),
-  create: (name: string) => request<ProjectDetail>('', body('POST', { name })),
-  update: (id: string, name: string) =>
-    request<ProjectSummary>(`/${id}`, body('PATCH', { name })),
-  remove: (id: string) => request<void>(`/${id}`, { method: 'DELETE' }),
-  members: (id: string, signal?: AbortSignal) =>
-    request<ProjectMember[]>(`/${id}/members`, { signal }),
-  searchUsers: (id: string, query: string, signal?: AbortSignal) =>
-    request<ProjectUser[]>(`/${id}/users?q=${encodeURIComponent(query)}`, {
-      signal,
-    }),
-  addMember: (id: string, userId: string, role: 'admin' | 'member') =>
-    request<ProjectMember>(`/${id}/members`, body('POST', { userId, role })),
-  changeRole: (id: string, userId: string, role: 'admin' | 'member') =>
-    request<void>(
-      `/${id}/members/${encodeURIComponent(userId)}`,
-      body('PATCH', { role }),
+  list: (
+    page = 0,
+    signal?: AbortSignal,
+    perPage = 20,
+    status: ProjectListStatus = 'active',
+  ) => api.projects.list({ query: { page, perPage, status } }, { signal }),
+  get: (projectId: string, signal?: AbortSignal) =>
+    api.projects.get({ params: { projectId } }, { signal }),
+  create: (input: ProjectCreateInput) => api.projects.create({ body: input }),
+  update: (projectId: string, name: string) =>
+    api.projects.update({ params: { projectId }, body: { name } }),
+  setArchived: (projectId: string, archived: boolean) =>
+    api.projects.update({ params: { projectId }, body: { archived } }),
+  pin: (projectId: string, pinned: boolean) =>
+    api.projects.pin({ params: { projectId }, body: { pinned } }),
+  remove: (projectId: string) => api.projects.remove({ params: { projectId } }),
+  members: (projectId: string, signal?: AbortSignal) =>
+    api.projects.members({ params: { projectId } }, { signal }),
+  searchUsers: (projectId: string, query: string, signal?: AbortSignal) =>
+    api.projects.searchUsers(
+      { params: { projectId }, query: { q: query } },
+      { signal },
     ),
-  removeMember: (id: string, userId: string) =>
-    request<void>(`/${id}/members/${encodeURIComponent(userId)}`, {
-      method: 'DELETE',
-    }),
-  savePreferences: (id: string, settings: ChatSettings) =>
-    request<ChatSettings>(`/${id}/preferences`, body('PUT', settings)),
+  addMember: (projectId: string, userId: string, role: 'admin' | 'member') =>
+    api.projects.addMember({ params: { projectId }, body: { userId, role } }),
+  changeRole: (projectId: string, userId: string, role: 'admin' | 'member') =>
+    api.projects.changeRole({ params: { projectId, userId }, body: { role } }),
+  removeMember: (projectId: string, userId: string) =>
+    api.projects.removeMember({ params: { projectId, userId } }),
+  savePreferences: (projectId: string, settings: ChatSettings) =>
+    api.projects.savePreferences({ params: { projectId }, body: settings }),
 };

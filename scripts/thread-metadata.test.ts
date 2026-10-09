@@ -1,3 +1,4 @@
+import { openSessionStub } from './fixtures/thread-session.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ThreadService } from '../apps/server/src/modules/threads/service.js';
@@ -8,7 +9,7 @@ const runner = {
   async createWorkspace() {
     return 'workspace';
   },
-  async execute() {},
+  open: openSessionStub,
 };
 
 test('new thread runtime fields are stored directly in metadata', async (t) => {
@@ -24,13 +25,10 @@ test('new thread runtime fields are stored directly in metadata', async (t) => {
     createdBy: 'alice',
     workspace: 'workspace',
     status: 'idle',
-    queue: [],
     activeId: null,
     acceptedIds: [],
     reasoningEffort: 'high',
     error: null,
-    failedInput: null,
-    paused: false,
     autoTitle: true,
     usage: null,
     toolInteractions: [],
@@ -96,7 +94,7 @@ for (const mixed of [false, true]) {
     assert.deepEqual(snapshot.usage, mixed ? null : usage);
     assert.equal(snapshot.thread.error, mixed ? null : 'RUN_INTERRUPTED');
     assert.equal(snapshot.thread.reasoningEffort, 'high');
-    assert.equal(snapshot.thread.queue[0].id, 'message01');
+    assert.equal(snapshot.thread.queueCount, 0);
     const metadata = threads.get(thread.id)!.metadata!;
     assert.equal(Object.hasOwn(metadata, 'aime'), false);
     assert.deepEqual(metadata.queue, queue);

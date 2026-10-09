@@ -1,6 +1,6 @@
 # Aime Hub
 
-基于 React、Express 和 Mastra 的 AI 工作空间，支持个人对话、项目协作、模型供应商管理与会话工作目录。消息由服务端持续执行，通过 SSE 同步；关闭页面不会中断正在进行的对话。
+基于 React、TanStack Router、Hono、oRPC 和 Mastra 的 AI 工作空间，支持个人对话、项目协作、模型供应商管理与会话工作目录。消息由服务端持续执行，通过 SSE 同步；关闭页面不会中断正在进行的对话。
 
 ## 功能
 
@@ -9,7 +9,7 @@
 | 账号与权限 | 用户名登录、注册、持久会话；管理员管理用户、角色、密码、封禁与会话撤销               |
 | 模型管理   | 供应商与模型管理、OpenAI 兼容模型列表同步、能力配置、系统默认模型与思考等级          |
 | 个人聊天   | 流式回复、Markdown、推理过程、图片输入、工具结果、上下文用量、错误重试与历史分页     |
-| 消息队列   | 空闲时直接执行；忙碌时排队，支持编辑、拖动排序、删除、立即注入、停止与继续           |
+| 消息队列   | Mastra 原生 FIFO 队列，通过取消重入队支持编辑、排序，支持清空与停止                  |
 | 工具交互   | 工具审批、用户问题与挂起恢复；后台任务状态、结果展示和单独取消                       |
 | 项目协作   | owner/admin/member 角色、成员管理、共享对话、项目默认模型与共享工作目录              |
 | 工作区文件 | 文件树、文件名与内容搜索、新建、重命名、删除、下载，文本/代码及图片、音频、视频预览  |
@@ -18,8 +18,8 @@
 
 ## 技术栈
 
-- **前端**：React 19、Vite 7、React Router 7、TypeScript、Tailwind CSS 4、shadcn/ui、AI Elements、AI SDK 6、Streamdown、i18next。
-- **后端**：Express 5、Mastra Agent / Memory / Workspace / Background Tasks。
+- **前端**：React 19、Vite 7、TanStack Router 1、TypeScript、Tailwind CSS 4、shadcn/ui、AI Elements、AI SDK 6、Streamdown、i18next。
+- **后端**：Hono 4（Node.js adapter）、oRPC 1、Mastra Agent / Memory / Workspace / Background Tasks。
 - **认证**：Better Auth，使用 `username` 与 `admin` 插件。
 - **存储**：PostgreSQL；TypeORM 管理业务实体和迁移，Mastra 管理线程、消息与任务持久化。
 - **工程**：pnpm workspace、ESLint、Prettier、Node.js 测试运行器。
@@ -75,6 +75,10 @@ pnpm dev
 
 浏览器地址、`BETTER_AUTH_URL` 和 `WEB_ORIGIN` 必须一致，包括协议、主机名及端口；不要混用 `localhost` 和 `127.0.0.1`。修改 `.env` 后需要重启开发服务。
 
+后端默认通过 Undici hook 输出模型接口（`/chat/completions`、`/responses`）实际发送的完整请求 body，日志以 `[chat:request]` 开头，包含请求 ID 和接口地址。每次重试、工具调用后的续问，以及标题生成等辅助模型请求都会单独记录；body 发送中断时标记为 `incomplete`。日志保留正文中的完整对话、附件及工具参数，地址中的查询参数和请求头不输出。
+
+管理员可在 **管理后台 → 请求日志**（`/admin/request-logs`）查看这些请求。新日志异步保存到 PostgreSQL 的 `chat_request_logs` 表，重启后保留；部署更新时先运行 `pnpm db:migrate`。页面支持按模型、接口、请求 ID 搜索，按请求体发送状态筛选，分页查看，以及自动刷新最新一页。详情按需加载完整原文，提供 JSON 格式化和原文复制；浏览历史页或详情时自动刷新暂停。状态仅表示请求体是否完整发送，不代表模型响应成功。历史控制台输出不会补录。
+
 ### 4. 配置模型并开始对话
 
 1. 使用管理员账号登录，进入 **模型供应商**（`/admin/providers`）。
@@ -94,18 +98,33 @@ pnpm dev
 
 API Key 只在服务端使用，HTTP 响应不返回密钥；编辑时留空保留原值，显式清除才删除。当前密钥在数据库中明文存储，应妥善保护数据库及备份。模型列表同步仅允许公共网络 HTTP(S) 地址，携带密钥时要求 HTTPS，不支持私网/回环地址同步。
 
+### 网页搜索、读取与工具配置
+
+聊天提供 `web_search` 工具，通过 Mastra 的 `createTool` 和 `provider.webSearch()` 执行搜索。未选择供应商时默认使用搜狗；选择供应商后优先调用该供应商，请求失败或供应商不可用时使用搜狗兜底。成功但没有结果的搜索保留空结果，用户取消后不会继续兜底。返回值包含标题、链接、摘要及实际搜索供应商。
+
+1. 在 **模型供应商 → 新建供应商 → 其他组 → serpapi** 中配置名称、API Key 和 API 根地址（默认 `https://serpapi.com`）。SerpAPI 用于搜索，不参与聊天模型同步或默认模型选择。
+2. 在 **工具配置**（`/admin/tools`）编辑网页搜索，选择上述供应商，设置启停、最多结果数（1–20）和每个供应商的超时（1–60 秒）。API Key 仅保存在供应商配置中，不由工具配置重复保存或返回。
+3. 配置保存在已有 `settings` 表的 `tool:web_search` 记录中，无需新增迁移。聊天通过 Mastra 动态工具配置读取最新值，再调用 `createTool`；进行中的搜索保留启动时的参数。后续工具可通过共享配置 schema 和服务端工厂注册扩展。
+
+`web_fetch` 使用项目自定义工具。在 **模型供应商 → 其他组 → jina-ai** 中配置 Jina AI，Reader 根地址默认为 `https://r.jina.ai`，然后在 **工具配置 → 网页读取** 中选择该供应商。可设置启停、每阶段超时和最大返回字符数，配置保存在 `tool:web_fetch`。
+
+读取顺序为 **Jina AI → 直接请求 + Defuddle → 独立浏览器 + Defuddle**，通过 `defuddle/node` 提取正文并直接输出 Markdown。关闭 Defuddle 自带的异步外部抓取，统一使用项目的网络请求和取消控制。未选择供应商时从直接请求开始；供应商被停用、删除或请求失败时自动兜底。取消后不会进入下一阶段，长正文会截断并标记 `truncated`。本地读取仅访问公网 HTTP(S) 地址，重定向及浏览器资源同样校验地址。
+
+浏览器兜底使用 `playwright-core`，部署环境需要预先执行 `pnpm --filter @aime/server exec playwright-core install chromium` 安装对应版本的 Chromium。
+
+搜狗兜底抓取公开搜索页面并解析结果和跳转链接，不执行返回的脚本，也不抓取结果目标页。验证码或页面结构变化可能导致兜底失败，此时工具返回可识别的错误，不会伪造结果。
+
 ### 会话、队列与后台任务
 
-每个线程串行执行。空闲时新消息直接运行；已有任务时新消息进入队列，可修改文字、排序或移除。标记为“立即”的消息在当前轮下一步可用时注入，若没有后续步骤则紧接当前轮执行。
+每个线程由 Mastra 原生消息队列调度：普通消息使用 `queueMessage()`，即时输入使用 `sendMessage()`。空闲时直接运行，忙碌时普通消息按 FIFO 等待；界面显示官方队列数量，并通过官方取消／重新入队接口提供编辑、排序、即时切换和清空。已进入执行的消息不能再编辑；重新提交失败时保留草稿供手动重试。
 
-- 每个队列最多 20 条消息，总序列化大小不超过 16 MiB。
 - 每条消息最多附带 4 张图片，每张不超过 2 MiB；模型需支持图片输入。
-- 停止当前轮会保留已生成的部分回复并暂停剩余队列，之后可继续。
+- 停止当前轮会保留已生成的部分回复，同时清空待处理消息。
 - 工具请求审批或补充输入时，可在消息卡片中回应后恢复执行。
 - 标题旁的后台任务入口显示任务列表，可单独取消任务。停止当前 Agent 轮次不会自动取消独立后台任务。
 - 全局导航通过独立 SSE 同步会话摘要与项目运行数量，未打开的会话也会更新状态。
 
-线程、消息、队列和任务记录会持久化。服务进程重启后不能接续原模型连接；未完成的会话会提示中断，已保存的消息和队列可供继续。详细协议见 [个人聊天](docs/personal-chat.md)。
+线程、已消费的消息和任务记录会持久化。原生待处理队列由当前服务进程持有，重启后不会恢复；未完成的会话会提示中断，已保存的消息仍可查看或重试。详细协议见 [个人聊天](docs/personal-chat.md)。
 
 ### 项目协作
 
@@ -152,6 +171,24 @@ workspaces/
 ```
 
 安装会保留技能目录内的脚本和参考文件，跳过符号链接与子模块，并校验技能格式和路径。已有目标目录不会被静默覆盖；批量安装发生错误时回滚本批次写入。扫描结果保留 15 分钟，过期后需重新扫描。安装后的全局技能可被个人与项目聊天发现。
+
+### 后台环境变量管理
+
+管理员在 `/admin/environment-variables` 新增、搜索、编辑和删除环境变量。页面使用 AI Elements Environment Variables 组件，默认遮罩变量值，支持显隐切换、复制、空值及多行值。名称区分大小写，必须以字母或下划线开头，仅允许字母、数字和下划线；重复名称返回 `409`。
+
+配置保存在独立的 `environment_variables` 表中；新增迁移后需运行 `pnpm db:migrate`。当前阶段仅提供配置 CRUD，不修改 `.env` 或 `process.env`，也不自动注入 Agent/工具运行环境。
+
+接口仅允许管理员访问，通过共享 oRPC 契约提供 `environmentVariables.list/get/create/update/remove`，同时支持 HTTP：
+
+| 方法     | 路径                                   | 用途                                 |
+| -------- | -------------------------------------- | ------------------------------------ |
+| `GET`    | `/api/admin/environment-variables`     | 列表                                 |
+| `POST`   | `/api/admin/environment-variables`     | 新增 `{ name, value, description? }` |
+| `GET`    | `/api/admin/environment-variables/:id` | 单条详情                             |
+| `PATCH`  | `/api/admin/environment-variables/:id` | 更新名称、值或说明                   |
+| `DELETE` | `/api/admin/environment-variables/:id` | 删除                                 |
+
+写请求校验同源 `Origin`，所有响应禁止缓存；变量值仅在此管理员接口中显式读取。
 
 ### 用户管理与语言
 
@@ -216,6 +253,8 @@ TEST_DATABASE_URL=postgresql://user:password@127.0.0.1:5432/aime_hub_test pnpm t
 ```text
 apps/
 ├── web/src/
+│   ├── router.tsx           # TanStack Router 类型化路由树与懒加载
+│   ├── lib/rpc.ts           # 共享 oRPC 客户端
 │   ├── pages/               # 认证、工作台、聊天、项目及后台页面
 │   ├── components/          # chat、file-manager、model-selector、UI 等复用组件
 │   ├── features/            # 认证会话、模型目录等共享逻辑
@@ -223,17 +262,34 @@ apps/
 │   └── i18n/                # 语言配置与翻译资源
 └── server/src/
     ├── modules/             # auth、providers、models、projects、threads、files、skills 等
+    ├── rpc/                 # 会话、管理员权限、来源与错误映射
     ├── mastra/              # Mastra 实例、存储和工具
-    └── middleware/          # 权限、来源检查与错误处理
+    └── middleware/          # HTTP 错误处理
 packages/
 ├── auth/                    # Better Auth 配置、插件与认证迁移
 ├── db/                      # TypeORM 业务实体、数据源与显式迁移
-└── shared/                  # 共享类型、校验规则与环境加载
+└── shared/                  # 共享类型、oRPC 契约、校验规则与环境加载
 scripts/                     # 初始化、迁移、目录更新及测试
 docs/                        # 设计与模块文档
 ```
 
 前后端按业务模块组织，页面专属组件就近存放，跨页面交互放在 `components/`。认证表由 Better Auth 管理，业务表由 TypeORM 管理，线程和消息由 Mastra 管理。TypeORM `synchronize` 关闭，API 启动时检查待执行迁移，不会自动修改认证或业务表结构。
+
+## 路由与 API 架构
+
+页面使用 `apps/web/src/router.tsx` 中的 TanStack Router 路由树。页面仍按业务存放于 `pages/`，通过懒加载拆分；动态链接使用 `$projectId` / `$threadId` 和类型化 `params`，登录、会话和管理员布局共用原有会话状态。
+
+业务请求的唯一契约位于 `packages/shared/src/rpc/`，输入复用 Zod 校验，输出声明共享 DTO。后端在 `apps/server/src/modules/<业务>/rpc.ts` 实现，统一由 Hono 挂载：
+
+- `/api/rpc/*`：前端通过 `apps/web/src/lib/rpc.ts` 的 `api` 调用，输入输出从契约推导；浏览器不导入后端实现或数据库代码。
+- 原有 `/api/threads`、`/api/projects`、`/api/admin/providers` 等 HTTP 地址：同一套过程通过 oRPC OpenAPIHandler 提供兼容入口，不重复实现业务逻辑。
+- `/api/auth/*`：Better Auth 原生 Web Request handler，用户管理继续由其 admin 插件负责。
+- `/api/threads/events`、`/api/threads/:threadId/messages`：Hono SSE，保留独立订阅、心跳、权限复查和断开清理。取消订阅不会停止服务端执行。
+- `/api/threads/:threadId/files/raw`：Hono 文件响应，保留权限检查、Range / HEAD、下载与内容安全响应头。
+
+新增业务接口先增加共享契约，再实现对应模块过程，最后通过类型化客户端调用。会话和管理员检查在 oRPC 中间件中执行，非安全 HTTP 方法（包括 RPC POST）要求匹配 `WEB_ORIGIN`；HTTP 和 RPC 共用业务权限检查及稳定错误码。API 时间字段显式转换为 ISO 字符串，避免 RPC 的 Date 支持改变既有 DTO。
+
+本次迁移不改变数据库结构；开发、构建、启动命令和同域 `/api/*` 代理规则保持不变。框架参考：[TanStack Router](https://tanstack.com/router/latest/docs/quick-start)、[Hono Node.js](https://hono.dev/docs/getting-started/nodejs)、[oRPC Contract First](https://v1.orpc.dev/docs/contract-first/implement-contract)。
 
 ## 部署
 

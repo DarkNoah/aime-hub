@@ -7,7 +7,6 @@ import {
   type ModelDefaults,
 } from '@aime/shared/providers';
 import { thinkingLevels } from '@aime/shared/threads';
-import { invalidateAvailableModels } from '@/features/models/resource';
 import { LoadingState } from '@/components/loading-state';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -18,11 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  defaultsPath,
-  providerErrorKey,
-  providerRequest,
-} from '@/pages/admin/providers/api';
+import { providerErrorKey, providerApi } from '@/pages/admin/providers/api';
 import { modelOptions } from '@/components/model-selector/model-options';
 import { useAvailableModels } from '@/features/models/use-available-models';
 import { ModelSelector } from '@/components/model-selector';
@@ -55,13 +50,9 @@ export function ModelDefaultsSection({
 
   useEffect(() => {
     const controller = new AbortController();
-    const options = { signal: controller.signal };
     async function load() {
       try {
-        const defaults = await providerRequest<ModelDefaults>(
-          defaultsPath,
-          options,
-        );
+        const defaults = await providerApi.defaults(controller.signal);
         if (!controller.signal.aborted) setResult({ key, defaults });
       } catch (cause) {
         if (!controller.signal.aborted)
@@ -116,14 +107,10 @@ export function ModelDefaultsSection({
     onPendingChange(true);
     setError(null);
     try {
-      const saved = await providerRequest<ModelDefaults>(defaultsPath, {
-        method: 'PUT',
-        body: JSON.stringify(parsed.data),
-      });
+      const saved = await providerApi.saveDefaults(parsed.data);
       setResult((current) =>
         current ? { ...current, defaults: saved } : current,
       );
-      invalidateAvailableModels();
       toast.success(t('defaults.saved'));
     } catch (cause) {
       toast.error(t(providerErrorKey(cause)));

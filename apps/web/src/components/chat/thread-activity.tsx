@@ -33,6 +33,9 @@ export function ThreadStatusBadge({
 }) {
   const { t } = useTranslation();
   const label = t(`chat.status.${status}`);
+  if(status == 'success'){
+    return null;
+  }
   return (
     <Badge
       variant={
@@ -42,8 +45,12 @@ export function ThreadStatusBadge({
       }
       className={cn(
         'shrink-0',
-        status === 'suspended' &&
-          'bg-amber-500/10 text-amber-700 dark:text-amber-300',
+        status === 'running' &&
+          'bg-transparent ',
+        status !== 'running' &&
+          status !== 'failed' &&
+          status !== 'tripwire' &&
+          'bg-blue-600 text-white',
         className,
       )}
       title={label}

@@ -1,5 +1,5 @@
 import { ArrowUpRight, Settings2 } from 'lucide-react';
-import { Link } from 'react-router';
+import { Link } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';

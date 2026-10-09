@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { useState } from 'react';
-import { NavLink, useNavigate } from 'react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { Home, LoaderCircle, LogOut } from 'lucide-react';
 import { Brand } from '@/components/brand';
 import { Button } from '@/components/ui/button';
@@ -9,7 +9,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAuthSession } from '@/features/auth/session-context';
 import { authClient, isAdmin } from '@/features/auth/client';
 import { authErrorKey } from '@/features/auth/errors';
-import { cn } from '@/lib/utils';
 import { ThreadSidebar } from '@/pages/threads/components/thread-sidebar';
 import { ProjectSidebar } from '@/pages/projects/components/project-sidebar';
 import { adminNavigation } from './navigation';
@@ -33,7 +32,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         return;
       }
       await refetch();
-      navigate('/login', { replace: true });
+      void navigate({ to: '/login', replace: true });
     } catch (cause) {
       toast.error(t(authErrorKey(cause, 'errors.signOutCheck')));
     } finally {
@@ -41,13 +40,14 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     }
   }
 
-  const linkClass = ({ isActive }: { isActive: boolean }) =>
-    cn(
-      'flex h-10 items-center gap-3 rounded-lg px-3 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
-      isActive
-        ? 'bg-card font-semibold text-primary ring-1 ring-border'
-        : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground',
-    );
+  const linkClass =
+    'flex h-10 items-center gap-3 rounded-lg px-3 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring';
+  const activeProps = {
+    className: 'bg-card font-semibold text-primary ring-1 ring-border',
+  };
+  const inactiveProps = {
+    className: 'text-muted-foreground hover:bg-accent/70 hover:text-foreground',
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -63,10 +63,17 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             <p className="px-3 pb-2 text-xs font-medium text-muted-foreground">
               {t('common.workspace')}
             </p>
-            <NavLink to="/" end className={linkClass} onClick={onNavigate}>
+            <Link
+              to="/"
+              activeOptions={{ exact: true }}
+              className={linkClass}
+              activeProps={activeProps}
+              inactiveProps={inactiveProps}
+              onClick={onNavigate}
+            >
               <Home className="size-4" />
               {t('nav.home')}
-            </NavLink>
+            </Link>
             <ThreadSidebar onNavigate={onNavigate} />
             <ProjectSidebar onNavigate={onNavigate} />
           </div>
@@ -76,16 +83,18 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 {t('nav.admin')}
               </p>
               {adminNavigation.map(({ to, label, icon: Icon }) => (
-                <NavLink
+                <Link
                   key={to}
                   to={to}
-                  end
+                  activeOptions={{ exact: true }}
                   className={linkClass}
+                  activeProps={activeProps}
+                  inactiveProps={inactiveProps}
                   onClick={onNavigate}
                 >
                   <Icon className="size-4" />
                   {t(label)}
-                </NavLink>
+                </Link>
               ))}
             </div>
           )}

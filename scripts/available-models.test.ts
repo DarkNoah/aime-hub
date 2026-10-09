@@ -1,3 +1,9 @@
+import {
+  mockRpcFetch,
+  rpcResponse,
+  rpcFailure,
+  nextTick,
+} from './fixtures/rpc-client.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
@@ -19,11 +25,11 @@ const catalog = {
   ],
 };
 
-test('model catalog consumers share a GET request and receive the same snapshot', async (t) => {
+test('model catalog consumers share an RPC request and receive the same snapshot', async (t) => {
   const response = deferred<Response>();
   const calls: Array<[unknown, RequestInit]> = [];
-  t.mock.method(globalThis, 'fetch', (url: unknown, options: RequestInit) => {
-    calls.push([url, options]);
+  mockRpcFetch(t, (request, options) => {
+    calls.push([request, options]);
     return response.promise;
   });
   const resource = createModelsResource();
@@ -33,11 +39,14 @@ test('model catalog consumers share a GET request and receive the same snapshot'
   const stopSecond = resource.subscribe(() => secondUpdates++);
   const first = resource.refresh();
   assert.equal(resource.refresh(), first);
+  await nextTick();
   assert.equal(calls.length, 1);
-  assert.equal(calls[0][0], '/api/models');
-  assert.equal(calls[0][1].method, 'GET');
+  assert.equal(
+    (calls[0][0] as Request).url,
+    'http://localhost/api/rpc/providers/available',
+  );
   assert.equal(calls[0][1].credentials, 'same-origin');
-  response.resolve(Response.json(catalog));
+  response.resolve(rpcResponse(catalog));
   await first;
   assert.deepEqual(resource.getSnapshot(), { ...catalog, loading: false });
   assert.equal(resource.getSnapshot(), resource.getSnapshot());
@@ -51,18 +60,20 @@ test('model catalog consumers share a GET request and receive the same snapshot'
 test('invalidation aborts a stale request and late responses cannot overwrite the new catalog', async (t) => {
   const responses = [deferred<Response>(), deferred<Response>()];
   const signals: AbortSignal[] = [];
-  t.mock.method(globalThis, 'fetch', (_url: unknown, options: RequestInit) => {
+  mockRpcFetch(t, (request) => {
     const response = responses[signals.length];
-    signals.push(options.signal as AbortSignal);
+    signals.push(request.signal);
     return response.promise;
   });
   const resource = createModelsResource();
   const old = resource.refresh();
+  await nextTick();
   const current = resource.refresh(true);
+  await nextTick();
   assert.equal(signals[0].aborted, true);
-  responses[1].resolve(Response.json(catalog));
+  responses[1].resolve(rpcResponse(catalog));
   await current;
-  responses[0].resolve(Response.json({ providers: [] }));
+  responses[0].resolve(rpcResponse({ providers: [] }));
   await old;
   assert.deepEqual(resource.getSnapshot().providers, catalog.providers);
 });
@@ -72,11 +83,11 @@ test('catalog errors are localized, retry recovers, and session expiry clears ca
     () => {
       throw new TypeError('offline');
     },
-    () => Response.json(catalog),
-    () => new Response('expired', { status: 401 }),
-    () => new Response('failed', { status: 500 }),
+    () => rpcResponse(catalog),
+    () => rpcFailure('UNAUTHORIZED', 401),
+    () => rpcFailure('INTERNAL_ERROR', 500),
   ];
-  t.mock.method(globalThis, 'fetch', async () => responses.shift()!());
+  mockRpcFetch(t, async () => responses.shift()!());
   const resource = createModelsResource();
   await resource.refresh();
   assert.equal(resource.getSnapshot().error, 'errors.network');

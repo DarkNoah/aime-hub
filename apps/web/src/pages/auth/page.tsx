@@ -1,7 +1,7 @@
 import type { ErrorKey } from '@/i18n/config';
 import { useTranslation } from 'react-i18next';
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import {
   ArrowRight,
   Eye,
@@ -13,6 +13,7 @@ import { authClient } from '@/features/auth/client';
 import { authErrorKey, validateCredentials } from '@/features/auth/errors';
 import { useAuthSession } from '@/features/auth/session-context';
 import { Brand } from '@/components/brand';
+import { ThemeToggle } from '@/components/theme/theme-toggle';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -99,7 +100,7 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
         }
       }
       await refetch();
-      navigate('/', { replace: true });
+      void navigate({ to: '/', replace: true });
     } catch (cause) {
       if (created) setAccountCreated(true);
       setError(authErrorKey(cause, 'errors.request'));
@@ -112,9 +113,12 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
     <main className="relative flex min-h-dvh flex-col">
       <header className="flex items-center justify-between gap-4 px-6 py-6 sm:px-10">
         <Brand />
-        <span className="hidden rounded-full border bg-card/70 px-3 py-1 text-xs text-muted-foreground sm:inline-flex">
-          {t('auth.tagline')}
-        </span>
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="hidden rounded-full border bg-card/70 px-3 py-1 text-xs text-muted-foreground sm:inline-flex">
+            {t('auth.tagline')}
+          </span>
+          <ThemeToggle />
+        </div>
       </header>
       <div className="flex flex-1 items-center justify-center px-4 py-8 sm:py-12">
         <div className="w-full max-w-[420px]">
@@ -313,9 +317,9 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
           </p>
         </div>
       </div>
-      <footer className="px-6 pb-6 text-center text-xs text-muted-foreground">
+      {/* <footer className="px-6 pb-6 text-center text-xs text-muted-foreground">
         {t('auth.footer')}
-      </footer>
+      </footer> */}
     </main>
   );
 }

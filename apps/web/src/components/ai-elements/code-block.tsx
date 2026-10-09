@@ -118,6 +118,8 @@ interface TokenizedCode {
   tokens: ThemedToken[][];
   fg: string;
   bg: string;
+  darkFg?: string;
+  darkBg?: string;
 }
 
 interface CodeBlockContextType {
@@ -218,9 +220,14 @@ export const highlightCode = (
         },
       });
 
+      // Multi-theme result colors contain CSS declarations, not React color values.
+      const lightTheme = highlighter.getTheme('github-light');
+      const darkTheme = highlighter.getTheme('github-dark');
       const tokenized: TokenizedCode = {
-        bg: result.bg ?? 'transparent',
-        fg: result.fg ?? 'inherit',
+        bg: lightTheme.bg,
+        fg: lightTheme.fg,
+        darkBg: darkTheme.bg,
+        darkFg: darkTheme.fg,
         tokens: result.tokens,
       };
 
@@ -256,11 +263,14 @@ const CodeBlockBody = memo(
     className?: string;
   }) => {
     const preStyle = useMemo(
-      () => ({
-        backgroundColor: tokenized.bg,
-        color: tokenized.fg,
-      }),
-      [tokenized.bg, tokenized.fg],
+      () =>
+        ({
+          backgroundColor: tokenized.bg,
+          color: tokenized.fg,
+          '--shiki-dark-bg': tokenized.darkBg ?? tokenized.bg,
+          '--shiki-dark': tokenized.darkFg ?? tokenized.fg,
+        }) as CSSProperties,
+      [tokenized.bg, tokenized.fg, tokenized.darkBg, tokenized.darkFg],
     );
 
     const keyedLines = useMemo(

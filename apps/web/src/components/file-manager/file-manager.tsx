@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/resizable';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { filesApi, fileErrorKey } from './api';
+import { fileErrorKey } from './api';
 import { EntryActions, type EntryAction } from './entry-actions';
 import { rootEntry } from './state';
 import { EntryDialog } from './entry-dialog';
@@ -48,7 +48,7 @@ export default function FileManager({
     error?: ReturnType<typeof fileErrorKey>;
   } | null>(null);
   const trimmed = query.trim();
-  const { threadId, revision } = state;
+  const { client, available, revision } = state;
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -59,11 +59,11 @@ export default function FileManager({
     return () => observer.disconnect();
   }, []);
   useEffect(() => {
-    if (!trimmed || !threadId) return;
+    if (!trimmed || !available) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      void filesApi
-        .search(threadId, trimmed, controller.signal)
+      void client
+        .search(trimmed, controller.signal)
         .then((data) => {
           if (!controller.signal.aborted) setSearch({ query: trimmed, data });
         })
@@ -76,7 +76,7 @@ export default function FileManager({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [threadId, trimmed, revision]);
+  }, [client, available, trimmed, revision]);
   const result = search?.query === trimmed ? search : null;
   const groups = new Map<string, FileSearch['matches']>();
   for (const match of result?.data?.matches ?? []) {
@@ -105,7 +105,7 @@ export default function FileManager({
         <Button
           variant="ghost"
           size="icon-sm"
-          disabled={!threadId}
+          disabled={!available}
           aria-label={t('files.createFile')}
           title={t('files.createFile')}
           onClick={() =>
@@ -117,7 +117,7 @@ export default function FileManager({
         <Button
           variant="ghost"
           size="icon-sm"
-          disabled={!threadId}
+          disabled={!available}
           aria-label={t('files.createFolder')}
           title={t('files.createFolder')}
           onClick={() =>
@@ -129,7 +129,7 @@ export default function FileManager({
         <Button
           variant="ghost"
           size="icon-sm"
-          disabled={!threadId}
+          disabled={!available}
           aria-label={t('files.refresh')}
           title={t('files.refresh')}
           onClick={state.refresh}
@@ -146,7 +146,7 @@ export default function FileManager({
           <PanelRightClose className="size-4" />
         </Button>
       </header>
-      {!threadId ? (
+      {!available ? (
         <div className="m-auto max-w-xs px-5 py-12 text-center text-sm text-muted-foreground">
           <Files className="mx-auto mb-3 size-8" />
           {t('files.startChat')}
@@ -341,7 +341,7 @@ export default function FileManager({
                 <TabsContent value={state.selected} className="min-h-0">
                   <FilePreview
                     key={activeTab.path}
-                    threadId={threadId}
+                    client={client}
                     path={activeTab.path}
                     line={activeTab.line}
                     revision={revision}

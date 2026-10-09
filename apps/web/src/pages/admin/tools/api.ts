@@ -1,0 +1,22 @@
+import { apiErrorCode } from '@/lib/rpc';
+import type { TranslationKey } from '@/i18n/config';
+import type { ToolId } from '@aime/shared/tools';
+
+export function toolErrorKey(error: unknown, toolId?: ToolId): TranslationKey {
+  if (error instanceof TypeError) return 'errors.network';
+  switch (apiErrorCode(error)) {
+    case 'UNAUTHORIZED':
+      return 'errors.sessionExpired';
+    case 'FORBIDDEN':
+      return 'errors.forbidden';
+    case 'NOT_FOUND':
+    case 'INVALID_TOOL_PROVIDER':
+      return toolId === 'web_fetch'
+        ? 'tools.invalidFetchProvider'
+        : 'tools.invalidProvider';
+    case 'VALIDATION_ERROR':
+      return 'tools.invalid';
+    default:
+      return 'errors.generic';
+  }
+}

@@ -1,0 +1,71 @@
+/* Density follows floating mode, even when the window is resized wider. */
+[data-chat-floating] [data-chat-header] {
+  min-height: 44px;
+  gap: 6px;
+  padding-inline: 12px;
+}
+
+[data-chat-floating] [data-chat-header] h1 {
+  font-size: 12px;
+}
+
+[data-chat-floating] [data-chat-header] p {
+  font-size: 11px;
+}
+
+[data-chat-floating] [data-chat-messages] {
+  gap: 16px;
+  padding: 12px;
+}
+
+[data-chat-floating] [data-chat-message-content],
+[data-chat-floating] [data-chat-message-content] .text-sm {
+  font-size: 12px;
+  line-height: 20px;
+}
+
+[data-chat-floating] .is-user [data-chat-message-content] {
+  padding: 8px 10px;
+}
+
+[data-chat-floating] [data-chat-composer] {
+  padding: 8px 10px;
+}
+
+[data-chat-floating] [data-chat-composer] [data-slot='input-group'] {
+  border-radius: 12px;
+}
+
+[data-chat-floating] [data-chat-composer] textarea {
+  min-height: 56px;
+  max-height: 112px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+[data-chat-floating] [data-slot='button'] {
+  font-size: 12px;
+}
+
+[data-chat-floating] [data-slot='button'][data-size='sm'] {
+  height: 28px;
+  gap: 4px;
+  padding-inline: 8px;
+}
+
+[data-chat-floating]
+  [data-slot='button']:is([data-size='icon'], [data-size='icon-sm']) {
+  width: 28px;
+  height: 28px;
+}
+
+[data-chat-floating] [data-slot='button'] svg {
+  width: 14px;
+  height: 14px;
+}
+
+[data-chat-floating] [data-slot='badge'] {
+  padding: 1px 6px;
+  font-size: 10px;
+}

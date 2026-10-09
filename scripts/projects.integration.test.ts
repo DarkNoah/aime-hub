@@ -1,3 +1,5 @@
+import { sessionStub } from './fixtures/thread-session.js';
+import { createNodeServer } from '../apps/server/src/server.js';
 import 'reflect-metadata';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -133,25 +135,36 @@ test(
         async createWorkspace(userId, projectId) {
           return `/test/${projectId ? `projects/${projectId}` : `users/${userId}/chat`}`;
         },
-        async execute({ input, onMessage }) {
-          onMessage({
-            id: `reply-${input.id}`,
-            role: 'assistant',
-            parts: [
-              {
-                type: 'text',
-                text: 'Shared project reply from the local test fixture.',
-              },
-            ],
+        async open({ onEvent }) {
+          return sessionStub({
+            async send(input) {
+              onEvent({
+                type: 'message',
+                active: true,
+                message: {
+                  id: `reply-${input.id}`,
+                  role: 'assistant',
+                  parts: [
+                    {
+                      type: 'text',
+                      text: 'Shared project reply from the local test fixture.',
+                    },
+                  ],
+                },
+              });
+              onEvent({ type: 'status', status: 'success', runId: input.id });
+            },
           });
         },
       },
       projects,
     );
-    server = createApp(
-      auth,
-      { service: providers, webOrigin },
-      { threads: service, models, projects, webOrigin },
+    server = createNodeServer(
+      createApp(
+        auth,
+        { service: providers, webOrigin },
+        { threads: service, models, projects, webOrigin },
+      ),
     ).listen(browser ? 4311 : 0, '127.0.0.1');
     await once(server, 'listening');
     const address = server.address();
@@ -219,6 +232,83 @@ test(
       });
       return;
     }
+    await t.test(
+      'project storage configuration persists while rename and preferences preserve it',
+      async () => {
+        const configs = [
+          { mode: 'simple', provider: 'local' },
+          { mode: 'simple', provider: 'agentfs' },
+          {
+            mode: 'composite',
+            mounts: [
+              { provider: 'local', mountPath: 'local' },
+              {
+                provider: 'agentfs',
+                mountPath: 'archive',
+              },
+            ],
+          },
+        ];
+        for (const workspace of configs) {
+          const response = await request('/projects', 'POST', {
+            name: 'Storage',
+            workspace,
+          });
+          assert.equal(response.status, 201);
+          const created = await response.json();
+          assert.deepEqual(created.workspace, workspace);
+          assert.equal(
+            (
+              await request(`/projects/${created.id}`, 'PATCH', {
+                name: 'Renamed',
+              })
+            ).status,
+            200,
+          );
+          assert.equal(
+            (
+              await request(`/projects/${created.id}/preferences`, 'PUT', {
+                model: null,
+                reasoningEffort: 'auto',
+              })
+            ).status,
+            200,
+          );
+          assert.deepEqual(
+            (await projects.get(users.alice.id, created.id)).workspace,
+            workspace,
+          );
+          await projects.remove(users.alice.id, created.id);
+        }
+        const invalid = await request('/projects', 'POST', {
+          name: 'Invalid',
+          workspace: {
+            mode: 'composite',
+            mounts: [
+              { provider: 'local', mountPath: 'local' },
+              {
+                provider: 'agentfs',
+                mountPath: 'data/nested',
+              },
+            ],
+          },
+        });
+        assert.equal(invalid.status, 400);
+        const legacy = await projects.create(users.alice.id, {
+          name: 'Legacy',
+        });
+        await database.manager.update(
+          Project,
+          { id: legacy.id },
+          { metadata: {} },
+        );
+        assert.deepEqual(
+          (await projects.get(users.alice.id, legacy.id)).workspace,
+          { mode: 'simple', provider: 'local' },
+        );
+        await projects.remove(users.alice.id, legacy.id);
+      },
+    );
     await t.test(
       'five-item project and thread pagination validates bounds and preserves scope',
       async () => {
@@ -413,6 +503,175 @@ test(
       },
     );
     await t.test(
+      'pins are personal and archives are shared, reversible, authorized and preserve project data',
+      async () => {
+        const item = await projects.create(users.alice.id, {
+          name: 'Archive lifecycle',
+        });
+        const endpoint = `/projects/${item.id}`;
+        assert.equal(item.archived, false);
+        assert.equal(item.pinned, false);
+        await projects.addMember(users.alice.id, item.id, {
+          userId: users.bobby.id,
+          role: 'member',
+        });
+        await projects.addMember(users.alice.id, item.id, {
+          userId: users.carol.id,
+          role: 'admin',
+        });
+        const conversation = await service!.createThread(users.alice.id, {
+          projectId: item.id,
+          model: null,
+          reasoningEffort: 'auto',
+          title: 'Retained conversation',
+        });
+        const pin = await request(
+          `${endpoint}/pin`,
+          'PATCH',
+          { pinned: true },
+          'bobby',
+        );
+        assert.equal(pin.status, 200);
+        assert.equal((await pin.json()).pinned, true);
+        assert.equal(
+          (await new ProjectService(database).get(users.bobby.id, item.id))
+            .pinned,
+          true,
+        );
+        assert.equal(
+          (await projects.get(users.alice.id, item.id)).pinned,
+          false,
+        );
+        const page = await (
+          await request('/projects?perPage=1', 'GET', undefined, 'bobby')
+        ).json();
+        assert.equal(page.projects[0].id, item.id);
+        assert.equal(
+          (
+            await request(
+              `${endpoint}/pin`,
+              'PATCH',
+              { pinned: true },
+              'outsider',
+            )
+          ).status,
+          404,
+        );
+        assert.equal(
+          (
+            await request(
+              `${endpoint}/pin`,
+              'PATCH',
+              { pinned: 'true' },
+              'bobby',
+            )
+          ).status,
+          400,
+        );
+        assert.equal(
+          (await request(endpoint, 'PATCH', { archived: true }, 'bobby'))
+            .status,
+          403,
+        );
+        assert.equal(
+          (await request(endpoint, 'PATCH', { archived: true }, 'outsider'))
+            .status,
+          404,
+        );
+        assert.equal(
+          (
+            await request(
+              endpoint,
+              'PATCH',
+              { archived: true },
+              'carol',
+              'https://attacker.example',
+            )
+          ).status,
+          403,
+        );
+        const archive = await request(
+          endpoint,
+          'PATCH',
+          { archived: true },
+          'carol',
+        );
+        assert.equal(archive.status, 200);
+        assert.equal((await archive.json()).archived, true);
+        for (const user of ['alice', 'bobby', 'carol']) {
+          const active = await (
+            await request('/projects', 'GET', undefined, user)
+          ).json();
+          assert.ok(
+            active.projects.every(
+              (entry: ProjectDetail) => entry.id !== item.id,
+            ),
+          );
+          const archived = await (
+            await request('/projects?status=archived', 'GET', undefined, user)
+          ).json();
+          assert.deepEqual(
+            archived.projects.map((entry: ProjectDetail) => entry.id),
+            [item.id],
+          );
+          const all = await (
+            await request('/projects?status=all', 'GET', undefined, user)
+          ).json();
+          assert.ok(
+            all.projects.some((entry: ProjectDetail) => entry.id === item.id),
+          );
+          const detail = await (
+            await request(endpoint, 'GET', undefined, user)
+          ).json();
+          assert.equal(detail.archived, true);
+          assert.deepEqual(detail.workspace, item.workspace);
+          assert.deepEqual(detail.settings, item.settings);
+          const chats = await (
+            await request(
+              `/threads?projectId=${item.id}`,
+              'GET',
+              undefined,
+              user,
+            )
+          ).json();
+          assert.equal(chats.threads[0].id, conversation.id);
+        }
+        const renamed = await request(endpoint, 'PATCH', {
+          name: 'Archived rename',
+        });
+        assert.equal((await renamed.json()).archived, true);
+        assert.equal((await request('/projects?status=invalid')).status, 400);
+        assert.equal((await request(endpoint, 'PATCH', {})).status, 400);
+        const restored = await request(endpoint, 'PATCH', { archived: false });
+        assert.equal((await restored.json()).archived, false);
+        assert.equal(
+          (await projects.get(users.bobby.id, item.id)).pinned,
+          true,
+        );
+        assert.ok(
+          (await projects.list(users.bobby.id)).projects.some(
+            (entry) => entry.id === item.id,
+          ),
+        );
+        assert.equal(
+          (
+            await request(
+              `${endpoint}/pin`,
+              'PATCH',
+              { pinned: false },
+              'bobby',
+            )
+          ).status,
+          200,
+        );
+        assert.equal(
+          (await projects.get(users.bobby.id, item.id)).pinned,
+          false,
+        );
+        await projects.remove(users.alice.id, item.id);
+      },
+    );
+    await t.test(
       'project model precedence never inherits user defaults',
       async () => {
         await models.setPreferences(users.alice.id, {
@@ -525,7 +784,12 @@ test(
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
         let content = decoder.decode((await reader.read()).value);
-        assert.match(content, /snapshot/);
+        while (!content.includes('event: snapshot')) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          content += decoder.decode(chunk.value);
+        }
+        assert.match(content, /event: snapshot/);
         assert.equal(
           (
             await request(

@@ -1,11 +1,11 @@
 import { isThreadActive } from '@aime/shared/threads';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import {
-  useEffect,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-} from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router';
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+} from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import {
@@ -21,7 +21,8 @@ import type { ThreadSummary } from '@aime/shared/threads';
 import { useAuthSession } from '@/features/auth/session-context';
 import { ChatPanel } from '@/components/chat';
 import { useProjectRunningCount } from '@/components/chat/thread-navigation-context';
-import { chatApi, chatErrorKey, ChatApiError } from '@/components/chat/api';
+import { chatErrorKey } from '@/components/chat/api';
+import { ChatThreadNavigation } from '@/components/chat/chat-thread-navigation';
 import { ThreadDialog } from '@/components/chat/thread-dialogs';
 import {
   ThreadActivityTitle,
@@ -48,12 +49,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { projectApi } from './api';
-import { ProjectSheet } from './components/project-sheet';
+import { ProjectDialog } from './components/project-dialog';
 import { MembersSheet } from './components/members-sheet';
 import { SettingsSheet } from './components/settings-sheet';
 
 export function ProjectPage() {
-  const { projectId = '', threadId } = useParams();
+  const { projectId = '', threadId } = useParams({ strict: false });
   const location = useLocation();
   const chat = location.pathname.startsWith(`/projects/${projectId}/threads`);
   return (
@@ -87,6 +88,7 @@ function ProjectSession({
     'edit' | 'members' | 'settings' | 'delete' | null
   >(null);
   const [deleting, setDeleting] = useState(false);
+  const [draftKey, setDraftKey] = useState(0);
   const [threadAction, setThreadAction] = useState<{
     thread: ThreadSummary;
     mode: 'rename' | 'delete';
@@ -106,6 +108,7 @@ function ProjectSession({
       .then((value) => {
         if (!controller.signal.aborted) {
           setProject(value);
+          navigation.updateProject(value);
           setError(null);
         }
       })
@@ -116,10 +119,13 @@ function ProjectSession({
     return () => {
       controller.abort();
     };
-  }, [projectId, resource, retry]);
+  }, [projectId, resource, retry, navigation]);
   const back = (
     <Button asChild variant="ghost" size="sm">
-      <Link to={chat ? `/projects/${projectId}` : '/projects'}>
+      <Link
+        to={chat ? '/projects/$projectId' : '/projects'}
+        params={{ projectId }}
+      >
         <ArrowLeft />
         {t(chat ? 'projects.dashboard' : 'nav.projects')}
       </Link>
@@ -141,15 +147,37 @@ function ProjectSession({
   if (!project) return <LoadingState className="p-6" />;
   if (chat)
     return (
-      <ProjectChat
-        key={threadId ?? 'new'}
-        project={project}
+      <ChatPanel
+        projectId={projectId}
+        initialSettings={project.settings}
         threadId={threadId}
-        back={back}
-        onUpdated={resource.update}
-        onCreated={(thread) => {
+        draftKey={draftKey}
+        navigation={
+          <ChatThreadNavigation
+            resource={resource}
+            selectedId={threadId}
+            onNew={() => {
+              setDraftKey((value) => value + 1);
+              void navigate({
+                to: '/projects/$projectId/threads',
+                params: { projectId },
+              });
+            }}
+            onSelect={(id) =>
+              void navigate({
+                to: '/projects/$projectId/threads/$threadId',
+                params: { projectId, threadId: id },
+              })
+            }
+          />
+        }
+        onThreadUpdated={resource.update}
+        onThreadCreated={(thread) => {
           resource.update(thread);
-          navigate(`/projects/${projectId}/threads/${thread.id}`);
+          void navigate({
+            to: '/projects/$projectId/threads/$threadId',
+            params: { projectId: projectId, threadId: thread.id },
+          });
         }}
       />
     );
@@ -209,7 +237,10 @@ function ProjectSession({
           </Badge>
         </div>
         <Button asChild>
-          <Link to={`/projects/${projectId}/threads`}>
+          <Link
+            to="/projects/$projectId/threads"
+            params={{ projectId: projectId }}
+          >
             <Plus />
             {t('chat.new')}
           </Link>
@@ -243,7 +274,8 @@ function ProjectSession({
             )}
             <Link
               className="min-w-0 flex-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              to={`/projects/${projectId}/threads/${thread.id}`}
+              to="/projects/$projectId/threads/$threadId"
+              params={{ projectId: projectId, threadId: thread.id }}
             >
               <h3 className="truncate text-sm font-medium">
                 <ThreadActivityTitle
@@ -305,12 +337,12 @@ function ProjectSession({
         </Button>
       )}
       {sheet === 'edit' && (
-        <ProjectSheet
+        <ProjectDialog
           project={project}
           onClose={() => setSheet(null)}
           onSaved={(value) => {
             setProject({ ...project, ...value });
-            navigation.projects.update(value);
+            navigation.updateProject(value);
           }}
         />
       )}
@@ -364,7 +396,7 @@ function ProjectSession({
                     .then(() => {
                       navigation.removeProject(projectId);
                       toast.success(t('projects.deleted'));
-                      navigate('/projects');
+                      void navigate({ to: '/projects' });
                     })
                     .catch((cause) => toast.error(t(chatErrorKey(cause))))
                     .finally(() => setDeleting(false));
@@ -377,59 +409,5 @@ function ProjectSession({
         </Dialog>
       )}
     </div>
-  );
-}
-
-function ProjectChat({
-  project,
-  threadId,
-  back,
-  onUpdated,
-  onCreated,
-}: {
-  project: ProjectDetail;
-  threadId?: string;
-  back: ReactNode;
-  onUpdated: (thread: ThreadSummary) => void;
-  onCreated: (thread: ThreadSummary) => void;
-}) {
-  const { t } = useTranslation();
-  const [ready, setReady] = useState(!threadId);
-  const [error, setError] = useState<ReturnType<typeof chatErrorKey> | null>(
-    null,
-  );
-  useEffect(() => {
-    if (!threadId) return;
-    const controller = new AbortController();
-    void chatApi
-      .get(threadId, controller.signal)
-      .then(({ thread }) => {
-        if (controller.signal.aborted) return;
-        if (thread.projectId !== project.id)
-          throw new ChatApiError('THREAD_NOT_FOUND');
-        setReady(true);
-      })
-      .catch((cause) => {
-        if (!controller.signal.aborted) setError(chatErrorKey(cause));
-      });
-    return () => controller.abort();
-  }, [threadId, project.id]);
-  if (error)
-    return (
-      <div role="alert" className="space-y-4 p-6">
-        {back}
-        <p>{t(error)}</p>
-      </div>
-    );
-  if (!ready) return <LoadingState className="p-6" />;
-  return (
-    <ChatPanel
-      threadId={threadId}
-      projectId={project.id}
-      initialSettings={project.settings}
-      headerActions={back}
-      onThreadUpdated={onUpdated}
-      onThreadCreated={onCreated}
-    />
   );
 }

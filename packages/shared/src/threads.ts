@@ -78,10 +78,16 @@ export const runInputSchema = chatSettingsSchema
           parts.filter((part) => part.type === 'file').length <= MAX_CHAT_FILES,
       ),
     isImmediate: z.boolean().default(false),
+    /** Start a new durable objective from this message's text. */
+    goal: z.boolean().optional(),
     createdBy: z.string().trim().optional(),
     createdAt: z.string().trim().optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (input) => !input.goal || input.parts.some((part) => part.type === 'text'),
+    { message: 'A goal requires a text objective', path: ['parts'] },
+  );
 export type RunInput = z.infer<typeof runInputSchema>;
 export const userQuestionSchema = z.object({
   question: z.string().trim().min(1),
@@ -144,6 +150,8 @@ export type QueuedMessageDetail = {
   hasAttachments: boolean;
 };
 export type QueuedMessage = {
+  /** A failed resubmission remains an editable draft; it never runs automatically. */
+  failed?: boolean;
   id: string;
   text: string;
   isImmediate: boolean;
@@ -175,18 +183,33 @@ export type ThreadSummary = ChatSettings & {
   createdAt: string;
   updatedAt: string;
   status: ThreadStatus;
-  stopping?: boolean;
-  queue: QueuedMessage[];
+  queueCount: number;
+  /** Presentation copies of native pending inputs, never an execution queue. */
+  queue?: QueuedMessage[];
   error: string | null;
 };
 export type ThreadSnapshot<Message> = {
   thread: ThreadSummary;
   messages: Message[];
+  removedMessageIds?: string[];
   activeMessageId: string | null;
   usage?: ChatUsage | null;
+  goal?: ThreadGoal | null;
   toolInteractions?: ToolInteraction[];
   backgroundTasks?: ThreadBackgroundTask[];
   backgroundTasksError?: 'BACKGROUND_TASKS_UNAVAILABLE' | null;
+};
+/** Public projection of Mastra's durable thread objective. */
+export type ThreadGoal = {
+  id?: string;
+  objective: string;
+  status: 'active' | 'paused' | 'done';
+  runsUsed: number;
+  maxRuns: number;
+  activeDurationMs: number;
+  pausedReason?: string;
+  evaluating?: boolean;
+  waitingForUser?: boolean;
 };
 // Thread-scoped view of Mastra's persisted tasks. Dates are serialized for SSE.
 export type ThreadBackgroundTask = {

@@ -141,7 +141,11 @@ export async function searchFiles(
     followSymbolicLinks: false,
     deep: 20,
     concurrency: 4,
-    ignore: [...ignored].map((name) => `**/${name}/**`),
+    ignore: [
+      '**/._*',
+      '**/._*/**',
+      ...[...ignored].map((name) => `**/${name}/**`),
+    ],
   }) as Readable;
   let stopped = false;
   const stop = () => {

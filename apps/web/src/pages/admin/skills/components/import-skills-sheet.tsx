@@ -1,3 +1,4 @@
+import { api } from '@/lib/rpc';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Download, FolderGit2, Loader2, Search } from 'lucide-react';
@@ -16,7 +17,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { LoadingState } from '@/components/loading-state';
-import { skillErrorKey, skillRequest } from '../api';
+import { skillErrorKey } from '../api';
 import {
   selectableSkills,
   selectionState,
@@ -64,9 +65,8 @@ export function ImportSkillsSheet({
     submitting.current = true;
     setPending(true);
     try {
-      const installed = await skillRequest<InstalledSkill[]>('/install', {
-        method: 'POST',
-        body: JSON.stringify({ scanId: scan.id, paths: [...selected] }),
+      const installed = await api.skills.install({
+        body: { scanId: scan.id, paths: [...selected] },
       });
       onInstalled(installed);
       source.markInstalled(installed.map((skill) => skill.path));
