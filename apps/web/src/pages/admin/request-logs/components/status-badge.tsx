@@ -19,3 +19,33 @@ export function RequestStatusBadge({
     </Badge>
   );
 }
+
+export function ResponseStatusBadge({
+  responseStatus,
+  httpStatus,
+}: Pick<RequestLogSummary, 'responseStatus' | 'httpStatus'>) {
+  const { t } = useTranslation();
+  if (responseStatus === null) return null;
+  return (
+    <Badge
+      variant={
+        responseStatus === 'incomplete' ||
+        (httpStatus !== null && httpStatus >= 400)
+          ? 'destructive'
+          : responseStatus === 'pending'
+            ? 'outline'
+            : 'secondary'
+      }
+      className="shrink-0"
+    >
+      {t(
+        responseStatus === 'pending'
+          ? 'requestLogs.responsePending'
+          : responseStatus === 'complete'
+            ? 'requestLogs.responseComplete'
+            : 'requestLogs.responseIncomplete',
+      )}
+      {httpStatus === null ? null : ` · HTTP ${httpStatus}`}
+    </Badge>
+  );
+}

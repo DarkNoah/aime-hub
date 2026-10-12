@@ -134,7 +134,7 @@ export function useThreadChat(
           setConnected(false);
           setError(new ChatApiError('UNAUTHORIZED'));
         });
-        source.addEventListener('revoked', () => {
+        source.addEventListener('revoked', (event) => {
           source?.close();
           recoveryVersion++;
           setConnected(false);
@@ -146,7 +146,14 @@ export function useThreadChat(
           setBackgroundTasksError(null);
           setToolInteractions([]);
           setHistory(null);
-          setError(new ChatApiError('PROJECT_NOT_FOUND'));
+          const { code } = JSON.parse((event as MessageEvent).data || '{}') as {
+            code?: string;
+          };
+          setError(
+            new ChatApiError(
+              code === 'THREAD_NOT_FOUND' ? code : 'PROJECT_NOT_FOUND',
+            ),
+          );
         });
         source.onerror = () => {
           if (!disposed) {

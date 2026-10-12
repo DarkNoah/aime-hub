@@ -16,6 +16,8 @@ import { WriteFilePreview } from './write-file';
 import { GrepPreview } from './grep';
 import { ReadFilePreview } from './read-file';
 import { WebSearchPreview } from './web-search';
+import { WebFetchPreview } from './web-fetch';
+import { ImageGenPreview } from './image-gen';
 import type { PreviewPart } from './selection';
 
 type PreviewProps = { part: PreviewPart };
@@ -104,7 +106,10 @@ const previewRenderers: Partial<Record<string, ComponentType<PreviewProps>>> = {
   'tool:write_file': WriteFilePreview,
   'tool:grep': GrepPreview,
   'tool:read_file': ReadFilePreview,
+  'tool:exec': ReadFilePreview,
   'tool:web_search': WebSearchPreview,
+  'tool:web_fetch': WebFetchPreview,
+  'tool:image_gen': ImageGenPreview,
   'data-om-observation-end': ObservationPreview,
   'data-om-buffering-end': ObservationPreview,
   'data-om-activation': ObservationPreview,

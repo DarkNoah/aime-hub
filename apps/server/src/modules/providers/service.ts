@@ -13,6 +13,8 @@ import {
   providerGroup,
 } from '@aime/shared/providers';
 import { ProviderError, requestProviderJson } from './network.js';
+import { NewApiProvider } from '../../mastra/providers/newapi.js';
+import { OpenAICompatibleProvider } from '../../mastra/providers/openai-compatible.js';
 
 const settingsId = 'models';
 const modelKeys = ['defaultModel', 'fastModel', 'imageModel'] as const;
@@ -211,8 +213,7 @@ export class ProviderService {
         })),
     };
   }
-  // Server-only persisted configuration, including credentials, for future model clients.
-  async getProvider(id: string) {
+  private async getProviderRecord(id: string) {
     const provider = await this.database
       .getRepository(Provider)
       .createQueryBuilder('provider')
@@ -220,6 +221,22 @@ export class ProviderService {
       .where('provider.id = :id', { id })
       .getOne();
     if (!provider) throw new ProviderError('NOT_FOUND', 404);
+    return provider;
+  }
+  private createProviderInstance(provider: Provider) {
+    this.assertLanguageModelProvider(provider);
+    return provider.type === 'newapi'
+      ? new NewApiProvider(provider)
+      : new OpenAICompatibleProvider(provider, this.requestJson);
+  }
+  async getProviderInstance(id: string) {
+    const provider = await this.getProviderRecord(id);
+    if (!provider.enabled) throw new ProviderError('INVALID_MODEL');
+    return this.createProviderInstance(provider);
+  }
+  // Server-only persisted configuration, including credentials, for model clients.
+  async getProvider(id: string) {
+    const provider = await this.getProviderRecord(id);
     const models = await this.database.manager.find(ProviderModel, {
       where: { providerId: id },
       order: { id: 'ASC' },
@@ -425,12 +442,18 @@ export class ProviderService {
       this.syncing.delete(providerId);
       throw error;
     }
-    const response = discoverySchema.safeParse(
-      await this.requestJson(
-        `${provider.baseUrl.replace(/\/+$/, '')}/models`,
-        provider.apiKey ?? undefined,
-      ),
-    );
+    let discovered: unknown;
+    try {
+      discovered = {
+        data: await this.createProviderInstance(
+          provider,
+        ).getLanguageModelList(),
+      };
+    } catch (error) {
+      if (error instanceof ProviderError) throw error;
+      throw new ProviderError('UPSTREAM_ERROR', 502);
+    }
+    const response = discoverySchema.safeParse(discovered);
     if (
       !response.success ||
       response.data.data.some(

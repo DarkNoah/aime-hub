@@ -70,6 +70,36 @@ test('failed autosave rolls back to the last persisted defaults and allows retry
   assert.equal(resource.getSnapshot().settings.reasoningEffort, 'none');
 });
 
+test('agent-only preference changes persist and restore without changing the selected model', async () => {
+  let saved: ChatSettings = {
+    ...defaults,
+    model: 'provider/model',
+    agentId: null as string | null,
+  };
+  const api = {
+    read: async () => saved,
+    save: async (next: ChatSettings) => {
+      saved = { ...next, agentId: next.agentId ?? null };
+      return saved;
+    },
+  };
+  const resource = createChatPreferencesResource(defaults, api);
+  await resource.load();
+  assert.equal(
+    await resource.save({
+      ...resource.getSnapshot().settings,
+      agentId: 'code:assistant',
+    }),
+    true,
+  );
+  const reopened = createChatPreferencesResource(defaults, api);
+  await reopened.load();
+  assert.equal(reopened.getSnapshot().settings.agentId, 'code:assistant');
+  assert.equal(reopened.getSnapshot().settings.model, 'provider/model');
+  await reopened.save({ ...reopened.getSnapshot().settings, agentId: null });
+  assert.equal(saved.agentId, null);
+});
+
 test('session cleanup ignores stale reads and prevents queued writes under another session', async () => {
   const oldRead = deferred<ChatSettings>();
   let reads = 0;

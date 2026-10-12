@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Copy, RefreshCw } from 'lucide-react';
-import { toast } from 'sonner';
-import type { RequestLogDetail } from '@aime/shared/request-logs';
+import { RefreshCw } from 'lucide-react';
+import {
+  requestLogContextFields,
+  type RequestLogDetail,
+  type RequestLogSummary,
+} from '@aime/shared/request-logs';
 import { api } from '@/lib/rpc';
 import type { TranslationKey } from '@/i18n/config';
 import { LoadingState } from '@/components/loading-state';
@@ -15,55 +18,60 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { RequestStatusBadge } from './status-badge';
-import { formatBody, formatBytes, requestLogErrorKey } from '../format';
+import { RequestStatusBadge, ResponseStatusBadge } from './status-badge';
+import { RequestLogBodyView } from './body-view';
+import { formatBytes, formatDuration, requestLogErrorKey } from '../format';
 
 export function RequestLogDetailSheet({
   id,
   onClose,
   restoreFocus,
+  onUpdate,
 }: {
   id: string;
   onClose: () => void;
   restoreFocus: () => void;
+  onUpdate: (summary: RequestLogSummary) => void;
 }) {
   const { t, i18n } = useTranslation();
   const [detail, setDetail] = useState<RequestLogDetail>();
   const [error, setError] = useState<TranslationKey>();
   const [revision, setRevision] = useState(0);
-  const [mode, setMode] = useState('formatted');
+  const [bodyTab, setBodyTab] = useState('request');
   useEffect(() => {
     const controller = new AbortController();
-    void api.requestLogs
-      .get({ params: { id } }, { signal: controller.signal })
-      .then(
-        (data) => {
-          if (!controller.signal.aborted) {
-            setDetail(data);
-            setError(undefined);
-          }
-        },
-        (cause) => {
-          if (!controller.signal.aborted) setError(requestLogErrorKey(cause));
-        },
-      );
-    return () => controller.abort();
-  }, [id, revision]);
-  const body = useMemo(
-    () =>
-      detail ? (mode === 'raw' ? detail.body : formatBody(detail.body)) : '',
-    [detail, mode],
-  );
-
-  async function copy() {
-    if (!detail) return;
-    try {
-      await navigator.clipboard.writeText(detail.body);
-      toast.success(t('requestLogs.copied'));
-    } catch {
-      toast.error(t('requestLogs.copyFailed'));
-    }
-  }
+    let timer: number | undefined;
+    const load = () => {
+      void api.requestLogs
+        .get({ params: { id } }, { signal: controller.signal })
+        .then(
+          (data) => {
+            if (!controller.signal.aborted) {
+              setDetail(data);
+              setError(undefined);
+              const {
+                body: _body,
+                responseBody: _responseBody,
+                ...summary
+              } = data;
+              void _body;
+              void _responseBody;
+              onUpdate(summary);
+              if (data.responseStatus === 'pending')
+                timer = window.setTimeout(load, 1500);
+            }
+          },
+          (cause) => {
+            if (!controller.signal.aborted) setError(requestLogErrorKey(cause));
+          },
+        );
+    };
+    load();
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [id, revision, onUpdate]);
 
   return (
     <Sheet
@@ -128,6 +136,39 @@ export function RequestLogDetailSheet({
                   <RequestStatusBadge status={detail.status} />
                 </dd>
                 <dt className="text-muted-foreground">
+                  {t('requestLogs.duration')}
+                </dt>
+                <dd title={t('requestLogs.durationHint')}>
+                  {formatDuration(detail.durationMs)}
+                </dd>
+                <dt className="text-muted-foreground">
+                  {t('requestLogs.responseStatus')}
+                </dt>
+                <dd>
+                  {detail.responseStatus === null ? (
+                    '—'
+                  ) : (
+                    <ResponseStatusBadge
+                      responseStatus={detail.responseStatus}
+                      httpStatus={detail.httpStatus}
+                    />
+                  )}
+                </dd>
+                <dt className="text-muted-foreground">
+                  {t('requestLogs.responseSize')}
+                </dt>
+                <dd>
+                  {detail.responseBytes === null
+                    ? '—'
+                    : formatBytes(detail.responseBytes)}
+                </dd>
+                <dt className="text-muted-foreground">
+                  {t('requestLogs.responseContentType')}
+                </dt>
+                <dd className="break-all font-mono text-xs leading-5">
+                  {detail.responseContentType ?? '—'}
+                </dd>
+                <dt className="text-muted-foreground">
                   {t('requestLogs.endpoint')}
                 </dt>
                 <dd className="break-all font-mono text-xs leading-5">
@@ -139,6 +180,16 @@ export function RequestLogDetailSheet({
                 <dd className="break-all font-mono text-xs leading-5">
                   {detail.id}
                 </dd>
+                {requestLogContextFields.map((field) => (
+                  <Fragment key={field}>
+                    <dt className="text-muted-foreground">
+                      {t(`requestLogs.${field}`)}
+                    </dt>
+                    <dd className="break-all font-mono text-xs leading-5">
+                      {detail[field] ?? '—'}
+                    </dd>
+                  </Fragment>
+                ))}
                 <dt className="text-muted-foreground">
                   {t('requestLogs.size')}
                 </dt>
@@ -150,36 +201,47 @@ export function RequestLogDetailSheet({
                 {t('requestLogs.incompleteHint')}
               </p>
             ) : null}
+            {detail.responseStatus === 'incomplete' ? (
+              <p className="px-5 pb-4 text-sm text-destructive sm:px-6">
+                {t('requestLogs.responseIncompleteHint')}
+              </p>
+            ) : null}
             <Tabs
-              value={mode}
-              onValueChange={setMode}
+              value={bodyTab}
+              onValueChange={setBodyTab}
               className="min-h-0 flex-1 gap-0"
             >
-              <div className="flex flex-wrap items-center justify-between gap-2 border-y bg-muted/30 px-5 py-3 sm:px-6">
-                <TabsList aria-label={t('requestLogs.bodyView')}>
-                  <TabsTrigger value="formatted">
-                    {t('requestLogs.formatted')}
+              <div className="border-y px-5 py-3 sm:px-6">
+                <TabsList aria-label={t('requestLogs.contentView')}>
+                  <TabsTrigger value="request">
+                    {t('requestLogs.body')}
                   </TabsTrigger>
-                  <TabsTrigger value="raw">{t('requestLogs.raw')}</TabsTrigger>
+                  <TabsTrigger value="response">
+                    {t('requestLogs.responseBody')}
+                  </TabsTrigger>
                 </TabsList>
-                <Button size="sm" variant="outline" onClick={() => void copy()}>
-                  <Copy />
-                  {t('requestLogs.copy')}
-                </Button>
               </div>
-              <TabsContent value={mode} className="min-h-0 flex-1">
-                <ScrollArea
-                  className="h-full"
-                  viewportProps={{
-                    className: '[&>div]:block!',
-                    tabIndex: 0,
-                    'aria-label': t('requestLogs.body'),
-                  }}
-                >
-                  <pre className="m-0 p-5 font-mono text-xs leading-6 break-all whitespace-pre-wrap sm:p-6">
-                    <code>{body}</code>
-                  </pre>
-                </ScrollArea>
+              <TabsContent
+                value={bodyTab}
+                className="flex min-h-0 flex-1 flex-col"
+              >
+                <RequestLogBodyView
+                  key={bodyTab}
+                  body={
+                    bodyTab === 'request' ? detail.body : detail.responseBody
+                  }
+                  base64={
+                    bodyTab === 'response' &&
+                    detail.responseBodyEncoding === 'base64'
+                  }
+                  emptyHint={
+                    detail.responseStatus === 'pending'
+                      ? 'requestLogs.responsePendingHint'
+                      : detail.responseStatus === null
+                        ? 'requestLogs.responseUnavailable'
+                        : 'requestLogs.noResponse'
+                  }
+                />
               </TabsContent>
             </Tabs>
           </>

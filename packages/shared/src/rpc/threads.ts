@@ -20,6 +20,30 @@ import {
 import type { UIMessage } from 'ai';
 
 export const threadsContract = {
+  archived: procedure
+    .route({
+      method: 'GET',
+      path: '/threads/archived',
+      inputStructure: 'detailed',
+    })
+    .output(type<ThreadSummary[]>()),
+  restore: procedure
+    .route({
+      method: 'POST',
+      path: '/threads/{threadId}/restore',
+      inputStructure: 'detailed',
+    })
+    .input(z.object({ params: z.object({ threadId }) }))
+    .output(type<ThreadSummary>()),
+  removeArchived: procedure
+    .route({
+      method: 'DELETE',
+      path: '/threads/archived/{threadId}',
+      inputStructure: 'detailed',
+      successStatus: 204,
+    })
+    .input(z.object({ params: z.object({ threadId }) }))
+    .output(type<void>()),
   list: procedure
     .route({ method: 'GET', path: '/threads', inputStructure: 'detailed' })
     .input(

@@ -6,7 +6,7 @@
       "type": "node",
       "request": "launch",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["dev"],
+      "runtimeArgs": ["--filter", "@aime/server", "dev"],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "internalConsoleOptions": "neverOpen",
@@ -14,10 +14,35 @@
       "autoAttachChildProcesses": true,
       "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
       "env": {
-        "NO_COLOR": "1"
+        "NO_COLOR": "1",
+        "SERVER_HOST": "0.0.0.0"
       },
       "serverReadyAction": {
-        "pattern": "Local:\\s+(https?://\\S+)",
+        "pattern": "Aime Hub API:\\s+https?://\\S+",
+        "action": "startDebugging",
+        "name": "Vite：前端调试",
+        "killOnServerStop": true
+      }
+    },
+    {
+      "name": "Vite：前端调试",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@aime/web", "dev"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "outputCapture": "std",
+      "autoAttachChildProcesses": true,
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "presentation": { "hidden": true },
+      "env": {
+        "NO_COLOR": "1",
+        "WEB_HOST": "0.0.0.0"
+      },
+      "serverReadyAction": {
+        "pattern": "Web entry:\\s+(https?://\\S+)",
         "uriFormat": "%s",
         "action": "debugWithChrome",
         "webRoot": "${workspaceFolder}/apps/web",

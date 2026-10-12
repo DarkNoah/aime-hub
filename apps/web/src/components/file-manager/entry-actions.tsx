@@ -6,9 +6,12 @@ import {
   MoreHorizontal,
   Pencil,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import type { FileEntry } from '@aime/shared/files';
 import { Button } from '@/components/ui/button';
+import { parentPath } from './state';
+import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,17 +28,27 @@ export function EntryActions({
   entry,
   children,
   onAction,
+  onUpload,
+  dropTarget = false,
 }: {
   entry: FileEntry;
   children: ReactNode;
   onAction: (action: EntryAction) => void;
+  onUpload?: (directory: string) => void;
+  dropTarget?: boolean;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <div
-        className="group/entry flex min-w-0 items-center rounded-md hover:bg-muted/80"
+        data-upload-directory={
+          entry.kind === 'directory' ? entry.path : parentPath(entry.path)
+        }
+        className={cn(
+          'group/entry flex min-w-0 items-center rounded-md hover:bg-muted/80',
+          dropTarget && 'bg-primary/10 ring-2 ring-inset ring-primary',
+        )}
         onContextMenu={(event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -57,6 +70,20 @@ export function EntryActions({
         </DropdownMenuTrigger>
       </div>
       <DropdownMenuContent align="end">
+        {onUpload && (
+          <DropdownMenuItem
+            onSelect={() =>
+              onUpload(
+                entry.kind === 'directory'
+                  ? entry.path
+                  : parentPath(entry.path),
+              )
+            }
+          >
+            <Upload />
+            {t('files.upload')}
+          </DropdownMenuItem>
+        )}
         {entry.kind === 'directory' && (
           <>
             <DropdownMenuItem

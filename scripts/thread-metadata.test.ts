@@ -22,6 +22,7 @@ test('new thread runtime fields are stored directly in metadata', async (t) => {
   });
   assert.deepEqual(threads.get(thread.id)?.metadata, {
     model: null,
+    agentId: null,
     createdBy: 'alice',
     workspace: 'workspace',
     status: 'idle',

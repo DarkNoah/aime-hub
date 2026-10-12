@@ -1,4 +1,369 @@
 export const en = {
+  'nav.mcp': 'MCP management',
+  'mcp.description':
+    'Manage MCP connections. Only published configurations are available for use.',
+  'mcp.listTitle': 'MCP servers',
+  'mcp.create': 'Add MCP',
+  'mcp.edit': 'Edit MCP',
+  'mcp.delete': 'Delete MCP',
+  'mcp.name': 'Server name',
+  'mcp.nameHint':
+    '1–100 letters, numbers, underscores or hyphens. Names must be unique.',
+  'mcp.transport': 'Transport',
+  'mcp.argsHint':
+    'One argument per line. Blank lines are ignored; quotes are passed literally.',
+  'mcp.envHint':
+    'Stdio environment variables: one KEY=Value per line. Empty values and equals signs in values are preserved.',
+  'mcp.headersHint':
+    'HTTP headers: one Key=Value per line, e.g. Authorization=Bearer your-token.',
+  'mcp.editorHint':
+    'Choose a form or paste JSON. New connections are saved as drafts; publish them from the list to use them.',
+  'mcp.deleteHint':
+    'Permanently delete the saved MCP configuration “{{name}}”?',
+  'mcp.inputMode': 'Configuration input mode',
+  'mcp.form': 'Form',
+  'mcp.jsonConfig': 'MCP JSON configuration',
+  'mcp.jsonHint':
+    'Use { "mcpServers": { "name": { ... } } }. Add up to 50 servers at once.',
+  'mcp.jsonEditHint':
+    'Keep exactly one entry in mcpServers when editing this connection.',
+  'mcp.serverNumber': 'Server {{index}}',
+  'mcp.removeForm': 'Remove server {{index}}',
+  'mcp.addAnother': 'Add another server',
+  'mcp.save': 'Save configuration',
+  'mcp.cancel': 'Cancel',
+  'mcp.saving': 'Saving…',
+  'mcp.created': '{{count}} MCP configuration(s) saved as drafts.',
+  'mcp.updated': 'MCP configuration saved.',
+  'mcp.deleted': 'MCP configuration deleted.',
+  'mcp.search': 'Search server name or endpoint…',
+  'mcp.refresh': 'Refresh MCP list',
+  'mcp.retry': 'Retry',
+  'mcp.loading': 'Loading MCP configurations…',
+  'mcp.status.draft': 'Draft',
+  'mcp.status.published': 'Published',
+  'mcp.status.archived': 'Archived',
+  'mcp.publishNamed': 'Publish {{name}}',
+  'mcp.editNamed': 'Edit {{name}}',
+  'mcp.deleteNamed': 'Delete {{name}}',
+  'mcp.published': 'MCP published and available for use.',
+  'mcp.unpublished': 'MCP unpublished; new connections are blocked.',
+  'mcp.noMatches': 'No matching MCP servers',
+  'mcp.searchHint': 'Try another name or endpoint.',
+  'mcp.empty': 'No MCP servers yet',
+  'mcp.emptyHint':
+    'Add a Stdio command or a Streamable HTTP / SSE URL, using a form or JSON.',
+  'mcp.transportInvalid': 'Provide either command or url, never both.',
+  'mcp.argsHttpInvalid': 'args is only supported for Stdio connections.',
+  'mcp.envHttpInvalid': 'env is only supported for Stdio connections.',
+  'mcp.headersStdioInvalid':
+    'headers is only supported for HTTP / SSE connections.',
+  'mcp.configInvalid':
+    'Check the configuration: valid names, HTTP(S) URLs, string arrays and single-line string values are required. Unsupported fields are not accepted.',
+  'mcp.keyValueInvalid':
+    '{{field}}, line {{line}}: use Key=Value with a non-empty key.',
+  'mcp.duplicateKey':
+    '{{field}} contains a duplicate key. Each key must be unique.',
+  'mcp.jsonInvalid': 'Invalid JSON. Check commas, quotes and brackets.',
+  'mcp.singleServer': 'Editing requires exactly one entry in mcpServers.',
+  'mcp.duplicateName':
+    'The server name already exists or is repeated in this import.',
+  'mcp.notFound': 'This MCP configuration no longer exists. Refresh the list.',
+  'mcp.conflict':
+    'This MCP configuration has changed. Close the editor and refresh before trying again.',
+  'mcp.notPublished': 'Publish this MCP configuration before using it.',
+  'mcp.importIncomplete':
+    'The import could not be rolled back completely. Refresh the list before retrying.',
+  'mcp.connectionFailed':
+    'Could not connect. Check the command or URL, credentials and server availability.',
+  'mcp.testNamed': 'Test connection to {{name}}',
+  'mcp.testSuccess': 'Connected. Found {{count}} tools.',
+  'mcp.unavailable':
+    'This server is not connected. Close the tool list and test the connection before retrying.',
+  'mcp.tools': 'Tools',
+  'mcp.toolsNamed': 'View tools for {{name}}',
+  'mcp.toolsHint':
+    'Browse tools, descriptions and parameter definitions from this server.',
+  'mcp.toolsSearch': 'Search tool names or descriptions…',
+  'mcp.toolsRefresh': 'Refresh tool list',
+  'mcp.toolsLoading': 'Loading tools…',
+  'mcp.toolsEmpty': 'This server does not currently provide any tools.',
+  'mcp.toolsNoMatches': 'No matching tools. Try another keyword.',
+  'mcp.toolNoDescription': 'No description provided.',
+  'mcp.toolParameters': 'Parameter definitions',
+  'mcp.toolParametersNamed': 'View parameter definitions for {{name}}',
+  'mcp.toolInputSchema': 'Input parameters · JSON Schema',
+  'mcp.toolOutputSchema': 'Result · JSON Schema',
+  'assets.title': 'Generated assets',
+  'assets.refresh': 'Refresh assets',
+  'assets.startChat': 'Start a conversation to collect generated assets here.',
+  'assets.search': 'Search filename or path',
+  'assets.clearSearch': 'Clear search',
+  'assets.resetFilters': 'Reset filters and sorting',
+  'assets.type': 'Asset type',
+  'assets.kind.all': 'All',
+  'assets.kind.image': 'Image',
+  'assets.kind.video': 'Video',
+  'assets.kind.audio': 'Audio',
+  'assets.kind.file': 'Other',
+  'assets.sort': 'Sort assets',
+  'assets.sort.newest': 'Newest first',
+  'assets.sort.oldest': 'Oldest first',
+  'assets.sort.name': 'Name A–Z',
+  'assets.sort.largest': 'Largest first',
+  'assets.empty': 'No generated assets yet',
+  'assets.emptyHint':
+    'Images generated here appear automatically. Select assets to reuse them in chat.',
+  'assets.noMatches': 'No matching assets',
+  'assets.filterHint': 'Try a different type or search term.',
+  'assets.loadMore': 'Load more assets',
+  'assets.select': 'Select {{name}}',
+  'assets.selected': '{{count}} selected',
+  'assets.clear': 'Clear selection',
+  'assets.addToChat': 'Add to chat',
+  'assets.added': 'Added to chat attachments',
+  'assets.limit': 'Attach up to {{count}} files, including uploaded images.',
+  'assets.composerUnavailable': 'Wait until the chat input is ready.',
+  'assets.attachments': 'Generated asset attachments',
+  'assets.remove': 'Remove {{name}}',
+  'assets.download': 'Download {{name}}',
+  'assets.mediaUnavailable':
+    'Preview unavailable. The file may have been moved or deleted.',
+  'notifications.desktop': 'Desktop notifications',
+  'notifications.desktopHint':
+    'Notify when this task completes or fails, even after closing the page. In-page notifications always appear.',
+  'notifications.unsupported':
+    'Use a browser that supports notifications over HTTPS or localhost.',
+  'notifications.notConfigured':
+    'Desktop notifications are not configured on this server. In-page notifications remain available.',
+  'notifications.enableBrowser': 'Enable on this browser',
+  'notifications.denied':
+    'Notifications are blocked. Allow them in your browser’s site settings and try again.',
+  'notifications.enableFailed':
+    'Could not enable desktop notifications. Check your browser permission and try again.',
+  'notifications.unavailable':
+    'Could not load notification settings. Reopen this dialog to retry.',
+  'notifications.completed': 'Automation completed',
+  'notifications.failed': 'Automation failed',
+  'notifications.view': 'View result',
+
+  'nav.automations': 'Automations',
+  'automations.title': 'Automations',
+  'automations.title.personal': 'Personal automations',
+  'automations.title.project': 'Project automations',
+  'automations.title.system': 'System automations',
+  'automations.description.personal':
+    'Schedule recurring work for yourself and review the results here.',
+  'automations.description.project':
+    'Run recurring tasks in the shared project workspace.',
+  'automations.description.system':
+    'Manage scheduled tasks shared by administrators, in a separate system workspace.',
+  'automations.create': 'Create automation',
+  'automations.edit': 'Edit automation',
+  'automations.editorHint':
+    'Runs share a dedicated conversation. Results are also saved in run history.',
+  'automations.name': 'Name',
+  'automations.namePlaceholder': 'Daily project summary',
+  'automations.prompt': 'Task instructions',
+  'automations.promptPlaceholder':
+    'Describe what to do and what the result should contain.',
+  'automations.cadence': 'Schedule',
+  'automations.daily': 'Every day at 09:00',
+  'automations.weekdays': 'Weekdays at 09:00',
+  'automations.weekly': 'Every Monday at 09:00',
+  'automations.hourly': 'Every hour',
+  'automations.custom': 'Custom cron expression',
+  'automations.cron': 'Cron expression',
+  'automations.cronHint':
+    'Minute · hour · day · month · weekday. For example: 0 9 * * 1-5.',
+  'automations.systemTimezone': 'Schedules use the server’s system time zone.',
+  'automations.separateThread': 'Show a dedicated chat',
+  'automations.separateThreadHint':
+    'Create the conversation on the first run. Show it in the chat list when enabled; turning this off keeps its history and context.',
+  'automations.threadLabel': 'Scheduled conversation',
+  'automations.openThread': 'Open task conversation',
+  'automations.threadUnavailable':
+    'The task conversation was archived or deleted. Restore it or create a new automation.',
+  'automations.agent': 'Agent',
+  'automations.model': 'Model',
+  'automations.defaultModel': 'Use scope default',
+  'automations.modelHint':
+    'The agent model takes priority; otherwise use the selected model or scope default.',
+  'automations.agentLoadFailed': 'Could not load agents.',
+  'automations.enable': 'Enable schedule',
+  'automations.saving': 'Saving…',
+  'automations.required': 'Enter a name, task instructions, and schedule.',
+  'automations.saved': 'Automation saved.',
+  'automations.enabledToast': 'Schedule enabled.',
+  'automations.pausedToast': 'Schedule paused.',
+  'automations.queued': 'Run requested. Check run history for the result.',
+  'automations.deleted': 'Automation deleted.',
+  'automations.enabled': 'Enabled',
+  'automations.paused': 'Paused',
+  'automations.search': 'Search automations',
+  'automations.count': '{{count}} tasks',
+  'automations.refresh': 'Refresh automations',
+  'automations.readOnly':
+    'Project members can view tasks and results. Project owners and admins can manage them.',
+  'automations.nextRun': 'Next: {{time}}',
+  'automations.noNextRun': 'Paused',
+  'automations.empty': 'No automations yet',
+  'automations.emptyHint':
+    'Create a task and set its schedule. It runs while the server is online, even when this page is closed.',
+  'automations.noMatches': 'No matching automations',
+  'automations.searchHint': 'Try another name or keyword.',
+  'automations.history': 'Run history',
+  'automations.historyHint': 'Last 30 runs, shown in the task time zone.',
+  'automations.historyNamed': 'View runs for {{name}}',
+  'automations.runNamed': 'Run {{name}} now',
+  'automations.editNamed': 'Edit {{name}}',
+  'automations.deleteNamed': 'Delete {{name}}',
+  'automations.enableNamed': 'Enable {{name}}',
+  'automations.noRuns':
+    'No runs yet. You can run the task now or wait for its schedule.',
+  'automations.status.running': 'Running',
+  'automations.status.succeeded': 'Completed',
+  'automations.status.failed': 'Failed',
+  'automations.status.skipped': 'Skipped',
+  'automations.deleteTitle': 'Delete “{{name}}”?',
+  'automations.deleteHint':
+    'This removes the schedule and its run history. An already running task is allowed to finish.',
+  'automations.delete': 'Delete automation',
+  'automations.invalidCron':
+    'Enter a valid cron expression with a future run time.',
+  'automations.notFound': 'This automation is unavailable or has been deleted.',
+  'automations.alreadyRunning':
+    'Skipped because the previous run is still active.',
+  'automations.removed': 'The task was deleted before this run started.',
+  'automations.requiresInput':
+    'This task requires interactive input and cannot finish unattended.',
+  'automations.runFailed':
+    'Execution failed. Check the agent, model, and workspace configuration.',
+
+  'agents.code': 'Code · Read only',
+  'agents.codeHint':
+    'This agent is maintained in server code and is not stored in agent tables.',
+  'agents.viewNamed': 'View {{name}}',
+  'agents.noSelectedSkills': 'No skills configured',
+  'agents.default': 'Default agent',
+  'agents.defaultHint':
+    'Used when no agent is specified. Only code or published agents can be selected. Choose another default before deleting or unpublishing this agent.',
+  'agents.defaultSaved': 'Default agent saved.',
+  'agents.selectTitle': 'Select Agent',
+  'agents.selectSearch': 'Search agent name, description or ID',
+  'agents.useDefault': 'Default',
+  'agents.selectionUnavailable': 'Agent unavailable. Choose another agent.',
+  'agents.isDefault':
+    'Choose another default agent before deleting or unpublishing this one.',
+  'chat.agent': 'Select agent',
+  'chat.agentBusy':
+    'Finish running, queued, or suspended work before switching agents.',
+  'agents.manageSkills': 'Manage skills',
+  'nav.agents': 'Agents',
+  'admin.agentsDescription':
+    'Manage agent instructions, models, tools, and skills.',
+  'agents.scopeHint':
+    'Code agents are read only. Custom agents become available after publishing. Editing a published agent updates its available configuration; running work retains its configuration.',
+  'agents.create': 'Create agent',
+  'agents.edit': 'Edit agent',
+  'agents.delete': 'Delete agent',
+  'agents.general': 'General',
+  'agents.instructions': 'Instructions',
+  'agents.resources': 'Tools & skills',
+  'agents.name': 'Name',
+  'agents.namePlaceholder': 'e.g. Product research assistant',
+  'agents.description': 'Description (optional)',
+  'agents.model': 'Model (optional)',
+  'agents.followModel': 'Follow conversation model',
+  'agents.modelHint':
+    'Leave empty to follow the chat model. A fixed model always overrides the chat model for this agent.',
+  'agents.instructionsHint':
+    'Define the agent’s role, response style, and requirements. Markdown and original whitespace are preserved.',
+  'agents.instructionsPlaceholder':
+    'You are a product research assistant. Reply in the user’s language and cite sources for key findings.',
+  'agents.tools': 'Tools',
+  'agents.skills': 'Skills',
+  'agents.toolsHint':
+    'Select application tools. Runtime honors global tool switches and supplies workspace and browser capabilities.',
+  'agents.skillsHint':
+    'Select valid skills installed in Skills administration. References use directory paths.',
+  'agents.searchSkills': 'Search skill names, paths, or descriptions…',
+  'agents.globallyDisabled': 'Globally disabled',
+  'agents.unavailable': 'Unavailable — remove this selection',
+  'agents.noSkills':
+    'No valid skills available. Install skills in Skills administration first.',
+  'agents.loading': 'Loading…',
+  'agents.retry': 'Retry',
+  'agents.save': 'Save configuration',
+  'agents.cancel': 'Cancel',
+  'agents.saving': 'Saving…',
+  'agents.created': 'Agent created.',
+  'agents.updated': 'Agent configuration saved.',
+  'agents.deleted': 'Agent deleted.',
+  'agents.draftHint': 'Saved as a draft. Publish to use in chat.',
+  'agents.nextVersion': 'Save as version {{version}}',
+  'agents.deleteHint':
+    'Delete “{{name}}” and all its configuration versions? This cannot be undone.',
+  'agents.search': 'Search agent names or descriptions…',
+  'agents.count': '{{count}} agents',
+  'agents.refresh': 'Refresh agents',
+  'agents.toolsCount': '{{count}} tools',
+  'agents.skillsCount': '{{count}} skills',
+  'agents.editNamed': 'Edit {{name}}',
+  'agents.deleteNamed': 'Delete {{name}}',
+  'agents.noMatches': 'No results',
+  'agents.searchHint': 'Try a different name or description.',
+  'agents.empty': 'No agents yet',
+  'agents.emptyHint':
+    'Create your first agent with its own instructions, tools, and skills.',
+  'agents.publish': 'Publish',
+  'agents.publishNamed': 'Publish {{name}}',
+  'agents.published': 'Agent published and available in chat.',
+  'agents.unpublished': 'Agent unpublished.',
+  'agents.notPublished': 'This agent is not published. Choose another agent.',
+  'agents.status.draft': 'Draft',
+  'agents.status.published': 'Published',
+  'agents.status.archived': 'Archived',
+  'agents.nameInvalid': 'Enter a name with 1–100 characters.',
+  'agents.descriptionInvalid': 'Description must be at most 1,000 characters.',
+  'agents.instructionsInvalid':
+    'Enter instructions with at most 24,000 characters.',
+  'agents.notFound': 'Agent no longer exists. Refresh the list.',
+  'agents.conflict':
+    'Agent has changed. Close the editor and refresh before trying again.',
+  'agents.unsupported':
+    'This configuration contains fields unsupported by this editor.',
+  'agents.skillUnavailable':
+    'A selected skill is missing or invalid. Reopen the editor and update your selection.',
+  'agents.modelUnavailable':
+    'The selected model is unavailable. Replace or clear it.',
+  'agents.invalid': 'Check the agent configuration.',
+  'agents.tool.web_search': 'Web search',
+  'agents.tool.image_gen': 'Image generation',
+  'tools.imageGen': 'Image generation',
+  'tools.imageDescription':
+    'Generate images from descriptions or edit reference images.',
+  'tools.configureImage': 'Configure image generation',
+  'tools.enableImage': 'Enable image generation',
+  'tools.defaultImageModel': 'Use default image generation model',
+  'tools.imageModelHint':
+    'Leave the model unselected to use the default Image generation model in Model providers.',
+  'tools.invalidImageModel':
+    'Select an enabled model with image output and check its provider configuration.',
+  'tools.imageTimeoutHint': '1–600 seconds; default: 180 seconds.',
+  'tools.imageSummary': '{{seconds}}s timeout',
+  'tools.imageProviderHint':
+    'The provider must support the OpenAI-compatible Images API. Reference image editing and transparent backgrounds depend on the selected model.',
+  'agents.tool.web_fetch': 'Web fetch',
+  'agents.tool.curr_time': 'Current time',
+  'agents.tool.exec': 'JavaScript tool orchestration',
+  'agents.tool.sleep': 'Wait',
+  'agents.tool.ask_user': 'Ask user',
+  'agents.tool.task_write': 'Create task',
+  'agents.tool.task_update': 'Update task',
+  'agents.tool.task_complete': 'Complete task',
+  'agents.tool.task_check': 'Check task',
+  'agents.tool.submit_plan': 'Submit plan',
   'tools.webFetch': 'Web fetch',
   'tools.fetchDescription': 'Read a web page and return readable Markdown.',
   'tools.configureFetch': 'Configure web fetch',
@@ -73,10 +438,15 @@ export const en = {
     'Theme changed, but your browser could not save the preference.',
   'nav.requestLogs': 'Request logs',
   'admin.requestLogsDescription':
-    'Inspect the actual request bodies sent to models, including retries and tool continuations.',
+    'Inspect model requests, responses and durations, including retries and tool continuations.',
   'requestLogs.listTitle': 'Model requests',
   'requestLogs.refresh': 'Refresh logs',
-  'requestLogs.search': 'Search model, endpoint or request ID…',
+  'requestLogs.search': 'Search model, endpoint or any ID…',
+  'requestLogs.threadId': 'Thread ID',
+  'requestLogs.resourceId': 'Resource ID',
+  'requestLogs.userId': 'User ID',
+  'requestLogs.projectId': 'Project ID',
+  'requestLogs.exactId': 'Exact ID match',
   'requestLogs.status': 'Body status',
   'requestLogs.all': 'All statuses',
   'requestLogs.complete': 'Body sent',
@@ -91,8 +461,7 @@ export const en = {
   'requestLogs.streaming': 'Streaming',
   'requestLogs.noMatches': 'No matching requests',
   'requestLogs.empty': 'No request logs yet',
-  'requestLogs.searchHint':
-    'Try another model or request ID, or change the status filter.',
+  'requestLogs.searchHint': 'Try another model or ID, or adjust the filters.',
   'requestLogs.emptyHint':
     'Send a chat message to record its actual model request here. Earlier console logs are not imported.',
   'requestLogs.page': 'Page {{page}}',
@@ -100,7 +469,28 @@ export const en = {
   'requestLogs.next': 'Next',
   'requestLogs.detail': 'Request details',
   'requestLogs.detailHint':
-    'Status describes body transmission, not the model response.',
+    'Request and response transmission are tracked separately. Duration covers the full HTTP attempt, including streaming. Base64 content is limited to the first 30 characters, including when copied.',
+  'requestLogs.duration': 'Duration',
+  'requestLogs.durationHint':
+    'From request creation until the response finishes or is interrupted.',
+  'requestLogs.responseStatus': 'Response status',
+  'requestLogs.responsePending': 'Receiving',
+  'requestLogs.responseComplete': 'Response received',
+  'requestLogs.responseIncomplete': 'Response interrupted',
+  'requestLogs.responseSize': 'Received bytes',
+  'requestLogs.responseContentType': 'Response type',
+  'requestLogs.contentView': 'Request or response content',
+  'requestLogs.responseBody': 'Response body',
+  'requestLogs.responsePendingHint':
+    'Waiting for the response to finish. This detail view updates automatically.',
+  'requestLogs.responseUnavailable':
+    'Response content was not captured for this older log.',
+  'requestLogs.noResponse': 'No response body was received.',
+  'requestLogs.responseIncompleteHint':
+    'The response was interrupted. Only the bytes received before interruption are retained.',
+  'requestLogs.emptyBody': 'The body is empty.',
+  'requestLogs.base64Hint':
+    'These bytes could not be decoded as text. Only the first 30 characters of their Base64 encoding are shown.',
   'requestLogs.model': 'Model',
   'requestLogs.time': 'Recorded at',
   'requestLogs.endpoint': 'Endpoint',
@@ -255,6 +645,29 @@ export const en = {
   'files.root': 'Workspace root',
   'files.mountPoint': 'Mount',
   'files.mountProtected': 'Mount directories cannot be renamed or deleted',
+  'files.upload': 'Upload files',
+  'files.uploadTo': 'Upload files to {{path}}',
+  'files.uploadQueue': 'Uploads',
+  'files.uploadClear': 'Clear finished',
+  'files.uploadStatus.queued': 'Queued',
+  'files.uploadStatus.uploading': 'Uploading',
+  'files.uploadStatus.finishing': 'Saving',
+  'files.uploadStatus.done': 'Uploaded',
+  'files.uploadStatus.error': 'Failed',
+  'files.uploadStatus.cancelled': 'Cancelled',
+  'files.uploadRetry': 'Retry uploading {{name}}',
+  'files.uploadCancel': 'Cancel uploading {{name}}',
+  'files.uploadProgress': 'Upload progress for {{name}}',
+  'files.uploadSuccess': 'Uploaded {{name}}',
+  'files.uploadFailed': 'Failed to upload {{name}}',
+  'files.uploadTooLarge': 'Each file must be no larger than 1 GiB.',
+  'files.uploadLimit': 'Too many active uploads. Please retry later.',
+  'files.uploadExpired': 'The upload expired or is inaccessible. Please retry.',
+  'files.uploadIncomplete':
+    'Some file chunks could not be uploaded. Please retry.',
+  'files.uploadFilesOnly':
+    'Please drop files; uploading entire folders is not supported yet.',
+  'files.dropUpload': 'Drop to upload to {{path}}',
   'files.createFile': 'New file',
   'files.createFolder': 'New folder',
   'files.rename': 'Rename',
@@ -276,7 +689,8 @@ export const en = {
   'files.loading': 'Loading files…',
   'files.retry': 'Retry',
   'files.emptyFolder': 'Empty folder',
-  'files.empty': 'No files yet. Create a file or folder above.',
+  'files.empty':
+    'No files yet. Drop files here or use the upload button above.',
   'files.directoryLimit':
     'Showing the first 2,000 entries. Use search to find a file.',
   'files.previewLimit':
@@ -288,6 +702,15 @@ export const en = {
   'files.htmlPreview': 'HTML preview of {{name}}',
   'files.refreshPreview': 'Reload file',
   'files.download': 'Download file',
+  'imagePreview.open': 'View image: {{name}}',
+  'imagePreview.zoomIn': 'Zoom in',
+  'imagePreview.zoomOut': 'Zoom out',
+  'imagePreview.enterFullscreen': 'Enter fullscreen',
+  'imagePreview.exitFullscreen': 'Exit fullscreen',
+  'imagePreview.loading': 'Loading image…',
+  'imagePreview.gallery': 'Image preview',
+  'imagePreview.downloadError':
+    'Could not download the image. Try the download link in the preview.',
   'files.binary':
     'This file type has no inline preview. Download it to open locally.',
   'files.mediaError':
@@ -472,6 +895,21 @@ export const en = {
   'chat.grep.contextLine': 'Context: line {{line}}',
   'chat.grep.matchLine': 'Match: line {{line}}, column {{column}}',
   'chat.readFile.offset': 'From line {{line}}',
+  'chat.webFetch.source': 'Source page',
+  'chat.webFetch.openLink': 'Open the original page in a new tab',
+  'chat.webFetch.linkUnavailable': 'Link unavailable',
+  'chat.webFetch.requestedUrl': 'Requested URL: {{url}}',
+  'chat.webFetch.content': 'Page content',
+  'chat.webFetch.provider': 'Reader: {{provider}}',
+  'chat.webFetch.localReader': 'Local extraction',
+  'chat.webFetch.fallback': 'Local fallback',
+  'chat.webFetch.truncated': 'Truncated',
+  'chat.webFetch.truncatedHint':
+    'The page exceeds the output limit. Only the returned content is shown. Open the original page to read it in full.',
+  'chat.webFetch.loading': 'Reading the page…',
+  'chat.webFetch.empty':
+    'No readable content was returned. Try opening the original page.',
+  'chat.webFetch.failed': 'Web fetch failed. Please try again later.',
   'chat.webSearch.query': 'Search query',
   'chat.webSearch.results': 'Search results',
   'chat.webSearch.count_one': '{{count}} result',
@@ -605,7 +1043,7 @@ export const en = {
   'chat.inspector.copied': 'Messages JSON copied.',
   'chat.inspector.count': 'Loaded messages: {{count}}',
   'chat.inspector.hint':
-    'Original message objects, updated as messages stream in.',
+    'Original message objects, updated as messages stream in. Base64 content is limited to the first 30 characters, including when copied.',
   'chat.inspector.earlier':
     'Load earlier messages in the chat to include more history.',
   'chat.inspector.floating': 'Chat',
@@ -628,7 +1066,8 @@ export const en = {
   'chat.inspector.resizeWindow.sw':
     'Resize chat window from bottom left (drag or use arrow keys)',
   'chat.copy': 'Copy',
-  'chat.copied': 'Response copied.',
+  'chat.copied': 'Message copied.',
+  'chat.copyFailed': 'Copy failed. Check clipboard permissions.',
   'chat.toolRunning': 'Running',
   'chat.toolDone': 'Completed',
   'chat.toolFailed': 'Failed',
@@ -721,6 +1160,39 @@ export const en = {
   'chat.renamed': 'Chat renamed.',
   'chat.title': 'Chat title',
   'chat.delete': 'Delete chat',
+  'chat.archive': 'Archive chat',
+  'chat.archiveHint':
+    'Move this chat to Personal settings → Archived chats. Messages and workspace files will be kept and can be restored.',
+  'chat.archived': 'Chat archived.',
+  'nav.personalSettings': 'Personal settings',
+  'nav.accountMenu': 'Account menu',
+  'personalSettings.description': 'Manage your personal chat history.',
+  'personalSettings.failed':
+    'Could not complete this operation. Please try again.',
+  'personalSettings.archivedChats': 'Archived chats',
+  'personalSettings.archiveHint':
+    'Archived chats keep their messages and workspace files. Restore a chat to your history, or permanently delete it and its files.',
+  'personalSettings.search': 'Search archived chats',
+  'personalSettings.empty': 'No archived chats',
+  'personalSettings.emptyHint':
+    'Choose “Archive chat” from a chat’s menu to move it here.',
+  'personalSettings.noMatches': 'No matching chats',
+  'personalSettings.noMatchesHint':
+    'Try a different chat title or clear your search.',
+  'personalSettings.archived': 'Archived',
+  'personalSettings.archivedOn': 'Archived {{date}}',
+  'personalSettings.restore': 'Restore',
+  'personalSettings.restoreNamed': 'Restore {{title}}',
+  'personalSettings.restored': 'Chat restored to your history.',
+  'personalSettings.delete': 'Delete permanently',
+  'personalSettings.deleteNamed': 'Permanently delete {{title}}',
+  'personalSettings.deleteHint':
+    'This permanently deletes the chat, all its messages, and its thread folder and files in the workspace. This cannot be undone.',
+  'personalSettings.deleted': 'Chat and workspace folder permanently deleted.',
+  'personalSettings.notArchived':
+    'This chat is no longer archived. Reopen personal settings to update the list.',
+  'personalSettings.workspaceUnavailable':
+    'The workspace folder could not be safely accessed. The chat is still archived. Check the folder and try again.',
   'chat.deleteHint':
     'This permanently deletes the chat and its message history. Workspace files are retained.',
   'chat.deleted': 'Chat deleted.',
@@ -736,7 +1208,7 @@ export const en = {
   'chat.errors.interrupted':
     'The server restarted before the response finished. You can retry or send another message.',
   'chat.errors.busy':
-    'Stop this chat and remove queued messages before deleting it.',
+    'Stop this chat and its background tasks, and remove queued messages before continuing.',
   'chat.errors.validation':
     'Check the message and attachments. Text supports up to 60,000 characters; images up to 2 MB each.',
   'chat.errorTitle': 'Response failed',

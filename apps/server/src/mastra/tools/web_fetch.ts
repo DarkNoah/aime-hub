@@ -1,21 +1,23 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { defaultWebFetchConfig, type WebFetchConfig } from '@aime/shared/tools';
-import type { WebFetchProvider } from '../providers/web-fetch.js';
-import { LocalWebFetchProvider } from '../providers/local-web-fetch.js';
-import { publicWebAddress } from '../providers/web-request.js';
+import type { BaseProvider } from '../providers/base-provider.js';
+import { LocalProvider } from '../providers/local.js';
+import { publicWebAddress } from '../web/request.js';
 
 export function createWebFetchTool(
   config: WebFetchConfig = defaultWebFetchConfig,
   dependencies: {
-    resolveProvider?: (id: string) => Promise<WebFetchProvider>;
-    fallbackProvider?: WebFetchProvider;
+    resolveProvider?: (
+      id: string,
+    ) => Promise<Pick<BaseProvider, 'id' | 'webFetch'>>;
+    fallbackProvider?: Pick<BaseProvider, 'id' | 'webFetch'>;
     validateUrl?: typeof publicWebAddress;
   } = {},
 ) {
   const fallback =
     dependencies.fallbackProvider ??
-    new LocalWebFetchProvider(config.timeoutMs);
+    new LocalProvider({ timeoutMs: config.timeoutMs });
   return createTool({
     id: 'web_fetch',
     description:

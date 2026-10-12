@@ -9,6 +9,8 @@ export function toolErrorKey(error: unknown, toolId?: ToolId): TranslationKey {
       return 'errors.sessionExpired';
     case 'FORBIDDEN':
       return 'errors.forbidden';
+    case 'INVALID_IMAGE_MODEL':
+      return 'tools.invalidImageModel';
     case 'NOT_FOUND':
     case 'INVALID_TOOL_PROVIDER':
       return toolId === 'web_fetch'

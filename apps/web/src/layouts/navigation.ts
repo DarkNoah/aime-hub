@@ -1,4 +1,6 @@
 import {
+  Bot,
+  Clock3,
   LayoutDashboard,
   FileJson2,
   Plug,
@@ -12,7 +14,10 @@ import {
 export const adminNavigation = [
   { to: '/admin', label: 'nav.overview', icon: LayoutDashboard },
   { to: '/admin/providers', label: 'nav.providers', icon: Plug },
+  { to: '/admin/agents', label: 'nav.agents', icon: Bot },
+  { to: '/admin/automations', label: 'nav.automations', icon: Clock3 },
   { to: '/admin/tools', label: 'nav.tools', icon: Wrench },
+  { to: '/admin/mcp', label: 'nav.mcp', icon: Plug },
   { to: '/admin/request-logs', label: 'nav.requestLogs', icon: FileJson2 },
   { to: '/admin/skills', label: 'nav.skills', icon: Sparkles },
   {

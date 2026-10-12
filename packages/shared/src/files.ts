@@ -40,3 +40,18 @@ export const fileMutationSchema = z.discriminatedUnion('operation', [
     .strict(),
 ]);
 export type FileMutation = z.infer<typeof fileMutationSchema>;
+
+export const FILE_UPLOAD_CHUNK_SIZE = 4 * 1024 * 1024;
+export const FILE_UPLOAD_MAX_SIZE = 1024 * 1024 * 1024;
+export const fileUploadSchema = z
+  .object({
+    path: z.string().min(1).max(2048),
+    size: z.number().int().min(0).max(FILE_UPLOAD_MAX_SIZE),
+  })
+  .strict();
+export type FileUploadInput = z.infer<typeof fileUploadSchema>;
+export type FileUploadSession = {
+  id: string;
+  chunkSize: number;
+  offset: number;
+};

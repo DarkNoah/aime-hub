@@ -1,9 +1,11 @@
 import type { FileMutation } from '@aime/shared/files';
 import { chatErrorKey } from '../chat/api.js';
 import { api, apiErrorCode } from '../../lib/rpc.js';
+import { uploadFile } from './upload.js';
 
 const base = (id: string) => `/api/threads/${encodeURIComponent(id)}/files`;
 export const filesApi = {
+  upload: uploadFile,
   list: (threadId: string, path: string, signal?: AbortSignal) =>
     api.files.list({ params: { threadId }, query: { path } }, { signal }),
   preview: (threadId: string, path: string, signal?: AbortSignal) =>
@@ -19,6 +21,15 @@ export const filesApi = {
 export function fileErrorKey(error: unknown) {
   if (apiErrorCode(error)) {
     switch (apiErrorCode(error)) {
+      case 'FILE_UPLOAD_TOO_LARGE':
+        return 'files.uploadTooLarge';
+      case 'FILE_UPLOAD_LIMIT':
+        return 'files.uploadLimit';
+      case 'FILE_UPLOAD_EXPIRED':
+        return 'files.uploadExpired';
+      case 'FILE_UPLOAD_CHUNK':
+      case 'FILE_UPLOAD_INCOMPLETE':
+        return 'files.uploadIncomplete';
       case 'FILE_INVALID_PATH':
         return 'files.invalidName';
       case 'FILE_EXISTS':

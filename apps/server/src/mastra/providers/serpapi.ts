@@ -1,12 +1,12 @@
 import { z } from 'zod';
 import { requestProviderJson } from '../../modules/providers/network.js';
+import { searchResultUrl } from '../web/request.js';
 import {
-  searchResultUrl,
+  BaseProvider,
   type SearchResult,
   type WebSearchInput,
   type WebSearchOptions,
-  type WebSearchProvider,
-} from './web-search.js';
+} from './base-provider.js';
 
 const responseSchema = z.object({
   search_metadata: z.object({ status: z.string() }).optional(),
@@ -25,8 +25,9 @@ const responseSchema = z.object({
     .optional(),
 });
 
-export class SerpApiProvider implements WebSearchProvider {
-  readonly id = 'serpapi';
+export class SerpApiProvider extends BaseProvider {
+  readonly name = 'serpapi';
+  readonly type = 'serpapi';
   constructor(
     private readonly config: {
       apiKey: string;
@@ -34,7 +35,9 @@ export class SerpApiProvider implements WebSearchProvider {
       timeoutMs: number;
     },
     private readonly requestJson = requestProviderJson,
-  ) {}
+  ) {
+    super({ provider: { id: 'serpapi', ...config } });
+  }
 
   async webSearch(
     { query, numResults }: WebSearchInput,

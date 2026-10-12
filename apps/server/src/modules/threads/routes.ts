@@ -7,16 +7,20 @@ import { eventStream } from './event-stream.js';
 import { fileRoutes } from '../files/routes.js';
 import { ThreadError } from './errors.js';
 
-export function threadRoutes(auth: Auth, service: ThreadService) {
+export function threadRoutes(
+  auth: Auth,
+  service: ThreadService,
+  webOrigins: readonly string[] = [],
+) {
   const router = new Hono<HttpEnv>();
   router.get('/events', requireSession(auth), (c) =>
     streamThreadNavigation(auth, service, c.req.raw, c.get('userId')),
   );
-  router.route('/:threadId/files', fileRoutes(auth, service));
+  router.route('/:threadId/files', fileRoutes(auth, service, webOrigins));
   router.get('/:threadId/messages', requireSession(auth), async (c) => {
     const userId = c.get('userId');
     const threadId = c.req.param('threadId');
-    if (!/^[a-zA-Z0-9_-]{16}$/.test(threadId))
+    if (!/^(?:schedule:)?[a-zA-Z0-9_-]{16}$/.test(threadId))
       throw new ThreadError('THREAD_NOT_FOUND', 404);
     await service.getThread(userId, threadId);
     return eventStream(
@@ -27,8 +31,8 @@ export function threadRoutes(auth: Auth, service: ThreadService) {
           threadId,
           (snapshot, initial) =>
             send(initial ? 'snapshot' : 'update', snapshot),
-          () => {
-            send('revoked', {});
+          (code) => {
+            send('revoked', { code: code ?? 'PROJECT_NOT_FOUND' });
             close();
           },
         ),

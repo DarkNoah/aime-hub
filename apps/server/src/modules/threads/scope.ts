@@ -1,6 +1,8 @@
 import { ThreadError } from './errors.js';
 
 export function threadScope(resourceId: string) {
+  if (resourceId === 'system:automations')
+    return { type: 'system' as const, userId: 'system', projectId: undefined };
   if (resourceId.startsWith('user:') && resourceId.length > 5)
     return {
       type: 'user' as const,

@@ -4,6 +4,9 @@ import type { ChatSession } from '../../apps/server/src/modules/threads/session.
 export function sessionStub(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
     async send() {},
+    async generateTitle() {
+      return undefined;
+    },
     async compact() {
       return { observed: false };
     },

@@ -9,6 +9,15 @@ export function threadRouter(
   const p = rpc.threads;
   const threads = () => required(service);
   return p.router({
+    archived: p.archived.handler(({ context }) =>
+      threads().listArchivedThreads(context.userId),
+    ),
+    restore: p.restore.handler(({ context, input }) =>
+      threads().restoreThread(context.userId, input.params.threadId),
+    ),
+    removeArchived: p.removeArchived.handler(({ context, input }) =>
+      threads().deleteArchivedThread(context.userId, input.params.threadId),
+    ),
     list: p.list.handler(({ context, input }) =>
       threads().listThreads(
         context.userId,

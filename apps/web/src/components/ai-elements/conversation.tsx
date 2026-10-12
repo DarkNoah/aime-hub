@@ -1,6 +1,7 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import type { UIMessage } from 'ai';
 import { ArrowDownIcon, DownloadIcon } from 'lucide-react';
@@ -26,13 +27,30 @@ export type ConversationContentProps = ComponentProps<
 
 export const ConversationContent = ({
   className,
+  scrollClassName,
+  children,
   ...props
-}: ConversationContentProps) => (
-  <StickToBottom.Content
-    className={cn('flex flex-col gap-8 p-4', className)}
-    {...props}
-  />
-);
+}: ConversationContentProps) => {
+  const context = useStickToBottomContext();
+  return (
+    <ScrollArea
+      className="h-full"
+      viewportProps={{
+        ref: context.scrollRef,
+        className: cn('overscroll-contain', scrollClassName),
+      }}
+    >
+      {/* Observe the padded content's full height, including composer clearance. */}
+      <div ref={context.contentRef}>
+        <div className={cn('flex flex-col gap-8 p-4', className)} {...props}>
+          {/* Preserve the render-prop API; passing the context does not read its refs. */}
+          {/* eslint-disable-next-line react-hooks/refs */}
+          {typeof children === 'function' ? children(context) : children}
+        </div>
+      </div>
+    </ScrollArea>
+  );
+};
 
 export type ConversationEmptyStateProps = ComponentProps<'div'> & {
   title?: string;

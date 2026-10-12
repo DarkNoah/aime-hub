@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+!.env.example
+**/node_modules
+**/dist
+workspaces
+.aime-chat
+coverage
+.vscode
+.DS_Store
+**/*.log

@@ -1,6 +1,6 @@
 import type { InitOptions } from 'i18next';
-import { en } from './locales/en';
-import { zhCN } from './locales/zh-CN';
+import { en } from './locales/en.js';
+import { zhCN } from './locales/zh-CN.js';
 
 export type Locale = 'zh-CN' | 'en';
 export type TranslationKey = keyof typeof en;

@@ -1,0 +1,74 @@
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hub
+      POSTGRES_USER: hub
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a random alphanumeric database password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U hub -d hub']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  server:
+    build:
+      context: .
+      target: server
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
+        BUN_IMAGE: ${BUN_IMAGE:-oven/bun:1}
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://hub:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/hub
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set a random secret of at least 32 characters}
+      BETTER_AUTH_URL: ${WEB_ORIGIN:?Set the public HTTPS origin}
+      WEB_ORIGIN: ${WEB_ORIGIN:?Set the public HTTPS origin}
+      WEB_ORIGINS: ${WEB_ORIGINS:-}
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 3001
+      ADMINS: ${ADMINS:-admin}
+      WORKSPACE_ROOT: /data/workspaces
+      WEB_PUSH_PUBLIC_KEY: ${WEB_PUSH_PUBLIC_KEY:-}
+      WEB_PUSH_PRIVATE_KEY: ${WEB_PUSH_PRIVATE_KEY:-}
+      WEB_PUSH_SUBJECT: ${WEB_PUSH_SUBJECT:-}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - workspace-data:/data/workspaces
+    # AgentFS mounts shared project workspaces through FUSE on Linux.
+    devices:
+      - /dev/fuse:/dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    shm_size: 256mb
+    expose:
+      - '3001'
+
+  web:
+    build:
+      context: .
+      target: web
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
+        NGINX_IMAGE: ${NGINX_IMAGE:-nginx:stable-alpine}
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    expose:
+      - '80'
+
+volumes:
+  postgres-data:
+  workspace-data:

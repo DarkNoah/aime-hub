@@ -16,7 +16,12 @@ type ToolDefinition = {
   localId: string;
 };
 
-export const toolDefinitions: Record<ToolId, ToolDefinition> = {
+export const toolDefinitions = {
+  image_gen: {
+    title: 'tools.imageGen',
+    description: 'tools.imageDescription',
+    configure: 'tools.configureImage',
+  },
   web_search: {
     title: 'tools.webSearch',
     description: 'tools.searchDescription',
@@ -45,4 +50,8 @@ export const toolDefinitions: Record<ToolId, ToolDefinition> = {
     providerType: 'jina-ai',
     localId: 'local',
   },
-};
+} satisfies Record<Exclude<ToolId, 'image_gen'>, ToolDefinition> &
+  Record<
+    'image_gen',
+    Pick<ToolDefinition, 'title' | 'description' | 'configure'>
+  >;

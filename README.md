@@ -4,17 +4,40 @@
 
 ## 功能
 
-| 模块       | 当前能力                                                                             |
-| ---------- | ------------------------------------------------------------------------------------ |
-| 账号与权限 | 用户名登录、注册、持久会话；管理员管理用户、角色、密码、封禁与会话撤销               |
-| 模型管理   | 供应商与模型管理、OpenAI 兼容模型列表同步、能力配置、系统默认模型与思考等级          |
-| 个人聊天   | 流式回复、Markdown、推理过程、图片输入、工具结果、上下文用量、错误重试与历史分页     |
-| 消息队列   | Mastra 原生 FIFO 队列，通过取消重入队支持编辑、排序，支持清空与停止                  |
-| 工具交互   | 工具审批、用户问题与挂起恢复；后台任务状态、结果展示和单独取消                       |
-| 项目协作   | owner/admin/member 角色、成员管理、共享对话、项目默认模型与共享工作目录              |
-| 工作区文件 | 文件树、文件名与内容搜索、新建、重命名、删除、下载，文本/代码及图片、音频、视频预览  |
-| Skills     | 后台扫描 GitHub 并批量安装技能，支持全局及个人/项目覆盖，输入 `/` 搜索并补全技能命令 |
-| 界面       | 中英文随浏览器语言切换、响应式导航、可调整宽度的文件/消息检查面板、全局会话运行状态  |
+| 模块       | 当前能力                                                                                               |
+| ---------- | ------------------------------------------------------------------------------------------------------ |
+| 账号与权限 | 用户名登录、注册、持久会话；管理员管理用户、角色、密码、封禁与会话撤销                                 |
+| 模型管理   | 供应商与模型管理、OpenAI 兼容模型列表同步、能力配置、系统默认模型与思考等级                            |
+| 个人聊天   | 流式回复、Markdown、推理过程、图片输入、工具结果、上下文用量、错误重试与历史分页                       |
+| 消息队列   | Mastra 原生 FIFO 队列，通过取消重入队支持编辑、排序，支持清空与停止                                    |
+| 工具交互   | 工具审批、用户问题与挂起恢复；后台任务状态、结果展示和单独取消                                         |
+| 项目协作   | owner/admin/member 角色、成员管理、共享对话、项目默认模型与共享工作目录                                |
+| 自动化     | 个人、项目、系统任务；系统时区调度、独立线程显示开关、启停、立即运行、最近 30 次运行结果，共用管理界面 |
+| 工作区文件 | 文件树、文件名与内容搜索、新建、重命名、删除、下载，文本/代码及图片、音频、视频预览                    |
+| Skills     | 后台扫描 GitHub 并批量安装技能，支持全局及个人/项目覆盖，输入 `/` 搜索并补全技能命令                   |
+| 界面       | 中英文随浏览器语言切换、响应式导航、可调整宽度的文件/消息检查面板、全局会话运行状态                    |
+
+### MCP 管理
+
+管理员在 `/admin/mcp` 管理多个 MCP 连接，支持表单与 `{"mcpServers":{"name":{...}}}` JSON 切换及批量创建。Stdio 使用 `command`、`args`、`env`；Streamable HTTP / SSE 使用 `url`、`headers`。参数一行一项并忽略空白行，环境变量和请求头使用 `Key=Value`，保留值中的等号。
+
+配置通过 Mastra 原生 `MCPClientsStorage` 写入 `mastra_mcp_clients.metadata`，每个服务一条记录，带 `managedBy: admin-mcp` 标识，不保存额外的连接类型。原生版本表只保留 SDK 要求的空配置快照；连接配置以 metadata 为准，通过适配器传给 `@mastra/mcp` 的 `MCPClient`。没有新增业务表。
+
+新配置默认 `draft`。发布前必须通过 SDK `listToolsWithErrors()` 的连接与工具发现检查（有效的空工具列表也表示连接成功），成功后才写入原生 `published` 状态及 `activeVersionId`。编辑已发布配置会先检查新连接，失败时保留旧配置和旧连接。取消发布、删除与进程退出会释放客户端；旧工具引用在执行前也重新检查发布状态和配置版本。
+
+客户端在 API 进程内常驻，启动时连接已发布配置，所有聊天 Agent 和自动化任务共用同一工具构建入口与连接。线程创建只读取已连接的工具，不重复启动子进程。启动时不可用的连接不会阻止服务启动，可在后台“测试连接”重连；MCP 工具沿用聊天的通用工具结果展示。SDK 使用兼容当前 Mastra Core 的 1.x，以同时支持 Streamable HTTP 和旧版 SSE。
+
+已发布服务的“工具列表”侧栏通过常驻客户端的原生 `listToolDefinitionsWithErrors` 读取服务工具，支持按名称或说明搜索、刷新和展开输入／返回结果 JSON Schema。查看列表不会新建 MCPClient；尚未建立连接时需先测试连接。
+
+### 自动化任务
+
+个人入口在左侧栏 `/automations`，项目入口在项目仪表盘 `/projects/:projectId/automations`，系统入口在管理后台 `/admin/automations`。个人任务仅本人可访问；项目成员可查看，owner/admin 可管理；系统任务仅系统管理员可访问。每次执行前重新检查创建者的账号、项目权限或管理员身份，权限失效后不会继续调用模型。
+
+调度使用 [Mastra Agent Schedule](https://mastra.ai/reference/schedules/overview#agent-schedule-input)。保存时仅预留 `schedule:<16 位随机 ID>` 并将 `threadId`、`resourceId` 写入调度配置，首次定时触发或手动运行时才创建线程与工作目录；后续触发在同一线程中继续，保留对话上下文。开启“独立线程”后，已开始执行的任务线程显示在聊天列表中，并带有时钟图标；关闭只隐藏入口，不删除线程或历史。个人线程归属本人、项目线程归属项目、系统线程仅管理员可见。项目任务使用项目共享工作空间，个人与系统任务各有独立任务目录，系统任务不继承创建者的个人模型设置。已有线程继续保留并复用。
+
+任务始终使用后端服务器系统时区（可通过服务进程的 `TZ` 设置），表单不接受自定义时区；重启时同步已有任务的时区。服务启动时将旧 workflow schedule 原地升级为 Agent Schedule，保留原任务 ID、触发记录与旧工作流结果。新任务配置、触发记录分别存于 `mastra_schedules`、`mastra_schedule_triggers`，对话存于 `mastra_threads` / `mastra_messages`，每次运行状态及结果存于 `mastra_thread_state` 的 `automation-run:<runId>` 命名空间。
+
+服务器需要保持在线。支持暂停后手动运行；立即运行不改变原定频率。任务线程正在运行时跳过新的触发，单次执行限时 10 分钟、最多 100 个 Agent 步骤。暂停或删除任务不取消已经开始的运行，删除任务保留线程及消息；归档或删除线程后，任务不会另建线程继续执行。服务关闭时中止运行，重启不会自动重放可能已经产生外部副作用的未完成任务。最近 30 次运行记录按系统时区显示。
 
 ## 技术栈
 
@@ -45,6 +68,9 @@ DATABASE_URL=postgresql://user:password@127.0.0.1:5432/aime_hub
 BETTER_AUTH_SECRET=<至少32字符的随机密钥>
 BETTER_AUTH_URL=http://127.0.0.1:5173
 WEB_ORIGIN=http://127.0.0.1:5173
+WEB_ORIGINS=
+WEB_HOST=0.0.0.0
+SERVER_HOST=0.0.0.0
 SERVER_PORT=3001
 ADMINS=admin
 WORKSPACE_ROOT=workspaces
@@ -71,13 +97,25 @@ pnpm auth:create-admin
 pnpm dev
 ```
 
-打开 [http://127.0.0.1:5173](http://127.0.0.1:5173)。API 默认监听 `127.0.0.1:3001`，Vite 将 `/api` 请求代理至后端。
+打开 [http://127.0.0.1:5173](http://127.0.0.1:5173)。开发时只需访问或转发 Vite 的一个端口，端口由 `WEB_ORIGIN` 决定（示例为 `5173`）；页面、认证、RPC、SSE 和文件请求都走同一个入口。前后端默认均监听 `0.0.0.0`，Vite 将 `/api` 代理至本机 `127.0.0.1:3001`。开发环境仍运行前后端两个进程，浏览器无需单独访问后端端口。
 
-浏览器地址、`BETTER_AUTH_URL` 和 `WEB_ORIGIN` 必须一致，包括协议、主机名及端口；不要混用 `localhost` 和 `127.0.0.1`。修改 `.env` 后需要重启开发服务。
+`BETTER_AUTH_URL` 是认证使用的主地址，`WEB_ORIGIN` 是默认浏览器入口（也决定 Vite 端口和 VS Code 打开地址）。浏览器来源必须匹配 `WEB_ORIGIN` 或 `WEB_ORIGINS` 中明确列出的地址，包括协议、主机名及端口。修改 `.env` 后需要重启开发服务。
+
+同时支持本机和局域网访问时，保留主地址，并设置逗号分隔的来源白名单：
+
+```dotenv
+BETTER_AUTH_URL=http://127.0.0.1:5173
+WEB_ORIGIN=http://127.0.0.1:5173
+WEB_ORIGINS=http://127.0.0.1:5173,http://192.168.1.13:5173
+```
+
+`WEB_ORIGIN` 会自动加入白名单，`WEB_ORIGINS` 也可以只填写额外的局域网地址；需要 `localhost` 时应显式加入。认证与业务 API 共用这份白名单，不支持通配符。不同主机分别保存登录 Cookie，因此通常需要分别登录；账号和业务数据共用。`WEB_HOST` 和 `SERVER_HOST` 默认均为 `0.0.0.0`，这是监听地址，浏览器需使用实际 IP 或主机名访问。终端的 `Web entry:` 显示默认入口。
 
 后端默认通过 Undici hook 输出模型接口（`/chat/completions`、`/responses`）实际发送的完整请求 body，日志以 `[chat:request]` 开头，包含请求 ID 和接口地址。每次重试、工具调用后的续问，以及标题生成等辅助模型请求都会单独记录；body 发送中断时标记为 `incomplete`。日志保留正文中的完整对话、附件及工具参数，地址中的查询参数和请求头不输出。
 
-管理员可在 **管理后台 → 请求日志**（`/admin/request-logs`）查看这些请求。新日志异步保存到 PostgreSQL 的 `chat_request_logs` 表，重启后保留；部署更新时先运行 `pnpm db:migrate`。页面支持按模型、接口、请求 ID 搜索，按请求体发送状态筛选，分页查看，以及自动刷新最新一页。详情按需加载完整原文，提供 JSON 格式化和原文复制；浏览历史页或详情时自动刷新暂停。状态仅表示请求体是否完整发送，不代表模型响应成功。历史控制台输出不会补录。
+管理员可在 **管理后台 → 请求日志**（`/admin/request-logs`）查看这些请求。新日志异步保存到 PostgreSQL 的 `chat_request_logs` 表，重启后保留；部署更新时先运行 `pnpm db:migrate`。捕获器从实际请求的 `X-THREAD-ID`、`X-RESOURCE-ID`、`X-USER-ID`、`X-PROJECT-ID` Header 提取标识，分别存入带索引的 `thread_id`、`resource_id`、`user_id`、`project_id` 字段；缺失 Header 和旧日志对应字段为 `NULL`，不会补录。页面支持按模型、接口、请求 ID 及上述标识搜索，也支持四个标识的组合精确筛选、请求体发送状态筛选、分页和自动刷新。详情展示关联标识，按需加载完整原文，提供 JSON 格式化和原文复制；浏览历史页或详情时自动刷新暂停。状态仅表示请求体是否完整发送，不代表模型响应成功。历史控制台输出不会补录。
+
+请求发送后立即入库，响应完成或中断后更新同一条记录的 `duration_ms`、`http_status`、`response_status`、响应类型、编码、接收字节数及响应内容。耗时从 Undici 创建请求开始计时，包含连接、发送及完整流式接收过程；每次 HTTP 重试单独计时。响应通过传输层分块捕获，JSON 与 SSE 保留原始文本，gzip / deflate / brotli 自动解压；无法还原为 UTF-8 文本的内容保存原始接收字节的 Base64。`response_bytes` 统计解压前的接收字节数，请求发送状态与响应接收状态分别展示，HTTP 错误响应也会保留。列表不加载请求或响应正文，详情提供请求 / 响应切换和复制；等待响应完成时详情自动更新。旧日志的响应与耗时字段为 `NULL`。
 
 ### 4. 配置模型并开始对话
 
@@ -89,6 +127,8 @@ pnpm dev
 聊天连接读取后台保存的供应商配置。`.env.example` 中预留的 `OPENAI_API_KEY`、`OPENAI_BASE_URL` 和 `DEFAULT_MODEL` 不会自动配置聊天模型。
 
 ## 使用说明
+
+生产环境使用 Dockerfile + Docker Compose，支持 Dokploy 从 Git 自动部署。容器运行环境、HTTPS、持久化和管理员初始化见 [部署说明](docs/deployment.md)。
 
 ### 模型与默认配置
 
@@ -172,6 +212,18 @@ workspaces/
 
 安装会保留技能目录内的脚本和参考文件，跳过符号链接与子模块，并校验技能格式和路径。已有目标目录不会被静默覆盖；批量安装发生错误时回滚本批次写入。扫描结果保留 15 分钟，过期后需重新扫描。安装后的全局技能可被个人与项目聊天发现。
 
+### 后台 Agent 管理与聊天选择
+
+管理员在 **管理后台 → Agent 管理**（`/admin/agents`）创建、编辑和删除自定义 Agent，配置系统提示词、模型、应用工具与后台已安装的 Skills。代码 Agent 定义在 `apps/server/src/mastra/agents/`，在 `index.ts` 注册；示例 `code:assistant` 是通用助手。代码配置直接从注册表读取，不写入 Agent 数据表，管理页仅提供只读详情，服务端也拒绝修改和删除。按 ID 查找时优先匹配代码注册表，未命中才读取数据库；已有同 ID 数据只展示和使用代码配置。自定义 Agent 的 ID 由服务端生成并避开代码已占用的 ID，创建接口不接受客户端指定 ID。
+
+自定义 Agent 使用 Mastra 原生 `agents` storage domain，记录与版本分别保存在 `mastra.mastra_agents` 和 `mastra.mastra_agent_versions`；每次保存创建新版本，无需新增数据表。自定义 Agent 创建时为草稿，管理页通过发布开关切换 `draft` / `published`；只有 `published` 状态可进入可用列表、设置为默认项或构建运行实例，草稿和归档项均不可使用。编辑已发布项会保持发布状态并更新激活版本，运行中的会话仍保留原配置。修改、删除和状态切换携带版本 ID，单服务进程内串行检查以拒绝过期编辑；默认项需先更换后才能删除或取消发布。
+
+后台默认 Agent 写入 `settings` 的 `agents:defaults`，值为 `{ defaultAgentId }`；没有设置或默认项被外部删除、取消发布时回退到代码通用助手。`GET /api/rpc/agents/available`（HTTP 形式 `/api/agents/available`）向已登录用户返回 `{ defaultAgentId, agents }`，仅含可选项的 ID、名称、说明、模型和来源。配置管理与默认项写入要求管理员权限，写操作校验 Origin。
+
+聊天输入框上方可选择 Agent，选择保存到现有个人配置 `settings[chat:user:<userId>].agentId`，刷新或开启下一次聊天时恢复。选择“跟随系统默认”保存 `null`；未指定 Agent 时，配置入口 `AgentService.getConfig(id)` 解析默认项。项目聊天也保留个人 Agent 选择，不修改项目共享模型配置。固定模型优先于聊天模型；模型留空则沿用聊天模型和现有模型默认解析规则。API 空模型为 `null`，原生版本仍以 `model: []` 表示未固定模型，运行前才解析实际模型。
+
+运行时调用 `AgentService.getAgent(id, { model, tools, memory, workspace, goal, instructions, ... })` 获取构建后的 Mastra `Agent`；`model` 等依赖由当前会话提供，`instructions` 可覆盖默认提示词，工具从传入集合中按配置筛选，`versionId` 可固定已解析的数据库版本。每个聊天原生会话使用独立实例，加载对应提示词、遵守全局启停状态的应用工具，以及所选 `.agents/skills` 目录技能。Skills 以原生 `workspace` provider 引用 `{ type: 'provider', provider: 'installed-skills', config: { skillPaths } }` 纳入版本，运行时按已发现的安装目录解析。工作区和浏览器工具继续由聊天运行时提供。排队消息、工具恢复和正在运行的任务使用已固定的配置；在运行、排队、后台任务、工具等待或活跃目标结束后，可切换 Agent 或加载更新后的配置版本。
+
 ### 后台环境变量管理
 
 管理员在 `/admin/environment-variables` 新增、搜索、编辑和删除环境变量。页面使用 AI Elements Environment Variables 组件，默认遮罩变量值，支持显隐切换、复制、空值及多行值。名称区分大小写，必须以字母或下划线开头，仅允许字母、数字和下划线；重复名称返回 `409`。
@@ -198,17 +250,20 @@ workspaces/
 
 ## 环境变量
 
-| 变量                 | 说明                                                                  |
-| -------------------- | --------------------------------------------------------------------- |
-| `DATABASE_URL`       | PostgreSQL 连接串，必填                                               |
-| `BETTER_AUTH_SECRET` | 至少 32 字符的认证密钥，必填；更换会使已有会话失效                    |
-| `BETTER_AUTH_URL`    | 用户实际访问的应用地址，必填                                          |
-| `WEB_ORIGIN`         | 允许的浏览器来源，必填；与应用地址一致                                |
-| `SERVER_PORT`        | API 端口，默认 `3001`                                                 |
-| `ADMINS`             | 逗号分隔的保留管理员用户名，默认 `admin`                              |
-| `WORKSPACE_ROOT`     | 会话文件及技能的根目录，默认 `workspaces`                             |
-| `NODE_ENV`           | 默认 `development`；生产设为 `production`，认证地址与来源需使用 HTTPS |
-| `TEST_DATABASE_URL`  | 测试专用 PostgreSQL 连接串；未设置时跳过数据库集成测试                |
+| 变量                 | 说明                                                                   |
+| -------------------- | ---------------------------------------------------------------------- |
+| `DATABASE_URL`       | PostgreSQL 连接串，必填                                                |
+| `BETTER_AUTH_SECRET` | 至少 32 字符的认证密钥，必填；更换会使已有会话失效                     |
+| `BETTER_AUTH_URL`    | 认证主地址，必填；保留一个完整 URL                                     |
+| `WEB_ORIGIN`         | 默认浏览器入口，必填；决定 Vite 端口和 VS Code 打开地址                |
+| `WEB_ORIGINS`        | 可选的额外来源白名单，逗号分隔；认证与 API 共用，自动包含 `WEB_ORIGIN` |
+| `WEB_HOST`           | Vite 开发监听地址，默认 `0.0.0.0`                                      |
+| `SERVER_HOST`        | API 监听地址，默认 `0.0.0.0`                                           |
+| `SERVER_PORT`        | 内部 API 端口，默认 `3001`；Vite 的 `/api` 代理读取同一配置            |
+| `ADMINS`             | 逗号分隔的保留管理员用户名，默认 `admin`                               |
+| `WORKSPACE_ROOT`     | 会话文件及技能的根目录，默认 `workspaces`                              |
+| `NODE_ENV`           | 默认 `development`；生产设为 `production`，认证地址与来源需使用 HTTPS  |
+| `TEST_DATABASE_URL`  | 测试专用 PostgreSQL 连接串；未设置时跳过数据库集成测试                 |
 
 ## 开发与验证
 
@@ -226,7 +281,7 @@ workspaces/
 | `pnpm start`             | 启动编译后的 API；前端静态文件需另行托管  |
 | `pnpm providers:catalog` | 更新供应商能力目录                        |
 
-VS Code 已提供 **Aime Hub：全栈调试** 启动配置，可在完成环境配置后按 F5 使用。
+VS Code 已提供 **Aime Hub：全栈调试** 启动配置，可在完成环境配置后按 F5 使用。调试器先启动 API，待后端就绪后启动 Vite，再自动打开 `WEB_ORIGIN` 对应的 Chrome 调试窗口；前后端均监听 `0.0.0.0` 并支持断点。停止主调试会话会一并停止 Vite 和浏览器调试。启动前请先停止占用相同端口的 `pnpm dev`，端口被占用时 Vite 会报错，不会自动改用另一个端口。
 
 提交前建议运行：
 
@@ -287,7 +342,7 @@ docs/                        # 设计与模块文档
 - `/api/threads/events`、`/api/threads/:threadId/messages`：Hono SSE，保留独立订阅、心跳、权限复查和断开清理。取消订阅不会停止服务端执行。
 - `/api/threads/:threadId/files/raw`：Hono 文件响应，保留权限检查、Range / HEAD、下载与内容安全响应头。
 
-新增业务接口先增加共享契约，再实现对应模块过程，最后通过类型化客户端调用。会话和管理员检查在 oRPC 中间件中执行，非安全 HTTP 方法（包括 RPC POST）要求匹配 `WEB_ORIGIN`；HTTP 和 RPC 共用业务权限检查及稳定错误码。API 时间字段显式转换为 ISO 字符串，避免 RPC 的 Date 支持改变既有 DTO。
+新增业务接口先增加共享契约，再实现对应模块过程，最后通过类型化客户端调用。会话和管理员检查在 oRPC 中间件中执行，非安全 HTTP 方法（包括 RPC POST）要求匹配 `WEB_ORIGIN` / `WEB_ORIGINS` 的来源白名单；HTTP 和 RPC 共用业务权限检查及稳定错误码。API 时间字段显式转换为 ISO 字符串，避免 RPC 的 Date 支持改变既有 DTO。
 
 本次迁移不改变数据库结构；开发、构建、启动命令和同域 `/api/*` 代理规则保持不变。框架参考：[TanStack Router](https://tanstack.com/router/latest/docs/quick-start)、[Hono Node.js](https://hono.dev/docs/getting-started/nodejs)、[oRPC Contract First](https://v1.orpc.dev/docs/contract-first/implement-contract)。
 
@@ -295,7 +350,7 @@ docs/                        # 设计与模块文档
 
 当前部署方式为 **单个 API 实例 + PostgreSQL + 持久工作目录 + 同域前端静态服务**。执行队列、事件广播和部分限流状态由单进程持有，多实例部署前需要共享执行锁、事件通道及限流存储。
 
-1. 配置生产环境变量，设置 `NODE_ENV=production`，使用 HTTPS 的 `BETTER_AUTH_URL` 和 `WEB_ORIGIN`。
+1. 配置生产环境变量，设置 `NODE_ENV=production`，`BETTER_AUTH_URL`、`WEB_ORIGIN` 和 `WEB_ORIGINS` 中的所有来源均须使用 HTTPS。
 2. 在仓库根目录执行 `pnpm install --frozen-lockfile`、`pnpm db:migrate`、`pnpm build`。
 3. 使用进程管理器运行 `pnpm start`。API 仅监听 `127.0.0.1`，反向代理需能访问该回环地址。
 4. 托管 `apps/web/dist`，为 SPA 路由提供 `index.html` 回退，将同域 `/api/*` 转发至 API。
@@ -303,9 +358,25 @@ docs/                        # 设计与模块文档
 
 应用默认不信任转发头，代理部署的登录限流可能按代理地址共享额度。公网部署应根据实际拓扑配置可信代理与真实客户端 IP。当前未实现邮件验证、找回密码或邮件发送；注册邮箱仅用作账号标识。
 
+## 自动化通知
+
+任务完成或失败后，登录用户会收到右上角的 shadcn Base UI Toast，独立于任务的「桌面通知」开关。开启开关后使用 Web Push + Service Worker，即使关闭网页也可收到通知。个人任务发给创建者，项目任务发给当前项目成员，系统任务发给当前管理员。各浏览器需要单独允许通知；通知订阅绑定当前登录会话，退出或会话到期后停止投递。
+
+部署桌面推送：
+
+1. 执行 `pnpm --filter @aime/server exec web-push generate-vapid-keys --json`，生成一次并妥善保存密钥对。
+2. 在 `.env` 设置 `WEB_PUSH_PUBLIC_KEY`、`WEB_PUSH_PRIVATE_KEY` 和 `WEB_PUSH_SUBJECT`（真实的 HTTPS 联系页面或 `mailto:` 联系邮箱），重启 API。公钥可以传给浏览器，私钥只留在服务器。
+3. 执行 `pnpm db:migrate`。新增 `automation_notifications` 保存通知事件、`web_push_subscriptions` 保存浏览器订阅；任务开关仍保存在 Mastra schedule 的 metadata 中。
+4. 生产环境通过 HTTPS 同域提供 `/notification-sw.js` 与 `/api/*`，Service Worker 脚本不做 SPA 回退或长期缓存；开发环境可使用 localhost。HTTP 局域网地址不支持浏览器通知。
+5. 在任务编辑窗口开启「桌面通知」并允许浏览器通知，然后保存任务。其他有权限的成员可通过管理页的「在此浏览器启用」注册自己的设备，无需任务编辑权限。
+
+支持 Chrome/Edge、Firefox、Safari 使用的标准推送服务。移动端还需满足浏览器的安装要求（例如 iOS 的主屏幕 Web App）。操作系统或浏览器完全退出、禁用后台活动或通知时，实际到达时间由浏览器和系统控制。推送仅携带通知 ID；Service Worker 会再次校验当前账号权限后读取标题并展示。通知传输失败不改变任务执行结果，失效订阅会自动清除。页面断线后使用持久游标补收通知。
+
+参考：[shadcn Toast](https://ui.shadcn.com/docs/components/base/toast)、[MDN Push API](https://developer.mozilla.org/en-US/docs/Web/API/Push_API)、[web-push](https://github.com/web-push-libs/web-push)。
+
 ## 常见问题
 
-- **登录或退出报 `Invalid origin`**：对照浏览器地址检查 `BETTER_AUTH_URL`、`WEB_ORIGIN`，修正后重启服务。
+- **登录、退出或 API 报来源/权限错误**：确认浏览器来源在 `WEB_ORIGIN` / `WEB_ORIGINS` 中，协议、主机和端口均需一致；修改后重启服务。管理员权限和项目成员权限仍单独校验。
 - **提示 `环境配置无效`**：检查错误列出的变量；`BETTER_AUTH_SECRET` 不能为空且至少 32 字符。
 - **数据库连接报 `ECONNREFUSED`**：确认 PostgreSQL 已启动，连接串的地址、端口、库名及凭据正确。
 - **前端可打开但 `/api/health` 失败**：查看 API 日志，检查数据库连接及迁移是否完成。

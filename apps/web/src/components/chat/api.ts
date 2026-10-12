@@ -27,6 +27,11 @@ export const chatApi = {
     input: Partial<ChatSettings> & { title?: string },
   ) => api.threads.update({ params: { threadId }, body: input }),
   remove: (threadId: string) => api.threads.remove({ params: { threadId } }),
+  archived: (signal?: AbortSignal) =>
+    api.threads.archived(undefined, { signal }),
+  restore: (threadId: string) => api.threads.restore({ params: { threadId } }),
+  removeArchived: (threadId: string) =>
+    api.threads.removeArchived({ params: { threadId } }),
   run: (threadId: string, input: RunInput) =>
     api.threads.run({ params: { threadId }, body: input }),
   history: (
@@ -85,12 +90,26 @@ export function chatErrorKey(error: unknown) {
       ? error
       : '';
   switch (code) {
+    case 'AGENT_NOT_FOUND':
+      return 'agents.selectionUnavailable';
+    case 'AGENT_NOT_PUBLISHED':
+      return 'agents.notPublished';
+    case 'AGENT_CHANGE_BUSY':
+      return 'chat.agentBusy';
+    case 'AGENT_SKILL_UNAVAILABLE':
+      return 'agents.skillUnavailable';
+    case 'AGENT_MODEL_UNAVAILABLE':
+      return 'agents.modelUnavailable';
     case 'UNAUTHORIZED':
       return 'errors.sessionExpired';
     case 'FORBIDDEN':
       return 'errors.forbidden';
     case 'THREAD_NOT_FOUND':
       return 'chat.errors.notFound';
+    case 'THREAD_NOT_ARCHIVED':
+      return 'personalSettings.notArchived';
+    case 'WORKSPACE_UNAVAILABLE':
+      return 'personalSettings.workspaceUnavailable';
     case 'PROJECT_NOT_FOUND':
       return 'projects.errors.notFound';
     case 'PROJECT_BUSY':

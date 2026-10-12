@@ -1,10 +1,13 @@
 import { ChatRequestLog } from '@aime/db';
-import type {
-  CapturedChatRequest,
-  RequestLogDetail,
-  RequestLogPage,
-  RequestLogQuery,
-  RequestLogSummary,
+import { truncateJsonBody } from '@aime/shared/log-json';
+import {
+  requestLogContextFields,
+  type CapturedChatRequest,
+  type CapturedChatResponse,
+  type RequestLogDetail,
+  type RequestLogPage,
+  type RequestLogQuery,
+  type RequestLogSummary,
 } from '@aime/shared/request-logs';
 import { ORPCError } from '@orpc/server';
 import type { DataSource } from 'typeorm';
@@ -15,10 +18,21 @@ function summary(row: ChatRequestLog): RequestLogSummary {
     createdAt: row.createdAt.toISOString(),
     method: row.method,
     url: row.url,
+    threadId: row.threadId,
+    resourceId: row.resourceId,
+    userId: row.userId,
+    projectId: row.projectId,
     model: row.model,
     stream: row.stream,
     status: row.status,
     bodyBytes: row.bodyBytes,
+    durationMs: row.durationMs,
+    httpStatus: row.httpStatus,
+    responseStatus: row.responseStatus,
+    responseContentType: row.responseContentType,
+    responseContentEncoding: row.responseContentEncoding,
+    responseBytes: row.responseBytes,
+    responseBodyEncoding: row.responseBodyEncoding,
   };
 }
 
@@ -53,11 +67,16 @@ export class RequestLogService {
           createdAt: new Date(request.createdAt),
           method: request.method,
           url: request.url,
+          threadId: request.threadId,
+          resourceId: request.resourceId,
+          userId: request.userId,
+          projectId: request.projectId,
           model,
           stream,
           status: request.complete ? 'complete' : 'incomplete',
           bodyBytes: Buffer.byteLength(request.body, 'utf8'),
-          body: request.body,
+          body: truncateJsonBody(request.body),
+          responseStatus: 'pending',
         });
       })
       .catch(() => {
@@ -69,14 +88,30 @@ export class RequestLogService {
     return this.pending;
   }
 
+  /** Use the same queue so a fast response cannot overtake its request insert. */
+  recordResponse(response: CapturedChatResponse): void {
+    const { id, ...fields } = response;
+    this.pending = this.pending
+      .then(async () => {
+        await this.repository.update(id, fields);
+      })
+      .catch(() => {
+        console.error('Failed to persist chat response log', id);
+      });
+  }
+
   async list(input: RequestLogQuery): Promise<RequestLogPage> {
     const query = this.repository.createQueryBuilder('log');
     if (input.status !== 'all')
       query.andWhere('log.status = :status', { status: input.status });
+    for (const field of requestLogContextFields) {
+      if (input[field])
+        query.andWhere(`log.${field} = :${field}`, { [field]: input[field] });
+    }
     if (input.search) {
       const search = `%${input.search.replace(/[\\%_]/g, '\\$&')}%`;
       query.andWhere(
-        '(log.model ILIKE :search OR log.url ILIKE :search OR CAST(log.id AS text) ILIKE :search)',
+        '(log.model ILIKE :search OR log.url ILIKE :search OR CAST(log.id AS text) ILIKE :search OR log.threadId ILIKE :search OR log.resourceId ILIKE :search OR log.userId ILIKE :search OR log.projectId ILIKE :search)',
         { search },
       );
     }
@@ -109,9 +144,10 @@ export class RequestLogService {
     const row = await this.repository
       .createQueryBuilder('log')
       .addSelect('log.body')
+      .addSelect('log.responseBody')
       .where('log.id = :id', { id })
       .getOne();
     if (!row) throw new ORPCError('NOT_FOUND');
-    return { ...summary(row), body: row.body };
+    return { ...summary(row), body: row.body, responseBody: row.responseBody };
   }
 }

@@ -1,12 +1,13 @@
-import { requestWebResource, webUrl } from './web-request.js';
-import type {
-  WebFetchOptions,
-  WebFetchProvider,
-  WebFetchResult,
-} from './web-fetch.js';
+import { requestWebResource, webUrl } from '../web/request.js';
+import {
+  BaseProvider,
+  type WebFetchOptions,
+  type WebFetchResult,
+} from './base-provider.js';
 
-export class JinaAIProvider implements WebFetchProvider {
-  readonly id = 'jina-ai';
+export class JinaAIProvider extends BaseProvider {
+  readonly name = 'jina-ai';
+  readonly type = 'jina-ai';
   constructor(
     private readonly config: {
       baseUrl: string;
@@ -14,7 +15,9 @@ export class JinaAIProvider implements WebFetchProvider {
       timeoutMs: number;
     },
     private readonly request = requestWebResource,
-  ) {}
+  ) {
+    super({ provider: { id: 'jina-ai', ...config } });
+  }
 
   async webFetch(
     url: string,

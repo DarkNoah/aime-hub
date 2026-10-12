@@ -18,10 +18,12 @@ export function ChatSettingsFields({
   value,
   onChange,
   disabled,
+  modelOverride,
 }: {
   value: ChatSettings;
   onChange: (settings: ChatSettings) => void;
   disabled?: boolean;
+  modelOverride?: string | null;
 }) {
   const { t } = useTranslation();
   const floating = useContext(FloatingChatContext);
@@ -38,12 +40,12 @@ export function ChatSettingsFields({
   const label = t(`chat.reasoning.${efforts[level]}`);
   return (
     <>
-      <div className="min-w-0 max-w-[min(11rem,38cqw)]">
+      <div className="min-w-0 max-w-[min(11rem,38cqw)] flex-1">
         <ModelSelector
           label={t('chat.model')}
-          value={value.model ?? defaults?.defaultModel ?? null}
+          value={modelOverride ?? value.model ?? defaults?.defaultModel ?? null}
           onValueChange={(model) => onChange({ ...value, model })}
-          disabled={disabled}
+          disabled={disabled || !!modelOverride}
           allowNone={false}
           textOnly
           compact

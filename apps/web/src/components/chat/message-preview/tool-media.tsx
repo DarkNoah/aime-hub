@@ -3,6 +3,7 @@ import { Download } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { PreviewImage } from '@/components/image-viewer/preview-image';
 import type { ReadFileBlock } from './read-file-output';
 
 export function ToolMedia({
@@ -57,12 +58,11 @@ export function ToolMedia({
             {t(source ? 'files.mediaError' : 'chat.readFile.mediaUnavailable')}
           </p>
         ) : kind === 'image' ? (
-          <img
+          <PreviewImage
             src={source}
             alt={name}
             loading="lazy"
             referrerPolicy="no-referrer"
-            className="mx-auto max-h-[60vh] max-w-full rounded object-contain"
             onError={onError}
           />
         ) : kind === 'audio' ? (

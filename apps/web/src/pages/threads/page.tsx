@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from '@tanstack/react-router';
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChatPanel } from '@/components/chat';
@@ -8,7 +8,10 @@ import { useThreadList } from './use-thread-list';
 
 export function ThreadsPage() {
   const { threadId } = useParams({ strict: false });
-  return <ThreadPageSession key={threadId ?? 'new'} threadId={threadId} />;
+  const { draft } = useSearch({ strict: false });
+  return (
+    <ThreadPageSession key={threadId ?? draft ?? 'new'} threadId={threadId} />
+  );
 }
 
 function ThreadPageSession({ threadId }: { threadId?: string }) {

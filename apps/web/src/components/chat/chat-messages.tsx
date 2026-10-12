@@ -1,7 +1,6 @@
-import { memo } from 'react';
+import { Fragment, memo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Copy, LoaderCircle, ScanText } from 'lucide-react';
-import { toast } from 'sonner';
+import { LoaderCircle, ScanText } from 'lucide-react';
 import { isToolUIPart, type UIMessage } from 'ai';
 import type { ToolInteraction, ToolResponse } from '@aime/shared/threads';
 import {
@@ -30,7 +29,9 @@ import {
 } from '@/components/ai-elements/tool';
 import { Button } from '@/components/ui/button';
 import { ChatBackgroundTask } from './chat-background-task';
+import { ChatMessageActions } from './chat-message-actions';
 import { ChatMessageCompression } from './chat-message-compression';
+import { ChatToolAttachments } from './chat-tool-attachments';
 import { ChatToolRenderer } from './tool-renderers';
 import { useMessagePreview } from './message-preview/context';
 import {
@@ -131,10 +132,6 @@ export const ChatMessage = memo(function ChatMessage({
       new Set(toolInteractions.map((item) => item.toolCallId)),
     );
   if (message.parts.length > 0 && groupedParts.length === 0) return null;
-  const text = message.parts
-    .filter((part) => part.type === 'text')
-    .map((part) => part.text)
-    .join('\n');
   const lastReasoningIndex = message.parts.reduce(
     (last, part, index) => (part.type === 'reasoning' ? index : last),
     -1,
@@ -163,52 +160,57 @@ export const ChatMessage = memo(function ChatMessage({
           }
           if (item.type === 'tools') {
             return (
-              <ChainOfThought
-                // Reset the default only when the message becomes history.
-                key={`${item.id}:${isLastMessage ? 'last-message' : 'history'}`}
-                defaultOpen={false}
-                className="min-w-0"
-              >
-                <ChainOfThoughtHeader>
-                  {t('chat.toolGroup', { count: item.tools.length })}
-                </ChainOfThoughtHeader>
-                <ChainOfThoughtContent>
-                  {item.tools.map((tool) => (
-                    <ChainOfThoughtStep
-                      key={tool.toolCallId}
-                      status={
-                        tool.state.startsWith('output-')
-                          ? 'complete'
-                          : tool.state === 'input-streaming'
-                            ? 'pending'
-                            : 'active'
-                      }
-                      label={
-                        <Tool defaultOpen={false} className="mb-0">
-                          <ToolHeader
-                            {...(tool.type === 'dynamic-tool'
-                              ? { type: tool.type, toolName: tool.toolName }
-                              : { type: tool.type })}
-                            state={tool.state}
-                            onPreview={
-                              openPreview ? () => openPreview(tool) : undefined
-                            }
-                          />
-                          <ToolContent>
-                            {tool.input !== undefined && (
-                              <ToolInput input={tool.input} />
-                            )}
-                            <ToolOutput
-                              output={tool.output}
-                              errorText={tool.errorText}
+              <Fragment key={item.id}>
+                <ChainOfThought
+                  // Reset the default only when the message becomes history.
+                  key={`${item.id}:${isLastMessage ? 'last-message' : 'history'}`}
+                  defaultOpen={false}
+                  className="min-w-0"
+                >
+                  <ChainOfThoughtHeader>
+                    {t('chat.toolGroup', { count: item.tools.length })}
+                  </ChainOfThoughtHeader>
+                  <ChainOfThoughtContent>
+                    {item.tools.map((tool) => (
+                      <ChainOfThoughtStep
+                        key={tool.toolCallId}
+                        status={
+                          tool.state.startsWith('output-')
+                            ? 'complete'
+                            : tool.state === 'input-streaming'
+                              ? 'pending'
+                              : 'active'
+                        }
+                        label={
+                          <Tool defaultOpen={false} className="mb-0">
+                            <ToolHeader
+                              {...(tool.type === 'dynamic-tool'
+                                ? { type: tool.type, toolName: tool.toolName }
+                                : { type: tool.type })}
+                              state={tool.state}
+                              onPreview={
+                                openPreview
+                                  ? () => openPreview(tool)
+                                  : undefined
+                              }
                             />
-                          </ToolContent>
-                        </Tool>
-                      }
-                    />
-                  ))}
-                </ChainOfThoughtContent>
-              </ChainOfThought>
+                            <ToolContent>
+                              {tool.input !== undefined && (
+                                <ToolInput input={tool.input} />
+                              )}
+                              <ToolOutput
+                                output={tool.output}
+                                errorText={tool.errorText}
+                              />
+                            </ToolContent>
+                          </Tool>
+                        }
+                      />
+                    ))}
+                  </ChainOfThoughtContent>
+                </ChainOfThought>
+                <ChatToolAttachments tools={item.tools} />
+              </Fragment>
             );
           }
           const { part, index } = item;
@@ -307,23 +309,7 @@ export const ChatMessage = memo(function ChatMessage({
           return null;
         })}
       </MessageContent>
-      {message.role === 'assistant' && text && !streaming && (
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="mt-1 size-7 text-muted-foreground"
-          aria-label={t('chat.copy')}
-          title={t('chat.copy')}
-          onClick={() =>
-            void navigator.clipboard
-              .writeText(text)
-              .then(() => toast.success(t('chat.copied')))
-              .catch(() => toast.error(t('errors.generic')))
-          }
-        >
-          <Copy className="size-3.5" aria-hidden="true" />
-        </Button>
-      )}
+      <ChatMessageActions message={message} streaming={streaming} />
       {streaming && (
         <LoaderCircle
           className="mb-2 size-3 animate-spin text-muted-foreground"

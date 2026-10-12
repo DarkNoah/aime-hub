@@ -24,7 +24,7 @@ try {
     pool,
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
-    webOrigin: env.WEB_ORIGIN,
+    webOrigin: env.WEB_ORIGINS,
     admins: env.ADMINS,
   });
   // Trusted local call: no HTTP request or headers. User management remains in the admin plugin.

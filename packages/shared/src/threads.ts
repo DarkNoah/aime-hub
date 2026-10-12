@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ProjectSummary } from './projects.js';
+import { agentIdSchema } from './agents.js';
 
 export const thinkingLevels = [
   'none',
@@ -15,6 +16,7 @@ export const reasoningEffortSchema = z.enum(reasoningEfforts);
 export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
 export const chatSettingsSchema = z
   .object({
+    agentId: agentIdSchema.nullable().optional(),
     model: z.string().min(3).max(512).nullable().default(null),
     reasoningEffort: reasoningEffortSchema.default('auto'),
   })
@@ -37,6 +39,7 @@ export const createThreadSchema = chatSettingsSchema.extend({
 export const updateThreadSchema = z
   .object({
     title: z.string().trim().min(1).max(120).optional(),
+    agentId: chatSettingsSchema.shape.agentId,
     model: chatSettingsSchema.shape.model.removeDefault().optional(),
     reasoningEffort: reasoningEffortSchema.optional(),
   })
@@ -180,6 +183,7 @@ export type ThreadSummary = ChatSettings & {
   projectId?: string | null;
   createdBy?: string;
   title: string;
+  archivedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   status: ThreadStatus;
@@ -255,9 +259,19 @@ export type ThreadList = {
 };
 // Navigation carries summaries only; message streams remain scoped to the open chat.
 export type ThreadNavigationEvent =
-  | { type: 'snapshot'; threads: ThreadSummary[]; projects: ProjectSummary[] }
+  | {
+      type: 'snapshot';
+      threads: ThreadSummary[];
+      projects: ProjectSummary[];
+      archivedThreads?: ThreadSummary[];
+    }
   | { type: 'upsert'; thread: ThreadSummary }
-  | { type: 'remove'; id: string; projectId: string | null }
+  | {
+      type: 'remove';
+      id: string;
+      projectId: string | null;
+      archivedThread?: ThreadSummary;
+    }
   | { type: 'project-removed'; projectId: string };
 export type MessagePage<Message> = {
   messages: Message[];

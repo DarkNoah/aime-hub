@@ -29,8 +29,12 @@ for (const approvalAction of [undefined, 'approve', 'decline'] as const) {
         },
       });
     let count = 0;
+    const requestHeaders: Array<
+      Record<string, string | undefined> | undefined
+    > = [];
     const model = new MastraLanguageModelV2Mock({
-      doStream: async () => {
+      doStream: async ({ headers }) => {
+        requestHeaders.push(headers);
         count++;
         return {
           stream: chunks(
@@ -94,6 +98,16 @@ for (const approvalAction of [undefined, 'approve', 'decline'] as const) {
     try {
       const settings = { model: null, reasoningEffort: 'auto' } as const;
       const thread = await service.createThread('alice', settings);
+      const checkHeaders = () => {
+        assert.ok(requestHeaders.length > 0);
+        for (const headers of requestHeaders) {
+          // Includes the first step and the resumed tool continuation.
+          assert.equal(headers?.['x-thread-id'], thread.id);
+          assert.equal(headers?.['x-resource-id'], 'user:alice');
+          assert.equal(headers?.['x-user-id'], 'alice');
+          assert.equal(headers?.['x-project-id'], undefined);
+        }
+      };
       const waitFor = async (check: () => Promise<boolean>) => {
         for (let i = 0; i < 300; i++) {
           if (await check()) return;
@@ -130,6 +144,7 @@ for (const approvalAction of [undefined, 'approve', 'decline'] as const) {
               'success',
           );
           assert.equal(count, 2);
+          checkHeaders();
           return;
         }
         await waitFor(
@@ -157,6 +172,7 @@ for (const approvalAction of [undefined, 'approve', 'decline'] as const) {
       const messages = (
         await service.getThread('alice', thread.id)
       ).messages.filter((message) => message.role === 'assistant');
+      checkHeaders();
       assert.equal(messages.length, 2, JSON.stringify(messages, null, 2));
       assert.equal(
         messages

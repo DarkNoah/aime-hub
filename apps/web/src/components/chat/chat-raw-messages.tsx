@@ -1,5 +1,6 @@
 import { memo, useDeferredValue, useMemo } from 'react';
 import type { UIMessage } from 'ai';
+import { stringifyLogJson } from '@aime/shared/log-json';
 import { Copy, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -19,15 +20,15 @@ export const ChatRawMessages = memo(function ChatRawMessages({
 }) {
   const { t } = useTranslation();
   const deferredMessages = useDeferredValue(messages);
-  // Preserve every field, including tool parts and metadata, without formatting during a drag.
+  // Shorten media payloads without mutating messages or formatting during a drag.
   const json = useMemo(
-    () => JSON.stringify(deferredMessages, null, 2),
+    () => stringifyLogJson(deferredMessages, 2),
     [deferredMessages],
   );
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <header className="flex min-h-16 shrink-0 items-center gap-2 border-b px-3">
+      <header className="flex min-h-12 shrink-0 items-center gap-2 border-b px-3">
         <h2 className="min-w-0 flex-1 truncate text-sm font-medium">
           {t('chat.inspector.title')}
         </h2>
@@ -41,7 +42,7 @@ export const ChatRawMessages = memo(function ChatRawMessages({
           onClick={async () => {
             try {
               await navigator.clipboard.writeText(
-                JSON.stringify(messages, null, 2),
+                stringifyLogJson(messages, 2),
               );
               toast.success(t('chat.inspector.copied'));
             } catch {

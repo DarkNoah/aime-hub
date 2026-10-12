@@ -40,6 +40,7 @@ export type ChatSessionContext = {
 /** Mastra owns input scheduling. This interface only submits and observes it. */
 export interface ChatSession {
   send(input: RunInput): Promise<void>;
+  generateTitle(input: RunInput): Promise<string | undefined>;
   compact(): Promise<{ observed: boolean }>;
   clearGoal(): Promise<void>;
   respond(

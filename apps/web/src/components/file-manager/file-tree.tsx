@@ -14,9 +14,13 @@ import type { FileManagerState } from './use-file-manager';
 export function FileTree({
   state,
   onAction,
+  onUpload,
+  dropTarget,
 }: {
   state: FileManagerState;
   onAction: (action: EntryAction) => void;
+  onUpload: (directory: string) => void;
+  dropTarget: string | null;
 }) {
   const { t } = useTranslation();
   return (
@@ -58,7 +62,14 @@ export function FileTree({
         event.preventDefault();
       }}
     >
-      <Directory path="" state={state} onAction={onAction} depth={0} />
+      <Directory
+        path=""
+        state={state}
+        onAction={onAction}
+        onUpload={onUpload}
+        dropTarget={dropTarget}
+        depth={0}
+      />
     </ElementsFileTree>
   );
 }
@@ -67,11 +78,15 @@ function Directory({
   path,
   state,
   onAction,
+  onUpload,
+  dropTarget,
   depth,
 }: {
   path: string;
   state: FileManagerState;
   onAction: (action: EntryAction) => void;
+  onUpload: (directory: string) => void;
+  dropTarget: string | null;
   depth: number;
 }) {
   const { t } = useTranslation();
@@ -159,7 +174,12 @@ function Directory({
             name={entry.isMount ? `${entry.path}` : entry.name}
             className="min-w-0 rounded outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             renderRow={(row) => (
-              <EntryActions entry={entry} onAction={onAction}>
+              <EntryActions
+                entry={entry}
+                onAction={onAction}
+                onUpload={onUpload}
+                dropTarget={dropTarget === entry.path}
+              >
                 {row}
                 {entry.isMount && (
                   <Badge
@@ -176,16 +196,25 @@ function Directory({
             {...nodeProps}
           >
             {open && (
-              <Directory
-                path={entry.path}
-                state={state}
-                onAction={onAction}
-                depth={depth + 1}
-              />
+              <div data-upload-directory={entry.path}>
+                <Directory
+                  path={entry.path}
+                  state={state}
+                  onAction={onAction}
+                  onUpload={onUpload}
+                  dropTarget={dropTarget}
+                  depth={depth + 1}
+                />
+              </div>
             )}
           </FileTreeFolder>
         ) : (
-          <EntryActions key={entry.path} entry={entry} onAction={onAction}>
+          <EntryActions
+            key={entry.path}
+            entry={entry}
+            onAction={onAction}
+            onUpload={onUpload}
+          >
             <FileTreeFile
               path={entry.path}
               name={entry.name}

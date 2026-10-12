@@ -69,6 +69,7 @@ export function createChatPreferencesResource(
     save(settings: ChatSettings): Promise<boolean> {
       if (
         settings.model === snapshot.settings.model &&
+        (settings.agentId ?? null) === (snapshot.settings.agentId ?? null) &&
         settings.reasoningEffort === snapshot.settings.reasoningEffort
       )
         return Promise.resolve(false);

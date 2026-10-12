@@ -6,14 +6,20 @@ import type { Auth } from '@aime/auth';
 import { requireSession, type HttpEnv } from '../../http.js';
 import type { ThreadService } from '../threads/service.js';
 import { fileError } from './paths.js';
+import { uploadRoutes } from './upload-routes.js';
 import {
   localWorkspaceFile,
   previewWorkspaceFile,
   streamWorkspaceFile,
 } from './workspace-files.js';
 
-export function fileRoutes(auth: Auth, service: ThreadService) {
+export function fileRoutes(
+  auth: Auth,
+  service: ThreadService,
+  webOrigins: readonly string[] = [],
+) {
   const router = new Hono<HttpEnv>();
+  router.route('/uploads', uploadRoutes(auth, service, webOrigins));
   router.get('/raw', requireSession(auth), async (c, next) => {
     try {
       const userId = c.get('userId');

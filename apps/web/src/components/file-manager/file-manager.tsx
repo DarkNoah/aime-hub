@@ -8,6 +8,7 @@ import {
   RotateCw,
   Search,
   X,
+  Upload,
 } from 'lucide-react';
 import type { FileSearch } from '@aime/shared/files';
 import { useTranslation } from 'react-i18next';
@@ -28,6 +29,8 @@ import { EntryDialog } from './entry-dialog';
 import { FileTree } from './file-tree';
 import { FilePreview } from './file-preview';
 import type { FileManagerState } from './use-file-manager';
+import { UploadDropZone } from './upload-drop-zone';
+import { UploadList } from './upload-list';
 
 export default function FileManager({
   state,
@@ -39,6 +42,14 @@ export default function FileManager({
   const { t } = useTranslation();
   const [action, setAction] = useState<EntryAction | null>(null);
   const [query, setQuery] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  const uploadDirectory = useRef('');
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  function chooseUpload(directory: string) {
+    state.setCurrentDirectory(directory);
+    uploadDirectory.current = directory;
+    inputRef.current?.click();
+  }
   const containerRef = useRef<HTMLElement>(null);
   const [stacked, setStacked] = useState(false);
   const activeTabRef = useRef<HTMLButtonElement>(null);
@@ -106,6 +117,20 @@ export default function FileManager({
           variant="ghost"
           size="icon-sm"
           disabled={!available}
+          aria-label={t('files.upload')}
+          title={t('files.uploadTo', {
+            path: state.currentDirectory
+              ? `/${state.currentDirectory}`
+              : t('files.root'),
+          })}
+          onClick={() => chooseUpload(state.currentDirectory)}
+        >
+          <Upload className="size-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          disabled={!available}
           aria-label={t('files.createFile')}
           title={t('files.createFile')}
           onClick={() =>
@@ -146,6 +171,19 @@ export default function FileManager({
           <PanelRightClose className="size-4" />
         </Button>
       </header>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        className="hidden"
+        aria-label={t('files.upload')}
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          event.target.value = '';
+          if (files.length)
+            state.uploads.enqueue(files, uploadDirectory.current);
+        }}
+      />
       {!available ? (
         <div className="m-auto max-w-xs px-5 py-12 text-center text-sm text-muted-foreground">
           <Files className="mx-auto mb-3 size-8" />
@@ -186,99 +224,125 @@ export default function FileManager({
                 )}
               </div>
             </div>
-            <ScrollArea
-              className="min-h-0 flex-1"
-              viewportProps={{ className: '[&>div]:!block' }}
+            <UploadDropZone
+              target={dropTarget}
+              onTargetChange={setDropTarget}
+              onFiles={state.uploads.enqueue}
+              onChoose={chooseUpload}
             >
-              {trimmed ? (
-                <div className="p-2" aria-live="polite">
-                  {!result && (
-                    <p
-                      role="status"
-                      className="p-2 text-xs text-muted-foreground"
-                    >
-                      {t('files.searching')}
-                    </p>
-                  )}
-                  {result?.error && (
-                    <div role="alert" className="p-2 text-xs text-destructive">
-                      {t(result.error)}
-                      <Button variant="ghost" size="sm" onClick={state.refresh}>
-                        {t('files.retry')}
-                      </Button>
-                    </div>
-                  )}
-                  {result?.data && (
-                    <>
-                      <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
-                        <span>{t('files.results')}</span>
-                        <Badge variant="secondary">
-                          {result.data.matches.length}
-                        </Badge>
+              <ScrollArea
+                className="min-h-0 flex-1"
+                viewportProps={{ className: '[&>div]:!block' }}
+              >
+                {trimmed ? (
+                  <div className="p-2" aria-live="polite">
+                    {!result && (
+                      <p
+                        role="status"
+                        className="p-2 text-xs text-muted-foreground"
+                      >
+                        {t('files.searching')}
+                      </p>
+                    )}
+                    {result?.error && (
+                      <div
+                        role="alert"
+                        className="p-2 text-xs text-destructive"
+                      >
+                        {t(result.error)}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={state.refresh}
+                        >
+                          {t('files.retry')}
+                        </Button>
                       </div>
-                      {!result.data.matches.length && (
-                        <p className="p-2 text-xs text-muted-foreground">
-                          {t('files.noResults')}
-                        </p>
-                      )}
-                      {[...groups].map(([path, matches]) => (
-                        <div key={path} className="mb-1">
-                          <EntryActions entry={matches[0]} onAction={setAction}>
-                            <button
-                              type="button"
-                              className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-2 py-2 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                              title={path}
-                              onClick={() => state.openFile(path)}
-                            >
-                              <File className="size-3.5 shrink-0" />
-                              <span className="truncate font-medium">
-                                {matches[0].name}
-                              </span>
-                              <span className="ml-1 truncate text-[11px] text-muted-foreground">
-                                {path.includes('/')
-                                  ? path.slice(0, path.lastIndexOf('/'))
-                                  : ''}
-                              </span>
-                              {matches[0].line && (
-                                <Badge
-                                  variant="secondary"
-                                  className="ml-auto shrink-0 text-[10px]"
-                                >
-                                  {matches.length}
-                                </Badge>
-                              )}
-                            </button>
-                          </EntryActions>
-                          {matches
-                            .filter((match) => match.line !== undefined)
-                            .map((match) => (
-                              <button
-                                key={match.line}
-                                type="button"
-                                title={`${path}:${match.line}`}
-                                className="flex w-full min-w-0 items-baseline gap-2 rounded py-1 pr-2 pl-7 text-left font-mono text-xs hover:bg-muted/80 focus-visible:outline-ring"
-                                onClick={() => state.openFile(path, match.line)}
-                              >
-                                <span className="shrink-0 text-muted-foreground">
-                                  {match.line}
-                                </span>
-                                <span className="truncate">{match.text}</span>
-                              </button>
-                            ))}
+                    )}
+                    {result?.data && (
+                      <>
+                        <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
+                          <span>{t('files.results')}</span>
+                          <Badge variant="secondary">
+                            {result.data.matches.length}
+                          </Badge>
                         </div>
-                      ))}
-                      {result.data.truncated && (
-                        <p className="p-2 text-xs text-muted-foreground">
-                          {t('files.searchLimit')}
-                        </p>
-                      )}
-                    </>
-                  )}
-                </div>
-              ) : (
-                <FileTree state={state} onAction={setAction} />
-              )}
-            </ScrollArea>
+                        {!result.data.matches.length && (
+                          <p className="p-2 text-xs text-muted-foreground">
+                            {t('files.noResults')}
+                          </p>
+                        )}
+                        {[...groups].map(([path, matches]) => (
+                          <div key={path} className="mb-1">
+                            <EntryActions
+                              entry={matches[0]}
+                              onAction={setAction}
+                              onUpload={chooseUpload}
+                            >
+                              <button
+                                type="button"
+                                className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-2 py-2 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                title={path}
+                                onClick={() => state.openFile(path)}
+                              >
+                                <File className="size-3.5 shrink-0" />
+                                <span className="truncate font-medium">
+                                  {matches[0].name}
+                                </span>
+                                <span className="ml-1 truncate text-[11px] text-muted-foreground">
+                                  {path.includes('/')
+                                    ? path.slice(0, path.lastIndexOf('/'))
+                                    : ''}
+                                </span>
+                                {matches[0].line && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="ml-auto shrink-0 text-[10px]"
+                                  >
+                                    {matches.length}
+                                  </Badge>
+                                )}
+                              </button>
+                            </EntryActions>
+                            {matches
+                              .filter((match) => match.line !== undefined)
+                              .map((match) => (
+                                <button
+                                  key={match.line}
+                                  type="button"
+                                  title={`${path}:${match.line}`}
+                                  className="flex w-full min-w-0 items-baseline gap-2 rounded py-1 pr-2 pl-7 text-left font-mono text-xs hover:bg-muted/80 focus-visible:outline-ring"
+                                  onClick={() =>
+                                    state.openFile(path, match.line)
+                                  }
+                                >
+                                  <span className="shrink-0 text-muted-foreground">
+                                    {match.line}
+                                  </span>
+                                  <span className="truncate">{match.text}</span>
+                                </button>
+                              ))}
+                          </div>
+                        ))}
+                        {result.data.truncated && (
+                          <p className="p-2 text-xs text-muted-foreground">
+                            {t('files.searchLimit')}
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <FileTree
+                    state={state}
+                    onAction={setAction}
+                    onUpload={chooseUpload}
+                    dropTarget={dropTarget}
+                  />
+                )}
+              </ScrollArea>
+            </UploadDropZone>
+            <UploadList uploads={state.uploads} compact={stacked} />
           </ResizablePanel>
           <ResizableHandle
             aria-label={t(

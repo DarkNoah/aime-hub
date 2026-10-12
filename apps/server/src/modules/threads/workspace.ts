@@ -1,4 +1,4 @@
-import { lstat, mkdir, readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -46,6 +46,41 @@ export async function createPersonalWorkspace(root: string, userId: string) {
   const path = resolve(userDirectory(root, userId), `${date}-${nanoid(6)}`);
   await mkdir(path, { recursive: true });
   return path;
+}
+
+export async function removePersonalWorkspace(
+  root: string,
+  userId: string,
+  directory: string,
+) {
+  const ownerDirectory = userDirectory(root, userId);
+  if (
+    !isAbsolute(directory) ||
+    directory !== resolve(directory) ||
+    dirname(directory) !== ownerDirectory ||
+    !/^\d{4}-\d{2}-\d{2}-[a-zA-Z0-9_-]{6}$/.test(basename(directory))
+  )
+    throw new ThreadError('WORKSPACE_UNAVAILABLE', 409);
+
+  const existingPath = async (path: string) =>
+    realpath(path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+  const canonicalRoot = await existingPath(root);
+  const canonicalOwner = await existingPath(ownerDirectory);
+  if (!canonicalRoot || !canonicalOwner) return;
+  // A symlink in users/ or the user folder must not redirect recursive removal.
+  if (canonicalOwner !== resolve(canonicalRoot, 'users', userId))
+    throw new ThreadError('WORKSPACE_UNAVAILABLE', 409);
+  const info = await lstat(directory).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (!info) return;
+  if (!info.isDirectory() || info.isSymbolicLink())
+    throw new ThreadError('WORKSPACE_UNAVAILABLE', 409);
+  await rm(directory, { recursive: true, force: true });
 }
 
 export function getWorkspace(
@@ -131,6 +166,9 @@ export function getWorkspace(
 }
 
 export type DiscoveredSkill = { id: string; group: string; path: string };
+export function discoverInstalledSkills(root: string) {
+  return discover(resolve(root, '.agents', 'skills'));
+}
 async function discover(root: string): Promise<DiscoveredSkill[]> {
   const result: DiscoveredSkill[] = [];
   const canonicalRoot = await realpath(root).catch(

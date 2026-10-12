@@ -20,6 +20,17 @@ import { SkillService } from './modules/skills/service.js';
 import { EnvironmentVariableService } from './modules/environment-variables/service.js';
 import { projectAgentMounts } from './modules/threads/workspace.js';
 import { ToolService } from './modules/tools/service.js';
+import { AgentService } from './modules/agents/service.js';
+import { McpService } from './modules/mcp/service.js';
+import { agentSettingsStore } from './modules/agents/settings.js';
+import { createAutomationRuntime } from './modules/automations/runtime.js';
+import { hasAdminRole } from '@aime/shared';
+import type { ScheduleHooks } from '@mastra/core/schedules';
+import type { Mastra } from '@mastra/core/mastra';
+import { NotificationService } from './modules/notifications/service.js';
+import { PgNotificationStore } from './modules/notifications/store.js';
+import { createPushTransport } from './modules/notifications/push.js';
+import { AssetService } from './modules/assets/service.js';
 
 const env = loadEnv();
 const database = createDataSource(env.DATABASE_URL);
@@ -28,7 +39,7 @@ const auth = createAuth({
   pool,
   secret: env.BETTER_AUTH_SECRET,
   baseURL: env.BETTER_AUTH_URL,
-  webOrigin: env.WEB_ORIGIN,
+  webOrigin: env.WEB_ORIGINS,
   admins: env.ADMINS,
 });
 try {
@@ -51,71 +62,130 @@ try {
   throw error;
 }
 const providers = new ProviderService(database);
-const tools = new ToolService(database, providers);
+const assets = new AssetService(database);
 const requestLogs = new RequestLogService(database);
 const disposeChatRequestLogging = installChatRequestLogging(
   undefined,
   (request) => requestLogs.record(request),
+  (response) => requestLogs.recordResponse(response),
 );
-const models = new LanguageModelService(database, providers);
 const projects = new ProjectService(database);
-const { mastra, storage, memory } = createMastraRuntime(pool);
+const notifications = new NotificationService(
+  new PgNotificationStore(pool),
+  createPushTransport({
+    publicKey: env.WEB_PUSH_PUBLIC_KEY,
+    privateKey: env.WEB_PUSH_PRIVATE_KEY,
+    subject: env.WEB_PUSH_SUBJECT,
+  }),
+);
+const scheduleHooks: ScheduleHooks<Mastra> = {};
+const { mastra, storage, memory } = createMastraRuntime(
+  pool,
+  'mastra',
+  scheduleHooks,
+);
 await storage.init();
 const workspaceRoot = resolve(
   process.env.INIT_CWD ?? process.cwd(),
   env.WORKSPACE_ROOT,
 );
+const skills = new SkillService(workspaceRoot);
+const agentStore = await storage.getStore('agents');
+if (!agentStore) throw new Error('Mastra agents storage is required');
+const mcpStore = await storage.getStore('mcpClients');
+if (!mcpStore) throw new Error('Mastra MCP clients storage is required');
+const mcp = new McpService(mcpStore);
+await mcp.initialize();
+const tools = new ToolService(database, providers, assets, mcp);
+const agents = new AgentService(
+  agentStore,
+  skills,
+  tools,
+  providers,
+  agentSettingsStore(database),
+);
+const models = new LanguageModelService(database, providers, agents);
 const threads = new ThreadService(
   memory,
-  createChatRunner(mastra, models, workspaceRoot, projects, tools),
+  createChatRunner(mastra, models, workspaceRoot, projects, tools, agents),
   projects,
   mastra.backgroundTaskManager,
+  async (id) => {
+    const { rows } = await pool.query(
+      'SELECT role, banned FROM users WHERE id = $1',
+      [id],
+    );
+    return !!rows[0] && !rows[0].banned && hasAdminRole(rows[0].role);
+  },
 );
-const skills = new SkillService(workspaceRoot);
+const automations = createAutomationRuntime({
+  notifications,
+  mastra,
+  pool,
+  scheduleHooks,
+  threads,
+  agents,
+  models,
+  projects,
+  tools,
+  workspaceRoot,
+});
+await automations.initialize();
+// Restore persisted schedules on every boot, even before the first API request.
+await mastra.startWorkers();
 const app = createApp(
   auth,
   {
     service: providers,
-    webOrigin: env.WEB_ORIGIN,
+    webOrigin: env.WEB_ORIGINS,
   },
-  { threads, models, projects, webOrigin: env.WEB_ORIGIN },
-  { service: skills, webOrigin: env.WEB_ORIGIN },
+  { threads, models, projects, assets, webOrigin: env.WEB_ORIGINS },
+  { service: skills, webOrigin: env.WEB_ORIGINS },
   {
     service: new EnvironmentVariableService(database),
-    webOrigin: env.WEB_ORIGIN,
+    webOrigin: env.WEB_ORIGINS,
   },
-  { service: requestLogs, webOrigin: env.WEB_ORIGIN },
-  { service: tools, webOrigin: env.WEB_ORIGIN },
+  { service: requestLogs, webOrigin: env.WEB_ORIGINS },
+  { service: tools, webOrigin: env.WEB_ORIGINS },
+  { service: agents, webOrigin: env.WEB_ORIGINS },
+  { service: automations.service, webOrigin: env.WEB_ORIGINS },
+  { service: notifications, webOrigin: env.WEB_ORIGINS },
+  { service: mcp, webOrigin: env.WEB_ORIGINS },
 );
 const server = serve(
-  { fetch: app.fetch, port: env.SERVER_PORT, hostname: '127.0.0.1' },
+  { fetch: app.fetch, port: env.SERVER_PORT, hostname: env.SERVER_HOST },
   () => {
-    console.log(`Aime Hub API: http://127.0.0.1:${env.SERVER_PORT}`);
+    console.log(`Aime Hub API: http://${env.SERVER_HOST}:${env.SERVER_PORT}`);
   },
 ) as Server;
 let stopping = false;
 function shutdown() {
   if (stopping) return;
   stopping = true;
-  void threads.shutdown().finally(() => {
-    server.closeAllConnections();
-    server.close(() => {
-      void Promise.all([
-        mastra.shutdown(),
-        skills.dispose(),
-        projectAgentMounts.dispose(),
-      ])
-        .finally(async () => {
-          await disposeChatRequestLogging();
-          await requestLogs.settled();
-          await database.destroy();
-        })
-        .finally(() => pool.end())
-        .catch(() => {
-          process.exitCode = 1;
-        });
+  void automations
+    .shutdown()
+    .finally(() => threads.shutdown())
+    .finally(() => notifications.close())
+    .finally(() => {
+      server.closeAllConnections();
+      server.close(() => {
+        void Promise.all([
+          mastra.shutdown(),
+          mcp.shutdown(),
+          skills.dispose(),
+          projectAgentMounts.dispose(),
+        ])
+          .finally(async () => {
+            await disposeChatRequestLogging();
+            await requestLogs.settled();
+            await database.destroy();
+          })
+          .finally(() => pool.end())
+          .catch(() => {
+            process.exitCode = 1;
+          });
+      });
     });
-  });
   server.closeIdleConnections();
 }
 process.once('SIGINT', shutdown);

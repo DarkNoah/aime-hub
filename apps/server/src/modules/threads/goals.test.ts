@@ -135,7 +135,7 @@ test('native judge continues then completes, streams progress and persists acros
   );
   const goal = (await service.getThread('alice', thread.id)).goal;
   assert.equal(goal?.runsUsed, 2);
-  assert.equal(goal?.maxRuns, 50);
+  assert.equal(goal?.maxRuns, 150);
   assert.equal(answers, 2);
   assert.ok(seen.includes('active'));
   await service.run('alice', thread.id, input());

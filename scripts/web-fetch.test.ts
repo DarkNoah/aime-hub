@@ -3,18 +3,19 @@ import test from 'node:test';
 import { defaultWebFetchConfig } from '@aime/shared/tools';
 import { createWebFetchTool } from '../apps/server/src/mastra/tools/web_fetch.js';
 import { JinaAIProvider } from '../apps/server/src/mastra/providers/jina-ai.js';
+import { BaseProvider } from '../apps/server/src/mastra/providers/base-provider.js';
+import { LocalProvider } from '../apps/server/src/mastra/providers/local.js';
 import {
-  LocalWebFetchProvider,
   readBrowserPage,
   readWebPage,
-} from '../apps/server/src/mastra/providers/local-web-fetch.js';
-import { extractWebContent } from '../apps/server/src/mastra/providers/web-content.js';
+  extractWebContent,
+} from '../apps/server/src/mastra/web/page.js';
 import {
   requestWebResource,
   webUrl,
   WebRequestError,
   type WebResource,
-} from '../apps/server/src/mastra/providers/web-request.js';
+} from '../apps/server/src/mastra/web/request.js';
 
 const url = 'https://example.com/news/article?q=one#section';
 const result = { content: '# Article\n\nReadable content', url };
@@ -54,7 +55,7 @@ test('Jina uses the configured Reader endpoint, credential header and Markdown f
     async (target, options) => {
       assert.equal(target, 'https://reader.example/api');
       assert.equal(options.method, 'POST');
-      assert.deepEqual(JSON.parse(options.body!), { url });
+      assert.deepEqual(JSON.parse(String(options.body)), { url });
       assert.equal(options.headers?.authorization, 'Bearer synthetic-key');
       assert.equal(options.headers?.['x-with-generated-alt'], 'true');
       assert.equal(options.headers?.['x-respond-with'], 'markdown');
@@ -62,6 +63,7 @@ test('Jina uses the configured Reader endpoint, credential header and Markdown f
       return resource(result.content);
     },
   );
+  assert.ok(provider instanceof BaseProvider);
   assert.equal((await provider.webFetch(url)).content, result.content);
 });
 
@@ -162,35 +164,53 @@ test('Defuddle preserves code and tables without making its own network requests
   assert.equal(requests, 0);
 });
 
+test('LocalProvider implements both search and fetch through BaseProvider', async () => {
+  const provider = new LocalProvider({
+    timeoutMs: 1000,
+    fetchPage: async () =>
+      new Response(
+        '<div class="vrwrap"><h3><a href="https://example.com/news">News</a></h3><div>Summary</div></div>',
+      ),
+    readDirect: async () => result,
+  });
+  assert.ok(provider instanceof BaseProvider);
+  assert.equal(provider.id, 'local');
+  assert.deepEqual(await provider.webSearch({ query: 'news', numResults: 1 }), [
+    { title: 'News', href: 'https://example.com/news', snippet: 'Summary' },
+  ]);
+  assert.deepEqual(await provider.webFetch(url), result);
+  assert.deepEqual(await provider.getLanguageModelList(), []);
+});
+
 test('local fallback uses the browser only after direct request or extraction fails', async () => {
   let browsers = 0;
   const readBrowser = async () => {
     browsers++;
     return result;
   };
-  const direct = new LocalWebFetchProvider(
-    1000,
-    async () => result,
+  const direct = new LocalProvider({
+    timeoutMs: 1000,
+    readDirect: async () => result,
     readBrowser,
-  );
+  });
   assert.deepEqual(await direct.webFetch(url), result);
   assert.equal(browsers, 0);
-  const fallback = new LocalWebFetchProvider(
-    1000,
-    async () => {
+  const fallback = new LocalProvider({
+    timeoutMs: 1000,
+    readDirect: async () => {
       throw new Error('No article');
     },
     readBrowser,
-  );
+  });
   assert.deepEqual(await fallback.webFetch(url), result);
   assert.equal(browsers, 1);
-  const blocked = new LocalWebFetchProvider(
-    1000,
-    async () => {
+  const blocked = new LocalProvider({
+    timeoutMs: 1000,
+    readDirect: async () => {
       throw new WebRequestError('INVALID_URL');
     },
     readBrowser,
-  );
+  });
   await assert.rejects(blocked.webFetch(url));
   assert.equal(browsers, 1);
 });
@@ -279,16 +299,16 @@ test('cancellation stops provider resolution, provider execution and direct fall
     assert.equal(fallbacks, 0);
   }
   const controller = new AbortController();
-  const local = new LocalWebFetchProvider(
-    1000,
-    async () => {
+  const local = new LocalProvider({
+    timeoutMs: 1000,
+    readDirect: async () => {
       controller.abort();
       throw new Error('aborted');
     },
-    async () => {
+    readBrowser: async () => {
       assert.fail('browser must not launch');
     },
-  );
+  });
   await assert.rejects(local.webFetch(url, { abortSignal: controller.signal }));
 });
 

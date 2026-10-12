@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowUp, Paperclip, Square } from 'lucide-react';
 import { nanoid } from 'nanoid';
@@ -9,6 +9,7 @@ import {
   runInputSchema,
   type RunInput,
   type ChatUsage,
+  type ChatSettings,
   type ThreadGoal,
 } from '@aime/shared/threads';
 import {
@@ -31,6 +32,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ChatSettingsFields } from './chat-settings';
+import { AgentSelector } from '@/components/agent-selector';
+import { useAvailableAgents } from '@/features/agents/use-available-agents';
 import { chatApi, ChatApiError, chatErrorKey } from './api';
 import { usePersonalChatSettings } from './use-personal-chat-settings';
 import { ChatContextUsage } from './chat-context-usage';
@@ -39,6 +42,79 @@ import { useChatSkills } from './use-chat-skills';
 import { skillCommandGroup } from './skill-commands';
 import { consumeCompactCommand, consumeGoalCommand } from './slash-command';
 import { ChatGoal } from './chat-goal';
+import type { GeneratedAsset } from '@aime/shared/assets';
+import { useAssetAttachments } from '@/components/generated-assets/context';
+import { assetsApi } from '@/components/generated-assets/api';
+import { fileErrorKey, filesApi } from '@/components/file-manager/api';
+
+function GeneratedAttachments({
+  assets,
+  onChange,
+  disabled,
+}: {
+  assets: GeneratedAsset[];
+  onChange: (assets: GeneratedAsset[]) => void;
+  disabled: boolean;
+}) {
+  const { t } = useTranslation();
+  const context = useAssetAttachments();
+  const uploaded = usePromptInputAttachments();
+  useEffect(
+    () =>
+      context?.register((incoming) => {
+        if (disabled) {
+          toast.error(t('assets.composerUnavailable'));
+          return false;
+        }
+        const next = [
+          ...new Map(
+            [...assets, ...incoming].map((asset) => [asset.id, asset]),
+          ).values(),
+        ];
+        if (next.length + uploaded.files.length > MAX_CHAT_FILES) {
+          toast.error(t('assets.limit', { count: MAX_CHAT_FILES }));
+          return false;
+        }
+        onChange(next);
+        return true;
+      }),
+    [context, assets, uploaded.files.length, onChange, disabled, t],
+  );
+  if (!assets.length) return null;
+  return (
+    <Attachments
+      variant="inline"
+      className="w-full min-w-0 px-3 pt-3"
+      aria-label={t('assets.attachments')}
+    >
+      {assets.map((asset) => (
+        <Attachment
+          key={asset.id}
+          data={{
+            type: 'file',
+            id: asset.id,
+            filename: asset.name,
+            mediaType: asset.mimeType,
+            url: filesApi.raw(asset.threadId, asset.path),
+          }}
+          onRemove={() =>
+            onChange(assets.filter((item) => item.id !== asset.id))
+          }
+          className="max-w-full min-w-0"
+          tabIndex={0}
+        >
+          <AttachmentPreview />
+          <AttachmentInfo className="max-w-48" />
+          <AttachmentRemove
+            disabled={disabled}
+            label={t('assets.remove', { name: asset.name })}
+            className="shrink-0 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+          />
+        </Attachment>
+      ))}
+    </Attachments>
+  );
+}
 
 function ComposerAttachments({ disabled }: { disabled: boolean }) {
   const { t } = useTranslation();
@@ -138,7 +214,24 @@ export function ChatComposer({
     save: saveSettings,
     retry: retrySettings,
   } = usePersonalChatSettings();
+  const agentCatalog = useAvailableAgents();
+  const fixedModel = agentCatalog.data?.agents.find(
+    (agent) =>
+      agent.id === (settings.agentId ?? agentCatalog.data?.defaultAgentId),
+  )?.model;
+  function changeSettings(value: ChatSettings) {
+    void saveSettings(value)
+      .then((saved) => {
+        if (saved) toast.success(t('chat.saved'), { id: 'chat-preferences' });
+      })
+      .catch((cause) =>
+        toast.error(t(chatErrorKey(cause)), { id: 'chat-preferences' }),
+      );
+  }
   const [text, setText] = useState('');
+  const [assetAttachments, setAssetAttachments] = useState<GeneratedAsset[]>(
+    [],
+  );
   const [goalDraft, setGoalDraft] = useState(false);
   const [closingGoal, setClosingGoal] = useState(false);
   const [commandsOpen, setCommandsOpen] = useState(false);
@@ -182,7 +275,11 @@ export function ChatComposer({
     loadingSettings ||
     savingSettings ||
     !!settingsError;
-  const showStop = (running || stopping) && !text.trim() && !!onStop;
+  const showStop =
+    (running || stopping) &&
+    !text.trim() &&
+    !assetAttachments.length &&
+    !!onStop;
   const submitLabel = showStop
     ? t(stopping ? 'chat.stopping' : 'chat.stop')
     : t(running && !goalDraft ? 'chat.queueSend' : 'chat.send');
@@ -216,20 +313,18 @@ export function ChatComposer({
   return (
     <div
       data-chat-composer
-      className={cn('shrink-0 space-y-2 bg-card p-3 @lg/chat:p-5', className)}
+      className={cn(
+        'pointer-events-none shrink-0 space-y-2 bg-transparent p-3 @lg/chat:p-5',
+        className,
+      )}
     >
-      <div>
+      <div className="pointer-events-auto">
         {queue}
-        {usage && (
-          <div className="mb-1 flex justify-end">
-            <ChatContextUsage usage={usage} />
-          </div>
-        )}
         <PromptInput
           className="relative [&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:bg-card"
           accept="image/png,image/jpeg,image/webp,image/gif"
           multiple
-          maxFiles={MAX_CHAT_FILES}
+          maxFiles={MAX_CHAT_FILES - assetAttachments.length}
           maxFileSize={MAX_IMAGE_BYTES}
           onError={() => toast.error(t('chat.imageHint'))}
           onSubmitCapture={(event) => {
@@ -256,32 +351,52 @@ export function ChatComposer({
               toast.error(t('chat.goal.textRequired'));
               throw new Error('Goal requires text');
             }
-            if (!body && !files.length) throw new Error('Empty');
+            if (!body && !files.length && !assetAttachments.length)
+              throw new Error('Empty');
+            if (files.length + assetAttachments.length > MAX_CHAT_FILES) {
+              toast.error(t('assets.limit', { count: MAX_CHAT_FILES }));
+              throw new Error('Too many attachments');
+            }
             const id = retryId.current ?? nanoid();
             retryId.current = id;
-            const result = runInputSchema.safeParse({
-              id,
-              ...settings,
-              isImmediate: startGoal,
-              ...(startGoal ? { goal: true } : {}),
-              parts: [
-                ...files,
-                ...(body ? [{ type: 'text', text: body }] : []),
-              ],
-            });
-            if (!result.success) {
-              toast.error(t('chat.errors.validation'));
-              throw new ChatApiError('VALIDATION_ERROR');
-            }
             pendingRef.current = true;
             setPending(true);
+            let preparingAssets = assetAttachments.length > 0;
             try {
+              if (preparingAssets && !threadId)
+                throw new ChatApiError('THREAD_NOT_FOUND');
+              const generated =
+                assetAttachments.length && threadId
+                  ? await assetsApi.attach(
+                      threadId,
+                      assetAttachments.map((asset) => asset.id),
+                    )
+                  : { parts: [] };
+              preparingAssets = false;
+              const result = runInputSchema.safeParse({
+                id,
+                ...settings,
+                isImmediate: startGoal,
+                ...(startGoal ? { goal: true } : {}),
+                parts: [
+                  ...files,
+                  ...generated.parts,
+                  ...(body ? [{ type: 'text', text: body }] : []),
+                ],
+              });
+              if (!result.success) {
+                toast.error(t('chat.errors.validation'));
+                throw new ChatApiError('VALIDATION_ERROR');
+              }
               await onSend(result.data);
               setText('');
+              setAssetAttachments([]);
               setGoalDraft(false);
               retryId.current = null;
             } catch (cause) {
-              toast.error(t(chatErrorKey(cause)));
+              toast.error(
+                t(preparingAssets ? fileErrorKey(cause) : chatErrorKey(cause)),
+              );
               throw cause;
             } finally {
               setPending(false);
@@ -290,6 +405,11 @@ export function ChatComposer({
           }}
         >
           <ComposerAttachments disabled={pending} />
+          <GeneratedAttachments
+            assets={assetAttachments}
+            onChange={setAssetAttachments}
+            disabled={pending || !!unavailable || !!stopping}
+          />
           <PromptInputBody>
             <ChatCommandTextarea
               value={text}
@@ -325,29 +445,9 @@ export function ChatComposer({
               )}
             />
           </PromptInputBody>
-          <PromptInputFooter className="items-end gap-2">
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+          <PromptInputFooter className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-x-2 gap-y-1 @md/chat:flex">
+            <div className="flex min-w-0 flex-wrap items-center gap-1">
               <AttachButton disabled={pending || !!disabled || !!stopping} />
-              <ChatSettingsFields
-                value={settings}
-                onChange={(value) => {
-                  void saveSettings(value)
-                    .then((saved) => {
-                      if (saved)
-                        toast.success(t('chat.saved'), {
-                          id: 'chat-preferences',
-                        });
-                    })
-                    .catch((cause) =>
-                      toast.error(t(chatErrorKey(cause)), {
-                        id: 'chat-preferences',
-                      }),
-                    );
-                }}
-                disabled={
-                  pending || stopping || loadingSettings || !!settingsError
-                }
-              />
               {(goalDraft || goal) && (
                 <ChatGoal
                   disabled={!!disabled || pending || closingGoal}
@@ -367,7 +467,49 @@ export function ChatComposer({
                 />
               )}
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="order-first col-span-2 flex min-w-0 items-center gap-1 @md/chat:order-none @md/chat:flex-1">
+              <div className="min-w-0 max-w-24 flex-1">
+                <AgentSelector
+                  compact
+                  label={t('chat.agent')}
+                  value={settings.agentId ?? null}
+                  agents={agentCatalog.data?.agents ?? []}
+                  defaultAgentId={agentCatalog.data?.defaultAgentId}
+                  disabled={
+                    pending ||
+                    stopping ||
+                    running ||
+                    unavailable ||
+                    agentCatalog.loading ||
+                    agentCatalog.error ||
+                    goal?.status === 'active'
+                  }
+                  onValueChange={(agentId) =>
+                    changeSettings({ ...settings, agentId })
+                  }
+                />
+              </div>
+              <ChatSettingsFields
+                value={settings}
+                modelOverride={fixedModel}
+                onChange={changeSettings}
+                disabled={
+                  pending || stopping || loadingSettings || !!settingsError
+                }
+              />
+              {agentCatalog.error && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={agentCatalog.retry}
+                >
+                  {t('agents.retry')}
+                </Button>
+              )}
+            </div>
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              {usage && <ChatContextUsage usage={usage} />}
               <PromptInputSubmit
                 disabled={
                   showStop ? stopping : pending || unavailable || stopping
@@ -396,7 +538,7 @@ export function ChatComposer({
       {settingsError && (
         <div
           role="alert"
-          className="flex items-center justify-center gap-2 text-xs text-destructive"
+          className="pointer-events-auto flex items-center justify-center gap-2 text-xs text-destructive"
         >
           <span>{t(settingsError)}</span>
           <Button

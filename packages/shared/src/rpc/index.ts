@@ -6,6 +6,11 @@ import { filesContract } from './files.js';
 import { environmentVariablesContract } from './environment-variables.js';
 import { requestLogsContract } from './request-logs.js';
 import { toolsContract } from './tools.js';
+import { agentsContract } from './agents.js';
+import { mcpContract } from './mcp.js';
+import { automationsContract } from './automations.js';
+import { notificationsContract } from './notifications.js';
+import { assetsContract } from './assets.js';
 
 export const apiContract = {
   threads: threadsContract,
@@ -16,4 +21,9 @@ export const apiContract = {
   environmentVariables: environmentVariablesContract,
   requestLogs: requestLogsContract,
   tools: toolsContract,
+  agents: agentsContract,
+  mcp: mcpContract,
+  automations: automationsContract,
+  notifications: notificationsContract,
+  assets: assetsContract,
 };

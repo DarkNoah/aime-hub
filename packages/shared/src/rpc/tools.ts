@@ -4,6 +4,7 @@ import { procedure } from './base.js';
 import {
   webSearchConfigSchema,
   webFetchConfigSchema,
+  imageGenConfigSchema,
   type ToolConfig,
 } from '../tools.js';
 
@@ -26,6 +27,10 @@ export const toolsContract = {
         z.object({
           params: z.object({ toolId: z.literal('web_fetch') }),
           body: webFetchConfigSchema,
+        }),
+        z.object({
+          params: z.object({ toolId: z.literal('image_gen') }),
+          body: imageGenConfigSchema,
         }),
       ]),
     )

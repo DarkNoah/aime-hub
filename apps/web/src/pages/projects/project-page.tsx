@@ -2,6 +2,7 @@ import { isThreadActive } from '@aime/shared/threads';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import {
   Link,
+  Outlet,
   useLocation,
   useNavigate,
   useParams,
@@ -10,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import {
   ArrowLeft,
+  Clock3,
   MessageSquare,
   MoreHorizontal,
   Plus,
@@ -56,6 +58,7 @@ import { SettingsSheet } from './components/settings-sheet';
 export function ProjectPage() {
   const { projectId = '', threadId } = useParams({ strict: false });
   const location = useLocation();
+  if (location.pathname.endsWith('/automations')) return <Outlet />;
   const chat = location.pathname.startsWith(`/projects/${projectId}/threads`);
   return (
     <ProjectSession
@@ -189,6 +192,15 @@ function ProjectSession({
         description={t('projects.dashboardHint')}
         actions={
           <>
+            <Button asChild variant="outline">
+              <Link
+                to="/projects/$projectId/automations"
+                params={{ projectId }}
+              >
+                <Clock3 />
+                {t('nav.automations')}
+              </Link>
+            </Button>
             <Button variant="outline" onClick={() => setSheet('members')}>
               <Users />
               {t('projects.members')}

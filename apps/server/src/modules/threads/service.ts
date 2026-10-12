@@ -51,7 +51,7 @@ type Subscription = {
   userId: string;
   active: boolean;
   listener: (snapshot: ThreadSnapshot<UIMessage>, initial: boolean) => void;
-  revoked?: () => void;
+  revoked?: (code?: string) => void;
   pending: Promise<void>;
 };
 
@@ -74,6 +74,8 @@ type Runtime = {
   removedMessageIds: Set<string>;
   activeMessageId: string | null;
   session?: ChatSession;
+  sessionKey?: string;
+  titleGeneration?: symbol;
   queueCount: number;
   queuedMessages: QueuedMessage[];
   listeners: Set<Subscription>;
@@ -86,6 +88,8 @@ type Runtime = {
 };
 
 export interface ChatRunner {
+  resolveSettings?(settings: ChatSettings): Promise<ChatSettings>;
+  sessionKey?(settings: ChatSettings): Promise<string>;
   getGoal?(threadId: string): Promise<ThreadGoal | null>;
   clearGoal?(threadId: string): Promise<void>;
   projectFilesystem?(
@@ -99,6 +103,7 @@ export interface ChatRunner {
     projectId?: string,
   ): Promise<void>;
   createWorkspace(userId: string, projectId?: string): Promise<string>;
+  removePersonalWorkspace?(userId: string, directory: string): Promise<void>;
   open(context: ChatSessionContext): Promise<ChatSession>;
 }
 
@@ -114,7 +119,11 @@ type ThreadMemory = Pick<
 >;
 const PAGE_SIZE = 40;
 const isChatThread = (thread: StorageThreadType) =>
-  !Object.hasOwn(thread.metadata ?? {}, 'goalJudge');
+  !Object.hasOwn(thread.metadata ?? {}, 'goalJudge') &&
+  (!thread.metadata?.automation ||
+    (thread.metadata.automation as { visible?: boolean }).visible === true);
+const isArchived = (thread: StorageThreadType) =>
+  typeof thread.metadata?.archivedAt === 'string';
 const initialData = (): ThreadData => ({
   status: 'idle',
   activeId: null,
@@ -170,6 +179,8 @@ export class ThreadService {
     private runner: ChatRunner,
     private projects?: ProjectThreadAccess,
     private backgroundTaskManager?: ThreadBackgroundTaskManager,
+    private isSystemAdmin: (userId: string) => Promise<boolean> = async () =>
+      false,
   ) {}
 
   subscribeNavigation(
@@ -184,14 +195,34 @@ export class ThreadService {
     this.navigation.refresh(userId);
   }
 
-  private async listChatThreads(resourceId: string) {
+  /** Reuse chat snapshots for messages persisted by a native scheduled Agent. */
+  async refreshAutomationThread(
+    userId: string,
+    id: string,
+    event?: ChatSessionEvent,
+  ) {
+    const runtime = await this.runtime(userId, id);
+    await this.locked(id, async () => {
+      runtime.thread = (await this.memory.getThreadById({ threadId: id }))!;
+      runtime.data.reasoningEffort = dataOf(runtime.thread).reasoningEffort;
+      const history = await this.history(userId, id);
+      for (const message of history.messages) this.upsert(runtime, message);
+      this.publish(runtime);
+    });
+    if (event) await this.observe(runtime, event);
+    this.refreshNavigation();
+  }
+
+  private async listChatThreads(resourceId: string, archived = false) {
     const result = await this.memory.listThreads({
       filter: { resourceId },
       page: 0,
       perPage: false,
       orderBy: { field: 'updatedAt', direction: 'DESC' },
     });
-    return result.threads.filter(isChatThread);
+    return result.threads.filter(
+      (thread) => isChatThread(thread) && isArchived(thread) === archived,
+    );
   }
 
   private async navigationSnapshot(
@@ -206,6 +237,13 @@ export class ThreadService {
       }
     }
     const threads = new Map<string, ThreadSummary>();
+    if (await this.isSystemAdmin(userId)) {
+      for (const thread of await this.listChatThreads('system:automations'))
+        threads.set(
+          thread.id,
+          this.summary(thread, this.runtimes.get(thread.id)),
+        );
+    }
     for (const projectId of [
       undefined,
       ...projects.map((project) => project.id),
@@ -234,6 +272,7 @@ export class ThreadService {
     return {
       type: 'snapshot',
       projects: visible,
+      archivedThreads: await this.listArchivedThreads(userId),
       threads: [...threads.values()].filter(
         (thread) => !thread.projectId || allowed.has(thread.projectId),
       ),
@@ -252,13 +291,22 @@ export class ThreadService {
     return next;
   }
 
-  private async accessible(userId: string, id: string) {
+  private async accessible(
+    userId: string,
+    id: string,
+    includeArchived = false,
+  ) {
     const thread = await this.memory.getThreadById({ threadId: id });
     if (!thread) throw new ThreadError('THREAD_NOT_FOUND', 404);
     const scope = threadScope(thread.resourceId);
-    if (scope.type === 'project') {
+    if (scope.type === 'system') {
+      if (!(await this.isSystemAdmin(userId)))
+        throw new ThreadError('THREAD_NOT_FOUND', 404);
+    } else if (scope.type === 'project') {
       await this.projectAccess(userId, scope.projectId);
     } else if (scope.userId !== userId)
+      throw new ThreadError('THREAD_NOT_FOUND', 404);
+    if (!includeArchived && isArchived(thread))
       throw new ThreadError('THREAD_NOT_FOUND', 404);
     return thread;
   }
@@ -281,8 +329,9 @@ export class ThreadService {
     userId: string,
     id: string,
     action: () => Promise<T>,
+    includeArchived = false,
   ) {
-    const thread = await this.accessible(userId, id);
+    const thread = await this.accessible(userId, id, includeArchived);
     const { projectId } = threadScope(thread.resourceId);
     return projectId
       ? this.locked(`project:${projectId}`, () => this.locked(id, action))
@@ -299,6 +348,10 @@ export class ThreadService {
           ? thread.metadata.createdBy
           : undefined,
       title: thread.title ?? '',
+      agentId:
+        typeof thread.metadata?.agentId === 'string'
+          ? thread.metadata.agentId
+          : null,
       model:
         typeof thread.metadata?.model === 'string'
           ? thread.metadata.model
@@ -306,6 +359,9 @@ export class ThreadService {
       reasoningEffort: data.reasoningEffort,
       createdAt: new Date(thread.createdAt).toISOString(),
       updatedAt: new Date(thread.updatedAt).toISOString(),
+      archivedAt: isArchived(thread)
+        ? String(thread.metadata!.archivedAt)
+        : null,
       status: data.activeId && !runtime ? 'failed' : data.status,
       error: data.activeId && !runtime ? 'RUN_INTERRUPTED' : data.error,
       queueCount: runtime?.queueCount ?? 0,
@@ -351,6 +407,7 @@ export class ThreadService {
         runtime.navigationSignature = signature;
         if (
           snapshot.thread.error !== 'THREAD_NOT_FOUND' &&
+          !isArchived(runtime.thread) &&
           isChatThread(runtime.thread)
         )
           this.navigation.publish(runtime.thread.resourceId!, {
@@ -420,6 +477,7 @@ export class ThreadService {
       metadata: {
         // Mastra patchThread merges metadata; do not replay stale Mastra/OM fields from the runtime cache.
         model: runtime.thread.metadata?.model ?? null,
+        agentId: runtime.thread.metadata?.agentId ?? null,
         // Preserve pre-migration drafts until the first native session accepts them.
         ...(runtime.thread.metadata?.queue === undefined &&
         runtime.thread.metadata?.aime
@@ -454,7 +512,7 @@ export class ThreadService {
 
   private observe(runtime: Runtime, event: ChatSessionEvent) {
     // Serialize snapshot/storage updates only. Mastra schedules all model work.
-    void this.locked(runtime.thread.id, async () => {
+    return this.locked(runtime.thread.id, async () => {
       if (this.runtimes.get(runtime.thread.id) !== runtime) return;
       if (event.type === 'goal') {
         // Read native state after taking the lock. A late event must never
@@ -558,12 +616,28 @@ export class ThreadService {
     settings: ChatSettings,
     handoff = true,
   ) {
+    // Tool replies and compaction continue the existing native session, even if
+    // its stored configuration has since been edited or removed.
+    if (runtime.session && !handoff) return runtime.session;
+    const key = await this.runner.sessionKey?.(settings);
+    if (runtime.session && key !== runtime.sessionKey) {
+      if (
+        this.busy(runtime) ||
+        runtime.data.toolInteractions.some((item) => !item.response) ||
+        runtime.backgroundTasks.some(isBackgroundTaskActive) ||
+        runtime.goal?.status === 'active'
+      )
+        throw new ThreadError('AGENT_CHANGE_BUSY', 409);
+      await runtime.session.close();
+      runtime.session = undefined;
+    }
     if (!runtime.session) {
       runtime.session = await this.runner.open({
         thread: runtime.thread,
         settings,
         onEvent: (event) => this.observe(runtime, event),
       });
+      runtime.sessionKey = key;
     }
     // Checkpoint each pre-migration draft only after native acceptance. This is
     // an upgrade handoff; all new input goes directly to the native queue.
@@ -660,6 +734,7 @@ export class ThreadService {
     input: ChatSettings & { title?: string; projectId?: string },
   ) {
     if (input.projectId) await this.projectAccess(userId, input.projectId);
+    input = { ...input, ...(await this.runner.resolveSettings?.(input)) };
     if (input.model) await this.runner.validate(userId, input, input.projectId);
     const workspace = await this.runner.createWorkspace(
       userId,
@@ -673,6 +748,7 @@ export class ThreadService {
       title: input.title ?? '',
       metadata: {
         model: input.model,
+        agentId: input.agentId ?? null,
         createdBy: userId,
         workspace,
         ...initialData(),
@@ -698,6 +774,13 @@ export class ThreadService {
     const threads = await this.listChatThreads(
       projectId ? `project:${projectId}` : `user:${userId}`,
     );
+    if (!projectId && (await this.isSystemAdmin(userId))) {
+      threads.push(...(await this.listChatThreads('system:automations')));
+      threads.sort(
+        (a, b) =>
+          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      );
+    }
     // Paginate visible chats so judge threads cannot create short or empty pages.
     const start = page * perPage;
     return {
@@ -715,12 +798,96 @@ export class ThreadService {
     );
   }
 
+  async listArchivedThreads(userId: string) {
+    const threads = await this.listChatThreads(`user:${userId}`, true);
+    if (await this.isSystemAdmin(userId))
+      threads.push(...(await this.listChatThreads('system:automations', true)));
+    return threads
+      .map((thread) => this.summary(thread))
+      .sort(
+        (a, b) =>
+          b.archivedAt!.localeCompare(a.archivedAt!) ||
+          b.id.localeCompare(a.id),
+      );
+  }
+
+  restoreThread(userId: string, id: string) {
+    return this.locked(id, async () => {
+      const thread = await this.archivedPersonalThread(userId, id);
+      const restored = await this.memory.updateThread({
+        id,
+        title: thread.title,
+        metadata: { archivedAt: null },
+      });
+      const summary = this.summary(restored);
+      this.navigation.publish(thread.resourceId!, {
+        type: 'upsert',
+        thread: summary,
+      });
+      return summary;
+    });
+  }
+
+  private async archivedPersonalThread(userId: string, id: string) {
+    const thread = await this.accessible(userId, id, true);
+    if (
+      (thread.resourceId !== `user:${userId}` &&
+        !(
+          thread.resourceId === 'system:automations' &&
+          (await this.isSystemAdmin(userId))
+        )) ||
+      !isChatThread(thread)
+    )
+      throw new ThreadError('THREAD_NOT_FOUND', 404);
+    if (!isArchived(thread)) throw new ThreadError('THREAD_NOT_ARCHIVED', 409);
+    return thread;
+  }
+
+  deleteArchivedThread(userId: string, id: string) {
+    return this.locked(id, async () => {
+      const thread = await this.archivedPersonalThread(userId, id);
+      await this.assertNoBackgroundTasks(thread);
+      const directory = thread.metadata?.workspace;
+      if (
+        typeof directory !== 'string' ||
+        !directory ||
+        !this.runner.removePersonalWorkspace
+      )
+        throw new ThreadError('WORKSPACE_UNAVAILABLE', 409);
+      // Keep the archive available for retry if filesystem cleanup fails. Missing
+      // directories are harmless when retrying after a failed database deletion.
+      await this.runner.removePersonalWorkspace(
+        thread.resourceId === 'system:automations' ? 'system' : userId,
+        directory,
+      );
+      await this.memory.deleteThread(id);
+      this.navigation.publish(thread.resourceId!, {
+        type: 'remove',
+        id,
+        projectId: null,
+      });
+    });
+  }
+
   async workspaceDirectory(userId: string, id: string) {
     const thread = await this.accessible(userId, id);
     const path = thread.metadata?.workspace;
     if (typeof path !== 'string' || !path)
       throw new ThreadError('WORKSPACE_UNAVAILABLE', 404);
     return path;
+  }
+
+  /** Resolve asset access from an authorized thread, never a client resource ID. */
+  async assetScope(userId: string, id: string) {
+    const thread = await this.accessible(userId, id);
+    const { projectId } = threadScope(thread.resourceId);
+    const threads = projectId
+      ? await this.listChatThreads(thread.resourceId)
+      : [thread];
+    return {
+      resourceId: thread.resourceId,
+      threadIds: threads.map((item) => item.id),
+    };
   }
 
   async withWorkspaceFiles<T>(
@@ -730,7 +897,11 @@ export class ThreadService {
   ) {
     const thread = await this.accessible(userId, id);
     const { projectId } = threadScope(thread.resourceId);
-    if (!projectId || !this.runner.projectFilesystem)
+    if (!projectId)
+      return this.locked(id, async () =>
+        action(await this.workspaceDirectory(userId, id)),
+      );
+    if (!this.runner.projectFilesystem)
       return action(await this.workspaceDirectory(userId, id));
     const filesystem = await this.runner.projectFilesystem(userId, projectId);
     try {
@@ -794,11 +965,20 @@ export class ThreadService {
     return this.scopeLocked(userId, id, async () => {
       const runtime = await this.runtime(userId, id);
       await this.manageable(userId, runtime.thread);
-      if (input.model)
+      if (input.model || input.agentId)
         await this.runner.validate(
           userId,
           {
-            model: input.model,
+            model:
+              input.model ??
+              (typeof runtime.thread.metadata?.model === 'string'
+                ? runtime.thread.metadata.model
+                : null),
+            agentId:
+              input.agentId ??
+              (typeof runtime.thread.metadata?.agentId === 'string'
+                ? runtime.thread.metadata.agentId
+                : null),
             reasoningEffort:
               input.reasoningEffort ?? runtime.data.reasoningEffort,
           },
@@ -807,11 +987,17 @@ export class ThreadService {
       if (input.title !== undefined) {
         runtime.thread.title = input.title;
         runtime.data.autoTitle = false;
+        runtime.titleGeneration = undefined;
       }
       if (input.model !== undefined)
         runtime.thread.metadata = {
           ...runtime.thread.metadata,
           model: input.model,
+        };
+      if (input.agentId !== undefined)
+        runtime.thread.metadata = {
+          ...runtime.thread.metadata,
+          agentId: input.agentId,
         };
       if (input.reasoningEffort)
         runtime.data.reasoningEffort = input.reasoningEffort;
@@ -827,6 +1013,7 @@ export class ThreadService {
       const runtime = await this.runtime(userId, id);
       if (runtime.data.acceptedIds.includes(input.id))
         return this.summary(runtime.thread, runtime);
+      input = { ...input, ...(await this.runner.resolveSettings?.(input)) };
       if (runtime.data.toolInteractions.some((item) => !item.response))
         throw new ThreadError('TOOL_RESPONSE_REQUIRED', 409);
       await this.runner.validate(
@@ -851,8 +1038,10 @@ export class ThreadService {
       runtime.thread.metadata = {
         ...runtime.thread.metadata,
         model: input.model,
+        agentId: input.agentId ?? null,
       };
-      if (runtime.data.autoTitle) {
+      const generateTitle = runtime.data.autoTitle;
+      if (generateTitle) {
         runtime.thread.title = messageText(input)
           .replace(/\s+/g, ' ')
           .slice(0, 80);
@@ -860,8 +1049,49 @@ export class ThreadService {
       }
       await this.save(runtime);
       this.publish(runtime);
+      if (generateTitle) void this.generateTitle(runtime, session, input);
       return this.summary(runtime.thread, runtime);
     });
+  }
+
+  private async generateTitle(
+    runtime: Runtime,
+    session: ChatSession,
+    input: RunInput,
+  ) {
+    const generation = Symbol();
+    runtime.titleGeneration = generation;
+    try {
+      // Do not hold the thread lock while waiting for the title model.
+      const title = (await session.generateTitle(input))
+        ?.replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 80);
+      if (!title) return;
+      await this.locked(runtime.thread.id, async () => {
+        if (
+          this.closing ||
+          this.runtimes.get(runtime.thread.id) !== runtime ||
+          runtime.titleGeneration !== generation
+        )
+          return;
+        const previous = runtime.thread.title;
+        runtime.thread.title = title;
+        try {
+          await this.save(runtime);
+        } catch (error) {
+          runtime.thread.title = previous;
+          throw error;
+        }
+        this.publish(runtime);
+      });
+    } catch (error) {
+      // A failed title must never change the chat's status or interrupt its stream.
+      console.error('Thread title generation failed', error);
+    } finally {
+      if (runtime.titleGeneration === generation)
+        runtime.titleGeneration = undefined;
+    }
   }
 
   compact(userId: string, id: string) {
@@ -883,6 +1113,10 @@ export class ThreadService {
         const session = await this.session(
           runtime,
           {
+            agentId:
+              typeof runtime.thread.metadata?.agentId === 'string'
+                ? runtime.thread.metadata.agentId
+                : null,
             model:
               typeof runtime.thread.metadata?.model === 'string'
                 ? runtime.thread.metadata.model
@@ -1017,6 +1251,10 @@ export class ThreadService {
       )
         throw new ThreadError('RETRY_UNAVAILABLE', 409);
       const settings: ChatSettings = {
+        agentId:
+          typeof runtime.thread.metadata?.agentId === 'string'
+            ? runtime.thread.metadata.agentId
+            : null,
         model:
           typeof runtime.thread.metadata?.model === 'string'
             ? runtime.thread.metadata.model
@@ -1092,7 +1330,7 @@ export class ThreadService {
     userId: string,
     id: string,
     listener: (snapshot: ThreadSnapshot<UIMessage>, initial: boolean) => void,
-    revoked?: () => void,
+    revoked?: (code?: string) => void,
   ) {
     return this.scopeLocked(userId, id, async () => {
       const runtime = await this.runtime(userId, id);
@@ -1115,43 +1353,64 @@ export class ThreadService {
   }
 
   deleteThread(userId: string, id: string) {
-    return this.scopeLocked(userId, id, async () => {
-      const thread = await this.accessible(userId, id);
-      await this.manageable(userId, thread);
-      const runtime = await this.runtime(userId, id);
-      const activeTasks = await this.backgroundTaskManager?.listTasks({
-        threadId: id,
-        resourceId: thread.resourceId!,
-        status: ['pending', 'running', 'suspended'],
-        perPage: 1,
-      });
-      if (
-        this.busy(runtime) ||
-        activeTasks?.tasks.length ||
-        runtime.backgroundTasks.some(isBackgroundTaskActive) ||
-        runtime.queueCount
-      )
-        throw new ThreadError('THREAD_BUSY', 409);
-      if (runtime) {
-        clearTimeout(runtime.expiry);
-        clearTimeout(runtime.broadcast);
-      }
-      await this.memory.deleteThread(id);
-      await runtime.backgroundObserver?.stop();
-      await runtime.session?.close();
-      this.navigation.publish(thread.resourceId!, {
-        type: 'remove',
-        id,
-        projectId: threadScope(thread.resourceId).projectId ?? null,
-      });
-      if (runtime) {
-        runtime.data.error = 'THREAD_NOT_FOUND';
-        runtime.data.status = 'failed';
-        this.publish(runtime);
+    return this.scopeLocked(
+      userId,
+      id,
+      async () => {
+        const thread = await this.accessible(userId, id, true);
+        await this.manageable(userId, thread);
+        // Repeating an old DELETE request must never permanently delete an archive.
+        if (isArchived(thread)) return;
+        const runtime = await this.runtime(userId, id);
+        await this.assertNoBackgroundTasks(thread);
+        if (
+          this.busy(runtime) ||
+          runtime.backgroundTasks.some(isBackgroundTaskActive) ||
+          runtime.queueCount
+        )
+          throw new ThreadError('THREAD_BUSY', 409);
+        if (runtime) {
+          clearTimeout(runtime.expiry);
+          clearTimeout(runtime.broadcast);
+        }
+        await runtime.backgroundObserver?.stop();
+        await runtime.session?.close();
+        runtime.session = undefined;
+        const { projectId } = threadScope(thread.resourceId);
+        if (projectId) await this.memory.deleteThread(id);
+        else
+          runtime.thread = await this.memory.updateThread({
+            id,
+            title: thread.title,
+            metadata: { archivedAt: new Date().toISOString() },
+          });
+        this.navigation.publish(thread.resourceId!, {
+          type: 'remove',
+          id,
+          projectId: projectId ?? null,
+          ...(!projectId
+            ? { archivedThread: this.summary(runtime.thread) }
+            : {}),
+        });
+        for (const subscription of runtime.listeners) {
+          subscription.active = false;
+          subscription.revoked?.('THREAD_NOT_FOUND');
+        }
         runtime.listeners.clear();
-      }
-      this.runtimes.delete(id);
+        this.runtimes.delete(id);
+      },
+      true,
+    );
+  }
+
+  private async assertNoBackgroundTasks(thread: StorageThreadType) {
+    const activeTasks = await this.backgroundTaskManager?.listTasks({
+      threadId: thread.id,
+      resourceId: thread.resourceId!,
+      status: ['pending', 'running', 'suspended'],
+      perPage: 1,
     });
+    if (activeTasks?.tasks.length) throw new ThreadError('THREAD_BUSY', 409);
   }
 
   invalidateProject(projectId: string, userId?: string) {

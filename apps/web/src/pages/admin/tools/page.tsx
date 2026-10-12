@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
-import { Globe, Settings2, RefreshCw } from 'lucide-react';
+import { Globe, ImagePlus, Settings2, RefreshCw } from 'lucide-react';
 import type { ToolConfig } from '@aime/shared/tools';
 import type { ProviderSummary } from '@aime/shared/providers';
 import type { TranslationKey } from '@/i18n/config';
@@ -20,6 +20,7 @@ import {
   ItemTitle,
 } from '@/components/ui/item';
 import { WebToolDialog } from './components/web-tool-dialog';
+import { ImageGenDialog } from './components/image-gen-dialog';
 import { toolErrorKey } from './api';
 import { toolDefinitions } from './definitions';
 
@@ -101,12 +102,13 @@ export function AdminToolsPage() {
           {data.tools.map((tool) => {
             const definition = toolDefinitions[tool.id];
             const provider = data.providers.find(
-              (item) => item.id === tool.config.providerId,
+              (item) =>
+                tool.id !== 'image_gen' && item.id === tool.config.providerId,
             );
             return (
               <Item key={tool.id} role="listitem" className="gap-4 p-5">
                 <ItemMedia variant="icon">
-                  <Globe />
+                  {tool.id === 'image_gen' ? <ImagePlus /> : <Globe />}
                 </ItemMedia>
                 <ItemContent className="min-w-48">
                   <ItemTitle>
@@ -123,24 +125,35 @@ export function AdminToolsPage() {
                   </ItemTitle>
                   <ItemDescription>{t(definition.description)}</ItemDescription>
                   <p className="mt-2 text-xs text-muted-foreground">
-                    {provider?.name ??
-                      t(
-                        tool.config.providerId
-                          ? definition.missingProvider
-                          : definition.localLabel,
-                      )}{' '}
-                    ·{' '}
-                    {t(
-                      tool.id === 'web_search'
-                        ? 'tools.summary'
-                        : 'tools.fetchSummary',
-                      {
-                        count:
+                    {tool.id === 'image_gen' ? (
+                      <>
+                        {tool.config.model ?? t('tools.defaultImageModel')} ·{' '}
+                        {t('tools.imageSummary', {
+                          seconds: tool.config.timeoutMs / 1000,
+                        })}
+                      </>
+                    ) : (
+                      <>
+                        {provider?.name ??
+                          t(
+                            tool.config.providerId
+                              ? toolDefinitions[tool.id].missingProvider
+                              : toolDefinitions[tool.id].localLabel,
+                          )}{' '}
+                        ·{' '}
+                        {t(
                           tool.id === 'web_search'
-                            ? tool.config.numResults
-                            : tool.config.maxChars,
-                        seconds: tool.config.timeoutMs / 1000,
-                      },
+                            ? 'tools.summary'
+                            : 'tools.fetchSummary',
+                          {
+                            count:
+                              tool.id === 'web_search'
+                                ? tool.config.numResults
+                                : tool.config.maxChars,
+                            seconds: tool.config.timeoutMs / 1000,
+                          },
+                        )}
+                      </>
                     )}
                   </p>
                 </ItemContent>
@@ -162,7 +175,25 @@ export function AdminToolsPage() {
           })}
         </ItemGroup>
       ) : null}
-      {selected && data ? (
+      {selected?.id === 'image_gen' ? (
+        <ImageGenDialog
+          tool={selected}
+          onClose={() => setSelected(undefined)}
+          restoreFocus={() => trigger.current?.focus()}
+          onSaved={(tool) =>
+            setData((current) =>
+              current
+                ? {
+                    ...current,
+                    tools: current.tools.map((item) =>
+                      item.id === tool.id ? tool : item,
+                    ),
+                  }
+                : current,
+            )
+          }
+        />
+      ) : selected && data ? (
         <WebToolDialog
           tool={selected}
           providers={data.providers}

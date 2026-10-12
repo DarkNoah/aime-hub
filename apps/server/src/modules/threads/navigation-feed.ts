@@ -72,6 +72,11 @@ export class ThreadNavigationFeed {
   }
 
   publish(resourceId: string, event: ThreadNavigationEvent) {
+    if (resourceId === 'system:automations') {
+      // Snapshot generation rechecks administrator access for every subscriber.
+      this.refresh();
+      return;
+    }
     for (const subscriber of this.subscribers) {
       if (resourceId.startsWith('user:')) {
         if (resourceId !== `user:${subscriber.userId}`) continue;

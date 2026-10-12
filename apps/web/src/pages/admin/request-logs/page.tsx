@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ChevronLeft,
@@ -7,9 +7,12 @@ import {
   RefreshCw,
   Search,
 } from 'lucide-react';
-import type {
-  RequestLogPage,
-  RequestLogQuery,
+import {
+  requestLogContextFields,
+  type RequestLogContext,
+  type RequestLogPage,
+  type RequestLogQuery,
+  type RequestLogSummary,
 } from '@aime/shared/request-logs';
 import type { TranslationKey } from '@/i18n/config';
 import { api } from '@/lib/rpc';
@@ -30,12 +33,23 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { RequestLogDetailSheet } from './components/detail-sheet';
-import { RequestStatusBadge } from './components/status-badge';
-import { formatBytes, requestLogErrorKey } from './format';
+import {
+  RequestStatusBadge,
+  ResponseStatusBadge,
+} from './components/status-badge';
+import { formatBytes, formatDuration, requestLogErrorKey } from './format';
 
 export function AdminRequestLogsPage() {
   const { t, i18n } = useTranslation();
   const [search, setSearch] = useState('');
+  const [context, setContext] = useState<
+    Record<keyof RequestLogContext, string>
+  >({
+    threadId: '',
+    resourceId: '',
+    userId: '',
+    projectId: '',
+  });
   const [status, setStatus] = useState<RequestLogQuery['status']>('all');
   const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
   const [data, setData] = useState<RequestLogPage>();
@@ -47,13 +61,28 @@ export function AdminRequestLogsPage() {
   const trigger = useRef<HTMLButtonElement | null>(null);
   const refreshButton = useRef<HTMLButtonElement>(null);
   const cursor = cursors.at(-1);
+  const updateLog = useCallback((summary: RequestLogSummary) => {
+    setData((current) =>
+      current
+        ? {
+            ...current,
+            items: current.items.map((item) =>
+              item.id === summary.id ? summary : item,
+            ),
+          }
+        : current,
+    );
+  }, []);
+  const hasFilters = Boolean(
+    search || status !== 'all' || Object.values(context).some(Boolean),
+  );
 
   useEffect(() => {
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       void api.requestLogs
         .list(
-          { query: { search, status, cursor, limit: 30 } },
+          { query: { search, ...context, status, cursor, limit: 30 } },
           { signal: controller.signal },
         )
         .then(
@@ -76,7 +105,7 @@ export function AdminRequestLogsPage() {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [search, status, cursor, revision]);
+  }, [search, context, status, cursor, revision]);
 
   useEffect(() => {
     if (!autoRefresh || cursor || selected || loading || error) return;
@@ -171,6 +200,29 @@ export function AdminRequestLogsPage() {
           </Label>
         </div>
       </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {requestLogContextFields.map((field) => (
+          <div key={field} className="min-w-0 space-y-2">
+            <Label htmlFor={`request-log-${field}`}>
+              {t(`requestLogs.${field}`)}
+            </Label>
+            <Input
+              id={`request-log-${field}`}
+              value={context[field]}
+              maxLength={200}
+              placeholder={t('requestLogs.exactId')}
+              onChange={(event) => {
+                setContext((value) => ({
+                  ...value,
+                  [field]: event.target.value,
+                }));
+                setCursors([undefined]);
+                setLoading(true);
+              }}
+            />
+          </div>
+        ))}
+      </div>
       {error ? (
         <div
           role="alert"
@@ -239,6 +291,10 @@ export function AdminRequestLogsPage() {
                             {log.model ?? t('requestLogs.unknownModel')}
                           </span>
                           <RequestStatusBadge status={log.status} />
+                          <ResponseStatusBadge
+                            responseStatus={log.responseStatus}
+                            httpStatus={log.httpStatus}
+                          />
                           {log.stream ? (
                             <Badge variant="outline">
                               {t('requestLogs.streaming')}
@@ -250,6 +306,10 @@ export function AdminRequestLogsPage() {
                         </span>
                         <span className="block truncate font-mono text-xs text-muted-foreground">
                           {log.id}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {t('requestLogs.duration')}:{' '}
+                          {formatDuration(log.durationMs)}
                         </span>
                         <span className="block text-xs text-muted-foreground sm:hidden">
                           {dateFormat.format(new Date(log.createdAt))} ·{' '}
@@ -283,15 +343,11 @@ export function AdminRequestLogsPage() {
                 aria-hidden="true"
               />
               <h3 className="text-sm font-medium">
-                {t(
-                  search || status !== 'all'
-                    ? 'requestLogs.noMatches'
-                    : 'requestLogs.empty',
-                )}
+                {t(hasFilters ? 'requestLogs.noMatches' : 'requestLogs.empty')}
               </h3>
               <p className="max-w-md text-sm leading-6 text-muted-foreground">
                 {t(
-                  search || status !== 'all'
+                  hasFilters
                     ? 'requestLogs.searchHint'
                     : 'requestLogs.emptyHint',
                 )}
@@ -337,6 +393,7 @@ export function AdminRequestLogsPage() {
         <RequestLogDetailSheet
           key={selected}
           id={selected}
+          onUpdate={updateLog}
           onClose={() => setSelected(undefined)}
           restoreFocus={() =>
             (trigger.current?.isConnected

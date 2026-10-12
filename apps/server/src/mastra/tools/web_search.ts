@@ -4,21 +4,24 @@ import {
   defaultWebSearchConfig,
   type WebSearchConfig,
 } from '@aime/shared/tools';
-import { SogouProvider } from '../providers/sogou.js';
 import {
   searchResultSchema,
-  type WebSearchProvider,
-} from '../providers/web-search.js';
+  type BaseProvider,
+} from '../providers/base-provider.js';
+import { LocalProvider } from '../providers/local.js';
 
 export function createWebSearchTool(
   config: WebSearchConfig = defaultWebSearchConfig,
   dependencies: {
-    resolveProvider?: (id: string) => Promise<WebSearchProvider>;
-    fallbackProvider?: WebSearchProvider;
+    resolveProvider?: (
+      id: string,
+    ) => Promise<Pick<BaseProvider, 'id' | 'webSearch'>>;
+    fallbackProvider?: Pick<BaseProvider, 'id' | 'webSearch'>;
   } = {},
 ) {
   const fallback =
-    dependencies.fallbackProvider ?? new SogouProvider(config.timeoutMs);
+    dependencies.fallbackProvider ??
+    new LocalProvider({ timeoutMs: config.timeoutMs });
   return createTool({
     id: 'web_search',
     description:

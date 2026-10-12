@@ -25,7 +25,9 @@ import {
   useMemo,
   useState,
 } from 'react';
-import { Streamdown } from 'streamdown';
+import { defaultRehypePlugins, Streamdown } from 'streamdown';
+import { MarkdownLink } from './markdown-link';
+import { rehypeWorkspaceFileLinks } from './markdown-file-link';
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage['role'];
@@ -319,6 +321,13 @@ export const MessageBranchPage = ({
 export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
 const streamdownPlugins = { cjk, code, math, mermaid };
+const streamdownComponents = { a: MarkdownLink };
+const messageRehypePlugins = [
+  defaultRehypePlugins.raw,
+  defaultRehypePlugins.sanitize,
+  rehypeWorkspaceFileLinks,
+  defaultRehypePlugins.harden,
+];
 
 export const MessageResponse = memo(
   ({ className, ...props }: MessageResponseProps) => (
@@ -327,7 +336,9 @@ export const MessageResponse = memo(
         'size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
         className,
       )}
+      components={streamdownComponents}
       plugins={streamdownPlugins}
+      rehypePlugins={messageRehypePlugins}
       {...props}
     />
   ),

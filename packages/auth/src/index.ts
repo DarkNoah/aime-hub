@@ -1,14 +1,18 @@
 import { betterAuth, type BetterAuthOptions } from 'better-auth';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { admin, username } from 'better-auth/plugins';
-import { parseAdminUsernames } from '@aime/shared';
+import {
+  normalizeWebOrigins,
+  parseAdminUsernames,
+  type WebOrigins,
+} from '@aime/shared';
 import type { Pool } from 'pg';
 
 type AuthConfig = {
   pool: Pool;
   secret: string;
   baseURL: string;
-  webOrigin: string;
+  webOrigin: WebOrigins;
   admins: string;
 };
 
@@ -23,7 +27,7 @@ export function createAuthOptions(config: AuthConfig) {
     advanced: {
       ipAddress: { ipAddressHeaders: ['x-aime-client-ip'] },
     },
-    trustedOrigins: [new URL(config.webOrigin).origin],
+    trustedOrigins: normalizeWebOrigins(config.webOrigin),
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 8,

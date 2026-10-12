@@ -317,6 +317,50 @@ test('global cache counts all project runs, preserves paging and reconciles offl
   projects.cancel();
 });
 
+test('archive navigation follows archive, restore, permanent deletion and reconnection without mixing personal history', () => {
+  const personal = createThreadListResource();
+  const navigation = createThreadNavigationResource(
+    personal,
+    createProjectNavigationResource(),
+  );
+  const active = { ...thread('personal'), projectId: null };
+  const archived = { ...active, archivedAt: '2026-10-10T00:00:00.000Z' };
+  navigation.receive({
+    type: 'snapshot',
+    threads: [active],
+    projects: [],
+    archivedThreads: [],
+  });
+  navigation.receive({
+    type: 'remove',
+    id: active.id,
+    projectId: null,
+    archivedThread: archived,
+  });
+  assert.deepEqual(navigation.getArchivedThreads(), [archived]);
+  assert.deepEqual(personal.getSnapshot().threads, []);
+  navigation.receive({ type: 'upsert', thread: active });
+  assert.deepEqual(navigation.getArchivedThreads(), []);
+  assert.deepEqual(personal.getSnapshot().threads, [active]);
+  navigation.receive({
+    type: 'remove',
+    id: active.id,
+    projectId: null,
+    archivedThread: archived,
+  });
+  navigation.receive({ type: 'remove', id: active.id, projectId: null });
+  assert.deepEqual(navigation.getArchivedThreads(), []);
+  navigation.receive({
+    type: 'snapshot',
+    threads: [],
+    projects: [],
+    archivedThreads: [archived],
+  });
+  assert.deepEqual(navigation.getArchivedThreads(), [archived]);
+  navigation.removeArchivedThread(active.id);
+  assert.deepEqual(navigation.getArchivedThreads(), []);
+});
+
 test('navigation HTTP SSE requires authentication and broadcasts create/edit/delete to another connection', async (t) => {
   const { createApp } = await import('../apps/server/src/app.js');
   const { memory } = fakeMemory();
@@ -405,9 +449,14 @@ test('navigation HTTP SSE requires authentication and broadcasts create/edit/del
       edited.thread.title === 'Changed from another tab',
   );
   assert.equal((await request(`/${value.id}`, 'DELETE')).status, 204);
-  assert.deepEqual(await next(), {
+  const archived = await next();
+  assert.ok(archived.type === 'remove');
+  assert.ok(archived.archivedThread?.archivedAt);
+  assert.equal(archived.archivedThread.title, 'Changed from another tab');
+  assert.deepEqual(archived, {
     type: 'remove',
     id: value.id,
     projectId: null,
+    archivedThread: archived.archivedThread,
   });
 });

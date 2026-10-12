@@ -1,8 +1,8 @@
 import { isThreadActive } from '@aime/shared/threads';
-import { MoreHorizontal } from 'lucide-react';
+import { Clock3, MoreHorizontal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThreadSummary } from '@aime/shared/threads';
-import { Button } from '@/components/ui/button';
+import { Item, ItemActions, ItemGroup } from '@/components/ui/item';
 import { ThreadActivityTitle, ThreadStatusBadge } from './thread-activity';
 import {
   DropdownMenu,
@@ -27,77 +27,92 @@ export function ThreadListItems({
 }) {
   const { t } = useTranslation();
   return (
-    <>
+    <ItemGroup>
       {threads.map((thread) => (
-        <div
+        <Item
           key={thread.id}
+          role="listitem"
           className={cn(
-            'group/thread flex h-9 w-full min-w-0 items-center rounded-md transition-colors',
-            thread.id === selectedId &&
-              'bg-card text-primary ring-1 ring-border',
+            'h-8 w-full min-w-0 flex-nowrap gap-0 p-0 hover:bg-card/60 mb-1',
+            thread.id === selectedId && 'bg-card text-primary ',
           )}
         >
-          <button
-            type="button"
-            aria-current={thread.id === selectedId ? 'page' : undefined}
-            title={thread.title || t('chat.new')}
-            className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md pl-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={() => onSelect(thread.id)}
+          <Item
+            asChild
+            className="min-w-0 flex-1 flex-nowrap gap-1.5 border-0 px-3 py-0 text-left font-normal"
           >
-            {isThreadActive(thread.status) && (
-              <ThreadStatusBadge
-                status={thread.status}
-                className="shrink-0 px-1 py-0 text-[10px]"
-              />
-            )}
-            <ThreadActivityTitle
-              active={isThreadActive(thread.status)}
-              className="text-[13px]"
+            <button
+              type="button"
+              className={cn(thread.id === selectedId && 'font-bold!')}
+              aria-current={thread.id === selectedId ? 'page' : undefined}
+              title={thread.title || t('chat.new')}
+              onClick={() => onSelect(thread.id)}
             >
-              {thread.title || t('chat.new')}
-            </ThreadActivityTitle>
-            {thread.status !== 'idle' &&
-              thread.status !== 'success' &&
-              thread.status !== 'canceled' &&
-              !isThreadActive(thread.status) && (
+              {thread.id.startsWith('schedule:') && (
+                <span
+                  className="inline-flex shrink-0 text-muted-foreground"
+                  role="img"
+                  aria-label={t('automations.threadLabel')}
+                  title={t('automations.threadLabel')}
+                >
+                  <Clock3 className="size-3.5" aria-hidden="true" />
+                </span>
+              )}
+              {isThreadActive(thread.status) && (
                 <ThreadStatusBadge
                   status={thread.status}
                   className="shrink-0 px-1 py-0 text-[10px]"
                 />
               )}
-          </button>
+              <ThreadActivityTitle
+                active={isThreadActive(thread.status)}
+                className="text-[13px]"
+              >
+                {thread.title || t('chat.new')}
+              </ThreadActivityTitle>
+              {thread.status !== 'idle' &&
+                thread.status !== 'success' &&
+                thread.status !== 'canceled' &&
+                !isThreadActive(thread.status) && (
+                  <ThreadStatusBadge
+                    status={thread.status}
+                    className="shrink-0 px-1 py-0 text-[10px]"
+                  />
+                )}
+            </button>
+          </Item>
           {(!canManage || canManage(thread)) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  className="size-7 shrink-0 text-muted-foreground transition-opacity group-hover/thread:opacity-100 group-focus-within/thread:opacity-100 data-[state=open]:opacity-100 [@media(hover:hover)]:opacity-0"
+            <ItemActions className="shrink-0">
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-opacity hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring group-hover/item:opacity-100 group-focus-within/item:opacity-100 data-[state=open]:opacity-100 [@media(hover:hover)]:opacity-0"
                   aria-label={t('chat.actions', {
                     title: thread.title || t('chat.new'),
                   })}
                 >
                   <MoreHorizontal className="size-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => onAction(thread, 'rename')}>
-                  {t('chat.rename')}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="text-destructive"
-                  disabled={
-                    isThreadActive(thread.status) || thread.queueCount > 0
-                  }
-                  onSelect={() => onAction(thread, 'delete')}
-                >
-                  {t('chat.delete')}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => onAction(thread, 'rename')}>
+                    {t('chat.rename')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={
+                      thread.projectId ? 'text-destructive' : undefined
+                    }
+                    disabled={
+                      isThreadActive(thread.status) || thread.queueCount > 0
+                    }
+                    onSelect={() => onAction(thread, 'delete')}
+                  >
+                    {t(thread.projectId ? 'chat.delete' : 'chat.archive')}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </ItemActions>
           )}
-        </div>
+        </Item>
       ))}
-    </>
+    </ItemGroup>
   );
 }

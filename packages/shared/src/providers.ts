@@ -1,8 +1,11 @@
 import { z } from 'zod';
 import { thinkingLevels } from './threads.js';
-import { languageModelProviders } from './provider-catalog.js';
+import { languageModelProviders as catalogProviders } from './provider-catalog.js';
 
-export { languageModelProviders };
+export const languageModelProviders = {
+  ...catalogProviders,
+  newapi: 'New API',
+} as const;
 export const otherProviders = {
   mineru: 'MinerU',
   serpapi: 'SerpAPI',

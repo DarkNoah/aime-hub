@@ -31,6 +31,13 @@ export function ThreadDialog({
   const { t } = useTranslation();
   const [title, setTitle] = useState(thread.title);
   const [pending, setPending] = useState(false);
+  const archive = mode === 'delete' && !thread.projectId;
+  const actionLabel =
+    mode === 'rename'
+      ? 'chat.rename'
+      : archive
+        ? 'chat.archive'
+        : 'chat.delete';
   return (
     <Dialog
       open
@@ -55,7 +62,13 @@ export function ThreadDialog({
                   onDeleted();
                 }
                 toast.success(
-                  t(mode === 'rename' ? 'chat.renamed' : 'chat.deleted'),
+                  t(
+                    mode === 'rename'
+                      ? 'chat.renamed'
+                      : archive
+                        ? 'chat.archived'
+                        : 'chat.deleted',
+                  ),
                 );
                 onClose();
               } catch (cause) {
@@ -67,11 +80,15 @@ export function ThreadDialog({
           }}
         >
           <DialogHeader>
-            <DialogTitle>
-              {t(mode === 'rename' ? 'chat.rename' : 'chat.delete')}
-            </DialogTitle>
+            <DialogTitle>{t(actionLabel)}</DialogTitle>
             <DialogDescription>
-              {mode === 'delete' ? t('chat.deleteHint') : t('chat.renameHint')}
+              {t(
+                mode === 'rename'
+                  ? 'chat.renameHint'
+                  : archive
+                    ? 'chat.archiveHint'
+                    : 'chat.deleteHint',
+              )}
             </DialogDescription>
           </DialogHeader>
           {mode === 'rename' ? (
@@ -103,7 +120,7 @@ export function ThreadDialog({
             <Button
               type="submit"
               className={
-                mode === 'delete'
+                mode === 'delete' && !archive
                   ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
                   : undefined
               }
@@ -114,7 +131,7 @@ export function ThreadDialog({
                   ? 'users.saving'
                   : mode === 'rename'
                     ? 'users.save'
-                    : 'chat.delete',
+                    : actionLabel,
               )}
             </Button>
           </DialogFooter>

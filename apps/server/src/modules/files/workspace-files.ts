@@ -24,7 +24,7 @@ import {
 import { searchFiles } from './search.js';
 
 type Root = string | WorkspaceFilesystem;
-function target(
+export function resolveWorkspaceTarget(
   root: Root,
   path: string,
   allowRoot = false,
@@ -34,7 +34,7 @@ function target(
     const mount = root.getMountPathForPath(`/${path}`);
     const filesystem = root.getFilesystemForPath(`/${path}`);
     if (filesystem && mount)
-      return target(
+      return resolveWorkspaceTarget(
         filesystem,
         `/${path}`.slice(mount.length).replace(/^\//, ''),
         true,
@@ -42,6 +42,8 @@ function target(
   }
   return { root: root instanceof LocalFilesystem ? root.basePath : root, path };
 }
+
+const target = resolveWorkspaceTarget;
 
 export async function listWorkspaceFiles(
   root: Root,
@@ -149,6 +151,25 @@ export async function streamWorkspaceFile(
 }
 
 const locks = new Map<string, Promise<unknown>>();
+export function withWorkspaceFileLock<T>(
+  filesystem: WorkspaceFilesystem,
+  action: () => Promise<T>,
+): Promise<T> {
+  const key =
+    filesystem instanceof AgentFSFilesystem
+      ? (filesystem.getInfo().metadata?.dbPath ?? filesystem.id)
+      : filesystem.id;
+  const pending = (locks.get(key) ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(action);
+  locks.set(key, pending);
+  void pending
+    .finally(() => {
+      if (locks.get(key) === pending) locks.delete(key);
+    })
+    .catch(() => undefined);
+  return pending;
+}
 export function mutateWorkspaceFile(
   root: Root,
   input: FileMutation,
@@ -167,50 +188,36 @@ export function mutateWorkspaceFile(
       }),
     );
   const filesystem = leaf.root;
-  const key =
-    filesystem instanceof AgentFSFilesystem
-      ? (filesystem.getInfo().metadata?.dbPath ?? filesystem.id)
-      : filesystem.id;
-  const pending = (locks.get(key) ?? Promise.resolve())
-    .catch(() => undefined)
-    .then(async () => {
-      if (input.operation === 'create') {
-        if (await filesystem.exists(leaf.path))
-          throw new ThreadError('FILE_EXISTS', 409);
-        const parent = posix.dirname(leaf.path);
-        if (
-          (await filesystem.stat(parent === '.' ? '/' : parent)).type !==
-          'directory'
-        )
-          throw new ThreadError('FILE_NOT_FOUND', 404);
-        if (input.kind === 'directory') await filesystem.mkdir(leaf.path);
-        else
-          await filesystem.writeFile(leaf.path, '', {
-            overwrite: false,
-            recursive: false,
-          });
-      } else if (input.operation === 'delete') {
-        if ((await filesystem.stat(leaf.path)).type === 'directory')
-          await filesystem.rmdir(leaf.path, { recursive: true });
-        else await filesystem.deleteFile(leaf.path);
-      } else {
-        validatePath(input.name);
-        if (input.name.includes('/'))
-          throw new ThreadError('FILE_INVALID_PATH');
-        const next = posix.join(posix.dirname(leaf.path), input.name);
-        if (next !== leaf.path)
-          await filesystem.moveFile(leaf.path, next, { overwrite: false });
-        return { path: posix.join(posix.dirname(input.path), input.name) };
-      }
-      return { path: input.path };
-    });
-  locks.set(key, pending);
-  void pending
-    .finally(() => {
-      if (locks.get(key) === pending) locks.delete(key);
-    })
-    .catch(() => undefined);
-  return pending;
+  return withWorkspaceFileLock(filesystem, async () => {
+    if (input.operation === 'create') {
+      if (await filesystem.exists(leaf.path))
+        throw new ThreadError('FILE_EXISTS', 409);
+      const parent = posix.dirname(leaf.path);
+      if (
+        (await filesystem.stat(parent === '.' ? '/' : parent)).type !==
+        'directory'
+      )
+        throw new ThreadError('FILE_NOT_FOUND', 404);
+      if (input.kind === 'directory') await filesystem.mkdir(leaf.path);
+      else
+        await filesystem.writeFile(leaf.path, '', {
+          overwrite: false,
+          recursive: false,
+        });
+    } else if (input.operation === 'delete') {
+      if ((await filesystem.stat(leaf.path)).type === 'directory')
+        await filesystem.rmdir(leaf.path, { recursive: true });
+      else await filesystem.deleteFile(leaf.path);
+    } else {
+      validatePath(input.name);
+      if (input.name.includes('/')) throw new ThreadError('FILE_INVALID_PATH');
+      const next = posix.join(posix.dirname(leaf.path), input.name);
+      if (next !== leaf.path)
+        await filesystem.moveFile(leaf.path, next, { overwrite: false });
+      return { path: posix.join(posix.dirname(input.path), input.name) };
+    }
+    return { path: input.path };
+  });
 }
 
 const ignored = new Set([

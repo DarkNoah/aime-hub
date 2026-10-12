@@ -20,6 +20,7 @@ import { PersonalChatSettingsProvider } from '@/components/chat/personal-chat-se
 import { ThreadNavigationProvider } from '@/components/chat/thread-navigation-provider';
 import { Sidebar } from './sidebar';
 import { adminNavigation } from './navigation';
+import { NotificationProvider } from '@/features/notifications/notification-provider';
 
 export function AppLayout() {
   const { data } = useAuthSession();
@@ -28,6 +29,7 @@ export function AppLayout() {
       <ThreadListProvider key={data?.session.id}>
         <ProjectNavigationProvider>
           <ThreadNavigationProvider>
+            <NotificationProvider />
             <LayoutContent />
           </ThreadNavigationProvider>
         </ProjectNavigationProvider>
@@ -46,12 +48,16 @@ function LayoutContent() {
     location.pathname.startsWith('/threads') ||
     /^\/projects\/[^/]+\/threads(?:\/|$)/.test(location.pathname);
   const title =
-    (isProject
-      ? 'nav.projects'
-      : isChat
-        ? 'nav.chats'
-        : adminNavigation.find((item) => item.to === location.pathname)
-            ?.label) ?? 'nav.home';
+    (location.pathname === '/automations'
+      ? 'nav.automations'
+      : location.pathname === '/settings'
+        ? 'nav.personalSettings'
+        : isProject
+          ? 'nav.projects'
+          : isChat
+            ? 'nav.chats'
+            : adminNavigation.find((item) => item.to === location.pathname)
+                ?.label) ?? 'nav.home';
 
   useEffect(() => {
     const desktop = window.matchMedia('(min-width: 768px)');

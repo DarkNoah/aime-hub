@@ -6,16 +6,20 @@ import { ThreadError } from '../modules/threads/errors.js';
 import { ProviderError } from '../modules/providers/network.js';
 import { SkillError } from '../modules/skills/errors.js';
 import { EnvironmentVariableError } from '../modules/environment-variables/errors.js';
+import { AgentError } from '../modules/agents/errors.js';
+import { McpError } from '../modules/mcp/errors.js';
 
 export type RpcContext = {
   auth: Auth;
   headers: Headers;
-  webOrigin?: string;
+  webOrigins: readonly string[];
   method: string;
 };
 
 export function mapRpcError(error: unknown): never {
   if (
+    error instanceof AgentError ||
+    error instanceof McpError ||
     error instanceof ThreadError ||
     error instanceof ProviderError ||
     error instanceof SkillError ||
@@ -52,20 +56,23 @@ export const rpc = implementation.use(async ({ context, path, next }) => {
     });
     if (!session) throw new ORPCError('UNAUTHORIZED');
     const admin =
+      (path[0] === 'agents' && path[1] !== 'available') ||
       path[0] === 'skills' ||
       path[0] === 'environmentVariables' ||
       path[0] === 'requestLogs' ||
       path[0] === 'tools' ||
+      path[0] === 'mcp' ||
       (path[0] === 'providers' && path[1] !== 'available');
     if (admin && !hasAdminRole(session.user.role))
       throw new ORPCError('FORBIDDEN');
     if (
       !['GET', 'HEAD', 'OPTIONS'].includes(context.method) &&
-      (!context.webOrigin ||
-        context.headers.get('origin') !== new URL(context.webOrigin).origin)
+      !context.webOrigins.includes(context.headers.get('origin') ?? '')
     )
       throw new ORPCError('FORBIDDEN');
-    return await next({ context: { userId: session.user.id } });
+    return await next({
+      context: { userId: session.user.id, session: session.session },
+    });
   } catch (error) {
     mapRpcError(error);
   }

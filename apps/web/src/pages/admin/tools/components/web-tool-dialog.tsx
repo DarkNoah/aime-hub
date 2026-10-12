@@ -40,7 +40,7 @@ export function WebToolDialog({
   onClose,
   restoreFocus,
 }: {
-  tool: ToolConfig;
+  tool: Exclude<ToolConfig, { id: 'image_gen' }>;
   providers: ProviderSummary[];
   onSaved: (tool: ToolConfig) => void;
   onClose: () => void;

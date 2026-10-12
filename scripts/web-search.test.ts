@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SerpApiProvider } from '../apps/server/src/mastra/providers/serpapi.js';
-import { SogouProvider } from '../apps/server/src/mastra/providers/sogou.js';
-import type { WebSearchProvider } from '../apps/server/src/mastra/providers/web-search.js';
+import { LocalProvider } from '../apps/server/src/mastra/providers/local.js';
+import { BaseProvider } from '../apps/server/src/mastra/providers/base-provider.js';
 import { createWebSearchTool } from '../apps/server/src/mastra/tools/web_search.js';
 import { requestProviderJson } from '../apps/server/src/modules/providers/network.js';
 import { defaultWebSearchConfig } from '@aime/shared/tools';
@@ -61,6 +61,7 @@ test('SerpAPI maps organic results and passes credentials, limits and cancellati
       };
     },
   );
+  assert.ok(provider instanceof BaseProvider);
   assert.deepEqual(
     await provider.webSearch(
       { ...input, numResults: 1 },
@@ -135,7 +136,7 @@ test('web_search uses provider.webSearch and retains a successful empty result w
         };
       },
       fallbackProvider: {
-        id: 'sogou',
+        id: 'local',
         async webSearch() {
           assert.fail('unexpected fallback');
         },
@@ -149,10 +150,10 @@ test('web_search uses provider.webSearch and retains a successful empty result w
   }
 });
 
-test('missing, unavailable or failed providers use Sogou, and total failures do not expose secrets', async () => {
+test('missing, unavailable or failed providers use LocalProvider, and total failures do not expose secrets', async () => {
   let fallbackCalls = 0;
-  const fallbackProvider: WebSearchProvider = {
-    id: 'sogou',
+  const fallbackProvider: Pick<BaseProvider, 'id' | 'webSearch'> = {
+    id: 'local',
     async webSearch() {
       fallbackCalls++;
       return [result];
@@ -176,7 +177,7 @@ test('missing, unavailable or failed providers use Sogou, and total failures do 
     );
     assert.deepEqual(await tool.execute!({ query: 'query' }, toolContext()), {
       results: [result],
-      provider: 'sogou',
+      provider: 'local',
       fallback: true,
     });
   }
@@ -186,7 +187,7 @@ test('missing, unavailable or failed providers use Sogou, and total failures do 
       throw new Error('synthetic-secret');
     },
     fallbackProvider: {
-      id: 'sogou',
+      id: 'local',
       async webSearch() {
         throw new Error('synthetic-secret');
       },
@@ -211,7 +212,7 @@ test('a cancelled search never starts or falls back to another engine', async ()
       },
     }),
     fallbackProvider: {
-      id: 'sogou',
+      id: 'local',
       async webSearch() {
         assert.fail('cancelled search attempted fallback');
       },
@@ -237,27 +238,30 @@ test('Sogou parses direct results and JS/HTTP redirects, skips broken links, ded
     <div class="vrwrap"><h3><a href="https://example.com/direct">Duplicate</a></h3></div>
     <div class="vrwrap"><h3><a href="javascript:alert(1)">Invalid</a></h3></div>
   </body></html>`;
-  const provider = new SogouProvider(2000, async (request, init) => {
-    const url = new URL(String(request));
-    visited.push(url);
-    assert.equal(url.origin, 'https://www.sogou.com');
-    assert.equal(init?.redirect, 'manual');
-    assert.ok(init?.signal);
-    if (url.pathname === '/web') {
-      assert.equal(url.searchParams.get('query'), input.query);
-      assert.deepEqual([...url.searchParams.keys()], ['query']);
-      return new Response(html);
-    }
-    if (url.searchParams.get('url') === 'js')
-      return new Response(
-        `<script>window.location.replace("https://example.com/js");</script>`,
-      );
-    if (url.searchParams.get('url') === 'http')
-      return new Response(null, {
-        status: 302,
-        headers: { location: 'https://example.com/http' },
-      });
-    return new Response('Failure', { status: 503 });
+  const provider = new LocalProvider({
+    timeoutMs: 2000,
+    fetchPage: async (request, init) => {
+      const url = new URL(String(request));
+      visited.push(url);
+      assert.equal(url.origin, 'https://www.sogou.com');
+      assert.equal(init?.redirect, 'manual');
+      assert.ok(init?.signal);
+      if (url.pathname === '/web') {
+        assert.equal(url.searchParams.get('query'), input.query);
+        assert.deepEqual([...url.searchParams.keys()], ['query']);
+        return new Response(html);
+      }
+      if (url.searchParams.get('url') === 'js')
+        return new Response(
+          `<script>window.location.replace("https://example.com/js");</script>`,
+        );
+      if (url.searchParams.get('url') === 'http')
+        return new Response(null, {
+          status: 302,
+          headers: { location: 'https://example.com/http' },
+        });
+      return new Response('Failure', { status: 503 });
+    },
   });
   assert.deepEqual(await provider.webSearch(input), [
     {
@@ -281,11 +285,17 @@ test('Sogou parses direct results and JS/HTTP redirects, skips broken links, ded
 
 test('Sogou fails explicitly on challenge/empty pages and enforces body size and cancellation', async () => {
   for (const body of ['<html>Captcha required</html>', 'x'.repeat(2_000_001)]) {
-    const provider = new SogouProvider(2000, async () => new Response(body));
+    const provider = new LocalProvider({
+      timeoutMs: 2000,
+      fetchPage: async () => new Response(body),
+    });
     await assert.rejects(provider.webSearch(input));
   }
-  const provider = new SogouProvider(2000, async () => {
-    assert.fail('fetch called after abort');
+  const provider = new LocalProvider({
+    timeoutMs: 2000,
+    fetchPage: async () => {
+      assert.fail('fetch called after abort');
+    },
   });
   await assert.rejects(
     provider.webSearch(input, { abortSignal: AbortSignal.abort() }),
@@ -293,9 +303,9 @@ test('Sogou fails explicitly on challenge/empty pages and enforces body size and
 });
 
 test('Sogou requests are aborted when their provider timeout expires', async () => {
-  const provider = new SogouProvider(
-    10,
-    async (_request, init) =>
+  const provider = new LocalProvider({
+    timeoutMs: 10,
+    fetchPage: async (_request, init) =>
       new Promise((_resolve, reject) => {
         const keepAlive = setTimeout(
           () => reject(new Error('test timeout')),
@@ -310,6 +320,6 @@ test('Sogou requests are aborted when their provider timeout expires', async () 
           { once: true },
         );
       }),
-  );
+  });
   await assert.rejects(provider.webSearch(input), { name: 'TimeoutError' });
 });

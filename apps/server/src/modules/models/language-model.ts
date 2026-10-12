@@ -1,5 +1,5 @@
 import type { DataSource } from 'typeorm';
-import { Provider, ProviderModel, Setting, Project } from '@aime/db';
+import { ProviderModel, Setting, Project } from '@aime/db';
 import {
   chatSettingsSchema,
   type ChatSettings,
@@ -10,9 +10,11 @@ import type { AgentExecutionOptions } from '@mastra/core/agent';
 type SharedProviderOptions = NonNullable<
   AgentExecutionOptions<undefined>['providerOptions']
 >;
-import { providerGroup, type ModelDefaults } from '@aime/shared/providers';
+import type { ModelDefaults } from '@aime/shared/providers';
 import type { ProviderService } from '../providers/service.js';
+import { ProviderError } from '../providers/network.js';
 import { ThreadError } from '../threads/errors.js';
+import type { AgentService } from '../agents/service.js';
 
 export function getProviderOptions({
   reasoningEffort,
@@ -26,7 +28,7 @@ export function getProviderOptions({
   if (!reasoning) return {};
   const effort = reasoningEffort === 'auto' ? thinkingMode : reasoningEffort;
   return {
-    openai: { reasoningEffort: effort },
+    openai: { reasoningEffort: effort, store: false },
     deepseek: {
       thinking: { type: effort === 'none' ? 'disabled' : 'enabled' },
       ...(effort === 'none'
@@ -50,6 +52,7 @@ export class LanguageModelService {
   constructor(
     private database: DataSource,
     private providers: ProviderService,
+    private agents?: Pick<AgentService, 'getConfig'>,
   ) {}
 
   async getPreferences(userId: string): Promise<ChatSettings> {
@@ -60,7 +63,9 @@ export class LanguageModelService {
   }
 
   async setPreferences(userId: string, input: ChatSettings) {
-    if (input.model) await this.getLanguageModel(userId, input);
+    const agent = await this.agents?.getConfig(input.agentId);
+    const model = agent?.model ?? input.model;
+    if (model) await this.getLanguageModel(userId, { ...input, model });
     await this.database.manager.save(Setting, {
       id: `chat:user:${userId}`,
       value: input,
@@ -86,37 +91,27 @@ export class LanguageModelService {
     const providerId = reference.slice(0, slash);
     const modelId = reference.slice(slash + 1);
     const [provider, model] = await Promise.all([
-      this.database
-        .getRepository(Provider)
-        .createQueryBuilder('provider')
-        .addSelect('provider.apiKey')
-        .where('provider.id = :providerId AND provider.enabled = true', {
-          providerId,
-        })
-        .getOne(),
+      this.providers.getProviderInstance(providerId).catch((error: unknown) => {
+        if (
+          error instanceof ProviderError &&
+          ['NOT_FOUND', 'INVALID_MODEL', 'PROVIDER_CONFIG_ONLY'].includes(
+            error.code,
+          )
+        )
+          throw new ThreadError('MODEL_UNAVAILABLE');
+        throw error;
+      }),
       this.database.manager.findOneBy(ProviderModel, {
         providerId,
         id: modelId,
         enabled: true,
       }),
     ]);
-    if (
-      !provider ||
-      providerGroup(provider.type) !== 'languageModel' ||
-      !model ||
-      !model.modalitiesOutput.includes('text')
-    )
+    if (!model || !model.modalitiesOutput.includes('text'))
       throw new ThreadError('MODEL_UNAVAILABLE');
     return {
       reference,
-      // Separate fields preserve model IDs containing slashes. Connections are server-only.
-      model: {
-        providerId: 'openai',
-        modelId,
-        url: provider.baseUrl,
-        apiKey: provider.apiKey ?? '',
-        api: 'chat',
-      },
+      model: provider.languageModel(modelId),
       providerOptions: getProviderOptions({
         reasoningEffort:
           input.reasoningEffort === 'auto'

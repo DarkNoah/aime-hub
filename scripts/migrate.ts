@@ -12,7 +12,7 @@ try {
     pool,
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
-    webOrigin: env.WEB_ORIGIN,
+    webOrigin: env.WEB_ORIGINS,
     admins: env.ADMINS,
   });
   const authMigrations = await getMigrations(authOptions);

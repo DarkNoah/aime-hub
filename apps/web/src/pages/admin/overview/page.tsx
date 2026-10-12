@@ -1,4 +1,5 @@
 import {
+  Bot,
   ArrowRight,
   FileJson2,
   Plug,
@@ -12,6 +13,12 @@ import { useTranslation } from 'react-i18next';
 import { PageHeader } from '@/components/page-header';
 
 const modules = [
+  {
+    to: '/admin/agents',
+    title: 'nav.agents',
+    description: 'admin.agentsDescription',
+    icon: Bot,
+  },
   {
     to: '/admin/request-logs',
     title: 'nav.requestLogs',

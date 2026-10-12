@@ -18,11 +18,31 @@ import { LoadingState } from '@/components/loading-state';
 const AuthPage = lazy(() =>
   import('@/pages/auth/page').then((m) => ({ default: m.AuthPage })),
 );
+const PersonalAutomationsPage = lazy(() =>
+  import('@/pages/automations/page').then((m) => ({
+    default: m.PersonalAutomationsPage,
+  })),
+);
+const AdminAutomationsPage = lazy(() =>
+  import('@/pages/admin/automations/page').then((m) => ({
+    default: m.AdminAutomationsPage,
+  })),
+);
+const ProjectAutomationsPage = lazy(() =>
+  import('@/pages/projects/automations-page').then((m) => ({
+    default: m.ProjectAutomationsPage,
+  })),
+);
 const WorkspacePage = lazy(() =>
   import('@/pages/workspace/page').then((m) => ({ default: m.WorkspacePage })),
 );
 const ThreadsPage = lazy(() =>
   import('@/pages/threads/page').then((m) => ({ default: m.ThreadsPage })),
+);
+const PersonalSettingsPage = lazy(() =>
+  import('@/pages/personal-settings/page').then((m) => ({
+    default: m.PersonalSettingsPage,
+  })),
 );
 const ProjectsPage = lazy(() =>
   import('@/pages/projects/page').then((m) => ({ default: m.ProjectsPage })),
@@ -55,6 +75,14 @@ const AdminProvidersPage = lazy(() =>
 const AdminToolsPage = lazy(() =>
   import('@/pages/admin/tools/page').then((m) => ({
     default: m.AdminToolsPage,
+  })),
+);
+const AdminMcpPage = lazy(() =>
+  import('@/pages/admin/mcp/page').then((m) => ({ default: m.AdminMcpPage })),
+);
+const AdminAgentsPage = lazy(() =>
+  import('@/pages/admin/agents/page').then((m) => ({
+    default: m.AdminAgentsPage,
   })),
 );
 const AdminSkillsPage = lazy(() =>
@@ -139,12 +167,27 @@ const routeTree = rootRoute.addChildren([
     layoutRoute.addChildren([
       createRoute({
         getParentRoute: () => layoutRoute,
+        path: '/automations',
+        component: PersonalAutomationsPage,
+      }),
+      createRoute({
+        getParentRoute: () => layoutRoute,
+        path: '/settings',
+        component: PersonalSettingsPage,
+      }),
+      createRoute({
+        getParentRoute: () => layoutRoute,
         path: '/',
         component: WorkspacePage,
       }),
       createRoute({
         getParentRoute: () => layoutRoute,
         path: '/threads',
+        validateSearch: (
+          search: Record<string, unknown>,
+        ): { draft?: string } => ({
+          draft: typeof search.draft === 'string' ? search.draft : undefined,
+        }),
         component: ThreadsPage,
       }),
       createRoute({
@@ -158,6 +201,11 @@ const routeTree = rootRoute.addChildren([
         component: ProjectsPage,
       }),
       projectRoute.addChildren([
+        createRoute({
+          getParentRoute: () => projectRoute,
+          path: 'automations',
+          component: ProjectAutomationsPage,
+        }),
         projectChatRoute.addChildren([
           createRoute({
             getParentRoute: () => projectChatRoute,
@@ -166,6 +214,21 @@ const routeTree = rootRoute.addChildren([
         ]),
       ]),
       adminRoute.addChildren([
+        createRoute({
+          getParentRoute: () => adminRoute,
+          path: '/mcp',
+          component: AdminMcpPage,
+        }),
+        createRoute({
+          getParentRoute: () => adminRoute,
+          path: '/automations',
+          component: AdminAutomationsPage,
+        }),
+        createRoute({
+          getParentRoute: () => adminRoute,
+          path: '/agents',
+          component: AdminAgentsPage,
+        }),
         createRoute({
           getParentRoute: () => adminRoute,
           path: '/tools',

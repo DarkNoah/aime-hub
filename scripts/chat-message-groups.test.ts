@@ -23,7 +23,6 @@ const message = (
 test('content parts end a consecutive tool group without changing message order', () => {
   const separators: Message['parts'] = [
     { type: 'text', text: 'next' },
-    { type: 'reasoning', text: 'thinking', state: 'done' },
     { type: 'file', mediaType: 'image/png', url: '/image.png' },
     { type: 'text', text: '' },
   ];
@@ -39,6 +38,31 @@ test('content parts end a consecutive tool group without changing message order'
     assert.equal(groups[1].type === 'part' && groups[1].part, separator);
     assert.deepEqual(source, before);
   }
+});
+
+test('reasoning remains visible while tools on either side stay in one group', () => {
+  const reasoning: Message['parts'][number] = {
+    type: 'reasoning',
+    text: 'thinking',
+    state: 'done',
+  };
+  const sources = [
+    message('one', [tool('a')]),
+    message('two', [reasoning, tool('b')]),
+  ];
+  const before = structuredClone(sources);
+  const rows = groupChatMessages(sources);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].parts[0], {
+    type: 'tools',
+    id: 'one:a',
+    tools: [tool('a'), tool('b')],
+  });
+  assert.equal(
+    rows[0].parts[1].type === 'part' && rows[0].parts[1].part,
+    reasoning,
+  );
+  assert.deepEqual(sources, before);
 });
 
 test('data and step parts do not split tools and remain available for rendering without mutating the source', () => {
@@ -121,7 +145,6 @@ test('ignoring data and steps still respects content, interaction, and message-r
   const step: Message['parts'][number] = { type: 'step-start' };
   const separators: Message['parts'] = [
     { type: 'text', text: 'answer' },
-    { type: 'reasoning', text: 'thinking', state: 'done' },
     { type: 'file', mediaType: 'image/png', url: '/image.png' },
     {
       type: 'tool-ask_user',

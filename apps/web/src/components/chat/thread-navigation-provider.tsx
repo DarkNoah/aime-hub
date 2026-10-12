@@ -25,7 +25,12 @@ export function ThreadNavigationProvider({
     });
     source.addEventListener('expired', () => {
       source.close();
-      resource.receive({ type: 'snapshot', threads: [], projects: [] });
+      resource.receive({
+        type: 'snapshot',
+        threads: [],
+        projects: [],
+        archivedThreads: [],
+      });
     });
     // EventSource retries transport failures; every connection starts with a fresh snapshot.
     return () => source.close();

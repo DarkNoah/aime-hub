@@ -11,16 +11,12 @@ import { useTranslation } from 'react-i18next';
 import { MessageSquare, X } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ChatSettings, ThreadSummary } from '@aime/shared/threads';
-import {
-  Conversation,
-  ConversationContent,
-  ConversationEmptyState,
-  ConversationScrollButton,
-} from '@/components/ai-elements/conversation';
+import { ConversationEmptyState } from '@/components/ai-elements/conversation';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { chatApi, chatErrorKey, ChatApiError } from './api';
 import { ChatComposer } from './chat-composer';
+import { ChatConversation } from './chat-conversation';
 import { ChatQueue } from './chat-queue';
 import { ChatWorkspace } from './chat-workspace';
 import { LoadingState } from '@/components/loading-state';
@@ -176,6 +172,7 @@ function ChatPanelSession({
             draftThread.current ??
             (await chatApi.create({
               model: input.model,
+              agentId: input.agentId,
               reasoningEffort: input.reasoningEffort,
               projectId,
             }));
@@ -356,97 +353,95 @@ function ExistingChat({
           )}
         </div>
       )}
-      <Conversation className="min-h-0" initial="instant" resize="instant">
-        <ConversationContent
-          data-chat-messages
-          className={cn(chatContentClassName, 'gap-6 py-6')}
-        >
-          {chat.hasEarlier && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="mx-auto"
-              disabled={chat.loadingHistory}
-              onClick={() => void chat.loadEarlier().catch(notifyError)}
-            >
-              {t(chat.loadingHistory ? 'chat.loading' : 'chat.loadEarlier')}
-            </Button>
-          )}
-          {!chat.thread && !chat.error && (
-            <div
-              role="status"
-              aria-label={t('chat.loading')}
-              className="space-y-5 motion-safe:animate-pulse"
-            >
-              <div className="h-4 w-1/3 rounded bg-muted" />
-              <div className="h-20 w-4/5 rounded-lg bg-muted" />
-              <div className="ml-auto h-14 w-3/5 rounded-lg bg-muted" />
-            </div>
-          )}
-          <ChatMessages
-            messages={chat.messages}
-            running={running}
-            activeMessageId={chat.activeMessageId}
-            toolInteractions={chat.toolInteractions}
-            onToolResponse={chat.respondToTool}
-            disabled={!chat.connected || running || stopping}
-          />
-          {chat.thread && !chat.messages.length && (
-            <ConversationEmptyState
-              title={t('chat.welcome')}
-              description={t('chat.welcomeHint')}
-            />
-          )}
-          {running && !chat.activeMessageId && (
-            <p
-              role="status"
-              className="text-sm text-muted-foreground motion-safe:animate-pulse"
-            >
-              {t('chat.thinking')}
-            </p>
-          )}
-          {chat.thread?.error && (
-            <ChatErrorCard
-              error={chat.thread.error}
-              disabled={!chat.connected || running || stopping || chat.sending}
-              onRetry={async () => {
-                await chatApi.retry(threadId);
+      <ChatConversation
+        contentClassName={chatContentClassName}
+        composer={
+          chat.thread && (
+            <ChatComposer
+              className={chatContentClassName}
+              threadId={threadId}
+              disabled={!chat.connected}
+              running={running}
+              stopping={stopping}
+              usage={chat.usage}
+              goal={chat.goal}
+              onClearGoal={chat.clearGoal}
+              queue={
+                <ChatQueue
+                  thread={chat.thread}
+                  disabled={!chat.connected}
+                  waitingForTool={chat.toolInteractions.some(
+                    (item) => !item.response,
+                  )}
+                />
+              }
+              onSend={chat.send}
+              onStop={async () => {
+                setStopping(true);
+                try {
+                  await chatApi.abort(threadId);
+                } finally {
+                  setStopping(false);
+                }
               }}
             />
-          )}
-        </ConversationContent>
-        <ConversationScrollButton aria-label={t('chat.toLatest')} />
-      </Conversation>
-      {chat.thread && (
-        <ChatComposer
-          className={chatContentClassName}
-          threadId={threadId}
-          disabled={!chat.connected}
+          )
+        }
+      >
+        {chat.hasEarlier && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="mx-auto"
+            disabled={chat.loadingHistory}
+            onClick={() => void chat.loadEarlier().catch(notifyError)}
+          >
+            {t(chat.loadingHistory ? 'chat.loading' : 'chat.loadEarlier')}
+          </Button>
+        )}
+        {!chat.thread && !chat.error && (
+          <div
+            role="status"
+            aria-label={t('chat.loading')}
+            className="space-y-5 motion-safe:animate-pulse"
+          >
+            <div className="h-4 w-1/3 rounded bg-muted" />
+            <div className="h-20 w-4/5 rounded-lg bg-muted" />
+            <div className="ml-auto h-14 w-3/5 rounded-lg bg-muted" />
+          </div>
+        )}
+        <ChatMessages
+          messages={chat.messages}
           running={running}
-          stopping={stopping}
-          usage={chat.usage}
-          goal={chat.goal}
-          onClearGoal={chat.clearGoal}
-          queue={
-            <ChatQueue
-              thread={chat.thread}
-              disabled={!chat.connected}
-              waitingForTool={chat.toolInteractions.some(
-                (item) => !item.response,
-              )}
-            />
-          }
-          onSend={chat.send}
-          onStop={async () => {
-            setStopping(true);
-            try {
-              await chatApi.abort(threadId);
-            } finally {
-              setStopping(false);
-            }
-          }}
+          activeMessageId={chat.activeMessageId}
+          toolInteractions={chat.toolInteractions}
+          onToolResponse={chat.respondToTool}
+          disabled={!chat.connected || running || stopping}
         />
-      )}
+        {chat.thread && !chat.messages.length && (
+          <ConversationEmptyState
+            title={t('chat.welcome')}
+            description={t('chat.welcomeHint')}
+          />
+        )}
+        {running && !chat.activeMessageId && (
+          <p
+            role="status"
+            className="text-sm text-muted-foreground motion-safe:animate-pulse"
+          >
+            {t('chat.thinking')}
+          </p>
+        )}
+        {chat.thread?.error && (
+          <ChatErrorCard
+            error={chat.thread.error}
+            disabled={!chat.connected || running || stopping || chat.sending}
+            onRetry={async () => {
+              await chatApi.retry(threadId);
+            }}
+          />
+        )}
+      </ChatConversation>
     </>
   );
 }

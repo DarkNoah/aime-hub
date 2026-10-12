@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { UIMessage } from 'ai';
-import { Braces, Columns2, Files, ScanText } from 'lucide-react';
+import { Braces, Columns2, Files, Images, ScanText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { usePanelRef } from 'react-resizable-panels';
 import { Button } from '@/components/ui/button';
@@ -40,6 +40,11 @@ import { WorkspaceFileContext } from '@/components/file-manager/context';
 import { FloatingWindow } from '@/components/floating-window';
 import { FloatingChatContext } from './layout-context';
 import './chat-floating.css';
+import { AssetAttachmentProvider } from '@/components/generated-assets/attachment-context';
+
+const AssetPanel = lazy(
+  () => import('@/components/generated-assets/asset-panel'),
+);
 
 const FileManager = lazy(
   () => import('@/components/file-manager/file-manager'),
@@ -71,7 +76,22 @@ export function ChatWorkspace({
   const [expanded, setExpanded] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [chatNarrow, setChatNarrow] = useState(false);
-  const [view, setView] = useState<'files' | 'messages' | 'preview'>('files');
+  const [view, setView] = useState<'files' | 'messages' | 'preview' | 'assets'>(
+    'files',
+  );
+  // Only completed generation changes refresh the gallery, not every text delta.
+  const assetRevision = messages
+    .flatMap((message) =>
+      message.parts.flatMap((part) =>
+        (part.type === 'tool-image_gen' ||
+          (part.type === 'dynamic-tool' && part.toolName === 'image_gen')) &&
+        'state' in part &&
+        part.state === 'output-available'
+          ? [part.toolCallId]
+          : [],
+      ),
+    )
+    .join(',');
   const [selection, setSelection] = useState<MessagePreviewSelection | null>(
     null,
   );
@@ -99,15 +119,16 @@ export function ChatWorkspace({
     threadId,
     view === 'files' && (compact ? drawerOpen : expanded),
   );
-  const { revealFile } = files;
+  const { revealFile, revealDirectory } = files;
   const openWorkspaceFile = useCallback(
-    (path: string) => {
+    (path: string, kind: 'file' | 'directory' = 'file') => {
       setView('files');
       if (compact) setDrawerOpen(true);
       else panelRef.current?.expand();
-      revealFile(path);
+      if (kind === 'directory') revealDirectory(path);
+      else revealFile(path);
     },
-    [compact, panelRef, revealFile],
+    [compact, panelRef, revealDirectory, revealFile],
   );
 
   useEffect(() => {
@@ -136,9 +157,11 @@ export function ChatWorkspace({
   const title = t(
     view === 'files'
       ? 'files.title'
-      : view === 'messages'
-        ? 'chat.inspector.title'
-        : 'chat.preview.title',
+      : view === 'assets'
+        ? 'assets.title'
+        : view === 'messages'
+          ? 'chat.inspector.title'
+          : 'chat.preview.title',
   );
   const content =
     view === 'files' ? (
@@ -150,6 +173,21 @@ export function ChatWorkspace({
         }
       >
         <FileManager state={files} onClose={close} />
+      </Suspense>
+    ) : view === 'assets' ? (
+      <Suspense
+        fallback={
+          <p role="status" className="p-4 text-sm text-muted-foreground">
+            {t('files.loading')}
+          </p>
+        }
+      >
+        <AssetPanel
+          key={threadId ?? 'new'}
+          threadId={threadId}
+          revision={assetRevision}
+          onClose={close}
+        />
       </Suspense>
     ) : view === 'preview' ? (
       <ChatMessagePreview
@@ -167,200 +205,237 @@ export function ChatWorkspace({
     );
 
   return (
-    <MessagePreviewContext.Provider value={openPreview}>
-      <WorkspaceFileContext.Provider
-        value={files.available ? openWorkspaceFile : null}
-      >
-        <div
-          ref={containerRef}
-          className="relative flex min-h-0 min-w-0 flex-1"
+    <AssetAttachmentProvider>
+      <MessagePreviewContext.Provider value={openPreview}>
+        <WorkspaceFileContext.Provider
+          value={files.available ? openWorkspaceFile : null}
         >
-          <ResizablePanelGroup orientation="horizontal" disabled={floating}>
-            <ResizablePanel
-              id={`${contentId}-chat`}
-              minSize={0}
-              // Keep the inspector full-width even if an in-flight drag writes another layout.
-              maxSize={floating ? '0%' : '100%'}
-              onResize={(size) => setChatNarrow(size.inPixels < 360)}
-              className="h-full min-h-0"
-              style={{ overflow: 'visible' }}
-            >
-              <FloatingWindow
-                active={floating}
-                boundaryRef={containerRef}
-                title={t('chat.inspector.floating')}
-                moveLabel={t('chat.inspector.moveWindow')}
-                resizeLabel={(direction) =>
-                  t(`chat.inspector.resizeWindow.${direction}`)
-                }
-                data-chat-floating={floating || undefined}
-                className="@container/chat"
-                actions={
+          <div
+            ref={containerRef}
+            className="relative flex min-h-0 min-w-0 flex-1"
+          >
+            <ResizablePanelGroup orientation="horizontal" disabled={floating}>
+              <ResizablePanel
+                id={`${contentId}-chat`}
+                minSize={0}
+                // Keep the inspector full-width even if an in-flight drag writes another layout.
+                maxSize={floating ? '0%' : '100%'}
+                onResize={(size) => setChatNarrow(size.inPixels < 360)}
+                className="h-full min-h-0"
+                style={{ overflow: 'visible' }}
+              >
+                <FloatingWindow
+                  active={floating}
+                  boundaryRef={containerRef}
+                  title={t('chat.inspector.floating')}
+                  moveLabel={t('chat.inspector.moveWindow')}
+                  resizeLabel={(direction) =>
+                    t(`chat.inspector.resizeWindow.${direction}`)
+                  }
+                  data-chat-floating={floating || undefined}
+                  className="@container/chat"
+                  actions={
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={t('chat.inspector.restore')}
+                      title={t('chat.inspector.restore')}
+                      onClick={() => {
+                        pendingLayoutAction.current = 'restore';
+                        setChatNarrow(false);
+                      }}
+                    >
+                      <Columns2 className="size-3.5" aria-hidden="true" />
+                    </Button>
+                  }
+                >
+                  <FloatingChatContext.Provider value={floating}>
+                    {children}
+                  </FloatingChatContext.Provider>
+                </FloatingWindow>
+              </ResizablePanel>
+              {!compact && (
+                <>
+                  <ResizableHandle
+                    aria-label={t('chat.inspector.resize')}
+                    disabled={floating}
+                    className={cn(floating && 'invisible w-0')}
+                  />
+                  <ResizablePanel
+                    id={`${contentId}-inspector`}
+                    panelRef={panelRef}
+                    defaultSize="38%"
+                    minSize={320}
+                    maxSize="100%"
+                    collapsible
+                    collapsedSize={48}
+                    onResize={(size) => setExpanded(size.inPixels > 49)}
+                    className="flex h-full min-h-0 bg-muted/20"
+                  >
+                    <div className="flex w-12 shrink-0 flex-col items-center gap-2 border-r py-3">
+                      <Button
+                        ref={toggleRef}
+                        variant={
+                          expanded && view === 'files' ? 'secondary' : 'ghost'
+                        }
+                        size="icon-sm"
+                        aria-label={t('files.title')}
+                        title={t('files.title')}
+                        aria-expanded={expanded && view === 'files'}
+                        aria-controls={contentId}
+                        onClick={() => {
+                          setView('files');
+                          if (expanded && view === 'files') collapseInspector();
+                          else panelRef.current?.expand();
+                        }}
+                      >
+                        <Files className="size-4" aria-hidden="true" />
+                      </Button>
+                      <Button
+                        variant={
+                          expanded && view === 'assets' ? 'secondary' : 'ghost'
+                        }
+                        size="icon-sm"
+                        aria-label={t('assets.title')}
+                        title={t('assets.title')}
+                        aria-expanded={expanded && view === 'assets'}
+                        aria-controls={contentId}
+                        onClick={() => {
+                          setView('assets');
+                          if (expanded && view === 'assets')
+                            collapseInspector();
+                          else panelRef.current?.expand();
+                        }}
+                      >
+                        <Images className="size-4" aria-hidden="true" />
+                      </Button>
+                      <Button
+                        variant={
+                          expanded && view === 'messages'
+                            ? 'secondary'
+                            : 'ghost'
+                        }
+                        size="icon-sm"
+                        aria-label={t('chat.inspector.title')}
+                        title={t('chat.inspector.title')}
+                        aria-expanded={expanded && view === 'messages'}
+                        aria-controls={contentId}
+                        onClick={() => {
+                          setView('messages');
+                          if (expanded && view === 'messages')
+                            collapseInspector();
+                          else panelRef.current?.expand();
+                        }}
+                      >
+                        <Braces className="size-4" aria-hidden="true" />
+                      </Button>
+                      <Button
+                        variant={
+                          expanded && view === 'preview' ? 'secondary' : 'ghost'
+                        }
+                        size="icon-sm"
+                        aria-label={t('chat.preview.title')}
+                        title={t('chat.preview.title')}
+                        aria-expanded={expanded && view === 'preview'}
+                        aria-controls={contentId}
+                        onClick={() => {
+                          setView('preview');
+                          if (expanded && view === 'preview')
+                            collapseInspector();
+                          else panelRef.current?.expand();
+                        }}
+                      >
+                        <ScanText className="size-4" aria-hidden="true" />
+                      </Button>
+                    </div>
+                    <aside
+                      id={contentId}
+                      aria-label={title}
+                      hidden={!expanded}
+                      className="min-h-0 min-w-0 flex-1"
+                    >
+                      {expanded && content}
+                    </aside>
+                  </ResizablePanel>
+                </>
+              )}
+            </ResizablePanelGroup>
+            {compact && (
+              <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+                <div className="flex w-12 shrink-0 flex-col items-center gap-2 border-l bg-muted/20 py-3">
                   <Button
+                    ref={toggleRef}
                     variant="ghost"
-                    size="icon-xs"
-                    aria-label={t('chat.inspector.restore')}
-                    title={t('chat.inspector.restore')}
+                    size="icon-sm"
+                    aria-label={t('files.title')}
+                    title={t('files.title')}
                     onClick={() => {
-                      pendingLayoutAction.current = 'restore';
-                      setChatNarrow(false);
+                      setView('files');
+                      setDrawerOpen(true);
                     }}
                   >
-                    <Columns2 className="size-3.5" aria-hidden="true" />
+                    <Files className="size-4" aria-hidden="true" />
                   </Button>
-                }
-              >
-                <FloatingChatContext.Provider value={floating}>
-                  {children}
-                </FloatingChatContext.Provider>
-              </FloatingWindow>
-            </ResizablePanel>
-            {!compact && (
-              <>
-                <ResizableHandle
-                  aria-label={t('chat.inspector.resize')}
-                  disabled={floating}
-                  className={cn(floating && 'invisible w-0')}
-                />
-                <ResizablePanel
-                  id={`${contentId}-inspector`}
-                  panelRef={panelRef}
-                  defaultSize="38%"
-                  minSize={320}
-                  maxSize="100%"
-                  collapsible
-                  collapsedSize={48}
-                  onResize={(size) => setExpanded(size.inPixels > 49)}
-                  className="flex h-full min-h-0 bg-muted/20"
-                >
-                  <div className="flex w-12 shrink-0 flex-col items-center gap-2 border-r py-3">
-                    <Button
-                      ref={toggleRef}
-                      variant={
-                        expanded && view === 'files' ? 'secondary' : 'ghost'
-                      }
-                      size="icon-sm"
-                      aria-label={t('files.title')}
-                      title={t('files.title')}
-                      aria-expanded={expanded && view === 'files'}
-                      aria-controls={contentId}
-                      onClick={() => {
-                        setView('files');
-                        if (expanded && view === 'files') collapseInspector();
-                        else panelRef.current?.expand();
-                      }}
-                    >
-                      <Files className="size-4" aria-hidden="true" />
-                    </Button>
-                    <Button
-                      variant={
-                        expanded && view === 'messages' ? 'secondary' : 'ghost'
-                      }
-                      size="icon-sm"
-                      aria-label={t('chat.inspector.title')}
-                      title={t('chat.inspector.title')}
-                      aria-expanded={expanded && view === 'messages'}
-                      aria-controls={contentId}
-                      onClick={() => {
-                        setView('messages');
-                        if (expanded && view === 'messages')
-                          collapseInspector();
-                        else panelRef.current?.expand();
-                      }}
-                    >
-                      <Braces className="size-4" aria-hidden="true" />
-                    </Button>
-                    <Button
-                      variant={
-                        expanded && view === 'preview' ? 'secondary' : 'ghost'
-                      }
-                      size="icon-sm"
-                      aria-label={t('chat.preview.title')}
-                      title={t('chat.preview.title')}
-                      aria-expanded={expanded && view === 'preview'}
-                      aria-controls={contentId}
-                      onClick={() => {
-                        setView('preview');
-                        if (expanded && view === 'preview') collapseInspector();
-                        else panelRef.current?.expand();
-                      }}
-                    >
-                      <ScanText className="size-4" aria-hidden="true" />
-                    </Button>
-                  </div>
-                  <aside
-                    id={contentId}
-                    aria-label={title}
-                    hidden={!expanded}
-                    className="min-h-0 min-w-0 flex-1"
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={t('assets.title')}
+                    title={t('assets.title')}
+                    onClick={() => {
+                      setView('assets');
+                      setDrawerOpen(true);
+                    }}
                   >
-                    {expanded && content}
-                  </aside>
-                </ResizablePanel>
-              </>
+                    <Images className="size-4" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={t('chat.inspector.title')}
+                    title={t('chat.inspector.title')}
+                    onClick={() => {
+                      setView('messages');
+                      setDrawerOpen(true);
+                    }}
+                  >
+                    <Braces className="size-4" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={t('chat.preview.title')}
+                    title={t('chat.preview.title')}
+                    onClick={() => {
+                      setView('preview');
+                      setDrawerOpen(true);
+                    }}
+                  >
+                    <ScanText className="size-4" aria-hidden="true" />
+                  </Button>
+                </div>
+                <SheetContent
+                  className="w-full max-w-full gap-0 sm:max-w-lg"
+                  showCloseButton={false}
+                >
+                  <SheetTitle className="sr-only">{title}</SheetTitle>
+                  <SheetDescription className="sr-only">
+                    {t(
+                      view === 'files'
+                        ? 'files.previewHint'
+                        : view === 'assets'
+                          ? 'assets.emptyHint'
+                          : view === 'messages'
+                            ? 'chat.inspector.hint'
+                            : 'chat.preview.hint',
+                    )}
+                  </SheetDescription>
+                  {content}
+                </SheetContent>
+              </Sheet>
             )}
-          </ResizablePanelGroup>
-          {compact && (
-            <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
-              <div className="flex w-12 shrink-0 flex-col items-center gap-2 border-l bg-muted/20 py-3">
-                <Button
-                  ref={toggleRef}
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t('files.title')}
-                  title={t('files.title')}
-                  onClick={() => {
-                    setView('files');
-                    setDrawerOpen(true);
-                  }}
-                >
-                  <Files className="size-4" aria-hidden="true" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t('chat.inspector.title')}
-                  title={t('chat.inspector.title')}
-                  onClick={() => {
-                    setView('messages');
-                    setDrawerOpen(true);
-                  }}
-                >
-                  <Braces className="size-4" aria-hidden="true" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t('chat.preview.title')}
-                  title={t('chat.preview.title')}
-                  onClick={() => {
-                    setView('preview');
-                    setDrawerOpen(true);
-                  }}
-                >
-                  <ScanText className="size-4" aria-hidden="true" />
-                </Button>
-              </div>
-              <SheetContent
-                className="w-full max-w-full gap-0 sm:max-w-lg"
-                showCloseButton={false}
-              >
-                <SheetTitle className="sr-only">{title}</SheetTitle>
-                <SheetDescription className="sr-only">
-                  {t(
-                    view === 'files'
-                      ? 'files.previewHint'
-                      : view === 'messages'
-                        ? 'chat.inspector.hint'
-                        : 'chat.preview.hint',
-                  )}
-                </SheetDescription>
-                {content}
-              </SheetContent>
-            </Sheet>
-          )}
-        </div>
-      </WorkspaceFileContext.Provider>
-    </MessagePreviewContext.Provider>
+          </div>
+        </WorkspaceFileContext.Provider>
+      </MessagePreviewContext.Provider>
+    </AssetAttachmentProvider>
   );
 }

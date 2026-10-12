@@ -9,6 +9,7 @@ import type { FileListing, FileMutation } from '@aime/shared/files';
 import { fileErrorKey } from './api';
 import { createWorkspaceFileClient } from './workspace-client';
 import { parentPath, renameTabs, withinPath, type FileTab } from './state';
+import { useFileUploads } from './use-file-uploads';
 
 type Directory = Partial<FileListing> & {
   loading?: boolean;
@@ -26,6 +27,7 @@ export function useFileManager(threadId: string | undefined, visible: boolean) {
   const [expanded, setExpanded] = useState(new Set<string>());
   const [tabs, setTabs] = useState<FileTab[]>([]);
   const [selected, setSelected] = useState('');
+  const [currentDirectory, setCurrentDirectory] = useState('');
   const [revision, setRevision] = useState(0);
   const requests = useRef(new Map<string, AbortController>());
   const loadDirectory = useCallback(
@@ -71,6 +73,7 @@ export function useFileManager(threadId: string | undefined, visible: boolean) {
   }, [visible, loadDirectory]);
 
   const openFile = useCallback((path: string, line?: number) => {
+    setCurrentDirectory(parentPath(path));
     setTabs((previous) =>
       previous.some((tab) => tab.path === path)
         ? previous.map((tab) => (tab.path === path ? { path, line } : tab))
@@ -78,6 +81,16 @@ export function useFileManager(threadId: string | undefined, visible: boolean) {
     );
     setSelected(path);
   }, []);
+  const uploaded = useCallback(
+    async (directory: string) => {
+      if (directory)
+        setExpanded((previous) => new Set([...previous, directory]));
+      await loadDirectory(directory);
+      setRevision((value) => value + 1);
+    },
+    [loadDirectory],
+  );
+  const uploads = useFileUploads(client, uploaded);
   const revealFile = useCallback(
     (path: string) => {
       // Tool paths may be relative to '.', while the file API uses root-relative paths.
@@ -96,6 +109,24 @@ export function useFileManager(threadId: string | undefined, visible: boolean) {
     },
     [loadDirectory, openFile],
   );
+  const revealDirectory = useCallback(
+    (path: string) => {
+      const relativePath = path.replace(/^(\.\/)+/, '');
+      if (!relativePath) return;
+      const directories: string[] = [];
+      let directory = relativePath;
+      while (directory) {
+        directories.push(directory);
+        directory = parentPath(directory);
+      }
+      setSelected(relativePath);
+      setCurrentDirectory(relativePath);
+      setExpanded((previous) => new Set([...previous, ...directories]));
+      ['', ...directories].forEach((entry) => void loadDirectory(entry));
+      setRevision((value) => value + 1);
+    },
+    [loadDirectory],
+  );
   function closeTab(path: string) {
     const index = tabs.findIndex((tab) => tab.path === path);
     const next = tabs.filter((tab) => tab.path !== path);
@@ -105,11 +136,15 @@ export function useFileManager(threadId: string | undefined, visible: boolean) {
   }
   function changeExpanded(next: Set<string>) {
     next.forEach((path) => {
-      if (!expanded.has(path)) void loadDirectory(path);
+      if (!expanded.has(path)) {
+        setCurrentDirectory(path);
+        void loadDirectory(path);
+      }
     });
     setExpanded(next);
   }
   function toggle(path: string) {
+    setCurrentDirectory(path);
     const next = new Set(expanded);
     if (next.has(path)) next.delete(path);
     else next.add(path);
@@ -123,6 +158,13 @@ export function useFileManager(threadId: string | undefined, visible: boolean) {
   async function mutate(input: FileMutation) {
     if (!available) return;
     const result = await client.mutate(input);
+    setCurrentDirectory((previous) => {
+      if (!withinPath(previous, input.path)) return previous;
+      if (input.operation === 'rename')
+        return result.path + previous.slice(input.path.length);
+      if (input.operation === 'delete') return parentPath(input.path);
+      return previous;
+    });
     // Invalidate old directory requests before adjusting descendant paths.
     requests.current.forEach((controller) => controller.abort());
     requests.current.clear();
@@ -186,15 +228,19 @@ export function useFileManager(threadId: string | undefined, visible: boolean) {
   }
   return {
     client,
+    uploads,
     available,
     directories,
     expanded,
     tabs,
     selected,
+    currentDirectory,
+    setCurrentDirectory,
     revision,
     loadDirectory,
     openFile,
     revealFile,
+    revealDirectory,
     closeTab,
     setSelected,
     changeExpanded,

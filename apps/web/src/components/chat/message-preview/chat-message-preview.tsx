@@ -22,7 +22,7 @@ export function ChatMessagePreview({
   const { t } = useTranslation();
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <header className="flex min-h-16 shrink-0 items-center gap-2 border-b px-3">
+      <header className="flex min-h-12 shrink-0 items-center gap-2 border-b px-3">
         <ScanText
           className="size-4 shrink-0 text-muted-foreground"
           aria-hidden="true"

@@ -5,15 +5,21 @@ import { randomBytes } from 'node:crypto';
 import { Pool } from 'pg';
 import { createDataSource } from '@aime/db';
 import {
+  toolIds,
   defaultWebSearchConfig,
   defaultWebFetchConfig,
+  defaultImageGenConfig,
   webFetchConfigSchema,
   webSearchConfigSchema,
 } from '@aime/shared/tools';
-import { ToolService } from '../apps/server/src/modules/tools/service.js';
-import type { ProviderService } from '../apps/server/src/modules/providers/service.js';
+import { agentToolIds } from '@aime/shared/agents';
+import {
+  buildTools,
+  ToolService,
+  type RegisteredToolId,
+} from '../apps/server/src/modules/tools/service.js';
 import { SerpApiProvider } from '../apps/server/src/mastra/providers/serpapi.js';
-import { SogouProvider } from '../apps/server/src/mastra/providers/sogou.js';
+import { LocalProvider } from '../apps/server/src/mastra/providers/local.js';
 import { createApp } from '../apps/server/src/app.js';
 import { createApiClient } from '../apps/web/src/lib/rpc.js';
 
@@ -32,9 +38,11 @@ const provider = {
 };
 function fixture() {
   const rows = new Map<string, { id: string; value: unknown }>();
+  const reads: string[] = [];
   const database = {
     getRepository: () => ({
       async findOneBy({ id }: { id: string }) {
+        reads.push(id);
         return rows.get(id) ?? null;
       },
       async upsert(row: { id: string; value: unknown }) {
@@ -43,7 +51,21 @@ function fixture() {
     }),
   } as unknown as DataSource;
   let current = { ...provider };
-  const providers: Pick<ProviderService, 'getProvider'> = {
+  const providers: ConstructorParameters<typeof ToolService>[1] = {
+    async getDefaults() {
+      return {
+        defaultModel: null,
+        fastModel: null,
+        imageModel: null,
+        thinkingMode: 'medium',
+      };
+    },
+    async getModel() {
+      throw new Error('No image models in this fixture');
+    },
+    async getProviderInstance() {
+      throw new Error('No image providers in this fixture');
+    },
     async getProvider(id) {
       assert.equal(id, provider.id);
       return current;
@@ -51,6 +73,7 @@ function fixture() {
   };
   return {
     rows,
+    reads,
     database,
     providers,
     setProvider: (value: typeof provider) => {
@@ -59,6 +82,98 @@ function fixture() {
     service: new ToolService(database, providers),
   };
 }
+
+test('registry builds selected tool IDs, deduplicates them and skips unrelated settings', async () => {
+  const f = fixture();
+  const builtinIds = agentToolIds.filter(
+    (id) => !toolIds.some((configured) => configured === id),
+  );
+  const builtins = await f.service.buildTools(builtinIds);
+  assert.deepEqual(Object.keys(builtins), builtinIds);
+  assert.deepEqual(f.reads, []);
+  assert.deepEqual(await f.service.buildTools([]), {});
+  const selected = await f.service.buildTools([
+    'curr_time',
+    'web_search',
+    'web_search',
+  ]);
+  assert.deepEqual(Object.keys(selected), ['curr_time', 'web_search']);
+  assert.deepEqual(f.reads, ['tool:web_search']);
+  assert.deepEqual(Object.keys(await buildTools(agentToolIds)), [
+    ...agentToolIds,
+  ]);
+  for (const id of ['unknown', '__proto__', 'constructor']) {
+    await assert.rejects(
+      f.service.buildTools([id as RegisteredToolId]),
+      /Unknown tool ID/,
+    );
+  }
+  assert.deepEqual(f.reads, ['tool:web_search']);
+});
+
+test('buildTools merges caller defaults with saved settings and honors disabled tools', async (t) => {
+  const f = fixture();
+  const counts: number[] = [];
+  t.mock.method(
+    LocalProvider.prototype,
+    'webSearch',
+    async (input: { numResults: number }) => {
+      counts.push(input.numResults);
+      return [];
+    },
+  );
+  const defaults = { web_search: { numResults: 3 }, sleep: { enabled: false } };
+  const first = await f.service.buildTools(['web_search', 'sleep'], defaults);
+  assert.deepEqual(Object.keys(first), ['web_search']);
+  assert.ok('execute' in first.web_search && first.web_search.execute);
+  await first.web_search.execute({ query: 'query' }, {});
+  // A partial persisted value overrides only supplied fields.
+  f.rows.set('tool:web_search', {
+    id: 'tool:web_search',
+    value: { numResults: 7 },
+  });
+  const second = await f.service.buildTools(['web_search'], defaults);
+  assert.ok('execute' in second.web_search && second.web_search.execute);
+  await second.web_search.execute({ query: 'query' }, {});
+  assert.deepEqual(counts, [3, 7]);
+  assert.notEqual(first.web_search, second.web_search);
+  assert.deepEqual(defaults, {
+    web_search: { numResults: 3 },
+    sleep: { enabled: false },
+  });
+
+  await f.service.update('web_search', {
+    ...defaultWebSearchConfig,
+    enabled: false,
+  });
+  assert.deepEqual(
+    await f.service.buildTools(['web_search'], {
+      web_search: { enabled: true },
+    }),
+    {},
+  );
+  await f.service.update('web_search', {
+    ...defaultWebSearchConfig,
+    enabled: true,
+  });
+  assert.ok(
+    (
+      await f.service.buildTools(['web_search'], {
+        web_search: { enabled: false },
+      })
+    ).web_search,
+  );
+  await assert.rejects(
+    buildTools(['web_search'], { web_search: { numResults: 0 } }),
+    { name: 'ZodError' },
+  );
+  assert.deepEqual(
+    Object.keys(
+      await buildTools(['curr_time'], { web_search: { numResults: 0 } }),
+    ),
+    ['curr_time'],
+  );
+});
 
 test('web search configuration validates limits, unknown properties and defaults', () => {
   assert.deepEqual(webSearchConfigSchema.parse({}), defaultWebSearchConfig);
@@ -85,6 +200,7 @@ test('persisted configuration controls new tool instances, without credentials i
   assert.deepEqual(await f.service.list(), [
     { id: 'web_search', config: defaultWebSearchConfig },
     { id: 'web_fetch', config: defaultWebFetchConfig },
+    { id: 'image_gen', config: defaultImageGenConfig },
   ]);
   const saved = {
     ...defaultWebSearchConfig,
@@ -107,14 +223,17 @@ test('persisted configuration controls new tool instances, without credentials i
       return [{ title: 'Result', href: 'https://example.com' }];
     },
   );
-  const first = (await restored.createTools()).web_search;
+  const first = (await restored.buildTools(toolIds)).web_search;
   assert.ok('execute' in first && first.execute);
   const output = await first.execute({ query: 'query' }, {});
   assert.doesNotMatch(JSON.stringify(output), /synthetic-secret/);
   await restored.update('web_search', { ...saved, enabled: false });
-  assert.deepEqual(Object.keys(await restored.createTools()), ['web_fetch']);
+  assert.deepEqual(Object.keys(await restored.buildTools(toolIds)), [
+    'web_fetch',
+    'image_gen',
+  ]);
   await restored.update('web_search', { ...saved, enabled: true });
-  const next = (await restored.createTools()).web_search;
+  const next = (await restored.buildTools(toolIds)).web_search;
   assert.notEqual(next, first);
 });
 
@@ -135,19 +254,22 @@ test('only enabled SerpAPI credentials can be selected; later disable/removal tr
   }
   f.setProvider({ ...provider });
   await f.service.update('web_search', config);
-  const tool = (await f.service.createTools()).web_search;
+  const tool = (await f.service.buildTools(toolIds)).web_search;
   assert.ok('execute' in tool && tool.execute);
-  t.mock.method(SogouProvider.prototype, 'webSearch', async () => [
+  t.mock.method(LocalProvider.prototype, 'webSearch', async () => [
     { title: 'Fallback', href: 'https://example.com/' },
   ]);
   f.setProvider({ ...provider, enabled: false });
-  assert.equal((await tool.execute({ query: 'query' }, {})).provider, 'sogou');
+  assert.equal((await tool.execute({ query: 'query' }, {})).provider, 'local');
   t.mock.method(f.providers, 'getProvider', async () => {
     throw new Error('deleted');
   });
-  assert.equal((await tool.execute({ query: 'query' }, {})).provider, 'sogou');
+  assert.equal((await tool.execute({ query: 'query' }, {})).provider, 'local');
   await f.service.update('web_search', { ...config, enabled: false });
-  assert.deepEqual(Object.keys(await f.service.createTools()), ['web_fetch']);
+  assert.deepEqual(Object.keys(await f.service.buildTools(toolIds)), [
+    'web_fetch',
+    'image_gen',
+  ]);
 });
 
 test('tool settings HTTP and RPC enforce admin, origin and schema validation', async (t) => {
@@ -178,9 +300,14 @@ test('tool settings HTTP and RPC enforce admin, origin and schema validation', a
   const body = { ...defaultWebSearchConfig, providerId: provider.id };
   const update = () =>
     client.tools.update({ params: { toolId: 'web_search' }, body });
+  const updateImage = () =>
+    client.tools.update({
+      params: { toolId: 'image_gen' },
+      body: defaultImageGenConfig,
+    });
   for (const value of [undefined, 'user', 'admin-assistant']) {
     role = value;
-    for (const call of [() => client.tools.list(), update])
+    for (const call of [() => client.tools.list(), update, updateImage])
       await assert.rejects(call(), {
         code: role ? 'FORBIDDEN' : 'UNAUTHORIZED',
       });
@@ -203,6 +330,7 @@ test('tool settings HTTP and RPC enforce admin, origin and schema validation', a
   for (const value of [undefined, 'https://other.example']) {
     requestOrigin = value;
     await assert.rejects(update(), { code: 'FORBIDDEN' });
+    await assert.rejects(updateImage(), { code: 'FORBIDDEN' });
   }
   assert.equal(f.rows.size, 0);
   requestOrigin = origin;
@@ -220,9 +348,20 @@ test('tool settings HTTP and RPC enforce admin, origin and schema validation', a
   });
   assert.equal(invalid.status, 400);
   assert.deepEqual(await update(), { id: 'web_search', config: body });
+  assert.deepEqual(await updateImage(), {
+    id: 'image_gen',
+    config: defaultImageGenConfig,
+  });
+  const imageResponse = await app.request('/api/admin/tools/image_gen', {
+    method: 'PUT',
+    headers: { Origin: origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...defaultImageGenConfig, timeoutMs: 600001 }),
+  });
+  assert.equal(imageResponse.status, 400);
   assert.deepEqual(await client.tools.list(), [
     { id: 'web_search', config: body },
     { id: 'web_fetch', config: defaultWebFetchConfig },
+    { id: 'image_gen', config: defaultImageGenConfig },
   ]);
   const fetchBody = { ...defaultWebFetchConfig, maxChars: 12345 };
   assert.deepEqual(
@@ -280,9 +419,12 @@ test('web fetch settings select only Jina AI credentials, persist limits and ind
     JSON.stringify([...f.rows.values()]),
     /synthetic-secret|apiKey/,
   );
-  assert.ok((await f.service.createTools()).web_fetch);
+  assert.ok((await f.service.buildTools(toolIds)).web_fetch);
   await f.service.update('web_fetch', { ...config, enabled: false });
-  assert.deepEqual(Object.keys(await f.service.createTools()), ['web_search']);
+  assert.deepEqual(Object.keys(await f.service.buildTools(toolIds)), [
+    'web_search',
+    'image_gen',
+  ]);
 });
 
 test(

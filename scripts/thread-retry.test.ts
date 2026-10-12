@@ -19,7 +19,7 @@ test('retry uses existing native history, rejects outsiders and ignores concurre
     async open({ onEvent }) {
       return sessionStub({
         async retry(selected) {
-          assert.deepEqual(selected, settings);
+          assert.deepEqual(selected, { ...settings, agentId: null });
           if (fail) throw new Error('Retry admission failed');
           retries++;
           onEvent({ type: 'status', status: 'running', runId: 'retry-run' });

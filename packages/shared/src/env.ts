@@ -1,6 +1,11 @@
 import { config } from 'dotenv';
 import { resolve } from 'node:path';
 import { z } from 'zod';
+import {
+  normalizeWebOrigins,
+  webOriginSchema,
+  webOriginsEnvSchema,
+} from './web-origins.js';
 
 config({
   path: resolve(process.env.INIT_CWD ?? process.cwd(), '.env'),
@@ -14,10 +19,18 @@ const schema = z.object({
   DATABASE_URL: z.url().refine((value) => /^postgres(ql)?:/.test(value)),
   BETTER_AUTH_SECRET: z.string().min(32),
   BETTER_AUTH_URL: z.url(),
-  WEB_ORIGIN: z.url(),
+  WEB_ORIGIN: webOriginSchema,
+  WEB_ORIGINS: webOriginsEnvSchema,
+  SERVER_HOST: z.string().min(1).default('0.0.0.0'),
   SERVER_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
   ADMINS: z.string().default('admin'),
   WORKSPACE_ROOT: z.string().min(1).default('workspaces'),
+  WEB_PUSH_PUBLIC_KEY: z.string().default(''),
+  WEB_PUSH_PRIVATE_KEY: z.string().default(''),
+  WEB_PUSH_SUBJECT: z
+    .string()
+    .refine((value) => !value || /^(mailto:|https:\/\/)/.test(value))
+    .default(''),
 });
 
 export function loadEnv() {
@@ -28,13 +41,19 @@ export function loadEnv() {
       `环境配置无效，请检查 .env: ${[...new Set(result.error.issues.map((issue) => issue.path.join('.')))].join(', ')}`,
     );
   }
+  const webOrigins = normalizeWebOrigins([
+    result.data.WEB_ORIGIN,
+    ...result.data.WEB_ORIGINS,
+  ]);
   if (
     result.data.NODE_ENV === 'production' &&
-    [result.data.BETTER_AUTH_URL, result.data.WEB_ORIGIN].some(
+    [result.data.BETTER_AUTH_URL, ...webOrigins].some(
       (url) => !url.startsWith('https://'),
     )
   ) {
-    throw new Error('生产环境 BETTER_AUTH_URL 和 WEB_ORIGIN 必须使用 HTTPS');
+    throw new Error(
+      '生产环境 BETTER_AUTH_URL、WEB_ORIGIN 和 WEB_ORIGINS 必须使用 HTTPS',
+    );
   }
-  return result.data;
+  return { ...result.data, WEB_ORIGINS: webOrigins };
 }

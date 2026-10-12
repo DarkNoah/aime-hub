@@ -5,6 +5,7 @@ import { ORPCError } from '@orpc/server';
 import { RPCHandler } from '@orpc/server/fetch';
 import { OpenAPIHandler } from '@orpc/openapi/fetch';
 import type { Auth } from '@aime/auth';
+import { normalizeWebOrigins, type WebOrigins } from '@aime/shared';
 import type { HttpEnv } from './http.js';
 import { authRoutes } from './modules/auth/routes.js';
 import { requireAdmin } from './modules/auth/require-admin.js';
@@ -28,25 +29,54 @@ import { requestLogRouter } from './modules/request-logs/rpc.js';
 import type { RequestLogService } from './modules/request-logs/service.js';
 import type { ToolService } from './modules/tools/service.js';
 import { toolRouter } from './modules/tools/rpc.js';
+import { agentRouter } from './modules/agents/rpc.js';
+import type { AgentService } from './modules/agents/service.js';
+import type { AutomationService } from './modules/automations/service.js';
+import { automationRouter } from './modules/automations/rpc.js';
+import type { NotificationService } from './modules/notifications/service.js';
+import { notificationRouter } from './modules/notifications/rpc.js';
+import { notificationRoutes } from './modules/notifications/routes.js';
+import { assetRouter } from './modules/assets/rpc.js';
+import type { AssetService } from './modules/assets/service.js';
+import type { McpService } from './modules/mcp/service.js';
+import { mcpRouter } from './modules/mcp/rpc.js';
 
 export function createApp(
   auth: Auth,
-  providers?: { service: ProviderService; webOrigin: string },
+  providers?: { service: ProviderService; webOrigin: WebOrigins },
   chat?: {
     threads: ThreadService;
     models: LanguageModelService;
-    webOrigin: string;
+    webOrigin: WebOrigins;
     projects?: ProjectService;
+    assets?: AssetService;
   },
-  skills?: { service: SkillService; webOrigin: string },
+  skills?: { service: SkillService; webOrigin: WebOrigins },
   environmentVariables?: {
     service: EnvironmentVariableService;
-    webOrigin: string;
+    webOrigin: WebOrigins;
   },
-  requestLogs?: { service: RequestLogService; webOrigin: string },
-  tools?: { service: ToolService; webOrigin: string },
+  requestLogs?: { service: RequestLogService; webOrigin: WebOrigins },
+  tools?: { service: ToolService; webOrigin: WebOrigins },
+  agents?: { service: AgentService; webOrigin: WebOrigins },
+  automations?: { service: AutomationService; webOrigin: WebOrigins },
+  notifications?: { service: NotificationService; webOrigin: WebOrigins },
+  mcp?: { service: McpService; webOrigin: WebOrigins },
 ) {
   const app = new Hono<HttpEnv>();
+  const webOrigins = normalizeWebOrigins(
+    providers?.webOrigin ??
+      chat?.webOrigin ??
+      skills?.webOrigin ??
+      environmentVariables?.webOrigin ??
+      requestLogs?.webOrigin ??
+      tools?.webOrigin ??
+      agents?.webOrigin ??
+      automations?.webOrigin ??
+      notifications?.webOrigin ??
+      mcp?.webOrigin ??
+      [],
+  );
   app.use('*', secureHeaders());
   app.route('/api', healthRoutes());
   // Better Auth owns its request bodies and its admin endpoints.
@@ -61,17 +91,28 @@ export function createApp(
     projects: projectRouter(chat?.projects, chat?.threads, chat?.models),
     skills: skillRouter(skills?.service),
     files: fileRouter(chat?.threads),
+    assets: assetRouter(chat?.assets, chat?.threads),
     requestLogs: requestLogRouter(requestLogs?.service),
     tools: toolRouter(tools?.service),
+    agents: agentRouter(agents?.service),
+    mcp: mcpRouter(mcp?.service),
+    automations: automationRouter(automations?.service),
+    notifications: notificationRouter(notifications?.service),
     environmentVariables: environmentVariableRouter(
       environmentVariables?.service,
     ),
   });
+  if (notifications)
+    app.route(
+      '/api/notifications',
+      notificationRoutes(auth, notifications.service),
+    );
   const rpcHandler = new RPCHandler(router);
   const httpHandler = new OpenAPIHandler(router, {
     customErrorResponseBodyEncoder: (error) => ({ code: error.code }),
   });
-  if (chat) app.route('/api/threads', threadRoutes(auth, chat.threads));
+  if (chat)
+    app.route('/api/threads', threadRoutes(auth, chat.threads, webOrigins));
   app.use('/api/*', async (c, next) => {
     const path = c.req.path;
     const threadRequest =
@@ -110,13 +151,7 @@ export function createApp(
         auth,
         headers: c.req.raw.headers,
         method: c.req.method,
-        webOrigin:
-          providers?.webOrigin ??
-          chat?.webOrigin ??
-          skills?.webOrigin ??
-          environmentVariables?.webOrigin ??
-          requestLogs?.webOrigin ??
-          tools?.webOrigin,
+        webOrigins,
       },
     });
     if (result.matched)
