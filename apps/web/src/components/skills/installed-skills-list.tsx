@@ -1,7 +1,17 @@
 import { useId } from 'react';
-import { ChevronRight, Folder, Sparkles, Trash2 } from 'lucide-react';
+import {
+  ChevronRight,
+  Folder,
+  ExternalLink,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { InstalledSkill } from '@aime/shared/skills';
+import {
+  skillGroupRepositoryUrl,
+  type InstalledSkill,
+} from '@aime/shared/skills';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -19,6 +29,9 @@ type Props = {
       mode: 'manage';
       onRemove: (skill: InstalledSkill) => void;
       onRemoveGroup: (group: string) => void;
+      onUpdateGroup: (group: string) => void;
+      onPreview: (skill: InstalledSkill) => void;
+      updatingGroup?: string;
     }
   | {
       mode: 'select';
@@ -38,6 +51,7 @@ export function InstalledSkillsList(props: Props) {
     groups.set(skill.group, group);
   }
   return [...groups].map(([group, skills]) => {
+    const repositoryUrl = skillGroupRepositoryUrl(group);
     const label = group || t('skills.localGroup');
     const heading = (
       <>
@@ -71,17 +85,49 @@ export function InstalledSkillsList(props: Props) {
               )}
             </h2>
             {group && props.mode === 'manage' ? (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="mr-3 shrink-0"
-                disabled={props.disabled}
-                aria-label={t('skills.removeGroupNamed', { name: group })}
-                title={t('skills.removeGroupNamed', { name: group })}
-                onClick={() => props.onRemoveGroup(group)}
-              >
-                <Trash2 className="text-muted-foreground" />
-              </Button>
+              <div className="mr-2 flex shrink-0 items-center gap-0.5">
+                {repositoryUrl ? (
+                  <>
+                    <Button variant="ghost" size="icon" asChild>
+                      <a
+                        href={repositoryUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={t('skills.openRepository', { name: group })}
+                        title={t('skills.openRepository', { name: group })}
+                      >
+                        <ExternalLink className="text-muted-foreground" />
+                      </a>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      disabled={props.disabled}
+                      onClick={() => props.onUpdateGroup(group)}
+                      aria-label={t('skills.updateGroupNamed', { name: group })}
+                      title={t('skills.updateGroupNamed', { name: group })}
+                    >
+                      <RefreshCw
+                        className={
+                          props.updatingGroup === group
+                            ? 'animate-spin text-primary'
+                            : 'text-muted-foreground'
+                        }
+                      />
+                    </Button>
+                  </>
+                ) : null}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  disabled={props.disabled}
+                  aria-label={t('skills.removeGroupNamed', { name: group })}
+                  title={t('skills.removeGroupNamed', { name: group })}
+                  onClick={() => props.onRemoveGroup(group)}
+                >
+                  <Trash2 className="text-muted-foreground" />
+                </Button>
+              </div>
             ) : null}
           </div>
           <CollapsibleContent>
@@ -89,7 +135,7 @@ export function InstalledSkillsList(props: Props) {
               {skills.map((skill) => (
                 <article
                   key={skill.path}
-                  className="flex items-start gap-3 px-4 py-4 sm:px-5"
+                  className="relative flex items-start gap-3 px-4 py-4 sm:px-5"
                 >
                   {props.mode === 'select' ? (
                     <Checkbox
@@ -119,7 +165,17 @@ export function InstalledSkillsList(props: Props) {
                             {skill.name}
                           </label>
                         ) : (
-                          skill.name
+                          <button
+                            type="button"
+                            disabled={props.disabled}
+                            onClick={() => props.onPreview(skill)}
+                            aria-label={t('skills.previewNamed', {
+                              name: skill.name,
+                            })}
+                            className="text-left outline-none after:absolute after:inset-0 after:transition-colors hover:text-primary hover:after:bg-muted/20 focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-ring"
+                          >
+                            {skill.name}
+                          </button>
                         )}
                       </h3>
                       <Badge
@@ -141,6 +197,7 @@ export function InstalledSkillsList(props: Props) {
                     <Button
                       variant="ghost"
                       size="icon"
+                      className="relative z-10"
                       disabled={!skill.path || props.disabled}
                       aria-label={t('skills.removeNamed', { name: skill.name })}
                       onClick={() => props.onRemove(skill)}

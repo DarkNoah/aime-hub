@@ -179,8 +179,7 @@ async function discover(root: string): Promise<DiscoveredSkill[]> {
   );
   if (!canonicalRoot) return result;
   const rootPath: string = canonicalRoot;
-  async function visit(directory: string, depth: number) {
-    if (depth > 12 || result.length >= 500) return;
+  async function visit(directory: string) {
     const entries = await readdir(directory, { withFileTypes: true }).catch(
       (error: NodeJS.ErrnoException) => {
         if (error.code === 'ENOENT') return [];
@@ -200,10 +199,10 @@ async function discover(root: string): Promise<DiscoveredSkill[]> {
     }
     for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       if (entry.isDirectory() && !entry.name.startsWith('.'))
-        await visit(resolve(directory, entry.name), depth + 1);
+        await visit(resolve(directory, entry.name));
     }
   }
-  await visit(resolve(root), 0);
+  await visit(resolve(root));
   return result;
 }
 

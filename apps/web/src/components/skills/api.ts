@@ -1,15 +1,21 @@
 import type { TranslationKey } from '@/i18n/config';
+import { api } from '@/lib/rpc';
+
+export type SkillScope = 'global' | 'personal';
+const clients = { global: api.skills, personal: api.personalSkills };
+export const getSkillApi = (scope: SkillScope) => clients[scope];
 
 const errorKeys = {
   SKILL_INVALID_URL: 'skills.invalidUrl',
   SKILL_SOURCE_NOT_FOUND: 'skills.sourceNotFound',
+  SKILL_SOURCE_UNKNOWN: 'skills.sourceUnknown',
+  SKILL_SOURCE_MISMATCH: 'skills.sourceMismatch',
+  SKILL_UPDATE_SOURCE_NOT_FOUND: 'skills.updateSourceNotFound',
+  SKILL_UPDATE_EMPTY: 'skills.updateEmpty',
   SKILL_DOWNLOAD_FAILED: 'skills.downloadFailed',
   SKILL_GIT_UNAVAILABLE: 'skills.gitUnavailable',
-  SKILL_REPOSITORY_LIMIT: 'skills.repositoryLimit',
-  SKILL_FILE_LIMIT: 'skills.repositoryLimit',
   SKILL_UNSAFE_REPOSITORY: 'skills.unsafeRepository',
   SKILL_UNSAFE_PATH: 'skills.unsafePath',
-  SKILL_SCAN_LIMIT: 'skills.scanLimit',
   SKILL_SCAN_EXPIRED: 'skills.scanExpired',
   SKILL_INVALID_SELECTION: 'skills.invalidSelection',
   SKILL_CONFLICT: 'skills.conflict',

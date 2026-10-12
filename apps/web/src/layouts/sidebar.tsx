@@ -10,6 +10,7 @@ import {
   LoaderCircle,
   LogOut,
   Settings2,
+  Sparkles,
   SquarePen,
 } from 'lucide-react';
 import { Brand } from '@/components/brand';
@@ -118,6 +119,16 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             >
               <Clock3 className="size-4" />
               {t('nav.automations')}
+            </Link>
+            <Link
+              to="/skills"
+              className={linkClass}
+              activeProps={activeProps}
+              inactiveProps={inactiveProps}
+              onClick={onNavigate}
+            >
+              <Sparkles className="size-4" />
+              {t('nav.skills')}
             </Link>
             <ThreadSidebar onNavigate={onNavigate} />
             <ProjectSidebar onNavigate={onNavigate} />

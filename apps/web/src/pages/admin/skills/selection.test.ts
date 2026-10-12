@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { RepositorySkill } from '@aime/shared/skills';
-import { selectionState, skillFolders, toggleSkills } from './selection';
+import {
+  selectionState,
+  skillFolders,
+  toggleSkills,
+} from '../../../components/skills/selection';
 
 const skill = (
   path: string,

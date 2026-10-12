@@ -2,22 +2,41 @@ import { rpc, required } from '../../rpc/context.js';
 import type { SkillService } from './service.js';
 
 export function skillRouter(service?: SkillService) {
-  const p = rpc.skills;
-  const skills = () => required(service);
+  return createSkillRouter(rpc.skills, () => required(service));
+}
+
+export function personalSkillRouter(service?: SkillService) {
+  return createSkillRouter(rpc.personalSkills, (userId) =>
+    required(service).forUser(userId),
+  );
+}
+
+function createSkillRouter(
+  p: typeof rpc.skills,
+  skills: (userId: string) => SkillService,
+) {
   return p.router({
-    list: p.list.handler(() => skills().list()),
-    scan: p.scan.handler(({ input, signal }) =>
-      skills().scan(input.body.url, signal),
+    list: p.list.handler(({ context }) => skills(context.userId).list()),
+    read: p.read.handler(({ context, input }) =>
+      skills(context.userId).read(input.query.path),
     ),
-    discard: p.discard.handler(({ input }) =>
-      skills().discard(input.params.id),
+    updateGroup: p.updateGroup.handler(({ context, input }) =>
+      skills(context.userId).updateGroup(input.body.group, input.body.source),
     ),
-    install: p.install.handler(({ input }) =>
-      skills().install(input.body.scanId, input.body.paths),
+    scan: p.scan.handler(({ context, input, signal }) =>
+      skills(context.userId).scan(input.body.url, signal),
     ),
-    remove: p.remove.handler(({ input }) => skills().remove(input.body.path)),
-    removeGroup: p.removeGroup.handler(({ input }) =>
-      skills().removeGroup(input.body.group, input.body.paths),
+    discard: p.discard.handler(({ context, input }) =>
+      skills(context.userId).discard(input.params.id),
+    ),
+    install: p.install.handler(({ context, input }) =>
+      skills(context.userId).install(input.body.scanId, input.body.paths),
+    ),
+    remove: p.remove.handler(({ context, input }) =>
+      skills(context.userId).remove(input.body.path),
+    ),
+    removeGroup: p.removeGroup.handler(({ context, input }) =>
+      skills(context.userId).removeGroup(input.body.group, input.body.paths),
     ),
   });
 }

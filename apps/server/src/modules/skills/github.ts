@@ -1,12 +1,12 @@
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { createWriteStream } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
+import type { Writable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { SkillError } from './errors.js';
 
-const exec = promisify(execFile);
-export const MAX_REPOSITORY_BYTES = 200 * 1024 * 1024;
 export type GitHubRepository = {
   owner: string;
   repo: string;
@@ -27,6 +27,7 @@ export type RepositorySnapshot = {
   fileOnly?: boolean;
   ref?: string;
   read: (file: RepositoryFile) => Promise<Buffer>;
+  write?: (file: RepositoryFile, output: string) => Promise<void>;
   dispose: () => Promise<void>;
 };
 
@@ -80,13 +81,13 @@ export function parseGitHubRepository(input: string): GitHubRepository {
   };
 }
 
-function git(
+async function git(
   args: string[],
   cwd?: string,
   signal?: AbortSignal,
-  maxBuffer = 8 * 1024 * 1024,
+  output?: Writable,
 ) {
-  return exec(
+  const child = spawn(
     'git',
     [
       '-c',
@@ -104,9 +105,7 @@ function git(
     {
       cwd,
       signal,
-      timeout: 120_000,
-      maxBuffer,
-      encoding: 'buffer',
+      stdio: ['ignore', 'pipe', 'pipe'],
       // Do not inherit Git configs, credential helpers, or repository variables.
       env: {
         PATH: process.env.PATH,
@@ -117,6 +116,30 @@ function git(
       },
     },
   );
+  const completion = new Promise<{ stdout: Buffer }>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let failure: Error | undefined;
+    if (!output) child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
+    child.stderr.resume();
+    child.on('error', (error) => {
+      failure = error;
+    });
+    // Wait for the process to exit before callers remove its temporary files.
+    child.on('close', (code) => {
+      if (failure) reject(failure);
+      else if (code !== 0) reject(new Error('Git command failed'));
+      else resolve({ stdout: Buffer.concat(chunks) });
+    });
+  });
+  if (!output) return completion;
+  const transfer = pipeline(child.stdout, output).catch((error) => {
+    child.kill();
+    throw error;
+  });
+  const results = await Promise.allSettled([completion, transfer]);
+  for (const result of results)
+    if (result.status === 'rejected') throw result.reason;
+  return { stdout: Buffer.alloc(0) };
 }
 
 export function safeRepositoryPath(path: string) {
@@ -143,11 +166,16 @@ export function safeRepositoryPath(path: string) {
 export async function readGitSnapshot(
   directory: string,
   revision = 'HEAD',
+  signal?: AbortSignal,
 ): Promise<RepositorySnapshot> {
-  const [head, tree] = await Promise.all([
-    git(['rev-parse', revision], directory),
-    git(['ls-tree', '-rlz', revision], directory),
+  const results = await Promise.allSettled([
+    git(['rev-parse', revision], directory, signal),
+    git(['ls-tree', '-rlz', revision], directory, signal),
   ]);
+  const [head, tree] = results.map((result) => {
+    if (result.status === 'rejected') throw result.reason;
+    return result.value;
+  });
   const files = tree.stdout
     .toString('utf8')
     .split('\0')
@@ -164,25 +192,24 @@ export async function readGitSnapshot(
         path: match[4],
       };
     });
-  if (
-    files.length > 30_000 ||
-    files.reduce((sum, file) => sum + file.size, 0) > MAX_REPOSITORY_BYTES
-  )
-    throw new SkillError('SKILL_REPOSITORY_LIMIT', 413);
   return {
     commit: head.stdout.toString('utf8').trim(),
     files,
     async read(file) {
-      if (!isRegularFile(file) || file.size > 20 * 1024 * 1024)
-        throw new SkillError('SKILL_FILE_LIMIT', 413);
-      return (
-        await git(
-          ['cat-file', 'blob', file.oid],
-          directory,
-          undefined,
-          20 * 1024 * 1024,
-        )
-      ).stdout;
+      if (!isRegularFile(file)) throw new SkillError('SKILL_UNSAFE_REPOSITORY');
+      return (await git(['cat-file', 'blob', file.oid], directory)).stdout;
+    },
+    async write(file, output) {
+      if (!isRegularFile(file)) throw new SkillError('SKILL_UNSAFE_REPOSITORY');
+      await git(
+        ['cat-file', 'blob', file.oid],
+        directory,
+        undefined,
+        createWriteStream(output, {
+          flags: 'wx',
+          mode: file.mode === '100755' ? 0o755 : 0o644,
+        }),
+      );
     },
     dispose: async () => {},
   };
@@ -195,13 +222,14 @@ export function isRegularFile(file: RepositoryFile) {
 export async function downloadGitHubRepository(
   repository: GitHubRepository,
   signal?: AbortSignal,
+  original?: { ref: string | null; scope: string },
 ): Promise<RepositorySnapshot> {
   const directory = await mkdtemp(join(tmpdir(), 'skill-repository-'));
   const dispose = () => rm(directory, { recursive: true, force: true });
   try {
-    let ref: string | undefined;
-    let scopePath: string | undefined;
-    if (repository.refPath) {
+    let ref: string | undefined = original?.ref ?? undefined;
+    let scopePath: string | undefined = original?.scope;
+    if (repository.refPath && !original) {
       const refs = await git(
         ['ls-remote', '--heads', '--tags', '--', `${repository.url}.git`],
         undefined,
@@ -239,7 +267,7 @@ export async function downloadGitHubRepository(
         signal,
       );
     }
-    const snapshot = await readGitSnapshot(checkout, revision);
+    const snapshot = await readGitSnapshot(checkout, revision, signal);
     if (repository.kind === 'blob') {
       const file = snapshot.files.find(
         (file) =>

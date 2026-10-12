@@ -12,7 +12,7 @@ import {
   selectableSkills,
   selectionState,
   type SkillFolder,
-} from '../selection';
+} from './selection';
 
 type SelectionProps = {
   selected: Set<string>;

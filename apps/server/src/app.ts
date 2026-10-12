@@ -15,7 +15,7 @@ import { threadRoutes } from './modules/threads/routes.js';
 import { providerRouter } from './modules/providers/rpc.js';
 import { threadRouter } from './modules/threads/rpc.js';
 import { projectRouter } from './modules/projects/rpc.js';
-import { skillRouter } from './modules/skills/rpc.js';
+import { skillRouter, personalSkillRouter } from './modules/skills/rpc.js';
 import { fileRouter } from './modules/files/rpc.js';
 import { rpc } from './rpc/context.js';
 import type { ProviderService } from './modules/providers/service.js';
@@ -90,6 +90,7 @@ export function createApp(
     threads: threadRouter(chat?.threads, chat?.models),
     projects: projectRouter(chat?.projects, chat?.threads, chat?.models),
     skills: skillRouter(skills?.service),
+    personalSkills: personalSkillRouter(skills?.service),
     files: fileRouter(chat?.threads),
     assets: assetRouter(chat?.assets, chat?.threads),
     requestLogs: requestLogRouter(requestLogs?.service),

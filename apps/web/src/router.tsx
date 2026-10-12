@@ -23,6 +23,11 @@ const PersonalAutomationsPage = lazy(() =>
     default: m.PersonalAutomationsPage,
   })),
 );
+const PersonalSkillsPage = lazy(() =>
+  import('@/pages/skills/page').then((m) => ({
+    default: m.PersonalSkillsPage,
+  })),
+);
 const AdminAutomationsPage = lazy(() =>
   import('@/pages/admin/automations/page').then((m) => ({
     default: m.AdminAutomationsPage,
@@ -169,6 +174,11 @@ const routeTree = rootRoute.addChildren([
         getParentRoute: () => layoutRoute,
         path: '/automations',
         component: PersonalAutomationsPage,
+      }),
+      createRoute({
+        getParentRoute: () => layoutRoute,
+        path: '/skills',
+        component: PersonalSkillsPage,
       }),
       createRoute({
         getParentRoute: () => layoutRoute,

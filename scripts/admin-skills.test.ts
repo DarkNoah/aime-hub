@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import { once } from 'node:events';
 import { promisify } from 'node:util';
 import {
+  cp,
   mkdtemp,
   mkdir,
   readFile,
@@ -17,7 +18,11 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Auth } from '@aime/auth';
-import type { SkillScan } from '@aime/shared/skills';
+import {
+  installSkillsSchema,
+  removeSkillGroupSchema,
+  type SkillScan,
+} from '@aime/shared/skills';
 import { createApp } from '../apps/server/src/app.js';
 import { SkillService } from '../apps/server/src/modules/skills/service.js';
 import {
@@ -71,6 +76,14 @@ async function fixture(t: test.TestContext) {
     '-m',
     'fixture',
   );
+  const gitInput = (args: string[], input: string | Buffer) =>
+    new Promise<string>((resolve, reject) => {
+      const child = execFile('git', args, { cwd: repo }, (error, stdout) => {
+        if (error) reject(error);
+        else resolve(stdout.trim());
+      });
+      child.stdin!.end(input);
+    });
   const snapshot = await readGitSnapshot(repo);
   const download = async (
     repository: GitHubRepository,
@@ -89,7 +102,7 @@ async function fixture(t: test.TestContext) {
   const workspace = join(directory, 'workspace');
   const service = new SkillService(workspace, download);
   t.after(() => service.dispose());
-  return { directory, repo, snapshot, download, workspace, service };
+  return { directory, repo, snapshot, download, workspace, service, gitInput };
 }
 
 test('GitHub sources accept the requested forms and reject arbitrary hosts and traversal', () => {
@@ -192,9 +205,9 @@ test('full and scoped scans find all manifests with stable destinations and vali
     all.skills.find((skill) => skill.path === file.skills[0].path)!.destination,
   );
   assert.equal(file.skills[0].skippedFiles, 1);
-  await assert.rejects(service.scan('owner/repo'), {
-    code: 'SKILL_SCAN_LIMIT',
-  });
+  const fourth = await service.scan('owner/repo');
+  assert.equal(fourth.skills.length, all.skills.length);
+  await service.discard(fourth.id);
   await service.discard(all.id);
   await assert.rejects(service.install(all.id, ['SKILL.md']), {
     code: 'SKILL_SCAN_EXPIRED',
@@ -236,7 +249,17 @@ test('batch installation preserves bundled bytes and modes, omits links, and is 
       scan.id,
       selected.map((skill) => skill.path),
     ),
-    { code: 'SKILL_CONFLICT' },
+    { code: 'SKILL_SCAN_EXPIRED' },
+  );
+  const repeat = await service.scan('owner/repo');
+  await assert.rejects(
+    service.install(
+      repeat.id,
+      selected.map((skill) => skill.path),
+    ),
+    {
+      code: 'SKILL_CONFLICT',
+    },
   );
   assert.equal((await service.list()).skills.length, 2);
   await service.remove(research.path);
@@ -252,6 +275,7 @@ test('failed batches leave no partially installed skills or staging directories'
     const snapshot = await download(repository);
     return {
       ...snapshot,
+      write: undefined,
       read: async (file) => {
         if (file.path.endsWith('guide.md'))
           throw new Error('Fixture read failed');
@@ -295,7 +319,7 @@ test('root and nested skills install as independent packages without discovering
   );
 });
 
-test('cancelled scans dispose their snapshot and release scan capacity', async (t) => {
+test('cancelled scans dispose their snapshot', async (t) => {
   const { workspace, snapshot } = await fixture(t);
   let disposed = 0;
   const service = new SkillService(workspace, async () => ({
@@ -320,11 +344,12 @@ test('cancelled scans dispose their snapshot and release scan capacity', async (
 
 test('mutation validation rejects unknown skills, invalid manifests, directory traversal and symlink roots', async (t) => {
   const { service, workspace, directory } = await fixture(t);
-  const scan = await service.scan('owner/repo');
-  for (const path of ['missing/SKILL.md', '../SKILL.md', 'broken/SKILL.md'])
+  for (const path of ['missing/SKILL.md', '../SKILL.md', 'broken/SKILL.md']) {
+    const scan = await service.scan('owner/repo');
     await assert.rejects(service.install(scan.id, [path]), {
       code: 'SKILL_INVALID_SELECTION',
     });
+  }
   for (const path of [
     '',
     '../escape',
@@ -333,6 +358,7 @@ test('mutation validation rejects unknown skills, invalid manifests, directory t
     'owner\\repo',
   ])
     await assert.rejects(service.remove(path), { code: 'SKILL_UNSAFE_PATH' });
+  const scan = await service.scan('owner/repo');
   await mkdir(workspace, { recursive: true });
   await symlink(directory, join(workspace, '.agents'));
   await assert.rejects(service.list(), { code: 'SKILL_UNSAFE_PATH' });
@@ -359,7 +385,8 @@ test('concurrent installs do not overwrite and existing ancestor skills remain i
     join(workspace, '.agents/skills/owner/SKILL.md'),
     manifest('owner'),
   );
-  await assert.rejects(service.install(scan.id, ['SKILL.md']), {
+  const ancestor = await service.scan('owner/repo');
+  await assert.rejects(service.install(ancestor.id, ['SKILL.md']), {
     code: 'SKILL_CONFLICT',
   });
   assert.equal(
@@ -453,10 +480,11 @@ test('admin skills API enforces session, role, same-origin and selection validat
     ).status,
     204,
   );
+  const batchScan = await service.scan('owner/repo');
   const batch = await request('/install', {
     method: 'POST',
     body: JSON.stringify({
-      scanId: scan.id,
+      scanId: batchScan.id,
       paths: ['skills/analysis/SKILL.md', 'skills/research/SKILL.md'],
     }),
   });
@@ -522,6 +550,209 @@ test('admin skills API enforces session, role, same-origin and selection validat
     ).status,
     410,
   );
+});
+
+test('Git snapshots accept more than 30,000 files, 200 MB and Git output above 8 MB', async (t) => {
+  const { repo, gitInput } = await fixture(t);
+  const large = Buffer.alloc(21 * 1024 * 1024, 7);
+  const largeOid = await gitInput(['hash-object', '-w', '--stdin'], large);
+  const smallOid = await gitInput(['hash-object', '-w', '--stdin'], 'fixture');
+  const rows = Array.from(
+    { length: 30_001 },
+    (_, index) =>
+      `100644 blob ${smallOid}\tfile-${String(index).padStart(5, '0')}-${'x'.repeat(230)}\0`,
+  );
+  for (let index = 0; index < 11; index++)
+    rows.push(`100644 blob ${largeOid}\tlarge-${index}.bin\0`);
+  const tree = await gitInput(['mktree', '-z'], rows.join(''));
+  const snapshot = await readGitSnapshot(repo, tree);
+  assert.equal(snapshot.files.length, 30_012);
+  assert.ok(
+    snapshot.files.reduce((sum, file) => sum + file.size, 0) >
+      200 * 1024 * 1024,
+  );
+  assert.deepEqual(
+    await snapshot.read(
+      snapshot.files.find((file) => file.path === 'large-0.bin')!,
+    ),
+    large,
+  );
+});
+
+test('installation accepts a selection above 200 MB with files above 20 MB', async (t) => {
+  const { repo, workspace, gitInput } = await fixture(t);
+  const large = Buffer.alloc(21 * 1024 * 1024, 3);
+  const largeOid = await gitInput(['hash-object', '-w', '--stdin'], large);
+  const manifestOid = await gitInput(
+    ['hash-object', '-w', '--stdin'],
+    manifest('large'),
+  );
+  const rows = [`100644 blob ${manifestOid}\tSKILL.md\0`];
+  for (let index = 0; index < 10; index++)
+    rows.push(`100644 blob ${largeOid}\tasset-${index}.bin\0`);
+  const tree = await gitInput(['mktree', '-z'], rows.join(''));
+  const snapshot = await readGitSnapshot(repo, tree);
+  const service = new SkillService(workspace, async () => snapshot);
+  t.after(() => service.dispose());
+  const scan = await service.scan('owner/repo');
+  assert.ok(scan.skills[0].valid);
+  assert.ok(scan.skills[0].bytes > 200 * 1024 * 1024);
+  const [installed] = await service.install(scan.id, ['SKILL.md']);
+  const target = join(service.root, installed.path);
+  assert.deepEqual(await readFile(join(target, 'asset-9.bin')), large);
+  assert.equal((await readdir(target)).length, 11);
+});
+
+test('scan, batch validation, installation, listing and group removal support more than 500 skills', async (t) => {
+  const { workspace } = await fixture(t);
+  const resources = new Map<string, Buffer>(
+    Array.from({ length: 501 }, (_, index) => {
+      const name = `skill-${index}`;
+      const content =
+        manifest(name) + (index === 0 ? 'x'.repeat(513 * 1024) : '');
+      return [`skills/${name}/SKILL.md`, Buffer.from(content)] as const;
+    }),
+  );
+  const service = new SkillService(workspace, async () => ({
+    commit: 'a'.repeat(40),
+    files: [...resources].map(([path, content]) => ({
+      path,
+      size: content.length,
+      mode: '100644',
+      oid: 'b'.repeat(40),
+    })),
+    read: async (file) => resources.get(file.path)!,
+    dispose: async () => {},
+  }));
+  t.after(() => service.dispose());
+  const scan = await service.scan('owner/repo');
+  assert.equal(scan.skills.length, 501);
+  assert.ok(scan.skills.every((skill) => skill.valid));
+  const input = installSkillsSchema.parse({
+    scanId: scan.id,
+    paths: scan.skills.map((skill) => skill.path),
+  });
+  const installed = await service.install(input.scanId, input.paths);
+  assert.equal(installed.length, 501);
+  const listed = (await service.list()).skills;
+  assert.equal(listed.length, 501);
+  assert.equal((await listChatSkills(workspace, 'alice')).length, 501);
+  assert.ok(listed.every((skill) => skill.valid));
+  const removal = removeSkillGroupSchema.parse({
+    group: 'owner/repo',
+    paths: installed.map((skill) => skill.path),
+  });
+  assert.equal(
+    (await service.removeGroup(removal.group, removal.paths)).length,
+    501,
+  );
+  assert.equal((await service.list()).skills.length, 0);
+});
+
+test('temporary repositories are deleted on installation, errors, cancellation, discard, expiry and shutdown', async (t) => {
+  for (const outcome of [
+    'success',
+    'read failure',
+    'write failure',
+    'invalid selection',
+    'conflict',
+    'cancel',
+    'scan failure',
+    'discard',
+    'expiry',
+    'shutdown',
+  ]) {
+    await t.test(outcome, async (t) => {
+      const { directory, repo, workspace } = await fixture(t);
+      const temporary = join(directory, 'downloaded-repository');
+      let disposed = 0;
+      const service = new SkillService(workspace, async () => {
+        await cp(repo, temporary, { recursive: true });
+        const snapshot = await readGitSnapshot(temporary);
+        return {
+          ...snapshot,
+          write:
+            outcome === 'read failure'
+              ? undefined
+              : async (file, output) => {
+                  if (
+                    outcome === 'write failure' &&
+                    file.path.endsWith('guide.md')
+                  )
+                    throw new Error('Fixture write failed');
+                  await snapshot.write!(file, output);
+                },
+          read: async (file) => {
+            if (
+              (outcome === 'read failure' && file.path.endsWith('guide.md')) ||
+              outcome === 'scan failure'
+            )
+              throw new Error('Fixture read failed');
+            return snapshot.read(file);
+          },
+          dispose: async () => {
+            disposed++;
+            await rm(temporary, { recursive: true, force: true });
+          },
+        };
+      });
+      t.after(() => service.dispose());
+      const controller = new AbortController();
+      if (outcome === 'cancel') controller.abort();
+      if (outcome === 'cancel' || outcome === 'scan failure') {
+        await assert.rejects(service.scan('owner/repo', controller.signal));
+      } else {
+        const scan = await service.scan('owner/repo');
+        assert.ok((await stat(temporary)).isDirectory());
+        if (outcome === 'success') {
+          await service.install(scan.id, ['skills/research/SKILL.md']);
+          assert.equal((await service.list()).skills.length, 1);
+        } else if (outcome === 'read failure' || outcome === 'write failure') {
+          await assert.rejects(
+            service.install(scan.id, ['skills/research/SKILL.md']),
+            /Fixture (?:read|write) failed/,
+          );
+          assert.equal((await service.list()).skills.length, 0);
+          assert.deepEqual(await readdir(join(workspace, '.agents')), [
+            'skills',
+          ]);
+        } else if (outcome === 'invalid selection') {
+          await assert.rejects(service.install(scan.id, []), {
+            code: 'SKILL_INVALID_SELECTION',
+          });
+        } else if (outcome === 'conflict') {
+          const target = join(service.root, 'owner/repo/analysis');
+          await mkdir(target, { recursive: true });
+          await writeFile(join(target, 'SKILL.md'), manifest('existing'));
+          await assert.rejects(
+            service.install(scan.id, ['skills/analysis/SKILL.md']),
+            { code: 'SKILL_CONFLICT' },
+          );
+          assert.equal(
+            await readFile(join(target, 'SKILL.md'), 'utf8'),
+            manifest('existing'),
+          );
+        } else if (outcome === 'discard') {
+          await service.discard(scan.id);
+        } else if (outcome === 'expiry') {
+          scan.expiresAt = new Date(0).toISOString();
+          await assert.rejects(
+            service.install(scan.id, ['skills/research/SKILL.md']),
+            { code: 'SKILL_SCAN_EXPIRED' },
+          );
+        } else {
+          await service.dispose();
+        }
+        await assert.rejects(
+          service.install(scan.id, ['skills/research/SKILL.md']),
+          { code: 'SKILL_SCAN_EXPIRED' },
+        );
+        await service.discard(scan.id);
+      }
+      assert.equal(disposed, 1);
+      await assert.rejects(stat(temporary), { code: 'ENOENT' });
+    });
+  }
 });
 
 test('group removal deletes exactly the confirmed group and preserves adjacent groups and loose files', async (t) => {

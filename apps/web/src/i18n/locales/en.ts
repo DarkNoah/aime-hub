@@ -565,7 +565,29 @@ export const en = {
   'nav.skills': 'Skills',
   'admin.skillsDescription':
     'Manage workspace skills shared by personal and project conversations.',
+  'skills.personalDescription':
+    'Manage skills for your personal chats. Personal skills take priority over global skills with the same name.',
+  'skills.personalRemoveHint':
+    '“{{name}}” and its bundled files will be deleted from your personal skill directory. Future personal conversations will use the global version if one exists with the same name.',
   'skills.import': 'Import from GitHub',
+  'skills.openRepository': 'Open GitHub repository {{name}}',
+  'skills.updateGroup': 'Update skill group',
+  'skills.updateGroupNamed': 'Update {{name}}',
+  'skills.updatingGroup': 'Updating…',
+  'skills.updateGroupSuccess': 'Updated “{{name}}” with {{count}} skills.',
+  'skills.updateSourceNotFound':
+    'The original branch or path no longer exists. This skill group was kept unchanged. Check the GitHub repository.',
+  'skills.updateEmpty':
+    'No valid skills remain at the original source path. The current skill group was kept.',
+  'skills.sourceUnknown':
+    'This group has no saved source. Enter the original GitHub URL, including its branch and path. Updating reinstalls all valid skills under that path.',
+  'skills.sourceMismatch':
+    'The GitHub source must belong to this skill group’s repository.',
+  'skills.restoreSourceTitle': 'Restore skill group source',
+  'skills.previewNamed': 'Preview skill {{name}}',
+  'skills.preview': 'Preview',
+  'skills.sourceContent': 'Source',
+  'skills.loadingContent': 'Loading skill content…',
   'skills.importHint':
     'Find skills in a repository, select folders or individual skills, then install them together.',
   'skills.source': 'GitHub source',
@@ -626,14 +648,10 @@ export const en = {
     'Could not download this public repository. Check the source and the server’s GitHub connection, then retry.',
   'skills.gitUnavailable':
     'Git is not installed on the server. Install Git to import repositories.',
-  'skills.repositoryLimit':
-    'This repository or selection exceeds the import limits: 200 MB, 30,000 repository files, 500 skills, and 20 MB per file.',
   'skills.unsafeRepository':
     'The repository contains unsupported file paths and cannot be imported.',
   'skills.unsafePath':
     'The skill directory is inaccessible or contains a symbolic link.',
-  'skills.scanLimit':
-    'Too many scans are open. Close another import panel or wait for its scan to expire.',
   'skills.scanExpired':
     'The scan expired after 15 minutes. Scan again before installing.',
   'skills.invalidSelection':

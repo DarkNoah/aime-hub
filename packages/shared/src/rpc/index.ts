@@ -1,7 +1,7 @@
 import { threadsContract } from './threads.js';
 import { projectsContract } from './projects.js';
 import { providersContract } from './providers.js';
-import { skillsContract } from './skills.js';
+import { skillsContract, personalSkillsContract } from './skills.js';
 import { filesContract } from './files.js';
 import { environmentVariablesContract } from './environment-variables.js';
 import { requestLogsContract } from './request-logs.js';
@@ -17,6 +17,7 @@ export const apiContract = {
   projects: projectsContract,
   providers: providersContract,
   skills: skillsContract,
+  personalSkills: personalSkillsContract,
   files: filesContract,
   environmentVariables: environmentVariablesContract,
   requestLogs: requestLogsContract,

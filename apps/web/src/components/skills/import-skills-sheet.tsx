@@ -1,4 +1,3 @@
-import { api } from '@/lib/rpc';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Download, FolderGit2, Loader2, Search } from 'lucide-react';
@@ -17,25 +16,28 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { LoadingState } from '@/components/loading-state';
-import { skillErrorKey } from '../api';
+import { getSkillApi, skillErrorKey, type SkillScope } from './api';
 import {
   selectableSkills,
   selectionState,
   skillFolders,
   toggleSkills,
-} from '../selection';
-import { useRepositoryScan } from '../use-repository-scan';
+} from './selection';
+import { useRepositoryScan } from './use-repository-scan';
 import { SkillFolderContents } from './skill-folder';
 
 export function ImportSkillsSheet({
+  scope,
   onClose,
   onInstalled,
 }: {
+  scope: SkillScope;
   onClose: () => void;
   onInstalled: (skills: InstalledSkill[]) => void;
 }) {
   const { t } = useTranslation();
-  const source = useRepositoryScan();
+  const source = useRepositoryScan(scope);
+  const client = getSkillApi(scope);
   const [search, setSearch] = useState('');
   const [selection, setSelection] = useState<{
     id?: string;
@@ -65,14 +67,14 @@ export function ImportSkillsSheet({
     submitting.current = true;
     setPending(true);
     try {
-      const installed = await api.skills.install({
+      const installed = await client.install({
         body: { scanId: scan.id, paths: [...selected] },
       });
       onInstalled(installed);
-      source.markInstalled(installed.map((skill) => skill.path));
-      setSelection({ id: scan.id, paths: new Set() });
       toast.success(t('skills.installSuccess', { count: installed.length }));
+      onClose();
     } catch (error) {
+      source.clearScan();
       toast.error(t(skillErrorKey(error)));
     } finally {
       submitting.current = false;

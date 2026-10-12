@@ -100,7 +100,7 @@ Linux also needs Playwright's system libraries. Projects use the local filesyste
 
 - **Model selection**: Personal chat resolves the current selection, then personal defaults, then system defaults. Projects use project defaults instead of personal model defaults. A model fixed by an agent takes precedence over the chat model.
 - **Agents and MCP**: Create and publish agents at `/admin/agents`, then select them in chat. Configure MCP at `/admin/mcp`; publishing requires a successful connection and tool discovery check.
-- **Skills**: Import skills from public GitHub repositories at `/admin/skills`. Global skills live in `WORKSPACE_ROOT/.agents/skills`; personal or project skills can override global skills with the same name.
+- **Skills**: Manage personal skills at `/skills` and global skills at `/admin/skills` as an administrator. Import from GitHub, update entire groups from their original branch and path, open source repositories, and preview skill contents. Personal or project skills with the same name override global skills.
 - **Conversations and queues**: Closing the page does not stop execution. Stopping the current turn clears pending messages. Pending queues are held in memory and are not restored after a server restart; saved messages remain available.
 - **Automations**: Use `/automations`, `/projects/:projectId/automations`, or `/admin/automations`. Schedules follow the server's system timezone and require the server to stay online. Pausing or deleting a task does not cancel a run already in progress.
 - **Notifications**: Configure VAPID keys and enable desktop notifications on a task. Browser permission is required, with HTTPS in production; delivery depends on browser and operating system behavior.

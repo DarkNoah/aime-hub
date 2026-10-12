@@ -20,8 +20,17 @@ import type {
   InstalledSkills,
   RepositorySkill,
   SkillScan,
+  SkillContent,
 } from '@aime/shared/skills';
 import { SkillError } from './errors.js';
+import { userDirectory } from '../threads/workspace.js';
+import {
+  normalizeSkillSource,
+  readSkillSources,
+  serializeSkillSources,
+  SKILL_SOURCES_FILE,
+  type SkillSource,
+} from './sources.js';
 import {
   downloadGitHubRepository,
   isRegularFile,
@@ -32,9 +41,8 @@ import {
 } from './github.js';
 
 const SCAN_TTL = 15 * 60_000;
-const MAX_MANIFEST_BYTES = 512 * 1024;
-const MAX_INSTALL_BYTES = 200 * 1024 * 1024;
 type CachedScan = {
+  source: SkillSource;
   result: SkillScan;
   snapshot: RepositorySnapshot;
   timer: NodeJS.Timeout;
@@ -84,15 +92,29 @@ async function stat(path: string) {
 export class SkillService {
   readonly root: string;
   private scans = new Map<string, CachedScan>();
-  private downloading = 0;
+  private personalServices = new Map<string, SkillService>();
   private mutations: Promise<unknown> = Promise.resolve();
 
   constructor(
     private workspaceRoot: string,
     private download = downloadGitHubRepository,
+    private userId?: string,
   ) {
     this.workspaceRoot = resolve(workspaceRoot);
-    this.root = join(this.workspaceRoot, '.agents', 'skills');
+    const directory =
+      userId !== undefined
+        ? userDirectory(this.workspaceRoot, userId)
+        : this.workspaceRoot;
+    this.root = join(directory, '.agents', 'skills');
+  }
+
+  forUser(userId: string): SkillService {
+    let service = this.personalServices.get(userId);
+    if (!service) {
+      service = new SkillService(this.workspaceRoot, this.download, userId);
+      this.personalServices.set(userId, service);
+    }
+    return service;
   }
 
   /** Check each component, including absent ancestors, before any read/write. */
@@ -102,7 +124,12 @@ export class SkillService {
   ): Promise<string | null> {
     let current = this.workspaceRoot;
     if (create) await mkdir(current, { recursive: true });
-    for (const part of ['.agents', 'skills', ...parts]) {
+    for (const part of [
+      ...(this.userId !== undefined ? ['users', this.userId] : []),
+      '.agents',
+      'skills',
+      ...parts,
+    ]) {
       current = join(current, part);
       if (create)
         await mkdir(current).catch((error: NodeJS.ErrnoException) => {
@@ -119,8 +146,7 @@ export class SkillService {
   async list(): Promise<InstalledSkills> {
     const skills: InstalledSkill[] = [];
     if (!(await this.directory([]))) return { root: this.root, skills };
-    const visit = async (directory: string, path: string, depth: number) => {
-      if (depth > 12 || skills.length >= 500) return;
+    const visit = async (directory: string, path: string) => {
       const entries = await readdir(directory, { withFileTypes: true });
       const manifest = entries.find(
         (entry) => entry.name === 'SKILL.md' && entry.isFile(),
@@ -128,11 +154,7 @@ export class SkillService {
       if (manifest) {
         const name = basename(directory);
         const file = join(directory, manifest.name);
-        const info = await lstat(file);
-        const metadata =
-          info.size <= MAX_MANIFEST_BYTES
-            ? describe(await readFile(file, 'utf8'), name)
-            : { description: '', valid: false };
+        const metadata = describe(await readFile(file, 'utf8'), name);
         skills.push({
           path,
           name,
@@ -149,36 +171,35 @@ export class SkillService {
           await visit(
             join(directory, entry.name),
             path ? `${path}/${entry.name}` : entry.name,
-            depth + 1,
           );
       }
     };
-    await visit(this.root, '', 0);
+    await visit(this.root, '');
     return { root: this.root, skills };
   }
 
   async scan(input: string, signal?: AbortSignal): Promise<SkillScan> {
+    return this.scanRepository(input, signal);
+  }
+
+  private async scanRepository(
+    input: string,
+    signal?: AbortSignal,
+    original?: SkillSource,
+  ): Promise<SkillScan> {
     const repository = parseGitHubRepository(input);
-    if (this.downloading + this.scans.size >= 3)
-      throw new SkillError('SKILL_SCAN_LIMIT', 429);
-    this.downloading++;
     let snapshot: RepositorySnapshot | undefined;
     try {
-      snapshot = await this.download(repository, signal);
+      snapshot = await this.download(repository, signal, original);
       if (signal?.aborted) throw new SkillError('SKILL_DOWNLOAD_FAILED', 502);
       // Resolve names across the whole repository so scoped and full scans use identical destinations.
       const manifests = snapshot.files.filter(
         (file) => isRegularFile(file) && /(^|\/)SKILL\.md$/.test(file.path),
       );
-      if (manifests.length > 500)
-        throw new SkillError('SKILL_REPOSITORY_LIMIT', 413);
       const candidates = [];
       for (const file of manifests) {
         if (signal?.aborted) throw new SkillError('SKILL_DOWNLOAD_FAILED', 502);
-        const content =
-          file.size <= MAX_MANIFEST_BYTES
-            ? (await snapshot.read(file)).toString('utf8')
-            : '';
+        const content = (await snapshot.read(file)).toString('utf8');
         const parsed = validateSkillContent({ content });
         const name = slug(
           file.path === 'SKILL.md'
@@ -208,10 +229,6 @@ export class SkillService {
         const files = skillFiles(snapshot, file.path);
         const regular = files.filter(isRegularFile);
         const metadata = describe(content, name);
-        if (regular.some((entry) => entry.size > 20 * 1024 * 1024)) {
-          metadata.valid = false;
-          metadata.errors.push('A bundled file exceeds the 20 MB limit.');
-        }
         const destination = `${repository.owner}/${repository.repo}/${name}`;
         const parent = await this.directory([
           repository.owner,
@@ -246,13 +263,20 @@ export class SkillService {
         void this.discard(result.id).catch(() => {});
       }, SCAN_TTL);
       timer.unref();
-      this.scans.set(result.id, { result, snapshot, timer });
+      this.scans.set(result.id, {
+        result,
+        snapshot,
+        timer,
+        source: {
+          url: normalizeSkillSource(input),
+          ref: snapshot.ref ?? null,
+          scope: snapshot.scopePath ?? '',
+        },
+      });
       return result;
     } catch (error) {
       await snapshot?.dispose();
       throw error;
-    } finally {
-      this.downloading--;
     }
   }
 
@@ -263,18 +287,27 @@ export class SkillService {
   }
 
   discard(id: string) {
-    return this.exclusive(async () => {
-      const scan = this.scans.get(id);
-      if (!scan) return;
-      this.scans.delete(id);
-      clearTimeout(scan.timer);
-      await scan.snapshot.dispose();
-    });
+    return this.exclusive(() => this.releaseScan(id));
+  }
+
+  private async releaseScan(id: string) {
+    const scan = this.scans.get(id);
+    if (!scan) return;
+    this.scans.delete(id);
+    clearTimeout(scan.timer);
+    await scan.snapshot.dispose();
   }
 
   install(id: string, paths: string[]): Promise<InstalledSkill[]> {
-    return this.exclusive(async () => {
-      const cached = this.scans.get(id);
+    return this.exclusive(() => this.installScan(id, paths));
+  }
+
+  private async installScan(
+    id: string,
+    paths: string[],
+  ): Promise<InstalledSkill[]> {
+    const cached = this.scans.get(id);
+    try {
       if (!cached || Date.parse(cached.result.expiresAt) <= Date.now())
         throw new SkillError('SKILL_SCAN_EXPIRED', 410);
       const selected = [...new Set(paths)].map((path) => {
@@ -283,12 +316,7 @@ export class SkillService {
           throw new SkillError('SKILL_INVALID_SELECTION');
         return skill;
       });
-      if (
-        !selected.length ||
-        selected.reduce((size, skill) => size + skill.bytes, 0) >
-          MAX_INSTALL_BYTES
-      )
-        throw new SkillError('SKILL_REPOSITORY_LIMIT', 413);
+      if (!selected.length) throw new SkillError('SKILL_INVALID_SELECTION');
       const { owner, repo } = cached.result;
       // An existing manifest on an ancestor would hide all installed children at runtime.
       for (const parts of [[], [owner], [owner, repo]]) {
@@ -297,15 +325,21 @@ export class SkillService {
           throw new SkillError('SKILL_CONFLICT', 409);
       }
       const parent = (await this.directory([owner, repo], true))!;
+      const sources = await readSkillSources(parent);
       for (const skill of selected) {
         if (await stat(join(parent, skill.name)))
           throw new SkillError('SKILL_CONFLICT', 409);
       }
       const staging = await mkdtemp(
-        join(this.workspaceRoot, '.agents', '.skill-install-'),
+        join(dirname(this.root), '.skill-install-'),
       );
       const installed: string[] = [];
       try {
+        await writeFile(
+          join(staging, SKILL_SOURCES_FILE),
+          serializeSkillSources([...sources, cached.source]),
+          { flag: 'wx' },
+        );
         for (const skill of selected) {
           const target = join(staging, skill.name);
           await mkdir(target);
@@ -329,6 +363,10 @@ export class SkillService {
           await rename(join(staging, skill.name), target);
           installed.push(target);
         }
+        await rename(
+          join(staging, SKILL_SOURCES_FILE),
+          join(parent, SKILL_SOURCES_FILE),
+        );
       } catch (error) {
         await Promise.all(
           installed.map((path) => rm(path, { recursive: true, force: true })),
@@ -344,6 +382,116 @@ export class SkillService {
         valid: true,
         group: `${owner}/${repo}`,
       }));
+    } finally {
+      await this.releaseScan(id);
+    }
+  }
+
+  read(path: string): Promise<SkillContent> {
+    return this.exclusive(async () => {
+      if (path && !safeRepositoryPath(path))
+        throw new SkillError('SKILL_UNSAFE_PATH', 403);
+      const directory = await this.directory(path ? path.split('/') : []);
+      const skill = (await this.list()).skills.find(
+        (skill) => skill.path === path,
+      );
+      if (!directory || !skill) throw new SkillError('SKILL_NOT_FOUND', 404);
+      const manifest = join(directory, 'SKILL.md');
+      const info = await stat(manifest);
+      if (!info?.isFile() || info.isSymbolicLink())
+        throw new SkillError('SKILL_UNSAFE_PATH', 403);
+      return { skill, content: await readFile(manifest, 'utf8') };
+    });
+  }
+
+  updateGroup(group: string, source?: string): Promise<InstalledSkill[]> {
+    return this.exclusive(async () => {
+      if (!safeRepositoryPath(group))
+        throw new SkillError('SKILL_UNSAFE_PATH', 403);
+      const directory = await this.directory(group.split('/'));
+      if (
+        !directory ||
+        !(await this.list()).skills.some((skill) => skill.group === group)
+      )
+        throw new SkillError('SKILL_NOT_FOUND', 404);
+      const sources: (string | SkillSource)[] = source
+        ? [normalizeSkillSource(source, group)]
+        : await readSkillSources(directory);
+      for (const source of sources)
+        normalizeSkillSource(
+          typeof source === 'string' ? source : source.url,
+          group,
+        );
+      if (!sources.length) throw new SkillError('SKILL_SOURCE_UNKNOWN', 409);
+      const scans: SkillScan[] = [];
+      let staging: string | undefined;
+      let backup: string | undefined;
+      try {
+        // Validate every original scope against the latest upstream snapshot before replacing anything.
+        for (const source of sources) {
+          let scan: SkillScan;
+          try {
+            scan = await this.scanRepository(
+              typeof source === 'string' ? source : source.url,
+              undefined,
+              typeof source === 'string' ? undefined : source,
+            );
+          } catch (error) {
+            if (
+              error instanceof SkillError &&
+              error.code === 'SKILL_SOURCE_NOT_FOUND'
+            )
+              throw new SkillError('SKILL_UPDATE_SOURCE_NOT_FOUND', 409);
+            throw error;
+          }
+          scans.push(scan);
+          if (!scan.skills.some((skill) => skill.valid))
+            throw new SkillError('SKILL_UPDATE_EMPTY', 409);
+        }
+        const selected = new Map<string, { scanId: string; path: string }>();
+        for (const scan of scans)
+          for (const skill of scan.skills.filter((skill) => skill.valid))
+            selected.set(skill.destination, {
+              scanId: scan.id,
+              path: skill.path,
+            });
+        staging = await mkdtemp(join(dirname(this.root), '.skill-update-'));
+        const resolvedSources = scans.map(
+          (scan) => this.scans.get(scan.id)!.source,
+        );
+        const saved = join(staging, 'previous');
+        await rename(directory, saved);
+        backup = saved;
+        const installed: InstalledSkill[] = [];
+        for (const scan of scans) {
+          const paths = [...selected.values()]
+            .filter((skill) => skill.scanId === scan.id)
+            .map((skill) => skill.path);
+          if (paths.length)
+            installed.push(...(await this.installScan(scan.id, paths)));
+        }
+        const metadata = join(staging, SKILL_SOURCES_FILE);
+        await writeFile(metadata, serializeSkillSources(resolvedSources), {
+          flag: 'wx',
+        });
+        await rename(metadata, join(directory, SKILL_SOURCES_FILE));
+        backup = undefined;
+        return installed;
+      } catch (error) {
+        if (backup) {
+          await rm(directory, { recursive: true, force: true });
+          await rename(backup, directory);
+          backup = undefined;
+        }
+        throw error;
+      } finally {
+        try {
+          await Promise.all(scans.map((scan) => this.releaseScan(scan.id)));
+        } finally {
+          if (staging && !backup)
+            await rm(staging, { recursive: true, force: true });
+        }
+      }
     });
   }
 
@@ -357,10 +505,12 @@ export class SkillService {
       throw new SkillError('SKILL_UNSAFE_REPOSITORY');
     const output = join(target, path);
     await mkdir(dirname(output), { recursive: true });
-    await writeFile(output, await snapshot.read(file), {
-      flag: 'wx',
-      mode: file.mode === '100755' ? 0o755 : 0o644,
-    });
+    if (snapshot.write) await snapshot.write(file, output);
+    else
+      await writeFile(output, await snapshot.read(file), {
+        flag: 'wx',
+        mode: file.mode === '100755' ? 0o755 : 0o644,
+      });
   }
 
   remove(path: string) {
@@ -374,6 +524,11 @@ export class SkillService {
       )
         throw new SkillError('SKILL_NOT_FOUND', 404);
       await rm(target, { recursive: true });
+      const group = path.includes('/')
+        ? path.slice(0, path.lastIndexOf('/'))
+        : '';
+      if (!(await this.list()).skills.some((skill) => skill.group === group))
+        await rm(join(dirname(target), SKILL_SOURCES_FILE), { force: true });
     });
   }
 
@@ -401,9 +556,7 @@ export class SkillService {
         targets.push({ path: skill.path, directory });
       }
       // Only remove the skills shown in this group, not sibling groups or loose files.
-      const staging = await mkdtemp(
-        join(this.workspaceRoot, '.agents', '.skill-remove-'),
-      );
+      const staging = await mkdtemp(join(dirname(this.root), '.skill-remove-'));
       const moved: { original: string; staged: string }[] = [];
       try {
         for (const target of targets) {
@@ -418,6 +571,7 @@ export class SkillService {
         throw error;
       }
       await rm(staging, { recursive: true, force: true });
+      await rm(join(groupDirectory, SKILL_SOURCES_FILE), { force: true });
       // Prune an empty group while preserving separate subgroups or loose files.
       await rmdir(groupDirectory).catch((error: NodeJS.ErrnoException) => {
         if (error.code !== 'ENOTEMPTY' && error.code !== 'ENOENT') throw error;
@@ -427,6 +581,12 @@ export class SkillService {
   }
 
   async dispose() {
-    await Promise.all([...this.scans.keys()].map((id) => this.discard(id)));
+    await Promise.all([
+      ...[...this.scans.keys()].map((id) => this.discard(id)),
+      ...[...this.personalServices.values()].map((service) =>
+        service.dispose(),
+      ),
+    ]);
+    this.personalServices.clear();
   }
 }

@@ -1,21 +1,27 @@
 import { z } from 'zod';
 
 export const scanSkillsSchema = z
-  .object({ url: z.string().trim().min(1).max(2048) })
+  .object({ url: z.string().trim().min(1) })
   .strict();
 export const installSkillsSchema = z
   .object({
     scanId: z.string().uuid(),
-    paths: z.array(z.string().min(1).max(2048)).min(1).max(500),
+    paths: z.array(z.string().min(1)).min(1),
   })
   .strict();
-export const removeSkillSchema = z
-  .object({ path: z.string().min(1).max(2048) })
-  .strict();
+export const removeSkillSchema = z.object({ path: z.string().min(1) }).strict();
+export const readSkillSchema = z.object({ path: z.string() }).strict();
 export const removeSkillGroupSchema = z
   .object({
-    group: z.string().min(1).max(2048),
-    paths: z.array(z.string().min(1).max(2048)).min(1).max(500),
+    group: z.string().min(1),
+    paths: z.array(z.string().min(1)).min(1),
+  })
+  .strict();
+
+export const updateSkillGroupSchema = z
+  .object({
+    group: z.string().min(1),
+    source: z.string().trim().min(1).optional(),
   })
   .strict();
 
@@ -55,3 +61,10 @@ export type SkillScan = {
 };
 
 export type InstalledSkills = { root: string; skills: InstalledSkill[] };
+export type SkillContent = { skill: InstalledSkill; content: string };
+
+export function skillGroupRepositoryUrl(group: string) {
+  return /^[a-zA-Z0-9-]+\/[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(group)
+    ? `https://github.com/${group}`
+    : null;
+}

@@ -515,7 +515,27 @@ export const zhCN = {
     '新增第一个变量，开始管理它的名称、值和说明。',
   'nav.skills': 'Skills 管理',
   'admin.skillsDescription': '管理个人与项目会话共用的工作区技能。',
+  'skills.personalDescription':
+    '管理你个人聊天中使用的技能；同名个人技能优先于全局技能。',
+  'skills.personalRemoveHint':
+    '将从你的个人技能目录删除「{{name}}」及其附带文件。若有同名全局技能，后续个人会话将恢复使用全局版本。',
   'skills.import': '从 GitHub 导入',
+  'skills.openRepository': '打开 GitHub 项目 {{name}}',
+  'skills.updateGroup': '更新技能组',
+  'skills.updateGroupNamed': '一键更新 {{name}}',
+  'skills.updatingGroup': '正在更新…',
+  'skills.updateGroupSuccess': '已更新「{{name}}」，安装了 {{count}} 个技能。',
+  'skills.updateSourceNotFound':
+    '原来源分支或路径已不存在，未更新此技能组。请检查 GitHub 项目。',
+  'skills.updateEmpty': '原来源路径下没有有效技能，当前技能组已保留。',
+  'skills.sourceUnknown':
+    '此技能组尚未保存原始来源。请填写最初导入的 GitHub 地址，保留原分支和路径；更新会重新安装该路径下的全部有效技能。',
+  'skills.sourceMismatch': 'GitHub 来源必须属于当前技能组对应的仓库。',
+  'skills.restoreSourceTitle': '补充技能组来源',
+  'skills.previewNamed': '预览技能 {{name}}',
+  'skills.preview': '预览',
+  'skills.sourceContent': '源文件',
+  'skills.loadingContent': '正在加载技能内容…',
   'skills.importHint': '搜索仓库中的技能，按文件夹或单个技能勾选后批量安装。',
   'skills.source': 'GitHub 来源',
   'skills.sourceHint':
@@ -570,11 +590,8 @@ export const zhCN = {
   'skills.downloadFailed':
     '无法下载此公开仓库，请检查来源地址和服务器的 GitHub 网络连接后重试。',
   'skills.gitUnavailable': '服务器尚未安装 Git，请安装后再导入仓库。',
-  'skills.repositoryLimit':
-    '仓库或所选内容超出导入限制：200 MB、仓库 30,000 个文件、500 个技能、单文件 20 MB。',
   'skills.unsafeRepository': '仓库包含不支持的文件路径，无法导入。',
   'skills.unsafePath': '技能目录不可访问或包含符号链接。',
-  'skills.scanLimit': '当前打开的扫描过多，请关闭其他导入面板或等待扫描过期。',
   'skills.scanExpired': '扫描结果已超过 15 分钟，请重新扫描后安装。',
   'skills.invalidSelection':
     '部分所选技能无效或已不可用，请重新扫描并检查选择。',
