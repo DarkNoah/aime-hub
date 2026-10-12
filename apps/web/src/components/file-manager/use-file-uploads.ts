@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { nanoid } from 'nanoid';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import type { WorkspaceFileClient } from './workspace-client';
@@ -87,7 +88,7 @@ export function useFileUploads(
     items,
     enqueue(files: File[], directory: string) {
       const next: UploadItem[] = files.map((file) => ({
-        id: crypto.randomUUID(),
+        id: nanoid(),
         file,
         directory,
         status: 'queued',

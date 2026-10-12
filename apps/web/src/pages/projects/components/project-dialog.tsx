@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { nanoid } from 'nanoid';
 import { XIcon, PlusIcon, Trash2Icon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -48,7 +49,7 @@ export function ProjectDialog({
   });
   const [mounts, setMounts] = useState<MountDraft[]>(() => [
     {
-      id: crypto.randomUUID(),
+      id: nanoid(),
       provider: 'local',
       mountPath: 'local',
     },
@@ -395,7 +396,7 @@ function ProjectWorkspaceFields({
               onMountsChange([
                 ...mounts,
                 {
-                  id: crypto.randomUUID(),
+                  id: nanoid(),
                   provider: 'local',
                   mountPath: availableMountName(mounts),
                 },

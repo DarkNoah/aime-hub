@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { useState } from 'react';
+import { nanoid } from 'nanoid';
 import { Link, useNavigate } from '@tanstack/react-router';
 import {
   ChevronsUpDown,
@@ -84,7 +85,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               onClick={() => {
                 void navigate({
                   to: '/threads',
-                  search: { draft: crypto.randomUUID() },
+                  search: { draft: nanoid() },
                 });
                 onNavigate?.();
               }}
