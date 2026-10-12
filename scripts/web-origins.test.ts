@@ -46,6 +46,7 @@ test('web origins support explicit lists, reject unsafe entries and preserve the
 
   const overrides = {
     NODE_ENV: 'development',
+    ALLOW_INSECURE_HTTP: 'false',
     DATABASE_URL: 'postgresql://unused:unused@127.0.0.1:1/unused',
     BETTER_AUTH_SECRET: 'origin-test-secret-with-at-least-32-characters',
     BETTER_AUTH_URL: localOrigin,
@@ -78,6 +79,17 @@ test('web origins support explicit lists, reject unsafe entries and preserve the
     'https://app.example.com',
     'https://second.example.com',
   ]);
+  process.env.BETTER_AUTH_URL = lanOrigin;
+  process.env.WEB_ORIGIN = lanOrigin;
+  process.env.WEB_ORIGINS = '';
+  assert.throws(loadEnv, /HTTPS/);
+  process.env.ALLOW_INSECURE_HTTP = 'true';
+  assert.equal(loadEnv().ALLOW_INSECURE_HTTP, true);
+  assert.deepEqual(loadEnv().WEB_ORIGINS, [lanOrigin]);
+  process.env.ALLOW_INSECURE_HTTP = 'false';
+  assert.throws(loadEnv, /HTTPS/);
+  process.env.ALLOW_INSECURE_HTTP = '1';
+  assert.throws(loadEnv, /ALLOW_INSECURE_HTTP/);
 });
 
 test('Better Auth accepts both browser origins and keeps CSRF and callback checks', async () => {

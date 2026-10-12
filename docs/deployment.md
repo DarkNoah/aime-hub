@@ -31,8 +31,18 @@
 
 ## Git 自动更新
 
+### 暂时通过内网 IP 访问
+
+设置 `WEB_ORIGIN=http://服务器IP:8088`、`ALLOW_INSECURE_HTTP=true`，其他需要访问的 IP 加入 `WEB_ORIGINS`。在 Dokploy 的 Compose Command 中使用 `compose -p <实际appName> --env-file .env -f ./compose.yaml -f ./compose.ip.yaml up -d --build --remove-orphans`。`WEB_PORT` 默认 8088，`WEB_BIND_IP` 默认 0.0.0.0。HTTP 模式限可信内网，浏览器 Web Push 不可用；切换域名 HTTPS 时去掉覆盖文件并恢复 `ALLOW_INSECURE_HTTP=false`。
+
+### 公网 Webhook
+
 在 Dokploy 开启 Auto Deploy，并将 Deployments 页面提供的 Webhook URL 加入 GitHub 仓库的 Webhooks，事件选择 `push`、内容类型选择 `application/json`。GitHub 必须能访问该 URL；仅内网地址无法接收 GitHub 回调。推送 `main` 后，Dokploy 重新拉取代码、构建 Dockerfile、执行迁移并更新容器。
 
 检查 GitHub webhook delivery 与 Dokploy 部署记录，确认自动部署成功，而不只是打开开关。数据库迁移不自动回滚，回退版本前需确认数据库兼容性。
+
+### 内网 Git 轮询
+
+Dokploy 没有公网入口时，可在宿主机安装 `deploy/git-auto-deploy.py` 和对应的 systemd service/timer，每分钟检查一次 `main`。只在出现新提交时调用本机 Dokploy Webhook，构建仍由 Dokploy 完成。Webhook URL 写入 `/etc/hub-git-deploy/config.json`（权限 600），格式包含 `repository`、`branch`、`webhook_url` 三个字段；不要提交该文件。脚本安装到 `/usr/local/lib/hub-git-deploy.py`，状态保存在 `/var/lib/hub-git-deploy/last-requested`。已提交但构建失败的版本需在 Dokploy 手动重试。
 
 参考：[Dokploy Compose](https://docs.dokploy.com/docs/core/docker-compose)、[自动部署](https://docs.dokploy.com/docs/core/auto-deploy)。

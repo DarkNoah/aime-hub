@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 ARG NODE_IMAGE=node:22-bookworm-slim
 ARG NGINX_IMAGE=nginx:stable-alpine
 ARG BUN_IMAGE=oven/bun:1

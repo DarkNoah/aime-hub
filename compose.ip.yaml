@@ -1,0 +1,6 @@
+# Temporary direct access on a trusted private network.
+# Add -f ./compose.ip.yaml after -f ./compose.yaml in the Compose command.
+services:
+  web:
+    ports:
+      - '${WEB_BIND_IP:-0.0.0.0}:${WEB_PORT:-8088}:80'

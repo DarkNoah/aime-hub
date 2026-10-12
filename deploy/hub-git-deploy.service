@@ -1,0 +1,14 @@
+[Unit]
+Description=Deploy new Git commits through local Dokploy
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/hub-git-deploy.py
+StateDirectory=hub-git-deploy
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true

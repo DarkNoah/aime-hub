@@ -29,10 +29,11 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
+      ALLOW_INSECURE_HTTP: ${ALLOW_INSECURE_HTTP:-false}
       DATABASE_URL: postgresql://hub:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/hub
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set a random secret of at least 32 characters}
-      BETTER_AUTH_URL: ${WEB_ORIGIN:?Set the public HTTPS origin}
-      WEB_ORIGIN: ${WEB_ORIGIN:?Set the public HTTPS origin}
+      BETTER_AUTH_URL: ${WEB_ORIGIN:?Set the browser origin}
+      WEB_ORIGIN: ${WEB_ORIGIN:?Set the browser origin}
       WEB_ORIGINS: ${WEB_ORIGINS:-}
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 3001

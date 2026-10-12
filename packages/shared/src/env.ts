@@ -16,6 +16,10 @@ const schema = z.object({
   NODE_ENV: z
     .enum(['development', 'test', 'production'])
     .default('development'),
+  ALLOW_INSECURE_HTTP: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   DATABASE_URL: z.url().refine((value) => /^postgres(ql)?:/.test(value)),
   BETTER_AUTH_SECRET: z.string().min(32),
   BETTER_AUTH_URL: z.url(),
@@ -47,6 +51,7 @@ export function loadEnv() {
   ]);
   if (
     result.data.NODE_ENV === 'production' &&
+    !result.data.ALLOW_INSECURE_HTTP &&
     [result.data.BETTER_AUTH_URL, ...webOrigins].some(
       (url) => !url.startsWith('https://'),
     )
