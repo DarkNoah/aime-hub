@@ -23,6 +23,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useToolResponse } from './tool-renderers/use-tool-response';
+import { getToolName } from './tool-renderers/registry';
 
 export type ToolInteractionProps = {
   interaction?: ToolInteraction;
@@ -49,9 +50,7 @@ export function ChatToolInteraction({
       tool?.state === 'output-denied',
     onRespond,
   });
-  const toolName =
-    interaction?.toolName ??
-    (tool?.type === 'dynamic-tool' ? tool.toolName : tool?.type.slice(5));
+  const toolName = interaction?.toolName ?? getToolName(tool);
   const question =
     toolName === 'ask_user'
       ? userQuestionSchema.safeParse(interaction?.suspendPayload ?? tool?.input)

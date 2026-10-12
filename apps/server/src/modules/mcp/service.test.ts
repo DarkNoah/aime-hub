@@ -9,7 +9,7 @@ import type { DataSource } from 'typeorm';
 import type { McpInput } from '@aime/shared/mcp';
 import { McpService } from './service.js';
 import { createMcpClient, toMastraServer } from './client.js';
-import { ToolService } from '../tools/service.js';
+import { ToolService, registeredToolIds } from '../tools/service.js';
 import type { ProviderService } from '../providers/service.js';
 import { buildAgent } from '../../mastra/agents/factory.js';
 import { fallbackAgentId, getCodeAgent } from '../../mastra/agents/index.js';
@@ -297,13 +297,25 @@ test('Agent construction excludes MCP tools; exec discovers resident tools and r
   };
   const agents = [
     buildAgent(config, options),
-    buildAgent({ ...config, tools: ['exec'] }, options),
-    buildAgent({ ...config, tools: ['curr_time'] }, options),
+    buildAgent(
+      {
+        ...config,
+        disabledTools: registeredToolIds.filter((id) => id !== 'exec'),
+      },
+      options,
+    ),
+    buildAgent(
+      {
+        ...config,
+        disabledTools: registeredToolIds.filter((id) => id !== 'curr_time'),
+      },
+      options,
+    ),
   ];
   const maps = await Promise.all(agents.map((agent) => agent.listTools()));
   assert.deepEqual(
     maps.map((tools) => Object.keys(tools)),
-    [[], ['exec'], ['curr_time']],
+    [[...registeredToolIds], ['exec'], ['curr_time']],
   );
   assert.equal(mcpReads.mock.callCount(), 0);
   const mcp = await f.service.getTools();

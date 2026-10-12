@@ -1,166 +1,29 @@
 import type { DataSource } from 'typeorm';
-import type { AssetService } from '../assets/service.js';
-import { z } from 'zod';
 import { Setting } from '@aime/db';
-import { agentToolIds, type AgentToolId } from '@aime/shared/agents';
-import {
-  toolIds,
-  toolConfigSchemas,
-  type ToolId,
-  type ToolConfig,
-  type WebSearchConfig,
-  type WebFetchConfig,
-  type ImageGenConfig,
-} from '@aime/shared/tools';
+import type { ToolId, ToolConfig } from '@aime/shared/tools';
 import type { ToolsInput } from '@mastra/core/agent';
-import {
-  askUserTool,
-  taskWriteTool,
-  taskUpdateTool,
-  taskCompleteTool,
-  taskCheckTool,
-  submitPlanTool,
-} from '@mastra/core/tools';
-import { currTime } from '../../mastra/tools/clock.js';
-import { sleep } from '../../mastra/tools/sleep.js';
-import { createExecTool } from '../../mastra/tools/exec.js';
+import type { AssetService } from '../assets/service.js';
 import type { ProviderService } from '../providers/service.js';
 import { ProviderError } from '../providers/network.js';
 import { SerpApiProvider } from '../../mastra/providers/serpapi.js';
-import { createWebSearchTool } from '../../mastra/tools/web_search.js';
 import { JinaAIProvider } from '../../mastra/providers/jina-ai.js';
-import { createWebFetchTool } from '../../mastra/tools/web_fetch.js';
 import {
-  createImageGenTool,
   ImageGenerationError,
   type ResolvedImageModel,
 } from '../../mastra/tools/image_gen.js';
-
-export type RegisteredToolId = AgentToolId;
-type ToolConfigs = {
-  [Id in RegisteredToolId]: Id extends 'web_search'
-    ? WebSearchConfig
-    : Id extends 'web_fetch'
-      ? WebFetchConfig
-      : Id extends 'image_gen'
-        ? ImageGenConfig
-        : { enabled: boolean };
-};
-export type ToolDefaultConfigs = {
-  [Id in RegisteredToolId]?: Partial<ToolConfigs[Id]>;
-};
-type ToolDependencies = {
-  mcpTools?: () => Promise<ToolsInput>;
-  loadConfig?: (id: RegisteredToolId) => Promise<unknown>;
-  searchProvider?: (id: string, timeoutMs: number) => Promise<SerpApiProvider>;
-  fetchProvider?: (id: string, timeoutMs: number) => Promise<JinaAIProvider>;
-  imageModel?: (reference: string | null) => Promise<ResolvedImageModel>;
-  recordAsset?: AssetService['record'];
-};
-type ToolRegistration<Id extends RegisteredToolId> = {
-  schema: z.ZodType<ToolConfigs[Id]>;
-  create: (
-    config: ToolConfigs[Id],
-    dependencies: ToolDependencies,
-    defaults: ToolDefaultConfigs,
-  ) => ToolsInput[string];
-};
-const enabledSchema = z.strictObject({ enabled: z.boolean().default(true) });
-const builtin = (tool: ToolsInput[string]) => ({
-  schema: enabledSchema,
-  create: () => tool,
-});
-
-/** Application tools are constructed by ID; workspace/browser tools belong to Mastra. */
-const toolRegistry: { [Id in RegisteredToolId]: ToolRegistration<Id> } = {
-  exec: {
-    schema: enabledSchema,
-    create: (_config, dependencies, defaults) =>
-      createExecTool({
-        getTools: async () => {
-          const [builtIn, mcp] = await Promise.all([
-            buildTools(
-              agentToolIds.filter((id) => id !== 'exec'),
-              defaults,
-              dependencies,
-            ),
-            dependencies.mcpTools?.() ?? {},
-          ]);
-          return { ...mcp, ...builtIn };
-        },
-      }),
-  },
-  web_search: {
-    schema: toolConfigSchemas.web_search,
-    create: (config, dependencies) =>
-      createWebSearchTool(config, {
-        resolveProvider: dependencies.searchProvider
-          ? (id) => dependencies.searchProvider!(id, config.timeoutMs)
-          : undefined,
-      }),
-  },
-  web_fetch: {
-    schema: toolConfigSchemas.web_fetch,
-    create: (config, dependencies) =>
-      createWebFetchTool(config, {
-        resolveProvider: dependencies.fetchProvider
-          ? (id) => dependencies.fetchProvider!(id, config.timeoutMs)
-          : undefined,
-      }),
-  },
-  curr_time: builtin(currTime),
-  image_gen: {
-    schema: toolConfigSchemas.image_gen,
-    create: (config, dependencies) =>
-      createImageGenTool(config, {
-        resolveModel: dependencies.imageModel,
-        recordAsset: dependencies.recordAsset,
-      }),
-  },
-  sleep: builtin(sleep),
-  ask_user: builtin(askUserTool),
-  task_write: builtin(taskWriteTool),
-  task_update: builtin(taskUpdateTool),
-  task_complete: builtin(taskCompleteTool),
-  task_check: builtin(taskCheckTool),
-  submit_plan: builtin(submitPlanTool),
-};
-
-async function buildTool<Id extends RegisteredToolId>(
-  id: Id,
-  defaults: ToolDefaultConfigs,
-  dependencies: ToolDependencies,
-) {
-  const registration = toolRegistry[id];
-  const saved = await dependencies.loadConfig?.(id);
-  const config = registration.schema.parse({
-    ...defaults[id],
-    ...z.looseObject({}).parse(saved ?? {}),
-  });
-  return config.enabled
-    ? registration.create(config, dependencies, defaults)
-    : undefined;
-}
-
-/** Saved settings override caller defaults; schema defaults fill omitted fields. */
-export async function buildTools(
-  ids: readonly RegisteredToolId[],
-  defaults: ToolDefaultConfigs = {},
-  dependencies: ToolDependencies = {},
-): Promise<ToolsInput> {
-  const selected = [...new Set(ids)];
-  for (const id of selected) {
-    if (!Object.hasOwn(toolRegistry, id))
-      throw new Error(`Unknown tool ID: ${id}`);
-  }
-  const entries = await Promise.all(
-    selected.map(async (id) => {
-      const tool = await buildTool(id, defaults, dependencies);
-      return tool ? [[id, tool] as const] : [];
-    }),
-  );
-  return Object.fromEntries(entries.flat());
-}
+import {
+  buildTools,
+  parseToolConfig,
+  registeredToolIds,
+  type RegisteredToolId,
+  type ToolDefaultConfigs,
+} from './registry.js';
+export {
+  buildTools,
+  registeredToolIds,
+  type RegisteredToolId,
+  type ToolDefaultConfigs,
+} from './registry.js';
 
 export class ToolService {
   constructor(
@@ -174,23 +37,22 @@ export class ToolService {
   ) {}
 
   async get(id: ToolId): Promise<ToolConfig> {
+    this.requireTool(id);
     const row = await this.database
       .getRepository(Setting)
       .findOneBy({ id: `tool:${id}` });
-    return this.parseConfig(id, row?.value ?? {});
+    return parseToolConfig(id, row?.value ?? {});
   }
 
   async list(): Promise<ToolConfig[]> {
-    return Promise.all(toolIds.map((id) => this.get(id)));
+    return Promise.all(registeredToolIds.map((id) => this.get(id)));
   }
 
-  async update(
-    id: ToolId,
-    input: WebSearchConfig | WebFetchConfig | ImageGenConfig,
-  ): Promise<ToolConfig> {
-    const tool = this.parseConfig(id, input);
+  async update(id: ToolId, input: unknown): Promise<ToolConfig> {
+    this.requireTool(id);
+    const tool = parseToolConfig(id, input);
     const { config } = tool;
-    if (tool.id === 'image_gen') {
+    if (tool.kind === 'image_gen') {
       if (tool.config.enabled && tool.config.model) {
         try {
           await this.imageModel(tool.config.model);
@@ -198,7 +60,11 @@ export class ToolService {
           throw new ProviderError('INVALID_IMAGE_MODEL');
         }
       }
-    } else if (tool.config.enabled && tool.config.providerId)
+    } else if (
+      tool.kind !== 'builtin' &&
+      tool.config.enabled &&
+      tool.config.providerId
+    )
       await this.configuredProvider(
         tool.config.providerId,
         id === 'web_search' ? 'serpapi' : 'jina-ai',
@@ -209,15 +75,14 @@ export class ToolService {
     return tool;
   }
 
-  private parseConfig(id: ToolId, input: unknown): ToolConfig {
-    switch (id) {
-      case 'web_search':
-        return { id, config: toolConfigSchemas.web_search.parse(input) };
-      case 'web_fetch':
-        return { id, config: toolConfigSchemas.web_fetch.parse(input) };
-      case 'image_gen':
-        return { id, config: toolConfigSchemas.image_gen.parse(input) };
-    }
+  async setEnabled(id: ToolId, enabled: boolean): Promise<ToolConfig> {
+    const current = await this.get(id);
+    return this.update(id, { ...current.config, enabled });
+  }
+
+  private requireTool(id: string) {
+    if (!registeredToolIds.includes(id))
+      throw new ProviderError('NOT_FOUND', 404);
   }
 
   private async imageModel(
@@ -276,14 +141,15 @@ export class ToolService {
   }
 
   async buildTools(
-    ids: readonly RegisteredToolId[],
+    ids: readonly RegisteredToolId[] = registeredToolIds,
     defaults: ToolDefaultConfigs = {},
+    disabledTools: readonly string[] = [],
   ): Promise<ToolsInput> {
     return buildTools(ids, defaults, {
+      disabledTools,
       // MCP tools are discovered only inside exec, never injected into the Agent.
       mcpTools: () => this.mcp?.getTools() ?? Promise.resolve({}),
       loadConfig: async (id) => {
-        if (!(toolIds as readonly string[]).includes(id)) return undefined;
         const row = await this.database
           .getRepository(Setting)
           .findOneBy({ id: `tool:${id}` });

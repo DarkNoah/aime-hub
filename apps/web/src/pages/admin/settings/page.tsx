@@ -1,36 +1,157 @@
-import { ArrowUpRight, Settings2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowUpRight, ShieldCheck } from 'lucide-react';
 import { Link } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
+import type { SystemSettings } from '@aime/shared/system-settings';
+import { api, apiErrorCode } from '@/lib/rpc';
 import { PageHeader } from '@/components/page-header';
+import { LoadingState } from '@/components/loading-state';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { StatusBadge } from '@/components/status-badge';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 
 export function AdminSettingsPage() {
   const { t } = useTranslation();
+  const [settings, setSettings] = useState<SystemSettings>();
+  const [loadError, setLoadError] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const changing = useRef(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void api.systemSettings.get(undefined, { signal: controller.signal }).then(
+      (value) => {
+        if (!controller.signal.aborted) {
+          setSettings(value);
+          setLoadError(false);
+        }
+      },
+      () => {
+        if (!controller.signal.aborted) setLoadError(true);
+      },
+    );
+    return () => controller.abort();
+  }, [revision]);
+
+  async function setRegistrationEnabled(registrationEnabled: boolean) {
+    if (!settings || changing.current) return;
+    changing.current = true;
+    setSaving(true);
+    try {
+      setSettings(
+        await api.systemSettings.update({ body: { registrationEnabled } }),
+      );
+      toast.success(t('settings.saved'));
+    } catch (cause) {
+      const code = apiErrorCode(cause);
+      toast.error(
+        t(
+          code === 'UNAUTHORIZED'
+            ? 'errors.sessionExpired'
+            : code === 'FORBIDDEN'
+              ? 'errors.forbidden'
+              : 'errors.request',
+        ),
+      );
+    } finally {
+      changing.current = false;
+      setSaving(false);
+    }
+  }
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <PageHeader
         title={t('nav.settings')}
         description={t('admin.settingsDescription')}
       />
-      <section className="flex flex-col items-center rounded-xl border bg-card px-6 py-16 text-center">
-        <span className="mb-5 flex size-12 items-center justify-center rounded-xl bg-muted text-primary">
-          <Settings2 className="size-6" strokeWidth={1.5} />
-        </span>
-        <StatusBadge>{t('common.comingSoon')}</StatusBadge>
-        <h2 className="mt-4 text-lg font-semibold">
-          {t('admin.settingsTitle')}
-        </h2>
-        <p className="mt-2 max-w-md text-sm leading-7 text-muted-foreground">
-          {t('admin.settingsHint')}
-        </p>
-        <Button asChild variant="outline" className="mt-6">
-          <Link to="/admin/providers">
-            {t('defaults.title')}
-            <ArrowUpRight />
-          </Link>
-        </Button>
-      </section>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ShieldCheck className="size-4 text-muted-foreground" />
+            {t('settings.registrationTitle')}
+          </CardTitle>
+          <CardDescription>{t('settings.registrationHint')}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loadError ? (
+            <div
+              role="alert"
+              className="flex items-center justify-between gap-3 text-sm text-destructive"
+            >
+              <span>{t('errors.request')}</span>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setLoadError(false);
+                  setRevision((value) => value + 1);
+                }}
+              >
+                {t('settings.retry')}
+              </Button>
+            </div>
+          ) : settings ? (
+            <div
+              className="flex flex-wrap items-center justify-between gap-4 rounded-lg border p-4"
+              aria-busy={saving}
+            >
+              <Label
+                htmlFor="registration-enabled"
+                className="flex-1 leading-6"
+              >
+                {t('settings.allowRegistration')}
+              </Label>
+              <div className="flex items-center gap-3">
+                <Badge
+                  variant={
+                    settings.registrationEnabled ? 'secondary' : 'outline'
+                  }
+                >
+                  {t(
+                    settings.registrationEnabled
+                      ? 'settings.registrationEnabled'
+                      : 'settings.registrationDisabled',
+                  )}
+                </Badge>
+                <Switch
+                  id="registration-enabled"
+                  checked={settings.registrationEnabled}
+                  disabled={saving}
+                  onCheckedChange={(value) =>
+                    void setRegistrationEnabled(value)
+                  }
+                />
+              </div>
+            </div>
+          ) : (
+            <LoadingState />
+          )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('admin.settingsTitle')}</CardTitle>
+          <CardDescription>{t('admin.settingsHint')}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button asChild variant="outline">
+            <Link to="/admin/providers">
+              {t('defaults.title')}
+              <ArrowUpRight />
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
     </div>
   );
 }

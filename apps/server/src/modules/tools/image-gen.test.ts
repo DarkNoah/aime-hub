@@ -160,10 +160,10 @@ test('image tool configuration rejects invalid references and timeouts', () => {
 
 test('unset model resolves the current default image model on each execution; explicit model wins', async () => {
   const f = fixture();
-  assert.deepEqual(await f.service.get('image_gen'), {
-    id: 'image_gen',
-    config: defaultImageGenConfig,
-  });
+  assert.deepEqual(
+    (await f.service.get('image_gen')).config,
+    defaultImageGenConfig,
+  );
   const built = (await f.service.buildTools(['image_gen'])).image_gen;
   assert.ok('execute' in built && built.execute);
   assert.equal(

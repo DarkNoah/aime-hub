@@ -60,13 +60,16 @@ export function CodeAgentSheet({
             </section>
             <section className="space-y-2">
               <h3 className="text-sm font-medium">{t('agents.tools')}</h3>
-              <div className="flex flex-wrap gap-2">
-                {agent.tools.map((id) => (
-                  <Badge key={id} variant="outline">
-                    {t(`agents.tool.${id}`)}
-                  </Badge>
-                ))}
-              </div>
+              <p className="text-sm text-muted-foreground">
+                {t('agents.toolsManaged')}
+              </p>
+              {agent.disabledTools.length > 0 && (
+                <Badge variant="outline">
+                  {t('agents.toolsExcluded', {
+                    count: agent.disabledTools.length,
+                  })}
+                </Badge>
+              )}
             </section>
             <section className="space-y-2">
               <h3 className="text-sm font-medium">Skills</h3>

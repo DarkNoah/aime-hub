@@ -8,5 +8,8 @@ export function toolRouter(service?: ToolService) {
     update: p.update.handler(({ input }) =>
       required(service).update(input.params.toolId, input.body),
     ),
+    setEnabled: p.setEnabled.handler(({ input }) =>
+      required(service).setEnabled(input.params.toolId, input.body.enabled),
+    ),
   });
 }

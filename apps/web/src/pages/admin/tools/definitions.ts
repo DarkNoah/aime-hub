@@ -1,4 +1,4 @@
-import type { ToolId } from '@aime/shared/tools';
+import type { ConfigurableToolId } from '@aime/shared/tools';
 import type { TranslationKey } from '@/i18n/config';
 
 type ToolDefinition = {
@@ -50,7 +50,7 @@ export const toolDefinitions = {
     providerType: 'jina-ai',
     localId: 'local',
   },
-} satisfies Record<Exclude<ToolId, 'image_gen'>, ToolDefinition> &
+} satisfies Record<Exclude<ConfigurableToolId, 'image_gen'>, ToolDefinition> &
   Record<
     'image_gen',
     Pick<ToolDefinition, 'title' | 'description' | 'configure'>

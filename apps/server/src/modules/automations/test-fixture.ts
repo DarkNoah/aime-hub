@@ -50,6 +50,7 @@ export async function fixture(
     model?: ReturnType<typeof createMockModel>;
     workspaceRoot?: string;
     notifications?: Pick<NotificationService, 'publish'>;
+    disabledTools?: string[];
   } = {},
 ) {
   const root =
@@ -131,6 +132,7 @@ export async function fixture(
     async (id) => users.get(id)?.role === 'admin',
   );
   const calls: { userId: string; projectId?: string }[] = [];
+  const toolExclusions: (readonly string[] | undefined)[] = [];
   const runtime = createAutomationRuntime({
     mastra,
     scheduleHooks,
@@ -142,7 +144,12 @@ export async function fixture(
       }),
     } as unknown as Pool,
     workspaceRoot: root,
-    agents: { getConfig: async () => ({ ...assistantAgent, tools: [] }) },
+    agents: {
+      getConfig: async () => ({
+        ...assistantAgent,
+        disabledTools: options.disabledTools ?? [],
+      }),
+    },
     models: {
       getLanguageModel: async (userId, _settings, projectId) => {
         calls.push({ userId, projectId });
@@ -156,7 +163,12 @@ export async function fixture(
       },
     },
     projects,
-    tools: { buildTools: async () => ({}) },
+    tools: {
+      buildTools: async (_ids, _defaults, disabledTools) => {
+        toolExclusions.push(disabledTools);
+        return {};
+      },
+    },
   });
   t.after(async () => {
     await runtime.shutdown();
@@ -175,6 +187,7 @@ export async function fixture(
     users,
     members,
     calls,
+    toolExclusions,
     root,
     model,
   };

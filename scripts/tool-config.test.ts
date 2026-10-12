@@ -12,9 +12,9 @@ import {
   webFetchConfigSchema,
   webSearchConfigSchema,
 } from '@aime/shared/tools';
-import { agentToolIds } from '@aime/shared/agents';
 import {
   buildTools,
+  registeredToolIds,
   ToolService,
   type RegisteredToolId,
 } from '../apps/server/src/modules/tools/service.js';
@@ -83,14 +83,18 @@ function fixture() {
   };
 }
 
-test('registry builds selected tool IDs, deduplicates them and skips unrelated settings', async () => {
+test('registry builds exported tools by default, deduplicates selections and loads their settings', async () => {
   const f = fixture();
-  const builtinIds = agentToolIds.filter(
+  const builtinIds = registeredToolIds.filter(
     (id) => !toolIds.some((configured) => configured === id),
   );
   const builtins = await f.service.buildTools(builtinIds);
   assert.deepEqual(Object.keys(builtins), builtinIds);
-  assert.deepEqual(f.reads, []);
+  assert.deepEqual(
+    f.reads,
+    builtinIds.map((id) => `tool:${id}`),
+  );
+  f.reads.length = 0;
   assert.deepEqual(await f.service.buildTools([]), {});
   const selected = await f.service.buildTools([
     'curr_time',
@@ -98,9 +102,9 @@ test('registry builds selected tool IDs, deduplicates them and skips unrelated s
     'web_search',
   ]);
   assert.deepEqual(Object.keys(selected), ['curr_time', 'web_search']);
-  assert.deepEqual(f.reads, ['tool:web_search']);
-  assert.deepEqual(Object.keys(await buildTools(agentToolIds)), [
-    ...agentToolIds,
+  assert.deepEqual(f.reads, ['tool:curr_time', 'tool:web_search']);
+  assert.deepEqual(Object.keys(await buildTools(registeredToolIds)), [
+    ...registeredToolIds,
   ]);
   for (const id of ['unknown', '__proto__', 'constructor']) {
     await assert.rejects(
@@ -108,7 +112,7 @@ test('registry builds selected tool IDs, deduplicates them and skips unrelated s
       /Unknown tool ID/,
     );
   }
-  assert.deepEqual(f.reads, ['tool:web_search']);
+  assert.deepEqual(f.reads, ['tool:curr_time', 'tool:web_search']);
 });
 
 test('buildTools merges caller defaults with saved settings and honors disabled tools', async (t) => {
@@ -195,13 +199,51 @@ test('web search configuration validates limits, unknown properties and defaults
   }
 });
 
+test('all built-in switches persist independently and preserve configured parameters', async () => {
+  const f = fixture();
+  await f.service.update('web_search', {
+    ...defaultWebSearchConfig,
+    numResults: 7,
+  });
+  for (const id of registeredToolIds) {
+    assert.equal((await f.service.setEnabled(id, false)).config.enabled, false);
+    assert.deepEqual(await f.service.buildTools([id]), {});
+    assert.equal((await f.service.setEnabled(id, true)).config.enabled, true);
+    assert.ok((await f.service.buildTools([id]))[id]);
+  }
+  assert.deepEqual((await f.service.get('web_search')).config, {
+    ...defaultWebSearchConfig,
+    numResults: 7,
+  });
+  assert.deepEqual(await f.service.buildTools(['sleep'], {}, ['sleep']), {});
+  await assert.rejects(f.service.setEnabled('unknown', false), {
+    code: 'NOT_FOUND',
+  });
+});
+
 test('persisted configuration controls new tool instances, without credentials in tool settings or results', async (t) => {
   const f = fixture();
-  assert.deepEqual(await f.service.list(), [
-    { id: 'web_search', config: defaultWebSearchConfig },
-    { id: 'web_fetch', config: defaultWebFetchConfig },
-    { id: 'image_gen', config: defaultImageGenConfig },
-  ]);
+  const catalog = await f.service.list();
+  assert.deepEqual(
+    catalog.map((tool) => tool.id),
+    [...registeredToolIds],
+  );
+  assert.ok(catalog.every((tool) => tool.description && tool.config.enabled));
+  assert.deepEqual(
+    catalog
+      .filter((tool) => tool.kind !== 'builtin')
+      .sort(
+        (a, b) =>
+          toolIds.indexOf(a.id as (typeof toolIds)[number]) -
+          toolIds.indexOf(b.id as (typeof toolIds)[number]),
+      )
+      .map(({ id, config }) => ({ id, config })),
+    [
+      { id: 'web_search', config: defaultWebSearchConfig },
+      { id: 'web_fetch', config: defaultWebFetchConfig },
+      { id: 'image_gen', config: defaultImageGenConfig },
+    ],
+  );
   const saved = {
     ...defaultWebSearchConfig,
     providerId: provider.id,
@@ -305,9 +347,14 @@ test('tool settings HTTP and RPC enforce admin, origin and schema validation', a
       params: { toolId: 'image_gen' },
       body: defaultImageGenConfig,
     });
+  const toggle = () =>
+    client.tools.setEnabled({
+      params: { toolId: 'sleep' },
+      body: { enabled: false },
+    });
   for (const value of [undefined, 'user', 'admin-assistant']) {
     role = value;
-    for (const call of [() => client.tools.list(), update, updateImage])
+    for (const call of [() => client.tools.list(), update, updateImage, toggle])
       await assert.rejects(call(), {
         code: role ? 'FORBIDDEN' : 'UNAUTHORIZED',
       });
@@ -331,6 +378,7 @@ test('tool settings HTTP and RPC enforce admin, origin and schema validation', a
     requestOrigin = value;
     await assert.rejects(update(), { code: 'FORBIDDEN' });
     await assert.rejects(updateImage(), { code: 'FORBIDDEN' });
+    await assert.rejects(toggle(), { code: 'FORBIDDEN' });
   }
   assert.equal(f.rows.size, 0);
   requestOrigin = origin;
@@ -347,29 +395,48 @@ test('tool settings HTTP and RPC enforce admin, origin and schema validation', a
     body: JSON.stringify(body),
   });
   assert.equal(invalid.status, 400);
-  assert.deepEqual(await update(), { id: 'web_search', config: body });
-  assert.deepEqual(await updateImage(), {
-    id: 'image_gen',
-    config: defaultImageGenConfig,
+  assert.deepEqual((await update()).config, body);
+  assert.deepEqual((await updateImage()).config, defaultImageGenConfig);
+  assert.equal((await toggle()).config.enabled, false);
+  assert.deepEqual(await f.service.buildTools(['sleep']), {});
+  await assert.rejects(
+    client.tools.setEnabled({
+      params: { toolId: 'unknown' },
+      body: { enabled: true },
+    }),
+    { code: 'NOT_FOUND' },
+  );
+  const toggled = await app.request('/api/admin/tools/curr_time/enabled', {
+    method: 'PATCH',
+    headers: { Origin: origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: false }),
   });
+  assert.equal(toggled.status, 200);
+  assert.deepEqual(await f.service.buildTools(['curr_time']), {});
   const imageResponse = await app.request('/api/admin/tools/image_gen', {
     method: 'PUT',
     headers: { Origin: origin, 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...defaultImageGenConfig, timeoutMs: 600001 }),
   });
   assert.equal(imageResponse.status, 400);
-  assert.deepEqual(await client.tools.list(), [
-    { id: 'web_search', config: body },
-    { id: 'web_fetch', config: defaultWebFetchConfig },
-    { id: 'image_gen', config: defaultImageGenConfig },
-  ]);
+  const listed = await client.tools.list();
+  assert.deepEqual(
+    listed.map((tool) => tool.id),
+    [...registeredToolIds],
+  );
+  assert.deepEqual(
+    listed.find((tool) => tool.id === 'web_search')?.config,
+    body,
+  );
   const fetchBody = { ...defaultWebFetchConfig, maxChars: 12345 };
   assert.deepEqual(
-    await client.tools.update({
-      params: { toolId: 'web_fetch' },
-      body: fetchBody,
-    }),
-    { id: 'web_fetch', config: fetchBody },
+    (
+      await client.tools.update({
+        params: { toolId: 'web_fetch' },
+        body: fetchBody,
+      })
+    ).config,
+    fetchBody,
   );
   const mismatch = await app.request('/api/admin/tools/web_fetch', {
     method: 'PUT',
@@ -412,8 +479,8 @@ test('web fetch settings select only Jina AI credentials, persist limits and ind
   f.setProvider({ ...provider, type: 'jina-ai', baseUrl: 'https://r.jina.ai' });
   await f.service.update('web_fetch', config);
   assert.deepEqual(
-    await new ToolService(f.database, f.providers).get('web_fetch'),
-    { id: 'web_fetch', config },
+    (await new ToolService(f.database, f.providers).get('web_fetch')).config,
+    config,
   );
   assert.doesNotMatch(
     JSON.stringify([...f.rows.values()]),

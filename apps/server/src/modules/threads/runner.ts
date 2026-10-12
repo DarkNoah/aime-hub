@@ -203,8 +203,10 @@ export function createChatRunner(
             maxRuns: GOAL_MAX_RUNS,
           },
           browser: getBrowser(),
-          buildTools: (ids, defaults) =>
-            tools ? tools.buildTools(ids, defaults) : buildTools(ids, defaults),
+          buildTools: (ids, defaults, disabledTools) =>
+            tools
+              ? tools.buildTools(ids, defaults, disabledTools)
+              : buildTools(ids, defaults, { disabledTools }),
           memory,
           workspace: async ({ requestContext }) => {
             const selected =

@@ -20,6 +20,7 @@
     "./environment-variables": "./src/environment-variables.ts",
     "./request-logs": "./src/request-logs.ts",
     "./log-json": "./src/log-json.ts",
+    "./system-settings": "./src/system-settings.ts",
     "./rpc": "./src/rpc/index.ts"
   },
   "scripts": {

@@ -1,8 +1,10 @@
 import { z } from 'zod';
 
-// Add a schema and runtime factory for each newly configurable tool.
-export const toolIds = ['web_search', 'web_fetch', 'image_gen'] as const;
-export const toolIdSchema = z.enum(toolIds);
+// Runtime registrations own the catalog; only tools with extra settings need a schema here.
+export const toolIdSchema = z.string().regex(/^[a-zA-Z][a-zA-Z0-9_]{0,99}$/);
+export const enabledToolConfigSchema = z.strictObject({
+  enabled: z.boolean().default(true),
+});
 export const webSearchConfigSchema = z.strictObject({
   enabled: z.boolean().default(true),
   providerId: z.string().min(1).max(128).nullable().default(null),
@@ -32,14 +34,22 @@ export const toolConfigSchemas = {
   web_fetch: webFetchConfigSchema,
   image_gen: imageGenConfigSchema,
 };
+export type ConfigurableToolId = keyof typeof toolConfigSchemas;
+export const toolIds = Object.keys(toolConfigSchemas) as ConfigurableToolId[];
 export type ToolId = z.infer<typeof toolIdSchema>;
 export type WebSearchConfig = z.infer<typeof webSearchConfigSchema>;
 export type WebFetchConfig = z.infer<typeof webFetchConfigSchema>;
 export type ImageGenConfig = z.infer<typeof imageGenConfigSchema>;
-export type ToolConfig =
-  | { id: 'web_search'; config: WebSearchConfig }
-  | { id: 'web_fetch'; config: WebFetchConfig }
-  | { id: 'image_gen'; config: ImageGenConfig };
+export type ToolConfig = { description: string } & (
+  | { id: 'web_search'; kind: 'web_search'; config: WebSearchConfig }
+  | { id: 'web_fetch'; kind: 'web_fetch'; config: WebFetchConfig }
+  | { id: 'image_gen'; kind: 'image_gen'; config: ImageGenConfig }
+  | {
+      id: string;
+      kind: 'builtin';
+      config: z.infer<typeof enabledToolConfigSchema>;
+    }
+);
 export const defaultWebSearchConfig = webSearchConfigSchema.parse({});
 export const defaultWebFetchConfig = webFetchConfigSchema.parse({});
 export const defaultImageGenConfig = imageGenConfigSchema.parse({});

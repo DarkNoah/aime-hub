@@ -108,7 +108,7 @@ GitHub 来源的组标题提供仓库跳转按钮，删除按钮左边提供一�
 | `https://github.com/owner/repo/tree/<ref>/<目录>`          | 指定分支或版本下的目录及子目录 |
 | `https://github.com/owner/repo/blob/<ref>/<目录>/SKILL.md` | 指定技能及其同目录资源         |
 
-导入功能需要 API 服务器安装 Git 并能访问公开 GitHub 仓库。扫描固定仓库提交，安装从该次扫描的快照读取，目标目录为：
+导入功能需要 API 服务器安装 Git。首次直连公开 GitHub 仓库，拉取失败时依次通过 `https://githubproxy.cc/`、`https://ghfast.top/` 重试，将加速源前缀加在原始 `https://github.com/<owner>/<repo>.git` 地址之前；任一来源成功后停止重试。导入和整组更新共用此机制。重试前清理失败下载的临时目录，保留原始 GitHub 来源、分支与路径；取消操作、缺失路径、无效仓库内容或未安装 Git 时不会切换加速源。扫描固定仓库提交，安装从该次扫描的快照读取，目标目录为：
 
 ```text
 <WORKSPACE_ROOT>/.agents/skills/<owner>/<repo>/<skill-name>/SKILL.md

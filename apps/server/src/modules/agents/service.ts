@@ -9,7 +9,6 @@ import {
   agentInputSchema,
   agentUpdateSchema,
   agentStatusSchema,
-  agentToolIds,
   agentDefaultsSchema,
   type AgentDefaults,
   type AdminAgent,
@@ -57,9 +56,9 @@ export class AgentService {
       this.tools.list(),
     ]);
     return {
-      tools: agentToolIds.map((id) => ({
+      tools: tools.map(({ id, config }) => ({
         id,
-        enabled: tools.find((tool) => tool.id === id)?.config.enabled ?? true,
+        enabled: config.enabled,
       })),
       skills: skills.skills.filter((skill) => skill.valid),
     };
@@ -79,6 +78,13 @@ export class AgentService {
 
   private view(row: StorageAgentType, version: AgentVersion): ManagedAgent {
     const workspace = version.workspace;
+    const settings =
+      workspace &&
+      !Array.isArray(workspace) &&
+      workspace.type === 'provider' &&
+      workspace.provider === skillProvider
+        ? workspace.config
+        : {};
     const model = version.model;
     const config = agentInputSchema.safeParse({
       name: version.name,
@@ -90,13 +96,8 @@ export class AgentService {
           : ''
         : `${model.providerId}/${model.name}`,
       tools: Object.keys(version.tools ?? {}),
-      skillPaths:
-        workspace &&
-        !Array.isArray(workspace) &&
-        workspace.type === 'provider' &&
-        workspace.provider === skillProvider
-          ? workspace.config.skillPaths
-          : [],
+      disabledTools: settings.disabledTools ?? [],
+      skillPaths: settings.skillPaths ?? [],
     });
     if (!config.success) throw new AgentError('AGENT_CONFIG_UNSUPPORTED', 409);
     return {
@@ -234,7 +235,11 @@ export class AgentService {
       workspace: {
         type: 'provider',
         provider: skillProvider,
-        config: { skillPaths: data.skillPaths },
+        // Keep application runtime settings in the same native version snapshot.
+        config: {
+          skillPaths: data.skillPaths,
+          disabledTools: data.disabledTools,
+        },
       },
     };
   }
@@ -291,6 +296,7 @@ export class AgentService {
         instructions: data.instructions,
         model: data.model,
         tools: data.tools,
+        disabledTools: data.disabledTools,
         skillPaths: data.skillPaths,
       };
       const snapshot = await this.snapshot(configuration);

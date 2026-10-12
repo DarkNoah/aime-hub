@@ -5,6 +5,8 @@ import {
   webSearchConfigSchema,
   webFetchConfigSchema,
   imageGenConfigSchema,
+  enabledToolConfigSchema,
+  toolIdSchema,
   type ToolConfig,
 } from '../tools.js';
 
@@ -32,7 +34,24 @@ export const toolsContract = {
           params: z.object({ toolId: z.literal('image_gen') }),
           body: imageGenConfigSchema,
         }),
+        z.object({
+          params: z.object({ toolId: toolIdSchema }),
+          body: enabledToolConfigSchema,
+        }),
       ]),
+    )
+    .output(type<ToolConfig>()),
+  setEnabled: procedure
+    .route({
+      method: 'PATCH',
+      path: '/admin/tools/{toolId}/enabled',
+      inputStructure: 'detailed',
+    })
+    .input(
+      z.object({
+        params: z.object({ toolId: toolIdSchema }),
+        body: z.strictObject({ enabled: z.boolean() }),
+      }),
     )
     .output(type<ToolConfig>()),
 };

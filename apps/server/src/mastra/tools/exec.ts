@@ -21,13 +21,13 @@ type Dependencies = {
   getTools: (context: ToolExecutionContext) => Promise<ToolsInput>;
 };
 
-/** The catalog is built at invocation time, independently of the Agent's selected tools. */
+/** The catalog is built at invocation time and respects global and Agent exclusions. */
 export function createExecTool({ getTools }: Dependencies) {
   return createTool({
     id: 'exec',
     description: `Run JavaScript to orchestrate tools in a fresh isolated QuickJS/WASM runtime.
 Pass a JavaScript function body in code (no Markdown fences); top-level await is supported.
-ALL_TOOLS is an array of { name, description } for all currently available built-in, workspace and MCP tools, including tools not selected in the Agent's tool list. MCP names start with mcp__.
+ALL_TOOLS is an array of { name, description } for all currently available built-in, workspace and MCP tools. Globally disabled tools and this Agent's excluded tools are unavailable. MCP names start with mcp__.
 Call await tools.read_file({ path: 'README.md' }) or await tools.mcp__server__tool({...}). Inspect tools[name].inputSchema for its JSON Schema. Names are normalized JavaScript identifiers; use the exact name from ALL_TOOLS.
 text(value) explicitly emits text (non-strings are JSON serialized); image(value) explicitly emits an image from a base64 data URL, { image_url: dataURL }, an MCP image block, or a workspace media result. HTTP URLs are not accepted.
 Only text() and image() output is returned. Return values, bare expressions, console output and nested tool results are not automatically emitted. Await all tool calls you need; unawaited work is cancelled when the script ends, but already-started external side effects cannot be rolled back.
@@ -221,3 +221,6 @@ async function abortable<T>(
     signal.removeEventListener('abort', abort!);
   }
 }
+
+// The runtime builder supplies the current application and MCP catalogs.
+export const exec = createExecTool({ getTools: async () => ({}) });

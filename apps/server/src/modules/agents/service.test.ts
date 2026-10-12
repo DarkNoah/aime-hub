@@ -11,7 +11,7 @@ import type { AgentSettingsStore } from './settings.js';
 import { fallbackAgentId, getCodeAgent } from '../../mastra/agents/index.js';
 import { Agent } from '@mastra/core/agent';
 import { MastraLanguageModelV2Mock } from '@mastra/core/test-utils/llm-mock';
-import { buildTools } from '../tools/service.js';
+import { buildTools, registeredToolIds } from '../tools/service.js';
 import { InMemoryStore, type AgentsStorage } from '@mastra/core/storage';
 import { PostgresStore } from '@mastra/pg';
 import {
@@ -94,6 +94,8 @@ function serviceFor(
       list: async () => [
         {
           id: 'web_fetch',
+          kind: 'web_fetch',
+          description: 'Web fetch',
           config: webFetchConfigSchema.parse({ enabled: false }),
         },
       ],
@@ -103,7 +105,7 @@ function serviceFor(
   );
 }
 
-test('agent input rejects unsafe paths, unknown tools, duplicate selections and invalid prompts', () => {
+test('agent input rejects unsafe paths, invalid legacy tool IDs, duplicate selections and invalid prompts', () => {
   assert.equal(agentInputSchema.parse(input).instructions, input.instructions);
   assert.equal(agentInputSchema.parse({ ...input, model: null }).model, null);
   for (const patch of [
@@ -113,8 +115,10 @@ test('agent input rejects unsafe paths, unknown tools, duplicate selections and 
     { instructions: 'x'.repeat(24001) },
     { model: 'invalid' },
     { model: '' },
-    { tools: ['invented'] },
+    { tools: ['invalid tool'] },
     { tools: ['sleep', 'sleep'] },
+    { disabledTools: ['invalid tool'] },
+    { disabledTools: ['sleep', 'sleep'] },
     { skillPaths: ['../secret'] },
     { skillPaths: ['/absolute'] },
     { skillPaths: ['x\\y'] },
@@ -216,7 +220,7 @@ test('native agent CRUD preserves prompt and versioned tools/skills, rejects sta
   assert.deepEqual(version1?.workspace, {
     type: 'provider',
     provider: 'installed-skills',
-    config: { skillPaths: input.skillPaths },
+    config: { skillPaths: input.skillPaths, disabledTools: [] },
   });
   assert.deepEqual(version1?.model, {
     provider: 'openai',
@@ -542,6 +546,7 @@ test('getAgent builds a fresh Mastra Agent with runtime dependencies and can pin
   const created = await service.create('admin', {
     ...input,
     tools: ['curr_time'],
+    disabledTools: ['sleep'],
     model: null,
   });
   await service.setStatus(created.id, {
@@ -553,36 +558,47 @@ test('getAgent builds a fresh Mastra Agent with runtime dependencies and can pin
     model: null,
     instructions: 'New instructions',
     tools: ['sleep'],
+    disabledTools: ['curr_time'],
     versionId: created.versionId,
   });
   const model = new MastraLanguageModelV2Mock({});
-  const selections: string[][] = [];
+  const selections: (readonly string[] | undefined)[] = [];
   const original = await service.getAgent(created.id, {
     model,
     versionId: created.versionId,
-    buildTools: async (ids, defaults) => {
-      selections.push([...ids]);
-      return buildTools(ids, defaults);
+    buildTools: async (ids, defaults, disabledTools) => {
+      selections.push(ids);
+      return buildTools(ids, defaults, { disabledTools });
     },
   });
   assert.ok(original instanceof Agent);
   assert.equal(original.id, created.id);
   assert.equal(await original.getInstructions(), input.instructions);
-  assert.deepEqual(Object.keys(await original.listTools()), ['curr_time']);
-  assert.deepEqual(selections, [['curr_time']]);
+  assert.deepEqual(
+    Object.keys(await original.listTools()),
+    registeredToolIds.filter((id) => id !== 'sleep'),
+  );
+  assert.deepEqual(selections, [undefined]);
   const latest = await service.getAgent(created.id, {
     model,
     instructions: 'Runtime instructions',
-    buildTools: async (ids, defaults) => buildTools(ids, defaults),
+    buildTools: async (ids, defaults, disabledTools) =>
+      buildTools(ids, defaults, { disabledTools }),
   });
   assert.equal(await latest.getInstructions(), 'Runtime instructions');
-  assert.deepEqual(Object.keys(await latest.listTools()), ['sleep']);
+  assert.deepEqual(
+    Object.keys(await latest.listTools()),
+    registeredToolIds.filter((id) => id !== 'curr_time'),
+  );
   assert.notEqual(original, latest);
   const disabled = await service.getAgent(created.id, {
     model,
     defaultToolConfigs: { sleep: { enabled: false } },
   });
-  assert.deepEqual(await disabled.listTools(), {});
+  assert.deepEqual(
+    Object.keys(await disabled.listTools()),
+    registeredToolIds.filter((id) => !['sleep', 'curr_time'].includes(id)),
+  );
   const other = await service.create('admin', { ...input, model: null });
   await service.setStatus(other.id, {
     status: 'published',
@@ -687,7 +703,7 @@ test('admin HTTP and typed RPC enforce session, role, origin and versioned CRUD'
   });
   assert.equal((await client.agents.list()).length, 1);
   await assert.rejects(
-    client.agents.create({ body: { ...input, tools: ['unknown' as 'sleep'] } }),
+    client.agents.create({ body: { ...input, tools: ['invalid tool'] } }),
     { code: 'VALIDATION_ERROR' },
   );
   const created = await client.agents.create({ body: input });

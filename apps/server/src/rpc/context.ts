@@ -62,6 +62,7 @@ export const rpc = implementation.use(async ({ context, path, next }) => {
       path[0] === 'requestLogs' ||
       path[0] === 'tools' ||
       path[0] === 'mcp' ||
+      path[0] === 'systemSettings' ||
       (path[0] === 'providers' && path[1] !== 'available');
     if (admin && !hasAdminRole(session.user.role))
       throw new ORPCError('FORBIDDEN');

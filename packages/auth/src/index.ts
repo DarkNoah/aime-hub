@@ -14,6 +14,7 @@ type AuthConfig = {
   baseURL: string;
   webOrigin: WebOrigins;
   admins: string;
+  isRegistrationEnabled?: () => Promise<boolean>;
 };
 
 export function createAuthOptions(config: AuthConfig) {
@@ -90,6 +91,16 @@ export function createAuthOptions(config: AuthConfig) {
     },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        if (
+          ctx.path === '/sign-up/email' &&
+          config.isRegistrationEnabled &&
+          !(await config.isRegistrationEnabled())
+        ) {
+          throw new APIError('FORBIDDEN', {
+            code: 'SIGNUP_DISABLED',
+            message: '暂未开放注册，请联系管理员',
+          });
+        }
         if (ctx.path !== '/sign-up/email' && ctx.path !== '/update-user')
           return;
         const value: unknown = ctx.body?.username;

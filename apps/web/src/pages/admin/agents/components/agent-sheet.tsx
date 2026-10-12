@@ -6,7 +6,6 @@ import { toast } from 'sonner';
 import {
   agentInputSchema,
   type AgentCatalog,
-  type AgentToolId,
   type ManagedAgent,
 } from '@aime/shared/agents';
 import { api } from '@/lib/rpc';
@@ -19,6 +18,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Switch } from '@/components/ui/switch';
 import {
   Sheet,
   SheetContent,
@@ -35,6 +35,7 @@ type Field =
   | 'instructions'
   | 'model'
   | 'tools'
+  | 'disabledTools'
   | 'skillPaths'
   | 'form';
 
@@ -49,13 +50,15 @@ export function AgentSheet({
   onSaved: (agent: ManagedAgent) => void;
   restoreFocus: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [name, setName] = useState(agent?.name ?? '');
   const [description, setDescription] = useState(agent?.description ?? '');
   const [instructions, setInstructions] = useState(agent?.instructions ?? '');
   const [model, setModel] = useState<string | null>(agent?.model ?? null);
-  const [tools, setTools] = useState<AgentToolId[]>(agent?.tools ?? []);
   const [skillPaths, setSkillPaths] = useState(agent?.skillPaths ?? []);
+  const [disabledTools, setDisabledTools] = useState(
+    agent?.disabledTools ?? [],
+  );
   const [catalog, setCatalog] = useState<AgentCatalog>();
   const [catalogError, setCatalogError] = useState<TranslationKey>();
   const [revision, setRevision] = useState(0);
@@ -103,7 +106,8 @@ export function AgentSheet({
       description,
       instructions,
       model,
-      tools,
+      tools: agent?.tools ?? [],
+      disabledTools,
       skillPaths,
     });
     setErrors({});
@@ -115,6 +119,7 @@ export function AgentSheet({
         instructions: 'agents.instructionsInvalid',
         model: 'agents.modelUnavailable',
         tools: 'agents.invalid',
+        disabledTools: 'agents.invalid',
         skillPaths: 'agents.skillUnavailable',
       };
       for (const issue of parsed.error.issues) {
@@ -331,50 +336,73 @@ export function AgentSheet({
                     </p>
                   ) : null}
                   <section className="space-y-3">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-semibold">
-                        {t('agents.tools')}
-                      </h3>
-                      <Badge variant="secondary">{tools.length}</Badge>
-                    </div>
+                    <h3 className="text-sm font-semibold">
+                      {t('agents.tools')}
+                    </h3>
                     <p className="text-xs leading-5 text-muted-foreground">
                       {t('agents.toolsHint')}
                     </p>
+                    <Button asChild variant="outline" size="sm">
+                      <Link
+                        to="/admin/tools"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        {t('nav.tools')}
+                        <ExternalLink />
+                      </Link>
+                    </Button>
                     <div className="divide-y rounded-lg border">
-                      {catalog?.tools.map((tool) => (
-                        <label
-                          key={tool.id}
-                          className="flex cursor-pointer items-start gap-3 p-3 hover:bg-muted/40"
-                        >
-                          <Checkbox
-                            className="mt-1"
-                            checked={tools.includes(tool.id)}
-                            disabled={pending}
-                            onCheckedChange={(checked) =>
-                              setTools((current) =>
-                                checked === true
-                                  ? [...current, tool.id]
-                                  : current.filter((id) => id !== tool.id),
-                              )
-                            }
-                          />
-                          <span className="min-w-0 flex-1">
-                            <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                              {t(`agents.tool.${tool.id}`)}
-                              {!tool.enabled ? (
-                                <Badge variant="outline">
-                                  {t('agents.globallyDisabled')}
-                                </Badge>
-                              ) : null}
-                            </span>
-                            <code className="mt-1 block text-xs text-muted-foreground">
-                              {tool.id}
-                            </code>
-                          </span>
-                        </label>
-                      ))}
+                      {catalog?.tools.map((tool) => {
+                        const titleKey =
+                          `agents.tool.${tool.id}` as TranslationKey;
+                        const title = i18n.exists(titleKey)
+                          ? String(t(titleKey))
+                          : tool.id;
+                        const enabled =
+                          tool.enabled && !disabledTools.includes(tool.id);
+                        return (
+                          <div
+                            key={tool.id}
+                            className="flex items-center gap-3 px-3 py-3"
+                          >
+                            <Label
+                              htmlFor={`agent-tool-${tool.id}`}
+                              className="flex min-w-0 flex-1 flex-col items-start gap-1"
+                            >
+                              <span className="break-words leading-5">
+                                {title}
+                              </span>
+                              <span className="break-all font-mono text-xs font-normal text-muted-foreground">
+                                {tool.id}
+                              </span>
+                            </Label>
+                            <Badge variant={enabled ? 'secondary' : 'outline'}>
+                              {t(
+                                !tool.enabled
+                                  ? 'agents.toolGloballyDisabled'
+                                  : enabled
+                                    ? 'tools.enabled'
+                                    : 'tools.disabled',
+                              )}
+                            </Badge>
+                            <Switch
+                              id={`agent-tool-${tool.id}`}
+                              checked={enabled}
+                              disabled={pending || !tool.enabled}
+                              onCheckedChange={(checked) =>
+                                setDisabledTools((current) =>
+                                  checked
+                                    ? current.filter((id) => id !== tool.id)
+                                    : [...current, tool.id],
+                                )
+                              }
+                            />
+                          </div>
+                        );
+                      })}
                     </div>
-                    {hint('tools')}
+                    {hint('disabledTools')}
                   </section>
                   <section className="space-y-3">
                     <div className="flex items-center gap-2">

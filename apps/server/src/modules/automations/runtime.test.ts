@@ -10,7 +10,8 @@ import {
 } from './test-fixture.js';
 
 test('native agent schedules create a thread on the first fire and reuse its persisted history', async (t) => {
-  const { service, mastra, memory, threads, calls } = await fixture(t);
+  const { service, mastra, memory, threads, calls, toolExclusions } =
+    await fixture(t, { disabledTools: ['ask_user', 'web_search'] });
   for (const scope of [personal, project, system]) {
     const user = scope.scope === 'personal' ? 'alice' : 'admin';
     const task = await service.create(user, scope, {
@@ -78,4 +79,7 @@ test('native agent schedules create a thread on the first fire and reuse its per
   }
   assert.ok(calls.some((call) => call.userId === 'system'));
   assert.ok(calls.some((call) => call.projectId === project.projectId));
+  assert.ok(toolExclusions.length > 0);
+  for (const ids of toolExclusions)
+    assert.deepEqual(ids, ['ask_user', 'web_search']);
 });

@@ -224,6 +224,35 @@ export async function downloadGitHubRepository(
   signal?: AbortSignal,
   original?: { ref: string | null; scope: string },
 ): Promise<RepositorySnapshot> {
+  const source = `${repository.url}.git`;
+  const remotes = [
+    source,
+    `https://githubproxy.cc/${source}`,
+    `https://ghfast.top/${source}`,
+  ];
+  for (const [index, remote] of remotes.entries()) {
+    try {
+      return await downloadRepository(repository, remote, signal, original);
+    } catch (error) {
+      if (
+        signal?.aborted ||
+        !(error instanceof SkillError) ||
+        error.code !== 'SKILL_DOWNLOAD_FAILED' ||
+        index === remotes.length - 1
+      )
+        throw error;
+      // Retry the entire transport in a fresh directory; keep the canonical GitHub source.
+    }
+  }
+  throw new SkillError('SKILL_DOWNLOAD_FAILED', 502);
+}
+
+async function downloadRepository(
+  repository: GitHubRepository,
+  remote: string,
+  signal?: AbortSignal,
+  original?: { ref: string | null; scope: string },
+): Promise<RepositorySnapshot> {
   const directory = await mkdtemp(join(tmpdir(), 'skill-repository-'));
   const dispose = () => rm(directory, { recursive: true, force: true });
   try {
@@ -231,7 +260,7 @@ export async function downloadGitHubRepository(
     let scopePath: string | undefined = original?.scope;
     if (repository.refPath && !original) {
       const refs = await git(
-        ['ls-remote', '--heads', '--tags', '--', `${repository.url}.git`],
+        ['ls-remote', '--heads', '--tags', '--', remote],
         undefined,
         signal,
       );
@@ -244,11 +273,7 @@ export async function downloadGitHubRepository(
     let revision = 'HEAD';
     if (ref && /^[a-f0-9]{40}$/.test(ref)) {
       await git(['init', '--', checkout], undefined, signal);
-      await git(
-        ['fetch', '--depth=1', '--', `${repository.url}.git`, ref],
-        checkout,
-        signal,
-      );
+      await git(['fetch', '--depth=1', '--', remote, ref], checkout, signal);
       revision = 'FETCH_HEAD';
     } else {
       await git(
@@ -260,7 +285,7 @@ export async function downloadGitHubRepository(
           '--no-checkout',
           ...(ref ? ['--branch', ref] : []),
           '--',
-          `${repository.url}.git`,
+          remote,
           checkout,
         ],
         undefined,

@@ -12,11 +12,13 @@ import {
 import { authClient } from '@/features/auth/client';
 import { authErrorKey, validateCredentials } from '@/features/auth/errors';
 import { useAuthSession } from '@/features/auth/session-context';
+import { useRegistrationStatus } from '@/features/auth/use-registration-status';
 import { Brand } from '@/components/brand';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { LoadingState } from '@/components/loading-state';
 import {
   Card,
   CardContent,
@@ -30,6 +32,11 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
   const registering = mode === 'register';
   const navigate = useNavigate();
   const { refetch } = useAuthSession();
+  const {
+    registrationEnabled,
+    error: registrationStatusError,
+    retry: retryRegistrationStatus,
+  } = useRegistrationStatus();
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -42,6 +49,7 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pending || accountCreated) return;
+    if (registering && registrationEnabled !== true) return;
     setError(null);
     const normalizedUsername = username.trim();
     const validation = validateCredentials(normalizedUsername, password);
@@ -74,6 +82,8 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
         });
         if (result.error) {
           setError(authErrorKey(result.error, 'errors.signUp'));
+          if (result.error.code === 'SIGNUP_DISABLED')
+            retryRegistrationStatus();
           return;
         }
         created = true;
@@ -144,171 +154,201 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
               </CardDescription>
             </CardHeader>
             <CardContent className="px-6 pb-7 sm:px-8">
-              <form
-                noValidate
-                onSubmit={(event) => void submit(event)}
-                className="space-y-5"
-                aria-busy={pending}
-                aria-describedby={error ? 'auth-error' : undefined}
-              >
-                <fieldset
-                  disabled={pending || accountCreated}
-                  className="min-w-0 space-y-5"
-                >
-                  <div className="space-y-2">
-                    <Label htmlFor="username">{t('auth.username')}</Label>
-                    <Input
-                      id="username"
-                      name="username"
-                      autoComplete="username"
-                      autoCapitalize="none"
-                      spellCheck={false}
-                      required
-                      minLength={3}
-                      maxLength={30}
-                      pattern="[a-zA-Z0-9_.]+"
-                      title={t('auth.usernameTitle')}
-                      placeholder={t('auth.usernamePlaceholder')}
-                      value={username}
-                      onChange={(event) => setUsername(event.target.value)}
-                      aria-describedby={
-                        registering ? 'username-hint' : undefined
-                      }
-                    />
-                    {registering && (
-                      <p
-                        id="username-hint"
-                        className="text-xs leading-5 text-muted-foreground"
-                      >
-                        {t('auth.usernameHint')}
-                      </p>
-                    )}
+              {registering && registrationEnabled !== true ? (
+                registrationStatusError ? (
+                  <div role="alert" className="space-y-4">
+                    <p className="text-sm text-destructive">
+                      {t('errors.request')}
+                    </p>
+                    <Button variant="outline" onClick={retryRegistrationStatus}>
+                      {t('settings.retry')}
+                    </Button>
                   </div>
-                  {registering && (
-                    <div className="space-y-2">
-                      <Label htmlFor="email">{t('auth.email')}</Label>
-                      <Input
-                        id="email"
-                        name="email"
-                        type="email"
-                        autoComplete="email"
-                        autoCapitalize="none"
-                        required
-                        placeholder="you@example.com"
-                        value={email}
-                        onChange={(event) => setEmail(event.target.value)}
-                      />
-                    </div>
-                  )}
-                  <div className="space-y-2">
-                    <Label htmlFor="password">{t('auth.password')}</Label>
-                    <div className="relative">
-                      <Input
-                        id="password"
-                        name="password"
-                        type={showPassword ? 'text' : 'password'}
-                        autoComplete={
-                          registering ? 'new-password' : 'current-password'
-                        }
-                        required
-                        minLength={8}
-                        maxLength={128}
-                        placeholder={
-                          registering
-                            ? t('auth.newPasswordPlaceholder')
-                            : t('auth.passwordPlaceholder')
-                        }
-                        value={password}
-                        onChange={(event) => setPassword(event.target.value)}
-                        className="pr-11"
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="absolute top-0.5 right-0.5"
-                        onClick={() => setShowPassword(!showPassword)}
-                        aria-label={
-                          showPassword
-                            ? t('auth.hidePassword')
-                            : t('auth.showPassword')
-                        }
-                        aria-pressed={showPassword}
-                      >
-                        {showPassword ? <EyeOff /> : <Eye />}
-                      </Button>
-                    </div>
-                  </div>
-                  {registering && (
-                    <div className="space-y-2">
-                      <Label htmlFor="confirm-password">
-                        {t('auth.confirmPassword')}
-                      </Label>
-                      <Input
-                        id="confirm-password"
-                        name="confirmPassword"
-                        type={showPassword ? 'text' : 'password'}
-                        autoComplete="new-password"
-                        required
-                        minLength={8}
-                        maxLength={128}
-                        placeholder={t('auth.confirmPasswordPlaceholder')}
-                        value={confirmPassword}
-                        onChange={(event) =>
-                          setConfirmPassword(event.target.value)
-                        }
-                      />
-                    </div>
-                  )}
-                </fieldset>
-                {error && (
+                ) : registrationEnabled === false ? (
                   <p
-                    id="auth-error"
-                    role="alert"
-                    className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm leading-6 text-destructive"
+                    role="status"
+                    className="rounded-lg border bg-muted/40 px-4 py-3 text-sm leading-6 text-muted-foreground"
                   >
-                    {accountCreated
-                      ? t('auth.createdError', { message: t(error) })
-                      : t(error)}
+                    {t('errors.signUpDisabled')}
                   </p>
-                )}
-                {accountCreated ? (
-                  <Button asChild className="h-11 w-full">
-                    <Link to="/login">
-                      {t('auth.goToLogin')}
-                      <ArrowRight />
-                    </Link>
-                  </Button>
                 ) : (
-                  <Button
-                    type="submit"
-                    disabled={pending}
-                    className="h-11 w-full"
-                  >
-                    {pending ? (
-                      <>
-                        <LoaderCircle className="animate-spin" />
-                        {registering ? t('auth.creating') : t('auth.signingIn')}
-                      </>
-                    ) : (
-                      <>
-                        {registering
-                          ? t('auth.createAccount')
-                          : t('auth.submitLogin')}
-                        <ArrowRight />
-                      </>
-                    )}
-                  </Button>
-                )}
-              </form>
-              <p className="mt-6 text-center text-sm text-muted-foreground">
-                {registering ? t('auth.hasAccount') : t('auth.noAccount')}{' '}
-                <Link
-                  to={registering ? '/login' : '/register'}
-                  className="rounded-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+                  <LoadingState />
+                )
+              ) : (
+                <form
+                  noValidate
+                  onSubmit={(event) => void submit(event)}
+                  className="space-y-5"
+                  aria-busy={pending}
+                  aria-describedby={error ? 'auth-error' : undefined}
                 >
-                  {registering ? t('auth.goToLogin') : t('auth.register')}
-                </Link>
-              </p>
+                  <fieldset
+                    disabled={pending || accountCreated}
+                    className="min-w-0 space-y-5"
+                  >
+                    <div className="space-y-2">
+                      <Label htmlFor="username">{t('auth.username')}</Label>
+                      <Input
+                        id="username"
+                        name="username"
+                        autoComplete="username"
+                        autoCapitalize="none"
+                        spellCheck={false}
+                        required
+                        minLength={3}
+                        maxLength={30}
+                        pattern="[a-zA-Z0-9_.]+"
+                        title={t('auth.usernameTitle')}
+                        placeholder={t('auth.usernamePlaceholder')}
+                        value={username}
+                        onChange={(event) => setUsername(event.target.value)}
+                        aria-describedby={
+                          registering ? 'username-hint' : undefined
+                        }
+                      />
+                      {registering && (
+                        <p
+                          id="username-hint"
+                          className="text-xs leading-5 text-muted-foreground"
+                        >
+                          {t('auth.usernameHint')}
+                        </p>
+                      )}
+                    </div>
+                    {registering && (
+                      <div className="space-y-2">
+                        <Label htmlFor="email">{t('auth.email')}</Label>
+                        <Input
+                          id="email"
+                          name="email"
+                          type="email"
+                          autoComplete="email"
+                          autoCapitalize="none"
+                          required
+                          placeholder="you@example.com"
+                          value={email}
+                          onChange={(event) => setEmail(event.target.value)}
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <Label htmlFor="password">{t('auth.password')}</Label>
+                      <div className="relative">
+                        <Input
+                          id="password"
+                          name="password"
+                          type={showPassword ? 'text' : 'password'}
+                          autoComplete={
+                            registering ? 'new-password' : 'current-password'
+                          }
+                          required
+                          minLength={8}
+                          maxLength={128}
+                          placeholder={
+                            registering
+                              ? t('auth.newPasswordPlaceholder')
+                              : t('auth.passwordPlaceholder')
+                          }
+                          value={password}
+                          onChange={(event) => setPassword(event.target.value)}
+                          className="pr-11"
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="absolute top-0.5 right-0.5"
+                          onClick={() => setShowPassword(!showPassword)}
+                          aria-label={
+                            showPassword
+                              ? t('auth.hidePassword')
+                              : t('auth.showPassword')
+                          }
+                          aria-pressed={showPassword}
+                        >
+                          {showPassword ? <EyeOff /> : <Eye />}
+                        </Button>
+                      </div>
+                    </div>
+                    {registering && (
+                      <div className="space-y-2">
+                        <Label htmlFor="confirm-password">
+                          {t('auth.confirmPassword')}
+                        </Label>
+                        <Input
+                          id="confirm-password"
+                          name="confirmPassword"
+                          type={showPassword ? 'text' : 'password'}
+                          autoComplete="new-password"
+                          required
+                          minLength={8}
+                          maxLength={128}
+                          placeholder={t('auth.confirmPasswordPlaceholder')}
+                          value={confirmPassword}
+                          onChange={(event) =>
+                            setConfirmPassword(event.target.value)
+                          }
+                        />
+                      </div>
+                    )}
+                  </fieldset>
+                  {error && (
+                    <p
+                      id="auth-error"
+                      role="alert"
+                      className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-sm leading-6 text-destructive"
+                    >
+                      {accountCreated
+                        ? t('auth.createdError', { message: t(error) })
+                        : t(error)}
+                    </p>
+                  )}
+                  {accountCreated ? (
+                    <Button asChild className="h-11 w-full">
+                      <Link to="/login">
+                        {t('auth.goToLogin')}
+                        <ArrowRight />
+                      </Link>
+                    </Button>
+                  ) : (
+                    <Button
+                      type="submit"
+                      disabled={pending}
+                      className="h-11 w-full"
+                    >
+                      {pending ? (
+                        <>
+                          <LoaderCircle className="animate-spin" />
+                          {registering
+                            ? t('auth.creating')
+                            : t('auth.signingIn')}
+                        </>
+                      ) : (
+                        <>
+                          {registering
+                            ? t('auth.createAccount')
+                            : t('auth.submitLogin')}
+                          <ArrowRight />
+                        </>
+                      )}
+                    </Button>
+                  )}
+                </form>
+              )}
+              {registering || registrationEnabled === true ? (
+                <p className="mt-6 text-center text-sm text-muted-foreground">
+                  {registering ? t('auth.hasAccount') : t('auth.noAccount')}{' '}
+                  <Link
+                    to={registering ? '/login' : '/register'}
+                    className="rounded-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+                  >
+                    {registering ? t('auth.goToLogin') : t('auth.register')}
+                  </Link>
+                </p>
+              ) : registrationEnabled === false ? (
+                <p className="mt-6 text-center text-sm text-muted-foreground">
+                  {t('errors.signUpDisabled')}
+                </p>
+              ) : null}
             </CardContent>
           </Card>
           <p className="mt-6 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">

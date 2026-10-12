@@ -23,7 +23,8 @@ export function buildAgent(
   options: AgentRuntimeOptions,
 ): Agent {
   const {
-    buildTools: createTools = buildTools,
+    buildTools: createTools = (ids, defaults, disabledTools) =>
+      buildTools(ids, defaults, { disabledTools }),
     defaultToolConfigs,
     ...runtime
   } = options;
@@ -34,6 +35,7 @@ export function buildAgent(
     name: config.name,
     description: config.description,
     instructions: runtime.instructions ?? config.instructions,
-    tools: () => createTools(config.tools, defaultToolConfigs),
+    tools: () =>
+      createTools(undefined, defaultToolConfigs, config.disabledTools),
   });
 }

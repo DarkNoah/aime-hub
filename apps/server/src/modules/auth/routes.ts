@@ -1,9 +1,17 @@
 import { Hono } from 'hono';
 import type { Auth } from '@aime/auth';
 import type { HttpEnv } from '../../http.js';
+import type { SystemSettingsService } from '../system-settings/service.js';
 
-export function authRoutes(auth: Auth) {
+export function authRoutes(auth: Auth, settings?: SystemSettingsService) {
   const router = new Hono<HttpEnv>();
+  router.get('/auth/registration-status', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const registrationEnabled = settings
+      ? (await settings.get()).registrationEnabled
+      : true;
+    return c.json({ registrationEnabled });
+  });
   router.on(['GET', 'POST'], '/auth/*', (c) => {
     const headers = new Headers(c.req.raw.headers);
     // Override client input with the socket address used by Better Auth rate limits.

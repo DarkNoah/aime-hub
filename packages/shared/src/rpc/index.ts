@@ -11,6 +11,7 @@ import { mcpContract } from './mcp.js';
 import { automationsContract } from './automations.js';
 import { notificationsContract } from './notifications.js';
 import { assetsContract } from './assets.js';
+import { systemSettingsContract } from './system-settings.js';
 
 export const apiContract = {
   threads: threadsContract,
@@ -27,4 +28,5 @@ export const apiContract = {
   automations: automationsContract,
   notifications: notificationsContract,
   assets: assetsContract,
+  systemSettings: systemSettingsContract,
 };

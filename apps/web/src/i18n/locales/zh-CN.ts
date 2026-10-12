@@ -262,7 +262,9 @@ export const zhCN = {
   'agents.tools': '工具',
   'agents.skills': 'Skills',
   'agents.toolsHint':
-    '选择应用工具，运行时遵守全局启停配置；工作区和浏览器能力由聊天运行时提供。',
+    '默认使用全局已启用的工具。可为此 Agent 单独关闭工具；全局停用的工具无法在此启用。',
+  'agents.toolGloballyDisabled': '全局已停用',
+  'agents.toolsExcluded': '已关闭 {{count}} 个工具',
   'agents.skillsHint': '选择后台 Skills 中已安装的有效技能，按目录路径引用。',
   'agents.searchSkills': '搜索技能名称、目录或说明…',
   'agents.globallyDisabled': '全局已停用',
@@ -357,7 +359,10 @@ export const zhCN = {
   'providers.fetchUrlHint':
     '填写 Reader API 根地址 https://r.jina.ai，不要附加要读取的网页地址。',
   'nav.tools': '工具配置',
-  'tools.description': '管理聊天工具使用的供应商和运行参数。',
+  'tools.description':
+    '管理 Agent 默认继承的内置工具，配置启用状态和运行参数。每个 Agent 可单独关闭工具。',
+  'tools.toggle': '启用或停用 {{name}}',
+  'agents.toolsManaged': '跟随全局工具',
   'tools.listTitle': '可用工具',
   'tools.webSearch': '网页搜索',
   'tools.searchDescription': '搜索网页，返回标题、链接和内容摘要。',
@@ -1121,9 +1126,16 @@ export const zhCN = {
   'providers.noResults': '未找到匹配的供应商',
   'workspace.greeting': '欢迎回来，{{name}}',
   'workspace.quickAccess': '工作空间管理',
-  'admin.settingsTitle': '更多设置将在这里提供',
-  'admin.settingsHint':
-    '默认模型与思考模式可在模型供应商页面中配置，其他系统设置将逐步开放。',
+  'admin.settingsTitle': '默认模型',
+  'admin.settingsHint': '在模型供应商页面中配置默认模型与思考模式。',
+  'settings.registrationTitle': '账号注册',
+  'settings.allowRegistration': '允许注册新账号',
+  'settings.registrationHint':
+    '关闭后停止公开注册，现有用户仍可登录，管理员仍可创建账号。',
+  'settings.registrationEnabled': '已开放',
+  'settings.registrationDisabled': '已关闭',
+  'settings.saved': '系统设置已更新。',
+  'settings.retry': '重试',
 
   'meta.title': 'Aime Hub · 工作空间',
   'meta.description': 'Aime Hub · 你的 AI 工作空间',

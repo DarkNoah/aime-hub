@@ -23,7 +23,7 @@ async function until(check: () => boolean | Promise<boolean>) {
 }
 
 test(
-  'runtime resolves agent configs, filters skills/tools, pins queued work and switches only when idle',
+  'runtime resolves agent configs, filters skills and automatically injects globally enabled tools, pins queued work and switches only when idle',
   { timeout: 20000 },
   async (t) => {
     const root = await mkdtemp('/tmp/runner-agents-');
@@ -43,6 +43,7 @@ test(
       instructions: 'FIRST_AGENT_INSTRUCTIONS',
       model: 'mock/fixed',
       tools: ['curr_time'],
+      disabledTools: ['sleep'],
       skillPaths: ['selected'],
     };
     const second: AdminAgent = {
@@ -52,10 +53,11 @@ test(
       instructions: 'SECOND_AGENT_INSTRUCTIONS',
       model: null,
       tools: ['sleep'],
+      disabledTools: ['curr_time'],
       skillPaths: [],
     };
     const lookups: Array<string | null | undefined> = [];
-    const toolSelections: string[][] = [];
+    const toolSelections: (readonly string[] | undefined)[] = [];
     const models: Array<string | null> = [];
     const requests: Array<{
       prompt: string;
@@ -115,9 +117,9 @@ test(
       root,
       undefined,
       {
-        buildTools: async (ids, defaults) => {
-          toolSelections.push([...ids]);
-          return buildTools(ids, defaults);
+        buildTools: async (ids, defaults, disabledTools) => {
+          toolSelections.push(ids);
+          return buildTools(ids, defaults, { disabledTools });
         },
       },
       {
@@ -175,11 +177,9 @@ test(
     assert.doesNotMatch(requests[0].prompt, /unselected skill marker/);
     assert.ok(requests[0].tools.includes('curr_time'));
     assert.ok(!requests[0].tools.includes('sleep'));
-    assert.ok(!requests[0].tools.includes('web_fetch'));
+    assert.ok(requests[0].tools.includes('web_fetch'));
     assert.ok(toolSelections.length > 0);
-    assert.ok(
-      toolSelections.every((ids) => ids.length === 1 && ids[0] === 'curr_time'),
-    );
+    assert.ok(toolSelections.every((ids) => ids === undefined));
     const previousCount = requests.length;
     await send('message04', second.id);
     await until(
@@ -195,7 +195,7 @@ test(
     );
     assert.ok(last.tools.includes('sleep'));
     assert.ok(!last.tools.includes('curr_time'));
-    assert.deepEqual(toolSelections.at(-1), ['sleep']);
+    assert.equal(toolSelections.at(-1), undefined);
     assert.equal(models.at(-1), 'mock/chat');
     assert.equal(
       (await service.getThread('alice', thread.id)).thread.agentId,
@@ -223,6 +223,7 @@ test(
       instructions: 'ORIGINAL_CONFIGURATION',
       model: null,
       tools: ['ask_user'],
+      disabledTools: [],
       skillPaths: [],
       status: 'published',
       versionId: 'version-one',

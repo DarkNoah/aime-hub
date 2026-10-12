@@ -356,7 +356,11 @@ export function createAutomationRuntime({
     instructions: async ({ requestContext }) =>
       `${(await execution(requestContext)).config.instructions}\nThis is an unattended scheduled task. Complete the task and return the result. Do not request interactive input. Do not unmount or replace shared workspace directories.`,
     tools: async ({ requestContext }) =>
-      tools.buildTools((await execution(requestContext)).config.tools),
+      tools.buildTools(
+        undefined,
+        undefined,
+        (await execution(requestContext)).config.disabledTools,
+      ),
     workspace: async ({ requestContext }) => {
       const run = await execution(requestContext);
       return run.model.toolCall ? run.workspace : undefined;

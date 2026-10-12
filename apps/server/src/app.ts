@@ -40,6 +40,8 @@ import { assetRouter } from './modules/assets/rpc.js';
 import type { AssetService } from './modules/assets/service.js';
 import type { McpService } from './modules/mcp/service.js';
 import { mcpRouter } from './modules/mcp/rpc.js';
+import type { SystemSettingsService } from './modules/system-settings/service.js';
+import { systemSettingsRouter } from './modules/system-settings/rpc.js';
 
 export function createApp(
   auth: Auth,
@@ -62,6 +64,7 @@ export function createApp(
   automations?: { service: AutomationService; webOrigin: WebOrigins },
   notifications?: { service: NotificationService; webOrigin: WebOrigins },
   mcp?: { service: McpService; webOrigin: WebOrigins },
+  systemSettings?: { service: SystemSettingsService; webOrigin: WebOrigins },
 ) {
   const app = new Hono<HttpEnv>();
   const webOrigins = normalizeWebOrigins(
@@ -75,12 +78,13 @@ export function createApp(
       automations?.webOrigin ??
       notifications?.webOrigin ??
       mcp?.webOrigin ??
+      systemSettings?.webOrigin ??
       [],
   );
   app.use('*', secureHeaders());
   app.route('/api', healthRoutes());
   // Better Auth owns its request bodies and its admin endpoints.
-  app.route('/api', authRoutes(auth));
+  app.route('/api', authRoutes(auth, systemSettings?.service));
   app.use('/api/*', async (c, next) => {
     c.header('Cache-Control', 'no-store');
     await next();
@@ -97,6 +101,7 @@ export function createApp(
     tools: toolRouter(tools?.service),
     agents: agentRouter(agents?.service),
     mcp: mcpRouter(mcp?.service),
+    systemSettings: systemSettingsRouter(systemSettings?.service),
     automations: automationRouter(automations?.service),
     notifications: notificationRouter(notifications?.service),
     environmentVariables: environmentVariableRouter(

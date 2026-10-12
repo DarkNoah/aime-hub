@@ -1,22 +1,9 @@
 import { z } from 'zod';
 import type { InstalledSkill } from './skills.js';
 
-/** Explicit application tools. Workspace/browser tools are supplied by the runtime. */
-export const agentToolIds = [
-  'exec',
-  'web_search',
-  'web_fetch',
-  'image_gen',
-  'curr_time',
-  'sleep',
-  'ask_user',
-  'task_write',
-  'task_update',
-  'task_complete',
-  'task_check',
-  'submit_plan',
-] as const;
-export type AgentToolId = (typeof agentToolIds)[number];
+import { toolIdSchema } from './tools.js';
+
+export type AgentToolId = string;
 
 const text = (max: number) =>
   z
@@ -39,10 +26,18 @@ export const agentInputSchema = z.strictObject({
     .min(1)
     .refine((value) => value.indexOf('/') > 0 && !value.endsWith('/'))
     .nullable(),
+  // Retained for existing stored versions; runtime tools are managed globally.
   tools: z
-    .array(z.enum(agentToolIds))
-    .max(agentToolIds.length)
-    .refine((values) => new Set(values).size === values.length),
+    .array(toolIdSchema)
+    .max(128)
+    .refine((values) => new Set(values).size === values.length)
+    .default([]),
+  // Global tools are inherited; an Agent only stores its exclusions.
+  disabledTools: z
+    .array(toolIdSchema)
+    .max(128)
+    .refine((values) => new Set(values).size === values.length)
+    .default([]),
   skillPaths: z
     .array(skillPath)
     .max(100)

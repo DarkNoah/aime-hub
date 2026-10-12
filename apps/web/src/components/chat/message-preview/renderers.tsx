@@ -19,6 +19,7 @@ import { WebSearchPreview } from './web-search';
 import { WebFetchPreview } from './web-fetch';
 import { ImageGenPreview } from './image-gen';
 import type { PreviewPart } from './selection';
+import { getToolName } from '../tool-renderers/registry';
 
 type PreviewProps = { part: PreviewPart };
 
@@ -34,8 +35,7 @@ function RawPreview({ part }: PreviewProps) {
 
 function ToolPreview({ part }: PreviewProps) {
   if (!isToolUIPart(part)) return null;
-  const name =
-    part.type === 'dynamic-tool' ? part.toolName : part.type.slice(5);
+  const name = getToolName(part);
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -116,11 +116,7 @@ const previewRenderers: Partial<Record<string, ComponentType<PreviewProps>>> = {
 };
 
 export function MessagePartPreview({ part }: PreviewProps) {
-  const toolName = isToolUIPart(part)
-    ? part.type === 'dynamic-tool'
-      ? part.toolName
-      : part.type.slice(5)
-    : null;
+  const toolName = isToolUIPart(part) ? getToolName(part) : undefined;
   const Renderer =
     (toolName ? previewRenderers[`tool:${toolName}`] : undefined) ??
     previewRenderers[part.type] ??

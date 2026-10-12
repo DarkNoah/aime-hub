@@ -31,9 +31,11 @@ import { NotificationService } from './modules/notifications/service.js';
 import { PgNotificationStore } from './modules/notifications/store.js';
 import { createPushTransport } from './modules/notifications/push.js';
 import { AssetService } from './modules/assets/service.js';
+import { SystemSettingsService } from './modules/system-settings/service.js';
 
 const env = loadEnv();
 const database = createDataSource(env.DATABASE_URL);
+const systemSettings = new SystemSettingsService(database);
 const pool = new Pool({ connectionString: env.DATABASE_URL });
 const auth = createAuth({
   pool,
@@ -41,6 +43,8 @@ const auth = createAuth({
   baseURL: env.BETTER_AUTH_URL,
   webOrigin: env.WEB_ORIGINS,
   admins: env.ADMINS,
+  isRegistrationEnabled: async () =>
+    (await systemSettings.get()).registrationEnabled,
 });
 try {
   await database.initialize();
@@ -151,6 +155,7 @@ const app = createApp(
   { service: automations.service, webOrigin: env.WEB_ORIGINS },
   { service: notifications, webOrigin: env.WEB_ORIGINS },
   { service: mcp, webOrigin: env.WEB_ORIGINS },
+  { service: systemSettings, webOrigin: env.WEB_ORIGINS },
 );
 const server = serve(
   { fetch: app.fetch, port: env.SERVER_PORT, hostname: env.SERVER_HOST },

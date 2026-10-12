@@ -263,9 +263,11 @@ export function AdminAgentsPage() {
                       ) : null}
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Badge variant="outline">
-                          {t('agents.toolsCount', {
-                            count: agent.tools.length,
-                          })}
+                          {agent.disabledTools.length
+                            ? t('agents.toolsExcluded', {
+                                count: agent.disabledTools.length,
+                              })
+                            : t('agents.toolsManaged')}
                         </Badge>
                         <Badge variant="outline">
                           {t('agents.skillsCount', {

@@ -286,7 +286,9 @@ export const en = {
   'agents.tools': 'Tools',
   'agents.skills': 'Skills',
   'agents.toolsHint':
-    'Select application tools. Runtime honors global tool switches and supplies workspace and browser capabilities.',
+    'Inherit globally enabled tools by default. Turn off individual tools for this agent; globally disabled tools cannot be enabled here.',
+  'agents.toolGloballyDisabled': 'Globally disabled',
+  'agents.toolsExcluded': '{{count}} tools excluded',
   'agents.skillsHint':
     'Select valid skills installed in Skills administration. References use directory paths.',
   'agents.searchSkills': 'Search skill names, paths, or descriptions…',
@@ -392,7 +394,9 @@ export const en = {
     'Use https://r.jina.ai as the Reader API root. Do not include a target page URL.',
   'nav.tools': 'Tools',
   'tools.description':
-    'Configure the providers and runtime settings used by chat tools.',
+    'Manage built-in tools inherited by agents, including availability and runtime settings. Individual agents can turn off tools.',
+  'tools.toggle': 'Enable or disable {{name}}',
+  'agents.toolsManaged': 'Inherits global tools',
   'tools.listTitle': 'Available tools',
   'tools.webSearch': 'Web search',
   'tools.searchDescription':
@@ -1243,9 +1247,17 @@ export const en = {
   'providers.noResults': 'No matching providers',
   'workspace.greeting': 'Welcome back, {{name}}',
   'workspace.quickAccess': 'Manage your workspace',
-  'admin.settingsTitle': 'More settings are on the way',
+  'admin.settingsTitle': 'Default models',
   'admin.settingsHint':
-    'Default models and thinking mode are available on the model providers page. More system settings will be added here.',
+    'Configure default models and thinking mode on the model providers page.',
+  'settings.registrationTitle': 'Account registration',
+  'settings.allowRegistration': 'Allow new account registration',
+  'settings.registrationHint':
+    'When disabled, public registration is closed. Existing users can still sign in, and administrators can still create accounts.',
+  'settings.registrationEnabled': 'Open',
+  'settings.registrationDisabled': 'Closed',
+  'settings.saved': 'System settings updated.',
+  'settings.retry': 'Retry',
 
   'meta.title': 'Aime Hub · Workspace',
   'meta.description': 'Aime Hub · Your AI workspace',
