@@ -8,10 +8,10 @@ FROM ${NODE_IMAGE} AS build
 WORKDIR /app
 RUN npm install --global pnpm@10.12.1
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm fetch --frozen-lockfile
+RUN nice -n 10 pnpm --network-concurrency=4 --child-concurrency=1 fetch --frozen-lockfile
 COPY . .
-RUN pnpm install --offline --frozen-lockfile
-RUN pnpm build
+RUN nice -n 10 pnpm --child-concurrency=1 install --offline --frozen-lockfile
+RUN NODE_OPTIONS=--max-old-space-size=2048 nice -n 10 pnpm build
 
 FROM build AS server
 ARG AGENTFS_VERSION=0.6.4
