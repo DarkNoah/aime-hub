@@ -12,7 +12,7 @@ def main():
     config = json.loads(Path('/etc/hub-git-deploy/config.json').read_text())
     branch = config['branch']
     output = subprocess.check_output(
-        ['git', 'ls-remote', '--exit-code', config['repository'], f'refs/heads/{branch}'],
+        ['git', '-c', 'http.version=HTTP/1.1', 'ls-remote', '--exit-code', config['repository'], f'refs/heads/{branch}'],
         text=True, timeout=45,
         env={**os.environ, 'GIT_TERMINAL_PROMPT': '0'},
     )
@@ -20,6 +20,18 @@ def main():
     state = Path('/var/lib/hub-git-deploy/last-requested')
     if state.exists() and state.read_text().strip() == commit:
         return
+    # Reapply the repository-only transport setting after a Dokploy restart.
+    container = subprocess.check_output(
+        ['docker', 'ps', '-q', '--filter', 'label=com.docker.swarm.service.name=dokploy'],
+        text=True, timeout=15,
+    ).splitlines()
+    if not container:
+        raise RuntimeError('Dokploy is not running; retry on the next check')
+    subprocess.run(
+        ['docker', 'exec', container[0], 'git', 'config', '--global',
+         f"http.{config['repository']}.version", 'HTTP/1.1'],
+        check=True, timeout=15,
+    )
     payload = json.dumps({
         'ref': f'refs/heads/{branch}', 'after': commit,
         'head_commit': {'id': commit, 'message': f'Git auto deploy {commit[:12]}'},
