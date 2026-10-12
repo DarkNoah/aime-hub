@@ -318,7 +318,9 @@ export const MessageBranchPage = ({
   );
 };
 
-export type MessageResponseProps = ComponentProps<typeof Streamdown>;
+export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
+  renderEnhancedLinks?: boolean;
+};
 
 const streamdownPlugins = { cjk, code, math, mermaid };
 const streamdownComponents = { a: MarkdownLink };
@@ -330,21 +332,26 @@ const messageRehypePlugins = [
 ];
 
 export const MessageResponse = memo(
-  ({ className, ...props }: MessageResponseProps) => (
+  ({
+    className,
+    renderEnhancedLinks = true,
+    ...props
+  }: MessageResponseProps) => (
     <Streamdown
       className={cn(
         'size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
         className,
       )}
-      components={streamdownComponents}
+      components={renderEnhancedLinks ? streamdownComponents : undefined}
       plugins={streamdownPlugins}
-      rehypePlugins={messageRehypePlugins}
+      rehypePlugins={renderEnhancedLinks ? messageRehypePlugins : undefined}
       {...props}
     />
   ),
   (prevProps, nextProps) =>
     prevProps.children === nextProps.children &&
-    nextProps.isAnimating === prevProps.isAnimating,
+    nextProps.isAnimating === prevProps.isAnimating &&
+    nextProps.renderEnhancedLinks === prevProps.renderEnhancedLinks,
 );
 
 MessageResponse.displayName = 'MessageResponse';

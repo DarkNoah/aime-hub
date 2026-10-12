@@ -148,6 +148,7 @@ export function WebFetchPreview({ part }: { part: PreviewPart }) {
             markdown ? (
               <MessageResponse
                 mode="static"
+                renderEnhancedLinks={false}
                 className="min-w-0 max-w-prose text-sm leading-7 [overflow-wrap:anywhere] [&_img]:max-w-full"
               >
                 {result.content}
