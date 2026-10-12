@@ -36,7 +36,7 @@ const toolDefinition = {
   outputSchema: { type: 'object', properties: { ok: { type: 'boolean' } } },
 };
 
-async function fixture() {
+async function fixture(toolNames = ['read']) {
   const store = (await new InMemoryStore().getStore('mcpClients'))!;
   const instances: {
     closed: number;
@@ -88,16 +88,19 @@ async function fixture() {
         state.discoveries++;
         await pendingDiscovery;
         return {
-          tools: {
-            [`${servers[0].name}_read`]: createTool({
-              id: 'read',
-              description: 'Read fixture',
-              execute: async () => {
-                state.runs++;
-                return { ok: true };
-              },
-            }),
-          },
+          tools: Object.fromEntries(
+            toolNames.map((name) => [
+              `${servers[0].name}_${name}`,
+              createTool({
+                id: name,
+                description: 'Read fixture',
+                execute: async () => {
+                  state.runs++;
+                  return { ok: true };
+                },
+              }),
+            ]),
+          ),
           errors: state.fail
             ? { remote: 'secret credentials must not escape' }
             : {},
@@ -306,7 +309,6 @@ test('Agent construction excludes MCP tools; exec discovers resident tools and r
   const mcp = await f.service.getTools();
   const name = Object.keys(mcp)[0];
   assert.equal(name, 'mcp__local__read');
-  assert.equal(name.length <= 64, true);
   assert.equal(f.instances.length, 1);
   assert.equal(f.instances[0].discoveries, 1);
   const handle = mcp[name];
@@ -614,10 +616,30 @@ test('MCP names have no suffix and normalization conflicts never overwrite anoth
       revision: row.revision,
     });
   }
-  await assert.rejects(f.service.getTools(), { code: 'MCP_NAME_CONFLICT' });
+  await assert.rejects(f.service.getTools(), {
+    code: 'MCP_TOOL_NAME_CONFLICT',
+  });
   assert.deepEqual(
     f.instances.map((instance) => instance.runs),
     [0, 0],
   );
   await f.service.shutdown();
+});
+
+test('tool normalization conflicts keep the server draft and close the candidate connection', async (t) => {
+  const f = await fixture(['read-file', 'read_file']);
+  t.after(() => f.service.shutdown());
+  const row = await f.create();
+  await assert.rejects(
+    f.service.setStatus(row.id, {
+      status: 'published',
+      revision: row.revision,
+    }),
+    { code: 'MCP_TOOL_NAME_CONFLICT' },
+  );
+  assert.equal((await f.service.get(row.id)).status, 'draft');
+  assert.equal((await f.service.get(row.id)).revision, row.revision);
+  assert.equal(f.instances[0].closed, 1);
+  assert.equal(f.instances[0].runs, 0);
+  assert.deepEqual(await f.service.getTools(), {});
 });

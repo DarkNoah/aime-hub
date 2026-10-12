@@ -3,6 +3,8 @@ import { createServer, type ServerResponse } from 'node:http';
 import { once } from 'node:events';
 import test from 'node:test';
 import { InMemoryStore } from '@mastra/core/storage';
+import { isValidationError, noopObserve } from '@mastra/core/tools';
+import { createExecTool } from '../../mastra/tools/exec.js';
 import { McpService } from './service.js';
 
 const tool = {
@@ -20,6 +22,7 @@ function reply(
     params?: Record<string, unknown>;
   },
   value: string,
+  catalog = [tool],
 ) {
   if (request.id === undefined) return undefined;
   const result =
@@ -30,7 +33,7 @@ function reply(
           capabilities: { tools: {} },
         }
       : request.method === 'tools/list'
-        ? { tools: [tool] }
+        ? { tools: catalog }
         : request.method === 'tools/call'
           ? { content: [{ type: 'text', text: value }] }
           : request.method === 'ping'
@@ -81,6 +84,80 @@ test(
     );
     const output = await Object.values(first)[0].execute!({}, {} as never);
     assert.match(JSON.stringify(output), /stdio=a=b==/);
+  },
+);
+
+test(
+  'long MCP names publish and remain distinct through SDK discovery and exec calls',
+  { timeout: 25000 },
+  async (t) => {
+    const service = new McpService(
+      (await new InMemoryStore().getStore('mcpClients'))!,
+    );
+    t.after(() => service.shutdown());
+    const toolNames = [
+      'docker.getContainersByAppLabel',
+      'docker.getContainersByAppNameMatch',
+    ];
+    const catalog = toolNames.map((name) => ({ ...tool, name }));
+    const script = `const tool = ${JSON.stringify(tool)}; const catalog = ${JSON.stringify(catalog)}; const reply = ${reply.toString().replace(/\n/g, ' ')}; require('node:readline').createInterface({ input: process.stdin }).on('line', line => { const request = JSON.parse(line); const result = reply(request, request.params?.name ?? '', catalog); if (result) process.stdout.write(JSON.stringify(result) + '\\n'); });`;
+    const expectedNames: string[] = [];
+    for (const name of [
+      'dokploy-mcp',
+      'dokploy-mcp-long-service-primary',
+      'dokploy-mcp-long-service-secondary',
+    ]) {
+      const [draft] = await service.create('admin', {
+        servers: [
+          { name, config: { command: process.execPath, args: ['-e', script] } },
+        ],
+      });
+      const published = await service.setStatus(draft.id, {
+        status: 'published',
+        revision: draft.revision,
+      });
+      assert.equal(published.status, 'published');
+      assert.deepEqual(await service.listTools(draft.id), catalog);
+      expectedNames.push(
+        ...toolNames.map(
+          (toolName) =>
+            `mcp__${name.replaceAll('-', '_')}__${toolName.replaceAll('.', '_')}`,
+        ),
+      );
+    }
+    const tools = await service.getTools();
+    assert.deepEqual(Object.keys(tools).sort(), expectedNames.sort());
+    assert.ok(expectedNames.some((name) => name.length > 64));
+    for (const name of expectedNames) assert.equal(tools[name].id, name);
+    const exec = createExecTool({ getTools: () => service.getTools() });
+    const output = await exec.execute!(
+      {
+        code: `text(ALL_TOOLS.map(t => t.name).sort()); ${expectedNames.map((name) => `text(await tools.${name}({}));`).join(' ')}`,
+        yield_time_ms: 3000,
+        max_output_tokens: 4000,
+      },
+      { observe: noopObserve },
+    );
+    assert.ok(
+      output && !isValidationError(output) && !output.isError,
+      JSON.stringify(output),
+    );
+    assert.deepEqual(output.content[0], {
+      type: 'text',
+      text: JSON.stringify(expectedNames),
+    });
+    assert.equal(output.content.length, expectedNames.length + 1);
+    expectedNames.forEach((name, index) => {
+      const result = output.content[index + 1];
+      assert.equal(result.type, 'text');
+      if (result.type === 'text') {
+        const expected = toolNames.find((toolName) =>
+          name.endsWith(toolName.replaceAll('.', '_')),
+        );
+        assert.ok(expected);
+        assert.equal(JSON.parse(result.text).content[0].text, expected);
+      }
+    });
   },
 );
 

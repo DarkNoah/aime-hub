@@ -26,7 +26,7 @@ MCP 工具不会直接注入 Agent 的工具列表，也不会在构建 Agent �
 - `text(value)`：显式添加文字输出。对象会 JSON 序列化，其余不能序列化的值转为字符串。
 - `image(value)`：显式添加图片输出。支持 base64 data URL、`{ image_url: dataURL }`、MCP 的 `{ type: 'image', data, mimeType }`，以及 `read_file`/截图工具的 `{ data, mediaType }`。支持 PNG、JPEG、WebP、GIF，能识别 `image/*`，不下载 HTTP 图片。
 
-所有名称都是有效的 JavaScript 标识符。MCP 使用 `mcp__<server>__<tool>`，不追加哈希后缀，名称长度不超过 64；使用目录返回的实际名字，不自行拼接。截断或字符替换后出现重名时会报错，避免覆盖其他工具。
+所有名称都是有效的 JavaScript 标识符。MCP 使用 `mcp__<server>__<tool>`，保留完整服务名和工具名，不截断、不追加哈希后缀，仅将非字母、数字或下划线的字符替换为下划线。MCP 工具只在 `exec` 内调用，不受模型直接调用工具的名称长度限制；使用目录返回的实际名字，不自行拼接。字符替换后出现重名时会返回 `MCP_TOOL_NAME_CONFLICT`，避免覆盖其他工具；服务配置重名则返回 `MCP_NAME_CONFLICT`。
 
 ```js
 text(ALL_TOOLS.filter((tool) => tool.name.startsWith('mcp__')));

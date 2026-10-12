@@ -255,7 +255,7 @@ export class McpService {
       if (connection?.revision === server.revision) {
         for (const [name, tool] of Object.entries(connection.tools)) {
           if (Object.hasOwn(tools, name))
-            throw new McpError('MCP_NAME_CONFLICT', 409);
+            throw new McpError('MCP_TOOL_NAME_CONFLICT', 409);
           tools[name] = tool;
         }
       }
@@ -340,14 +340,14 @@ export class McpService {
     const names = new Set<string>();
     return Object.fromEntries(
       Object.entries(tools).map(([nativeName, tool]) => {
-        // Keep callable names readable; reject normalization collisions instead of overwriting tools.
-        const identifier = (value: string, max: number) =>
-          value.replace(/[^a-zA-Z0-9_]/g, '_').slice(0, max);
+        // MCP tools run inside exec: preserve full names instead of applying provider name limits.
+        const identifier = (value: string) =>
+          value.replace(/[^a-zA-Z0-9_]/g, '_');
         const toolName = nativeName.startsWith(`${server.name}_`)
           ? nativeName.slice(server.name.length + 1)
           : nativeName;
-        const name = `mcp__${identifier(server.name, 20)}__${identifier(toolName, 24)}`;
-        if (names.has(name)) throw new McpError('MCP_NAME_CONFLICT', 409);
+        const name = `mcp__${identifier(server.name)}__${identifier(toolName)}`;
+        if (names.has(name)) throw new McpError('MCP_TOOL_NAME_CONFLICT', 409);
         names.add(name);
         const execute = tool.execute;
         return [

@@ -7,6 +7,7 @@ import { McpFormError } from './config';
 const errorKeys = {
   MCP_NOT_FOUND: 'mcp.notFound',
   MCP_NAME_CONFLICT: 'mcp.duplicateName',
+  MCP_TOOL_NAME_CONFLICT: 'mcp.toolNameConflict',
   MCP_CONFLICT: 'mcp.conflict',
   MCP_NOT_PUBLISHED: 'mcp.notPublished',
   MCP_CONFIG_INVALID: 'mcp.configInvalid',

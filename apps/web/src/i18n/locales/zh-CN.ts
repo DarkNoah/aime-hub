@@ -62,6 +62,8 @@ export const zhCN = {
   'mcp.jsonInvalid': 'JSON 格式无效，请检查逗号、引号和括号。',
   'mcp.singleServer': '编辑时 mcpServers 中必须恰好包含一个服务。',
   'mcp.duplicateName': '服务名称已存在，或本次导入中有重复名称。',
+  'mcp.toolNameConflict':
+    'MCP 工具名称规范化后发生冲突，请调整相关服务名或工具名后重试。',
   'mcp.notFound': '此 MCP 配置已不存在，请刷新列表。',
   'mcp.conflict': '此 MCP 配置已被修改，请关闭编辑器并刷新列表后重试。',
   'mcp.notPublished': '请先发布此 MCP 配置，再使用连接。',

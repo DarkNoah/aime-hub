@@ -68,6 +68,8 @@ export const en = {
   'mcp.singleServer': 'Editing requires exactly one entry in mcpServers.',
   'mcp.duplicateName':
     'The server name already exists or is repeated in this import.',
+  'mcp.toolNameConflict':
+    'MCP tool names conflict after name normalization. Rename the affected server or tools and try again.',
   'mcp.notFound': 'This MCP configuration no longer exists. Refresh the list.',
   'mcp.conflict':
     'This MCP configuration has changed. Close the editor and refresh before trying again.',
