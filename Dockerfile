@@ -1,12 +1,18 @@
 ARG NODE_IMAGE=node:22-bookworm-slim
 ARG NGINX_IMAGE=nginx:stable-alpine
 ARG BUN_IMAGE=oven/bun:1
+ARG BROWSER_CACHE_IMAGE=base
 
 FROM ${BUN_IMAGE} AS bun
 
 FROM ${NODE_IMAGE} AS base
 WORKDIR /app
 RUN npm install --global pnpm@10.12.1
+
+# An optional image can supply already downloaded Playwright browsers.
+# The default is empty; Playwright downloads any missing browser revision.
+FROM ${BROWSER_CACHE_IMAGE} AS browser-cache
+RUN mkdir -p /opt/playwright
 
 FROM base AS build
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -45,8 +51,10 @@ RUN set -eu; \
 RUN mkdir -p /data/workspaces
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/server/node_modules ./apps/server/node_modules
-RUN node apps/server/node_modules/playwright-core/cli.js install --with-deps chromium \
+RUN node apps/server/node_modules/playwright-core/cli.js install-deps chromium \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=browser-cache /opt/playwright /opt/playwright
+RUN node apps/server/node_modules/playwright-core/cli.js install chromium
 COPY --from=build /app /app
 ENV PATH="/opt/python/bin:${PATH}"
 EXPOSE 3001

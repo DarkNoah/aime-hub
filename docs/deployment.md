@@ -8,6 +8,8 @@
 
 项目共享工作区需要 Linux FUSE，因此仅 `server` 配置 `/dev/fuse`、`SYS_ADMIN` 和 `apparmor:unconfined`，宿主机须提供 `/dev/fuse`。不要运行多个 API 副本：队列、调度器和工作区挂载由单个进程管理。
 
+浏览器下载缓慢时，可将一个已验证且包含 `/opt/playwright` 的同架构镜像预载到服务器，并设置 `BROWSER_CACHE_IMAGE` 为该镜像。构建只从中复制浏览器目录；系统依赖仍由 Playwright 检查安装，应用代码仍从 Git 构建。所需浏览器版本不在缓存中时会正常下载。默认无需设置此变量。
+
 ## Dokploy 配置
 
 1. 创建 Docker Compose 服务，来源选择 **Git**，仓库为 `https://github.com/DarkNoah/aime-hub.git`，分支为 `main`，Compose 路径为 `./compose.yaml`。
