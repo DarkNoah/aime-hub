@@ -4,16 +4,20 @@ ARG BUN_IMAGE=oven/bun:1
 
 FROM ${BUN_IMAGE} AS bun
 
-FROM ${NODE_IMAGE} AS build
+FROM ${NODE_IMAGE} AS base
 WORKDIR /app
 RUN npm install --global pnpm@10.12.1
+
+FROM base AS build
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN nice -n 10 pnpm --network-concurrency=4 --child-concurrency=1 fetch --frozen-lockfile
+RUN --mount=type=cache,id=hub-pnpm-store,target=/pnpm/store \
+    NODE_OPTIONS=--max-old-space-size=1536 nice -n 10 pnpm --store-dir=/pnpm/store --network-concurrency=4 --child-concurrency=1 fetch --frozen-lockfile
 COPY . .
-RUN nice -n 10 pnpm --child-concurrency=1 install --offline --frozen-lockfile
+RUN --mount=type=cache,id=hub-pnpm-store,target=/pnpm/store \
+    NODE_OPTIONS=--max-old-space-size=1536 nice -n 10 pnpm --store-dir=/pnpm/store --child-concurrency=1 install --offline --frozen-lockfile
 RUN NODE_OPTIONS=--max-old-space-size=2048 nice -n 10 pnpm build
 
-FROM build AS server
+FROM base AS server
 ARG AGENTFS_VERSION=0.6.4
 ENV NODE_ENV=production \
     PLAYWRIGHT_BROWSERS_PATH=/opt/playwright \
@@ -26,7 +30,6 @@ RUN apt-get update \
         build-essential jq unzip zip procps openssh-client \
     && python3 -m venv /opt/python \
     && ln -s /usr/local/bin/bun /usr/local/bin/bunx \
-    && pnpm --filter @aime/server exec playwright-core install --with-deps chromium \
     && rm -rf /var/lib/apt/lists/*
 RUN set -eu; \
     case "$(uname -m)" in x86_64) arch=x86_64 ;; aarch64) arch=aarch64 ;; *) exit 1 ;; esac; \
@@ -40,6 +43,11 @@ RUN set -eu; \
     install "agentfs-${arch}-unknown-linux-gnu/agentfs" /usr/local/bin/agentfs; \
     rm -rf /tmp/agentfs-*
 RUN mkdir -p /data/workspaces
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/apps/server/node_modules ./apps/server/node_modules
+RUN node apps/server/node_modules/playwright-core/cli.js install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /app /app
 ENV PATH="/opt/python/bin:${PATH}"
 EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \

@@ -29,6 +29,9 @@ importers:
       '@types/pg':
         specifier: ^8.15.0
         version: 8.23.1
+      ai:
+        specifier: ^6.0.296
+        version: 6.0.296(zod@4.6.5)
       concurrently:
         specifier: ^9.2.0
         version: 9.2.4
@@ -56,12 +59,18 @@ importers:
       tsx:
         specifier: ^4.20.0
         version: 4.23.15
+      typeorm:
+        specifier: 0.3.31
+        version: 0.3.31(pg@8.23.0)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
       typescript-eslint:
         specifier: ^8.46.0
         version: 8.71.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
 
   apps/server:
     dependencies:
@@ -7487,7 +7496,7 @@ snapshots:
 
   '@browserbasehq/stagehand@3.7.3(playwright-core@1.64.0)(zod@4.6.5)':
     dependencies:
-      '@ai-sdk/provider': 2.0.3
+      '@ai-sdk/provider': 2.0.5
       '@anthropic-ai/sdk': 0.39.0
       '@browserbasehq/sdk': 2.21.0
       '@google/genai': 1.52.0(@modelcontextprotocol/sdk@1.32.1(zod@4.6.5))(bufferutil@4.1.0)
