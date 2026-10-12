@@ -13,6 +13,7 @@ import {
 import {
   providerGroup,
   providerGroups,
+  type ProviderModel,
   type ProviderSummary,
   type SyncResult,
 } from '@aime/shared/providers';
@@ -101,7 +102,9 @@ export function AdminProvidersPage() {
               : undefined,
         },
       );
-      if (mutation.kind === 'provider') {
+      if (mutation.kind === 'model') {
+        return result as ProviderModel;
+      } else if (mutation.kind === 'provider') {
         const saved = result as ProviderSummary;
         providers.updateData((items) =>
           items.map((item) => (item.id === saved.id ? saved : item)),
@@ -414,7 +417,7 @@ export function AdminProvidersPage() {
               onClose={() => setModelsOpen(false)}
               onSync={() => void mutate({ kind: 'sync', id: selected })}
               onToggle={(model, enabled) =>
-                void mutate({
+                mutate({
                   kind: 'model',
                   providerId: selected,
                   id: model.id,

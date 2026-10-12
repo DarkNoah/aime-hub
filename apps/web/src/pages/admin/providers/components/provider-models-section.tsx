@@ -26,7 +26,10 @@ export function ProviderModelsSection({
   busy: boolean;
   onAction: (action: ProviderAction) => void;
   onSync: () => void;
-  onToggle: (model: ProviderModel, enabled: boolean) => void;
+  onToggle: (
+    model: ProviderModel,
+    enabled: boolean,
+  ) => Promise<ProviderModel | undefined>;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -50,6 +53,14 @@ export function ProviderModelsSection({
       value?.toLocaleLowerCase().includes(query),
     ),
   );
+  async function toggleModel(model: ProviderModel, enabled: boolean) {
+    const saved = await onToggle(model, enabled);
+    if (saved) {
+      models.updateData((items) =>
+        items.map((item) => (item.id === saved.id ? saved : item)),
+      );
+    }
+  }
   return (
     <TooltipProvider delayDuration={250}>
       <section
@@ -234,7 +245,7 @@ export function ProviderModelsSection({
                             name: model.id,
                           })}
                           onCheckedChange={(enabled) =>
-                            onToggle(model, enabled)
+                            void toggleModel(model, enabled)
                           }
                         />
                       </td>
