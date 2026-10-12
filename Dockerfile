@@ -36,8 +36,8 @@ RUN set -eu; \
     archive="agentfs-${arch}-unknown-linux-gnu.tar.xz"; \
     base="https://github.com/tursodatabase/agentfs/releases/download/v${AGENTFS_VERSION}"; \
     cd /tmp; \
-    curl -fSL --retry 3 "${base}/${archive}" -o "${archive}"; \
-    curl -fSL --retry 3 "${base}/${archive}.sha256" -o "${archive}.sha256"; \
+    curl -fsSL --http1.1 --retry 3 --retry-all-errors --connect-timeout 15 --max-time 180 "${base}/${archive}" -o "${archive}"; \
+    curl -fsSL --http1.1 --retry 3 --retry-all-errors --connect-timeout 15 --max-time 180 "${base}/${archive}.sha256" -o "${archive}.sha256"; \
     sha256sum -c "${archive}.sha256"; \
     tar -xJf "${archive}"; \
     install "agentfs-${arch}-unknown-linux-gnu/agentfs" /usr/local/bin/agentfs; \
