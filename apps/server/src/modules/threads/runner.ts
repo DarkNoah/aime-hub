@@ -313,7 +313,7 @@ export function createChatRunner(
             memory: { thread: thread.id, resource: thread.resourceId },
             abortSignal,
             requestContext,
-            maxSteps: 300,
+            maxSteps: Infinity,
             providerOptions: selection.providerOptions,
             modelSettings: {
               maxOutputTokens: selection.maxOutputTokens,

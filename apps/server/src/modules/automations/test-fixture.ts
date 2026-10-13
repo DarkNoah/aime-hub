@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Pool } from 'pg';
 import { Mastra } from '@mastra/core/mastra';
+import type { ToolsInput } from '@mastra/core/agent';
 import { Memory } from '@mastra/memory';
 import { InMemoryStore, type MastraCompositeStore } from '@mastra/core/storage';
 import { createMockModel } from '@mastra/core/test-utils/llm-mock';
@@ -19,6 +20,7 @@ export const input = {
   name: 'Daily summary',
   prompt: 'Summarize the workspace.',
   cron: '0 9 * * *',
+  maxSteps: null,
   separateThread: false,
   desktopNotification: false,
   enabled: false,
@@ -51,6 +53,7 @@ export async function fixture(
     workspaceRoot?: string;
     notifications?: Pick<NotificationService, 'publish'>;
     disabledTools?: string[];
+    tools?: ToolsInput;
   } = {},
 ) {
   const root =
@@ -166,7 +169,7 @@ export async function fixture(
     tools: {
       buildTools: async (_ids, _defaults, disabledTools) => {
         toolExclusions.push(disabledTools);
-        return {};
+        return options.tools ?? {};
       },
     },
   });

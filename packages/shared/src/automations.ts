@@ -13,11 +13,14 @@ export const automationScopeSchema = z.discriminatedUnion('scope', [
 ]);
 export type AutomationScope = z.infer<typeof automationScopeSchema>;
 
+export const automationStepLimits = [50, 100, 200, 300] as const;
+
 export const automationInputSchema = z
   .object({
     name: z.string().trim().min(1).max(120),
     prompt: z.string().trim().min(1).max(20000),
     cron: z.string().trim().min(1).max(120),
+    maxSteps: z.literal(automationStepLimits).nullable().default(null),
     separateThread: z.boolean().default(false),
     desktopNotification: z.boolean().default(false),
     settings: chatSettingsSchema,

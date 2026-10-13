@@ -274,6 +274,10 @@ export const en = {
   'automations.modelHint':
     'The agent model takes priority; otherwise use the selected model or scope default.',
   'automations.agentLoadFailed': 'Could not load agents.',
+  'automations.maxSteps': 'Maximum steps',
+  'automations.unlimitedSteps': 'Unlimited',
+  'automations.maxStepsHint':
+    'Limit agent steps per run. Unlimited by default; runs end early when the task is complete.',
   'automations.enable': 'Enable schedule',
   'automations.saving': 'Saving…',
   'automations.required': 'Enter a name, task instructions, and schedule.',

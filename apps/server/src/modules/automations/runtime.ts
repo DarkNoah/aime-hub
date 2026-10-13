@@ -283,7 +283,7 @@ export function createAutomationRuntime({
     };
     const options: AgentExecutionOptions = {
       abortSignal,
-      maxSteps: 100,
+      maxSteps: task.maxSteps ?? Infinity,
       savePerStep: true,
       providerOptions: model.providerOptions,
       modelSettings,

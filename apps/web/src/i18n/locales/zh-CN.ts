@@ -256,6 +256,10 @@ export const zhCN = {
   'automations.modelHint':
     '优先使用 Agent 配置的模型，否则使用所选模型或当前范围的默认模型。',
   'automations.agentLoadFailed': '无法加载 Agent 列表。',
+  'automations.maxSteps': '最大循环次数',
+  'automations.unlimitedSteps': '无限',
+  'automations.maxStepsHint':
+    '限制每次执行的 Agent 循环次数，默认无限；任务完成后会提前结束。',
   'automations.enable': '启用定时执行',
   'automations.saving': '正在保存…',
   'automations.required': '请填写任务名称、任务内容和执行频率。',

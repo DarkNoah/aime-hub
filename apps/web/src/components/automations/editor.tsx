@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import {
   automationInputSchema,
+  automationStepLimits,
   type Automation,
   type AutomationInput,
   type AutomationScope,
@@ -61,6 +62,7 @@ export function AutomationEditor({
           name: task.name,
           prompt: task.prompt,
           cron: task.cron,
+          maxSteps: task.maxSteps,
           separateThread: task.separateThread,
           desktopNotification: task.desktopNotification,
           settings: task.settings,
@@ -70,6 +72,7 @@ export function AutomationEditor({
           name: '',
           prompt: '',
           cron: cadences[0],
+          maxSteps: null,
           separateThread: false,
           desktopNotification: false,
           settings: { agentId: null, model: null, reasoningEffort: 'auto' },
@@ -280,6 +283,47 @@ export function AutomationEditor({
                 />
                 <p className="text-xs text-muted-foreground">
                   {t('automations.modelHint')}
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor={`${id}-max-steps`}>
+                  {t('automations.maxSteps')}
+                </Label>
+                <Select
+                  value={String(form.maxSteps ?? 'unlimited')}
+                  onValueChange={(value) =>
+                    change(
+                      'maxSteps',
+                      automationInputSchema.shape.maxSteps.parse(
+                        value === 'unlimited' ? null : Number(value),
+                      ),
+                    )
+                  }
+                  disabled={pending}
+                >
+                  <SelectTrigger
+                    id={`${id}-max-steps`}
+                    className="w-full"
+                    aria-describedby={`${id}-max-steps-hint`}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unlimited">
+                      {t('automations.unlimitedSteps')}
+                    </SelectItem>
+                    {automationStepLimits.map((limit) => (
+                      <SelectItem key={limit} value={String(limit)}>
+                        {limit}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p
+                  id={`${id}-max-steps-hint`}
+                  className="text-xs text-muted-foreground"
+                >
+                  {t('automations.maxStepsHint')}
                 </p>
               </div>
               <div className="flex items-center justify-between gap-4 border-t pt-5">
