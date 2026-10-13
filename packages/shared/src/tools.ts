@@ -29,10 +29,14 @@ export const imageGenConfigSchema = z.strictObject({
     .default(null),
   timeoutMs: z.number().int().min(1000).max(600000).default(180000),
 });
+export const speechConfigSchema = imageGenConfigSchema.extend({
+  timeoutMs: z.number().int().min(1000).max(600000).default(300000),
+});
 export const toolConfigSchemas = {
   web_search: webSearchConfigSchema,
   web_fetch: webFetchConfigSchema,
   image_gen: imageGenConfigSchema,
+  speech: speechConfigSchema,
 };
 export type ConfigurableToolId = keyof typeof toolConfigSchemas;
 export const toolIds = Object.keys(toolConfigSchemas) as ConfigurableToolId[];
@@ -40,10 +44,12 @@ export type ToolId = z.infer<typeof toolIdSchema>;
 export type WebSearchConfig = z.infer<typeof webSearchConfigSchema>;
 export type WebFetchConfig = z.infer<typeof webFetchConfigSchema>;
 export type ImageGenConfig = z.infer<typeof imageGenConfigSchema>;
+export type SpeechConfig = z.infer<typeof speechConfigSchema>;
 export type ToolConfig = { description: string } & (
   | { id: 'web_search'; kind: 'web_search'; config: WebSearchConfig }
   | { id: 'web_fetch'; kind: 'web_fetch'; config: WebFetchConfig }
   | { id: 'image_gen'; kind: 'image_gen'; config: ImageGenConfig }
+  | { id: 'speech'; kind: 'speech'; config: SpeechConfig }
   | {
       id: string;
       kind: 'builtin';
@@ -53,3 +59,4 @@ export type ToolConfig = { description: string } & (
 export const defaultWebSearchConfig = webSearchConfigSchema.parse({});
 export const defaultWebFetchConfig = webFetchConfigSchema.parse({});
 export const defaultImageGenConfig = imageGenConfigSchema.parse({});
+export const defaultSpeechConfig = speechConfigSchema.parse({});

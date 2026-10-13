@@ -22,6 +22,11 @@ export const toolDefinitions = {
     description: 'tools.imageDescription',
     configure: 'tools.configureImage',
   },
+  speech: {
+    title: 'tools.speech',
+    description: 'tools.speechDescription',
+    configure: 'tools.configureSpeech',
+  },
   web_search: {
     title: 'tools.webSearch',
     description: 'tools.searchDescription',
@@ -50,8 +55,11 @@ export const toolDefinitions = {
     providerType: 'jina-ai',
     localId: 'local',
   },
-} satisfies Record<Exclude<ConfigurableToolId, 'image_gen'>, ToolDefinition> &
+} satisfies Record<
+  Exclude<ConfigurableToolId, 'image_gen' | 'speech'>,
+  ToolDefinition
+> &
   Record<
-    'image_gen',
+    'image_gen' | 'speech',
     Pick<ToolDefinition, 'title' | 'description' | 'configure'>
   >;

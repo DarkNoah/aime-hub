@@ -9,9 +9,16 @@ import {
 import { WorkspaceFileLink } from '@/components/file-manager/workspace-file-link';
 import { readFileBlocks } from './read-file-output';
 import { ToolMedia } from './tool-media';
+import type { TranslationKey } from '@/i18n/config';
 import type { PreviewPart } from './selection';
 
-export function ImageGenPreview({ part }: { part: PreviewPart }) {
+export function GeneratedMediaPreview({
+  part,
+  title,
+}: {
+  part: PreviewPart;
+  title: TranslationKey;
+}) {
   const { t } = useTranslation();
   const output = isToolUIPart(part) ? part.output : undefined;
   const parsed = useMemo(() => {
@@ -33,7 +40,7 @@ export function ImageGenPreview({ part }: { part: PreviewPart }) {
   return (
     <div className="min-w-0 space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-sm font-medium">{t('tools.imageGen')}</h3>
+        <h3 className="text-sm font-medium">{t(title)}</h3>
         {getStatusBadge(record?.isError ? 'output-error' : part.state)}
       </div>
       {part.input !== undefined && <ToolInput input={part.input} />}
@@ -56,4 +63,8 @@ export function ImageGenPreview({ part }: { part: PreviewPart }) {
       <ToolOutput output={undefined} errorText={part.errorText} />
     </div>
   );
+}
+
+export function ImageGenPreview({ part }: { part: PreviewPart }) {
+  return <GeneratedMediaPreview part={part} title="tools.imageGen" />;
 }

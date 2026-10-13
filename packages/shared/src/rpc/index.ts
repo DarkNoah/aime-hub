@@ -1,3 +1,4 @@
+import { usageContract } from './usage.js';
 import { threadsContract } from './threads.js';
 import { projectsContract } from './projects.js';
 import { providersContract } from './providers.js';
@@ -14,6 +15,7 @@ import { assetsContract } from './assets.js';
 import { systemSettingsContract } from './system-settings.js';
 
 export const apiContract = {
+  usage: usageContract,
   threads: threadsContract,
   projects: projectsContract,
   providers: providersContract,

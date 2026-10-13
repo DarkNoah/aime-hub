@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { runtimeTokenCounts } from '../usage/runtime.js';
+import type { UsageService } from '../usage/service.js';
 import { mastraDBMessageToSignal } from '@mastra/core/agent';
 import {
   buildAgent,
@@ -49,6 +52,7 @@ export function createChatRunner(
   projects?: Pick<ProjectService, 'get'>,
   tools?: Pick<ToolService, 'buildTools'>,
   agents?: Pick<AgentService, 'getConfig' | 'getAgent'>,
+  usage?: Pick<UsageService, 'record'>,
 ): ChatRunner {
   const getConfig = async (id?: string | null) => {
     if (agents) return agents.getConfig(id);
@@ -291,10 +295,18 @@ export function createChatRunner(
             model: next.model,
             reasoningEffort: next.reasoningEffort,
           });
+          let step = {
+            id: randomUUID(),
+            createdAt: new Date(),
+            startedAt: performance.now(),
+            userId: createdBy ?? userId,
+            model: selection,
+            number: 0,
+          };
           const headers = {
             'X-THREAD-ID': thread.id,
             'X-RESOURCE-ID': thread.resourceId,
-            'X-USER-ID': userId,
+            'X-USER-ID': createdBy ?? userId,
             ...(projectId ? { 'X-PROJECT-ID': projectId } : {}),
           };
           return {
@@ -309,7 +321,7 @@ export function createChatRunner(
               headers,
             },
             savePerStep: true,
-            prepareStep: async ({ messageList }) => {
+            prepareStep: async ({ messageList, stepNumber }) => {
               // Native signals have already entered the message list at this point.
               // Read their settings; do not drain or inject application-owned input.
               const latest = [...messageList.get.all.db()]
@@ -329,6 +341,18 @@ export function createChatRunner(
               currentSettings =
                 chatSettingsSchema.safeParse(fromMessage).data ?? next;
               resolved = await sessionModel(currentSettings);
+              step = {
+                id: randomUUID(),
+                createdAt: new Date(),
+                startedAt: performance.now(),
+                userId:
+                  typeof metadata?.createdBy === 'string'
+                    ? metadata.createdBy
+                    : (createdBy ?? userId),
+                model: resolved,
+                number: stepNumber,
+              };
+              headers['X-USER-ID'] = step.userId;
               return {
                 model: resolved.model,
                 providerOptions: resolved.providerOptions,
@@ -341,6 +365,33 @@ export function createChatRunner(
               };
             },
             onStepFinish: async (event) => {
+              if (usage) {
+                const slash = step.model.reference.indexOf('/');
+                await usage.record({
+                  id: step.id,
+                  createdAt: step.createdAt,
+                  finishedAt: new Date(),
+                  durationMs: Math.max(
+                    0,
+                    Math.round(performance.now() - step.startedAt),
+                  ),
+                  userId: step.userId,
+                  projectId: projectId ?? null,
+                  threadId: thread.id,
+                  agentId: config.id,
+                  runId: event.runId ?? null,
+                  stepNumber: step.number,
+                  providerId:
+                    slash > 0 ? step.model.reference.slice(0, slash) : null,
+                  model:
+                    event.response.modelId ??
+                    event.model?.modelId ??
+                    step.model.reference.slice(slash + 1),
+                  modelReference: step.model.reference,
+                  finishReason: event.finishReason ?? null,
+                  ...runtimeTokenCounts(event.usage),
+                });
+              }
               onEvent({
                 type: 'usage',
                 usage: getChatUsage(event.usage, resolved),

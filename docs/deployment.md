@@ -16,14 +16,16 @@
 2. 配置以下环境变量。密钥只保存在 Dokploy，不能提交到 Git：
 
    ```dotenv
-   WEB_ORIGIN=https://your-domain.example
+   WEB_ORIGINS=https://your-domain.example
    POSTGRES_PASSWORD=<随机字母数字密码，用于数据库连接 URL>
    BETTER_AUTH_SECRET=<至少 32 字符的随机密钥>
    ADMINS=admin
    TZ=Asia/Shanghai
    ```
 
-   可选配置 `WEB_ORIGINS`、`WEB_PUSH_PUBLIC_KEY`、`WEB_PUSH_PRIVATE_KEY`、`WEB_PUSH_SUBJECT`。镜像仓库受限时可通过 `NODE_IMAGE`、`NGINX_IMAGE`、`BUN_IMAGE`、`POSTGRES_IMAGE` 指定可用镜像源。
+   可选配置 `WEB_PUSH_PUBLIC_KEY`、`WEB_PUSH_PRIVATE_KEY`、`WEB_PUSH_SUBJECT`。镜像仓库受限时可通过 `NODE_IMAGE`、`NGINX_IMAGE`、`BUN_IMAGE`、`POSTGRES_IMAGE` 指定可用镜像源。
+
+   `WEB_ORIGINS` 必填且不能为空；多个完整来源用逗号分隔，第一项是默认入口及无请求上下文时的认证地址。升级旧配置时，将原 `WEB_ORIGIN` 放在列表第一项，合并额外来源，再删除 `WEB_ORIGIN` 和 `BETTER_AUTH_URL`。生产环境默认要求所有来源使用 HTTPS。
 
 3. 在 Domains 中将域名路由至 `web:80`，启用 HTTPS。域名必须指向入口服务器，并允许证书验证流量到达入口。
 4. 部署。服务启动前执行幂等数据库迁移；API 健康后才启动 Web。
@@ -31,11 +33,17 @@
 
 `postgres-data` 和 `workspace-data` 使用命名卷，重新部署保留数据。不要启用 Fresh Volumes 或执行 `docker compose down -v`，除非有意清空数据。备份应同时覆盖 PostgreSQL 与工作区卷。模型供应商在新数据库中需由管理员重新配置。
 
+## 认证代理与多入口
+
+Better Auth 根据配置列表构建动态 `baseURL`，认证链接使用请求的主机、端口和协议，缺少或未匹配主机时回退到第一项；来源和回调地址仍按完整白名单校验。Nginx 使用 `$http_host` 保留非默认端口，并覆盖 `X-Forwarded-Host`。HTTPS 入口代理必须覆盖 `X-Forwarded-Proto` 为真实的外部协议；Nginx 在没有有效转发协议时使用自身协议，因此直接内网 HTTP 访问也可工作。API 只通过受控代理暴露，不应直接发布后端端口。
+
+HTTPS-only 配置使用 Secure Cookie；显式包含 HTTP 来源时使用可在 HTTP 上传输的 Cookie，生产环境还需 `ALLOW_INSECURE_HTTP=true`。不同主机不共享 Cookie，需要分别登录。前端静态镜像构建不需要注入这些运行时来源；更新来源后重启 API 和开发服务。
+
 ## Git 自动更新
 
 ### 暂时通过内网 IP 访问
 
-设置 `WEB_ORIGIN=http://服务器IP:8088`、`ALLOW_INSECURE_HTTP=true`，其他需要访问的 IP 加入 `WEB_ORIGINS`。在 Dokploy 的 Compose Command 中使用 `compose -p <实际appName> --env-file .env -f ./compose.yaml -f ./compose.ip.yaml up -d --build --remove-orphans`。`WEB_PORT` 默认 8088，`WEB_BIND_IP` 默认 0.0.0.0。HTTP 模式限可信内网，浏览器 Web Push 不可用；切换域名 HTTPS 时去掉覆盖文件并恢复 `ALLOW_INSECURE_HTTP=false`。
+设置 `WEB_ORIGINS=http://服务器IP:8088`、`ALLOW_INSECURE_HTTP=true`；其他需要访问的完整 HTTP 来源按逗号追加，第一项作为默认入口。在 Dokploy 的 Compose Command 中使用 `compose -p <实际appName> --env-file .env -f ./compose.yaml -f ./compose.ip.yaml up -d --build --remove-orphans`。`WEB_PORT` 默认 8088，`WEB_BIND_IP` 默认 0.0.0.0。HTTP 模式限可信内网，浏览器 Web Push 不可用；切换域名 HTTPS 时去掉覆盖文件并恢复 `ALLOW_INSECURE_HTTP=false`。
 
 ### 公网 Webhook
 

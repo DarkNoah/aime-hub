@@ -62,7 +62,6 @@ test(
     const authOptions = createAuthOptions({
       pool,
       secret: randomBytes(32).toString('hex'),
-      baseURL: webOrigin,
       webOrigin,
       admins: 'admin',
     });
@@ -70,7 +69,6 @@ test(
     const auth = createAuth({
       pool,
       secret: authOptions.secret as string,
-      baseURL: webOrigin,
       webOrigin,
       admins: 'admin',
     });
@@ -123,6 +121,9 @@ test(
       defaultModel: 'fixture/system',
       fastModel: null,
       imageModel: null,
+      embeddingModel: null,
+      rerankModel: null,
+      speechModel: null,
       thinkingMode: 'medium',
     });
     const { memory } = fakeMemory();

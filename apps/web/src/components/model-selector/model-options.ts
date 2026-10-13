@@ -1,5 +1,7 @@
 import {
   modelReference,
+  modelSupportsType,
+  type ModelType,
   type AvailableModel,
   type AvailableProvider,
 } from '@aime/shared/providers';
@@ -18,7 +20,7 @@ export type ModelOption = {
 export function modelOptions(
   providers: Pick<AvailableProvider, 'id' | 'name' | 'enabled'>[],
   models: AvailableModel[],
-  imageOnly = false,
+  type: boolean | ModelType = false,
 ): ModelOption[] {
   const enabledProviders = new Map(
     providers
@@ -30,7 +32,10 @@ export function modelOptions(
     if (
       !provider ||
       !model.enabled ||
-      (imageOnly && !model.modalitiesOutput.includes('image'))
+      !modelSupportsType(
+        model,
+        typeof type === 'boolean' ? (type ? 'image' : 'language') : type,
+      )
     )
       return [];
     const displayName = model.displayName || model.name;

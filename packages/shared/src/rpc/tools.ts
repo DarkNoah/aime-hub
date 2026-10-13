@@ -5,6 +5,7 @@ import {
   webSearchConfigSchema,
   webFetchConfigSchema,
   imageGenConfigSchema,
+  speechConfigSchema,
   enabledToolConfigSchema,
   toolIdSchema,
   type ToolConfig,
@@ -33,6 +34,10 @@ export const toolsContract = {
         z.object({
           params: z.object({ toolId: z.literal('image_gen') }),
           body: imageGenConfigSchema,
+        }),
+        z.object({
+          params: z.object({ toolId: z.literal('speech') }),
+          body: speechConfigSchema,
         }),
         z.object({
           params: z.object({ toolId: toolIdSchema }),

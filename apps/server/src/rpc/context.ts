@@ -60,6 +60,7 @@ export const rpc = implementation.use(async ({ context, path, next }) => {
       path[0] === 'skills' ||
       path[0] === 'environmentVariables' ||
       path[0] === 'requestLogs' ||
+      path[0] === 'usage' ||
       path[0] === 'tools' ||
       path[0] === 'mcp' ||
       path[0] === 'systemSettings' ||

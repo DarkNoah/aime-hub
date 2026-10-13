@@ -90,6 +90,7 @@ test('provider form saves language model and custom provider types without reset
     'mineru',
     'serpapi',
     'jina-ai',
+    'xinference',
   ]) {
     const form = providerForm();
     form.set('type', type);
@@ -225,7 +226,7 @@ test('default options require enabled providers and models; images require outpu
   const providers = [base, { ...base, id: 'p2', enabled: false }];
   assert.deepEqual(
     modelOptions(providers, models).map((item) => item.value),
-    ['p1/vendor/text', 'p1/image'],
+    ['p1/vendor/text'],
   );
   assert.deepEqual(
     modelOptions(providers, models, true).map((item) => item.value),

@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
-import { Globe, ImagePlus, Wrench, Settings2, RefreshCw } from 'lucide-react';
+import {
+  Globe,
+  ImagePlus,
+  AudioLines,
+  Wrench,
+  Settings2,
+  RefreshCw,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import type { ToolConfig } from '@aime/shared/tools';
 import type { ProviderSummary } from '@aime/shared/providers';
@@ -22,7 +29,7 @@ import {
   ItemTitle,
 } from '@/components/ui/item';
 import { WebToolDialog } from './components/web-tool-dialog';
-import { ImageGenDialog } from './components/image-gen-dialog';
+import { ModelToolDialog } from './components/model-tool-dialog';
 import { toolErrorKey } from './api';
 import { toolDefinitions } from './definitions';
 
@@ -163,6 +170,8 @@ export function AdminToolsPage() {
                 <ItemMedia variant="icon">
                   {tool.kind === 'image_gen' ? (
                     <ImagePlus />
+                  ) : tool.kind === 'speech' ? (
+                    <AudioLines />
                   ) : tool.kind === 'builtin' ? (
                     <Wrench />
                   ) : (
@@ -188,9 +197,15 @@ export function AdminToolsPage() {
                   <code className="mt-1 block text-xs text-muted-foreground">
                     {tool.id}
                   </code>
-                  {tool.kind === 'image_gen' ? (
+                  {tool.kind === 'image_gen' || tool.kind === 'speech' ? (
                     <p className="mt-2 text-xs text-muted-foreground">
-                      {tool.config.model ?? t('tools.defaultImageModel')} ·{' '}
+                      {tool.config.model ??
+                        t(
+                          tool.kind === 'speech'
+                            ? 'tools.defaultSpeechModel'
+                            : 'tools.defaultImageModel',
+                        )}{' '}
+                      ·{' '}
                       {t('tools.imageSummary', {
                         seconds: tool.config.timeoutMs / 1000,
                       })}
@@ -252,8 +267,8 @@ export function AdminToolsPage() {
           })}
         </ItemGroup>
       ) : null}
-      {selected?.kind === 'image_gen' ? (
-        <ImageGenDialog
+      {selected?.kind === 'image_gen' || selected?.kind === 'speech' ? (
+        <ModelToolDialog
           tool={selected}
           onClose={() => setSelected(undefined)}
           restoreFocus={() => trigger.current?.focus()}

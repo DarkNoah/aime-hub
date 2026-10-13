@@ -5,6 +5,7 @@ export { currTime } from './clock.js';
 export { webSearch } from './web_search.js';
 export { webFetch } from './web_fetch.js';
 export { imageGen } from './image_gen.js';
+export { speech } from './speech.js';
 export {
   askUserTool,
   taskWriteTool,

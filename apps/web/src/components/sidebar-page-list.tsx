@@ -1,12 +1,12 @@
 import type { CSSProperties, ReactNode } from 'react';
-import { LoaderCircle } from 'lucide-react';
+import { ChevronDown, LoaderCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { chatErrorKey } from '@/components/chat/api';
 
-// Fetch only in response to a scroll or an explicit click. An intersection
-// observer would eagerly drain small pages while this section is expanded.
+// Sidebar lists grow in the outer navigation's ScrollArea and paginate on click.
+// Only standalone pickers opt into a bounded scroll area with maxHeight.
 export function SidebarPageList({
   children,
   label,
@@ -15,7 +15,7 @@ export function SidebarPageList({
   hasMore,
   loadMore,
   moreLabel,
-  maxHeight = '11.25rem',
+  maxHeight,
 }: {
   children: ReactNode;
   label: string;
@@ -27,11 +27,53 @@ export function SidebarPageList({
   maxHeight?: CSSProperties['maxHeight'];
 }) {
   const { t } = useTranslation();
+  const content = (
+    <div
+      role="navigation"
+      aria-label={label}
+      aria-busy={loading}
+      className="min-w-0"
+    >
+      {children}
+      {error ? (
+        <div role="alert" className="space-y-2 px-2 py-2 text-xs">
+          <p>{t(error)}</p>
+          <Button size="sm" variant="outline" onClick={() => void loadMore()}>
+            {t('providers.retry')}
+          </Button>
+        </div>
+      ) : (
+        (loading || hasMore) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-full justify-start gap-2 px-3 text-xs text-muted-foreground"
+            disabled={loading}
+            onClick={() => void loadMore()}
+          >
+            {loading ? (
+              <LoaderCircle
+                aria-hidden="true"
+                className="size-3.5 animate-spin"
+              />
+            ) : (
+              <ChevronDown aria-hidden="true" className="size-3.5" />
+            )}
+            <span aria-live="polite">
+              {loading ? t('chat.loading') : moreLabel}
+            </span>
+          </Button>
+        )
+      )}
+    </div>
+  );
+
+  if (maxHeight === undefined) return content;
+
   return (
     <ScrollArea
       className="overflow-hidden rounded-md"
       viewportProps={{
-        role: 'navigation',
         'aria-label': label,
         tabIndex: 0,
         className: 'overscroll-contain [&>div]:block!',
@@ -50,34 +92,7 @@ export function SidebarPageList({
         },
       }}
     >
-      {children}
-      {error ? (
-        <div role="alert" className="space-y-2 px-2 py-2 text-xs">
-          <p>{t(error)}</p>
-          <Button size="sm" variant="outline" onClick={() => void loadMore()}>
-            {t('providers.retry')}
-          </Button>
-        </div>
-      ) : loading ? (
-        <div
-          role="status"
-          aria-label={t('common.loading')}
-          className="flex h-8 items-center justify-center"
-        >
-          <LoaderCircle className="size-3.5 animate-spin text-muted-foreground" />
-        </div>
-      ) : (
-        hasMore && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 w-full text-xs text-muted-foreground"
-            onClick={() => void loadMore()}
-          >
-            {moreLabel}
-          </Button>
-        )
-      )}
+      {content}
     </ScrollArea>
   );
 }

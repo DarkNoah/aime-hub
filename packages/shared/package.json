@@ -18,6 +18,7 @@
     "./assets": "./src/assets.ts",
     "./skills": "./src/skills.ts",
     "./environment-variables": "./src/environment-variables.ts",
+    "./usage": "./src/usage.ts",
     "./request-logs": "./src/request-logs.ts",
     "./log-json": "./src/log-json.ts",
     "./system-settings": "./src/system-settings.ts",

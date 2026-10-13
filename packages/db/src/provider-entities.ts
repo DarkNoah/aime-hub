@@ -1,6 +1,8 @@
 import 'reflect-metadata';
+import type { ModelType } from '@aime/shared/providers';
 import {
   Column,
+  Check,
   CreateDateColumn,
   DeleteDateColumn,
   Entity,
@@ -54,7 +56,14 @@ export class Provider extends ProviderTimestamps {
 }
 
 @Entity('provider_models')
+@Check(
+  'provider_models_model_type_check',
+  "model_type IN ('language', 'embedding', 'rerank', 'speech', 'image')",
+)
 export class ProviderModel extends ProviderTimestamps {
+  @Column({ name: 'model_type', type: 'text', default: 'language' })
+  modelType!: ModelType;
+
   @PrimaryColumn({
     name: 'provider_id',
     type: 'text',

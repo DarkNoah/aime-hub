@@ -1,12 +1,17 @@
 import type { DataSource } from 'typeorm';
 import { Setting } from '@aime/db';
 import type { ToolId, ToolConfig } from '@aime/shared/tools';
+import { modelSupportsType } from '@aime/shared/providers';
 import type { ToolsInput } from '@mastra/core/agent';
 import type { AssetService } from '../assets/service.js';
 import type { ProviderService } from '../providers/service.js';
 import { ProviderError } from '../providers/network.js';
 import { SerpApiProvider } from '../../mastra/providers/serpapi.js';
 import { JinaAIProvider } from '../../mastra/providers/jina-ai.js';
+import {
+  SpeechGenerationError,
+  type ResolvedSpeechModel,
+} from '../../mastra/tools/speech.js';
 import {
   ImageGenerationError,
   type ResolvedImageModel,
@@ -58,6 +63,14 @@ export class ToolService {
           await this.imageModel(tool.config.model);
         } catch {
           throw new ProviderError('INVALID_IMAGE_MODEL');
+        }
+      }
+    } else if (tool.kind === 'speech') {
+      if (tool.config.enabled && tool.config.model) {
+        try {
+          await this.speechModel(tool.config.model);
+        } catch {
+          throw new ProviderError('INVALID_SPEECH_MODEL');
         }
       }
     } else if (
@@ -122,6 +135,38 @@ export class ToolService {
     return { ...provider, apiKey: provider.apiKey! };
   }
 
+  private async speechModel(
+    selected: string | null,
+  ): Promise<ResolvedSpeechModel> {
+    const reference =
+      selected ?? (await this.providers.getDefaults()).speechModel;
+    if (!reference)
+      throw new SpeechGenerationError(
+        'Speech model is not configured. Select a model in speech tool settings or set the default speech model.',
+      );
+    try {
+      const slash = reference.indexOf('/');
+      if (slash < 1 || slash === reference.length - 1)
+        throw new Error('Invalid model reference');
+      const [model, provider] = await Promise.all([
+        this.providers.getModel(reference),
+        this.providers.getProviderInstance(reference.slice(0, slash)),
+      ]);
+      if (!model.enabled || !modelSupportsType(model, 'speech'))
+        throw new Error('Invalid speech model');
+      return {
+        reference,
+        model: provider.speechModel(reference.slice(slash + 1), {
+          modelName: model.name,
+        }),
+      };
+    } catch {
+      throw new SpeechGenerationError(
+        'The speech model is unavailable. Select an enabled speech model in tool settings or update the default speech model.',
+      );
+    }
+  }
+
   private async searchProvider(id: string, timeoutMs: number) {
     const provider = await this.configuredProvider(id, 'serpapi');
     return new SerpApiProvider({
@@ -158,6 +203,7 @@ export class ToolService {
       searchProvider: (id, timeoutMs) => this.searchProvider(id, timeoutMs),
       fetchProvider: (id, timeoutMs) => this.fetchProvider(id, timeoutMs),
       imageModel: (reference) => this.imageModel(reference),
+      speechModel: (reference) => this.speechModel(reference),
       recordAsset: this.assets
         ? (input) => this.assets!.record(input)
         : undefined,

@@ -17,6 +17,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
 
 const modalityIcons = {
   text: Type,
@@ -61,6 +62,7 @@ export function ModelCapabilities({ model }: { model: ProviderModel }) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col items-start gap-1.5">
+      <Badge variant="secondary">{t(`models.type.${model.modelType}`)}</Badge>
       {(['modalitiesInput', 'modalitiesOutput'] as const).map((key) => {
         const label = `${t(`models.${key}`)}: ${model[key].map((value) => t(`models.modality.${value}`)).join(', ') || t('models.noCapabilities')}`;
         return (

@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import {
   projectWorkspaceSchema,
+  projectGitHubSourceSchema,
+  gitHubRepositoryUrlSchema,
   type ProjectSummary,
   type ProjectWorkspace,
 } from '@aime/shared/projects';
@@ -22,6 +24,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { chatErrorKey } from '@/components/chat/api';
 import { projectApi } from '../api';
+import { ProjectSourceFields } from './project-source-fields';
 import {
   Select,
   SelectContent,
@@ -43,6 +46,10 @@ export function ProjectDialog({
   const { t } = useTranslation();
   const [name, setName] = useState(project?.name ?? '');
   const [pending, setPending] = useState(false);
+  const [method, setMethod] = useState<'blank' | 'github'>('blank');
+  const [repositoryUrl, setRepositoryUrl] = useState('');
+  const [branch, setBranch] = useState('');
+  const [sourceErrors, setSourceErrors] = useState<Record<string, string>>({});
   const [mode, setMode] = useState<ProjectWorkspace['mode']>('simple');
   const [simple, setSimple] = useState<{ provider: 'local' | 'agentfs' }>({
     provider: 'local',
@@ -98,19 +105,45 @@ export function ProjectDialog({
         </Button>
         <form
           className="flex min-h-0 flex-col"
+          aria-busy={pending}
           onSubmit={(event) => {
             event.preventDefault();
             if (pending || !name.trim()) return;
+            const source =
+              !project && method === 'github'
+                ? projectGitHubSourceSchema.safeParse({
+                    type: 'github',
+                    repositoryUrl,
+                    branch,
+                  })
+                : undefined;
+            if (source && !source.success) {
+              setSourceErrors(
+                Object.fromEntries(
+                  source.error.issues.map((issue) => [
+                    issue.path.join('.'),
+                    t(
+                      issue.path[0] === 'branch'
+                        ? 'projects.github.invalidBranch'
+                        : 'projects.github.invalidUrl',
+                    ),
+                  ]),
+                ),
+              );
+              return;
+            }
             const parsed = projectWorkspaceSchema.safeParse(
-              mode === 'simple'
-                ? { mode, ...simple }
-                : {
-                    mode,
-                    mounts: mounts.map(({ provider, mountPath }) => ({
-                      provider,
-                      mountPath,
-                    })),
-                  },
+              source?.success
+                ? { mode: 'simple', provider: 'local' }
+                : mode === 'simple'
+                  ? { mode, ...simple }
+                  : {
+                      mode,
+                      mounts: mounts.map(({ provider, mountPath }) => ({
+                        provider,
+                        mountPath,
+                      })),
+                    },
             );
             if (!project && !parsed.success) {
               setErrors(
@@ -124,6 +157,7 @@ export function ProjectDialog({
               return;
             }
             setErrors({});
+            setSourceErrors({});
             setError('');
             setPending(true);
             void (
@@ -132,11 +166,14 @@ export function ProjectDialog({
                 : projectApi.create({
                     name: name.trim(),
                     workspace: parsed.success ? parsed.data : undefined,
+                    ...(source?.success ? { source: source.data } : {}),
                   })
             )
               .then((value) => {
                 onSaved(value);
-                toast.success(t('projects.saved'));
+                toast.success(
+                  t(project ? 'projects.saved' : 'projects.created'),
+                );
                 onClose();
               })
               .catch((cause) => {
@@ -155,6 +192,34 @@ export function ProjectDialog({
               disabled={pending}
               className="min-w-0 space-y-6 px-6 pt-1 pb-6 disabled:opacity-70"
             >
+              {!project && (
+                <ProjectSourceFields
+                  method={method}
+                  onMethodChange={(value) => {
+                    setMethod(value);
+                    setError('');
+                    setSourceErrors({});
+                  }}
+                  repositoryUrl={repositoryUrl}
+                  onRepositoryUrlChange={(value) => {
+                    const previous = repositoryName(repositoryUrl);
+                    const next = repositoryName(value);
+                    if (next && (!name.trim() || name === previous))
+                      setName(next);
+                    setRepositoryUrl(value);
+                    setSourceErrors({});
+                    setError('');
+                  }}
+                  branch={branch}
+                  onBranchChange={(value) => {
+                    setBranch(value);
+                    setSourceErrors({});
+                    setError('');
+                  }}
+                  errors={sourceErrors}
+                  disabled={pending}
+                />
+              )}
               <div className="space-y-2">
                 <Label htmlFor="project-name">{t('projects.name')}</Label>
                 <Input
@@ -166,7 +231,7 @@ export function ProjectDialog({
                   onChange={(event) => setName(event.target.value)}
                 />
               </div>
-              {!project && (
+              {!project && method === 'blank' && (
                 <ProjectWorkspaceFields
                   mode={mode}
                   simple={simple}
@@ -191,6 +256,11 @@ export function ProjectDialog({
                   {error}
                 </p>
               )}
+              {pending && method === 'github' && (
+                <p role="status" className="text-sm text-muted-foreground">
+                  {t('projects.github.pendingHint')}
+                </p>
+              )}
             </fieldset>
           </ScrollArea>
           <DialogFooter className="shrink-0 border-t px-6 py-4">
@@ -202,13 +272,23 @@ export function ProjectDialog({
             >
               {t('users.cancel')}
             </Button>
-            <Button disabled={pending || !name.trim()}>
+            <Button
+              disabled={
+                pending ||
+                !name.trim() ||
+                (!project && method === 'github' && !repositoryUrl.trim())
+              }
+            >
               {t(
                 pending
-                  ? 'users.saving'
+                  ? method === 'github'
+                    ? 'projects.github.cloning'
+                    : 'users.saving'
                   : project
                     ? 'users.save'
-                    : 'projects.create',
+                    : method === 'github'
+                      ? 'projects.github.submit'
+                      : 'projects.create',
               )}
             </Button>
           </DialogFooter>
@@ -221,6 +301,17 @@ export function ProjectDialog({
 type Storage = { provider: 'local' | 'agentfs' };
 type MountDraft = Storage & { id: string; mountPath: string };
 type WorkspaceErrors = Record<string, string>;
+
+function repositoryName(value: string) {
+  const parsed = gitHubRepositoryUrlSchema.safeParse(value);
+  return parsed.success
+    ? parsed.data
+        .split('/')
+        .at(-1)!
+        .replace(/\.git$/, '')
+        .slice(0, 120)
+    : '';
+}
 
 function availableMountName(mounts: MountDraft[], base = 'local') {
   let name = base;

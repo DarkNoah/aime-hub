@@ -47,8 +47,7 @@ Copy the generated random value into `BETTER_AUTH_SECRET` in `.env` and set `DAT
 ```dotenv
 DATABASE_URL=postgresql://user:password@127.0.0.1:5432/aime_hub
 BETTER_AUTH_SECRET=<replace-with-generated-secret>
-BETTER_AUTH_URL=http://127.0.0.1:5173
-WEB_ORIGIN=http://127.0.0.1:5173
+WEB_ORIGINS=http://127.0.0.1:5173
 ADMINS=admin
 ```
 
@@ -75,7 +74,7 @@ pnpm dev
 
 Open **[http://127.0.0.1:5173](http://127.0.0.1:5173)**. Vite proxies same-origin `/api` requests to `127.0.0.1:3001`, so the browser only needs the frontend entry point. The API health endpoint is `/api/health`.
 
-`WEB_ORIGIN` determines the frontend port; Vite does not switch ports automatically when it is occupied. The browser origin must match the scheme, host, and port in `WEB_ORIGIN` or `WEB_ORIGINS`. Restart after changing `.env`. For LAN access, use the actual IP and add it to `WEB_ORIGINS`; the listen address `0.0.0.0` is not a browser entry point.
+Configure only `WEB_ORIGINS`: a comma-separated list of full HTTP(S) origins. The first entry is the default browser URL and determines the Vite port; Vite does not switch ports automatically. Better Auth uses a dynamic `baseURL` so authentication links follow the trusted request host and protocol, falling back to the first entry when the request host is missing or unmatched. Browser origins must match the list exactly, including scheme, host, and port; unknown origins are still rejected. Restart after changing `.env`. Add the actual IP for LAN access; `0.0.0.0` is a listen address, not a browser entry point. Each host requires its own login and cookies. To migrate, put the previous default origin first in `WEB_ORIGINS`, then remove `WEB_ORIGIN` and `BETTER_AUTH_URL`.
 
 ### 4. Connect a model and start chatting
 
@@ -116,9 +115,7 @@ Configure `.env` at the repository root. Authentication and business APIs share 
 | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `DATABASE_URL`                                 | Required PostgreSQL connection string                                                                             |
 | `BETTER_AUTH_SECRET`                           | Required random authentication secret, at least 32 characters                                                     |
-| `BETTER_AUTH_URL`                              | Required primary authentication URL                                                                               |
-| `WEB_ORIGIN`                                   | Required default browser origin; determines the Vite port                                                         |
-| `WEB_ORIGINS`                                  | Optional comma-separated additional origins; `WEB_ORIGIN` is always included                                      |
+| `WEB_ORIGINS`                                  | Required comma-separated origins; the first is the default entry and determines the Vite port                     |
 | `WEB_HOST`                                     | Vite listen address; defaults to `0.0.0.0`                                                                        |
 | `SERVER_HOST` / `SERVER_PORT`                  | API listen address and port; defaults to `0.0.0.0:3001`                                                           |
 | `ADMINS`                                       | Comma-separated reserved administrator usernames; defaults to `admin`; provisioning still requires the script     |
@@ -136,7 +133,7 @@ Generate push keys with:
 pnpm --filter @aime/server exec web-push generate-vapid-keys --json
 ```
 
-Compose also requires `POSTGRES_PASSWORD`. It constructs `DATABASE_URL` inside the container and sets `BETTER_AUTH_URL` to `WEB_ORIGIN`. See the [deployment guide (Simplified Chinese)](docs/deployment.md) for image overrides and private-network port settings.
+Compose also requires `POSTGRES_PASSWORD`. It constructs `DATABASE_URL` inside the container and passes `WEB_ORIGINS` to the API. See the [deployment guide (Simplified Chinese)](docs/deployment.md) for image overrides and private-network port settings.
 
 ## Deployment
 
@@ -146,7 +143,7 @@ Use **Docker Compose / Dokploy**, or host the build artifacts yourself. The reco
 
 The [Dockerfile](Dockerfile) builds API and Nginx images; [compose.yaml](compose.yaml) defines `server`, `web`, and `postgres` services.
 
-- Set `WEB_ORIGIN`, `POSTGRES_PASSWORD`, and `BETTER_AUTH_SECRET`, and route an HTTPS entry point to `web:80`. The base Compose file exposes container ports without publishing host ports.
+- Set `WEB_ORIGINS`, `POSTGRES_PASSWORD`, and `BETTER_AUTH_SECRET`, and route an HTTPS entry point to `web:80`. The base Compose file exposes container ports without publishing host ports.
 - The API container runs `pnpm db:migrate` on startup. Then run `pnpm auth:create-admin` inside the `server` container.
 - PostgreSQL and workspaces use the `postgres-data` and `workspace-data` named volumes. Back up both.
 - The `server` FUSE configuration requires `/dev/fuse` on the Linux host and the configured privileges, including `SYS_ADMIN`.
@@ -213,7 +210,7 @@ Business API contracts live in `packages/shared/src/rpc/`, and page routes in `a
 
 | Problem                               | What to check                                                                                    |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Login or API origin errors            | Match the actual browser origin to `WEB_ORIGIN` / `WEB_ORIGINS`, then restart                    |
+| Login or API origin errors            | Match the actual browser origin to `WEB_ORIGINS`, then restart                                   |
 | Invalid environment configuration     | Check the variables listed in the error, especially required values and secret length            |
 | Database connection or schema errors  | Check the connection and database permissions, then run `pnpm db:migrate`                        |
 | The page loads but chat does not work | Configure a provider, enable a model, and set a default model in the administration UI           |

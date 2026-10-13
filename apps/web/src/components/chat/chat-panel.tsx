@@ -1,5 +1,6 @@
 import { isThreadActive } from '@aime/shared/threads';
 import {
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -25,6 +26,7 @@ import { ChatErrorCard } from './chat-error-card';
 import { ChatRunningTasks } from './chat-running-tasks';
 import { useThreadChat } from './use-thread-chat';
 import { PersonalChatSettingsProvider } from './personal-chat-settings-provider';
+import { ChatWorkspaceMenuContext } from './layout-context';
 
 const chatContentClassName = 'mx-auto w-full max-w-3xl px-4 @lg/chat:px-6';
 
@@ -207,6 +209,7 @@ function PanelHeader({
   navigation?: ReactNode;
 }) {
   const { t } = useTranslation();
+  const workspaceMenu = useContext(ChatWorkspaceMenuContext);
   return (
     <header
       data-chat-header
@@ -237,6 +240,7 @@ function PanelHeader({
       )} */}
       {actions}
       {navigation}
+      {workspaceMenu}
       {onClose && (
         <Button
           variant="ghost"

@@ -166,6 +166,9 @@ test(
       defaultModel: 'test-provider/fixture-model',
       fastModel: null,
       imageModel: null,
+      embeddingModel: null,
+      rerankModel: null,
+      speechModel: null,
       thinkingMode: 'medium',
     });
     const models = new LanguageModelService(database, providers);

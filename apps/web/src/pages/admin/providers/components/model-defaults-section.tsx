@@ -5,6 +5,8 @@ import { Loader2 } from 'lucide-react';
 import {
   modelDefaultsSchema,
   type ModelDefaults,
+  defaultModelKeys,
+  defaultModelTypes,
 } from '@aime/shared/providers';
 import { thinkingLevels } from '@aime/shared/threads';
 import { LoadingState } from '@/components/loading-state';
@@ -64,12 +66,12 @@ export function ModelDefaultsSection({
   }, [key]);
 
   const value = draft ?? result?.defaults;
-  const options = modelOptions(available.providers, available.models);
-  const imageOptions = modelOptions(
-    available.providers,
-    available.models,
-    true,
-  );
+  const choicesFor = (field: (typeof defaultModelKeys)[number]) =>
+    modelOptions(
+      available.providers,
+      available.models,
+      defaultModelTypes[field],
+    );
   async function change<K extends keyof ModelDefaults>(
     field: K,
     next: ModelDefaults[K],
@@ -90,10 +92,10 @@ export function ModelDefaultsSection({
       return;
     }
     if (
-      (['defaultModel', 'fastModel', 'imageModel'] as const).some(
+      defaultModelKeys.some(
         (field) =>
           nextDefaults[field] !== null &&
-          !(field === 'imageModel' ? imageOptions : options).some(
+          !choicesFor(field).some(
             (option) => option.value === nextDefaults[field],
           ),
       )
@@ -159,42 +161,39 @@ export function ModelDefaultsSection({
               disabled={pending || disabled}
               className="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-4"
             >
-              {(['defaultModel', 'fastModel', 'imageModel'] as const).map(
-                (field) => {
-                  const choices =
-                    field === 'imageModel' ? imageOptions : options;
-                  return (
-                    <div key={field} className="min-w-0 space-y-2">
-                      <Label htmlFor={`defaults-${field}`}>
-                        {t(`defaults.${field}`)}
-                      </Label>
-                      <ModelSelector
-                        id={`defaults-${field}`}
-                        label={t(`defaults.${field}`)}
-                        imageOnly={field === 'imageModel'}
-                        noneLabel={t('defaults.none')}
-                        emptyHint={t(
+              {defaultModelKeys.map((field) => {
+                const choices = choicesFor(field);
+                return (
+                  <div key={field} className="min-w-0 space-y-2">
+                    <Label htmlFor={`defaults-${field}`}>
+                      {t(`defaults.${field}`)}
+                    </Label>
+                    <ModelSelector
+                      id={`defaults-${field}`}
+                      label={t(`defaults.${field}`)}
+                      modelType={defaultModelTypes[field]}
+                      noneLabel={t('defaults.none')}
+                      emptyHint={t(
+                        field === 'imageModel'
+                          ? 'defaults.noImages'
+                          : 'defaults.noModels',
+                      )}
+                      value={value[field]}
+                      onValueChange={(next) => void change(field, next)}
+                      disabled={pending || disabled}
+                    />
+                    {choices.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        {t(
                           field === 'imageModel'
                             ? 'defaults.noImages'
                             : 'defaults.noModels',
                         )}
-                        value={value[field]}
-                        onValueChange={(next) => void change(field, next)}
-                        disabled={pending || disabled}
-                      />
-                      {choices.length === 0 && (
-                        <p className="text-xs text-muted-foreground">
-                          {t(
-                            field === 'imageModel'
-                              ? 'defaults.noImages'
-                              : 'defaults.noModels',
-                          )}
-                        </p>
-                      )}
-                    </div>
-                  );
-                },
-              )}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
               <div className="space-y-2">
                 <Label htmlFor="defaults-thinkingMode">
                   {t('defaults.thinkingMode')}

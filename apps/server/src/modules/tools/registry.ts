@@ -8,6 +8,7 @@ import {
   type WebSearchConfig,
   type WebFetchConfig,
   type ImageGenConfig,
+  type SpeechConfig,
 } from '@aime/shared/tools';
 import * as applicationTools from '../../mastra/tools/index.js';
 import { createExecTool } from '../../mastra/tools/exec.js';
@@ -20,6 +21,10 @@ import {
 import type { SerpApiProvider } from '../../mastra/providers/serpapi.js';
 import type { JinaAIProvider } from '../../mastra/providers/jina-ai.js';
 import type { AssetService } from '../assets/service.js';
+import {
+  createSpeechTool,
+  type ResolvedSpeechModel,
+} from '../../mastra/tools/speech.js';
 
 export type RegisteredToolId = string;
 export type ToolDefaultConfigs = Partial<
@@ -28,6 +33,7 @@ export type ToolDefaultConfigs = Partial<
   web_search?: Partial<WebSearchConfig>;
   web_fetch?: Partial<WebFetchConfig>;
   image_gen?: Partial<ImageGenConfig>;
+  speech?: Partial<SpeechConfig>;
 };
 type ToolDependencies = {
   disabledTools?: readonly string[];
@@ -36,6 +42,7 @@ type ToolDependencies = {
   searchProvider?: (id: string, timeoutMs: number) => Promise<SerpApiProvider>;
   fetchProvider?: (id: string, timeoutMs: number) => Promise<JinaAIProvider>;
   imageModel?: (reference: string | null) => Promise<ResolvedImageModel>;
+  speechModel?: (reference: string | null) => Promise<ResolvedSpeechModel>;
   recordAsset?: AssetService['record'];
 };
 
@@ -86,6 +93,13 @@ export function parseToolConfig(id: string, input: unknown): ToolConfig {
         description,
         config: toolConfigSchemas.image_gen.parse(input),
       };
+    case 'speech':
+      return {
+        id,
+        kind: id,
+        description,
+        config: toolConfigSchemas.speech.parse(input),
+      };
     default:
       return {
         id,
@@ -125,6 +139,11 @@ async function buildTool(
     case 'image_gen':
       return createImageGenTool(tool.config, {
         resolveModel: dependencies.imageModel,
+        recordAsset: dependencies.recordAsset,
+      });
+    case 'speech':
+      return createSpeechTool(tool.config, {
+        resolveModel: dependencies.speechModel,
         recordAsset: dependencies.recordAsset,
       });
     case 'builtin':

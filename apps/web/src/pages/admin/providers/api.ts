@@ -119,6 +119,7 @@ export function modelFormInput(
     String(form.get(key) ?? '').trim() === '' ? null : Number(form.get(key));
   const parsed = modelFormSchema.safeParse({
     id: form.get('id'),
+    modelType: form.get('modelType') ?? 'language',
     name: form.get('name'),
     description: String(form.get('description') ?? '') || null,
     displayName: String(form.get('displayName') ?? '').trim() || null,

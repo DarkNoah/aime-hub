@@ -104,3 +104,11 @@
 - 创建接口保存 `metadata.workspace`；详情接口返回配置，修改名称和模型偏好保留配置。没有此字段的历史项目默认使用简单 LocalFilesystem。直接使用上述 `projects/` 布局，不执行旧目录或数据库迁移。存储初始化、文件系统组合与 AgentFS 挂载生命周期统一放在现有 `modules/threads/workspace.ts` 中。
 - 文件访问前检查项目成员权限；支持列表、预览、搜索、增删改及下载，预览最多 512 KiB，原生下载支持 Range。挂载节点不能通过文件侧栏删除或重命名，符号链接检查沿用本地文件边界。项目 `.agents/skills` 在挂载完成后读取，不加载成员个人 skills。
 - 验证真实挂载：`TEST_AGENTFS_MOUNT=1 node --import tsx --test scripts/workspace-files.test.ts`。使用临时数据库与挂载点，覆盖终端双向读写、复合目录、并发共享、关闭/重挂载持久性和 HTTP 下载；未设置该变量时跳过需要系统挂载权限的部分。
+
+### 从 GitHub 创建项目
+
+- 创建 Dialog 提供“空白项目 / 从 GitHub 拉取”两种方式。GitHub 支持公开仓库的 HTTPS 地址或 `owner/repository`，可指定分支或标签，留空使用默认分支；项目名称自动填入仓库名，允许修改。
+- GitHub 项目使用简单 LocalFilesystem，文件直接放在 `<workspace>/projects/<projectId>/`，保留 `.git` 与原始 GitHub `origin`。拉取为单分支浅克隆，不自动安装依赖、执行脚本或初始化子模块。服务器须安装 Git，目前不提供私有仓库认证。
+- `POST /api/projects` 可传入 `source: { type: "github", repositoryUrl: "https://github.com/owner/repository", branch?: "main" }`，省略 `workspace` 时默认本地文件系统。GitHub 来源与 AgentFS/复合存储组合会被拒绝。来源保存在 `metadata.source` 并由详情返回，无需数据库迁移。
+- 拉取最多等待两分钟，成功后才通过事务保存项目与 owner。拉取失败或数据库事务失败会清理新工作目录，已有项目目录不会被覆盖。表单保留输入并显示可重试错误，完成后使用 Sonner 通知并局部更新项目列表。
+- 回归：`node --import tsx --test scripts/project-github.test.ts`；增加 `TEST_GITHUB_PROJECT=1` 可验证真实 GitHub 拉取。

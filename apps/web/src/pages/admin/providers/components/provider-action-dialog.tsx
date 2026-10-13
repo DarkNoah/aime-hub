@@ -3,6 +3,14 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import type { ProviderModel, ProviderSummary } from '@aime/shared/providers';
+import { modelTypes } from '@aime/shared/providers';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -208,9 +216,11 @@ export function ProviderActionDialog({
                         ? 'providers.searchHint'
                         : providerType === 'jina-ai'
                           ? 'providers.fetchHint'
-                          : providerType === 'mineru'
-                            ? 'providers.configOnlyHint'
-                            : 'providers.typeHint',
+                          : providerType === 'xinference'
+                            ? 'providers.xinferenceHint'
+                            : providerType === 'mineru'
+                              ? 'providers.configOnlyHint'
+                              : 'providers.typeHint',
                     )}
                   </p>
                 </div>
@@ -231,9 +241,11 @@ export function ProviderActionDialog({
                         ? 'providers.searchUrlHint'
                         : providerType === 'jina-ai'
                           ? 'providers.fetchUrlHint'
-                          : providerType === 'mineru'
-                            ? 'providers.otherUrlHint'
-                            : 'providers.urlHint',
+                          : providerType === 'xinference'
+                            ? 'providers.xinferenceUrlHint'
+                            : providerType === 'mineru'
+                              ? 'providers.otherUrlHint'
+                              : 'providers.urlHint',
                     )}
                   </p>
                 </div>
@@ -284,6 +296,25 @@ export function ProviderActionDialog({
               </>
             ) : (
               <>
+                <div className="space-y-2">
+                  <Label htmlFor="model-type">{t('models.type')}</Label>
+                  <Select
+                    name="modelType"
+                    defaultValue={model?.modelType ?? 'language'}
+                    disabled={pending}
+                  >
+                    <SelectTrigger id="model-type" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {modelTypes.map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {t(`models.type.${type}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="model-id">{t('models.id')}</Label>

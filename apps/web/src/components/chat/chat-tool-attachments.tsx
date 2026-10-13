@@ -10,6 +10,7 @@ import {
 import { PreviewImage } from '@/components/image-viewer/preview-image';
 import { useWorkspaceFile } from '@/components/file-manager/context';
 import { Button } from '@/components/ui/button';
+import { AudioClip } from '@/components/audio/audio-clip';
 import { getToolAttachments } from './tool-attachments';
 
 export function ChatToolAttachments({
@@ -25,7 +26,7 @@ export function ChatToolAttachments({
   return (
     <Attachments
       variant="grid"
-      className="ml-0 max-w-full"
+      className="ml-0 w-full max-w-full"
       aria-label={t('chat.readFile.media')}
     >
       {attachments.map((file) => {
@@ -38,6 +39,18 @@ export function ChatToolAttachments({
         const openPreview = () => {
           if (file.workspacePath) openFile?.(file.workspacePath);
         };
+        if (kind === 'audio') {
+          return (
+            <AudioClip
+              key={file.id}
+              src={file.url}
+              filename={name}
+              mediaType={file.mediaType}
+              onOpen={canPreview ? openPreview : undefined}
+              className="w-[26rem] max-w-full"
+            />
+          );
+        }
         return (
           <Attachment
             key={file.id}
@@ -59,14 +72,6 @@ export function ChatToolAttachments({
                 controls
                 preload="metadata"
                 className="max-h-48 w-full"
-              />
-            ) : kind === 'audio' ? (
-              <audio
-                src={file.url}
-                aria-label={name}
-                controls
-                preload="metadata"
-                className="w-full"
               />
             ) : (
               <button

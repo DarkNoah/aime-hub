@@ -1,4 +1,5 @@
 import {
+  BarChart3,
   Bot,
   Clock3,
   LayoutDashboard,
@@ -13,6 +14,7 @@ import {
 
 export const adminNavigation = [
   { to: '/admin', label: 'nav.overview', icon: LayoutDashboard },
+  { to: '/admin/usage', label: 'nav.usage', icon: BarChart3 },
   { to: '/admin/providers', label: 'nav.providers', icon: Plug },
   { to: '/admin/agents', label: 'nav.agents', icon: Bot },
   { to: '/admin/automations', label: 'nav.automations', icon: Clock3 },

@@ -1,4 +1,5 @@
 import {
+  BarChart3,
   Bot,
   ArrowRight,
   FileJson2,
@@ -13,6 +14,12 @@ import { useTranslation } from 'react-i18next';
 import { PageHeader } from '@/components/page-header';
 
 const modules = [
+  {
+    to: '/admin/usage',
+    title: 'nav.usage',
+    description: 'usage.description',
+    icon: BarChart3,
+  },
   {
     to: '/admin/agents',
     title: 'nav.agents',

@@ -209,7 +209,6 @@ test('Better Auth blocks closed public registration immediately, while sign-in a
     ...createAuthOptions({
       pool: {} as Pool,
       secret: 'registration-test-secret-with-at-least-32-characters',
-      baseURL: origin,
       webOrigin: origin,
       admins: 'admin',
       isRegistrationEnabled: async () =>

@@ -37,6 +37,7 @@ const available: AvailableModels = {
       models: [
         {
           id: 'fixture/model',
+          modelType: 'language',
           providerId,
           name: 'Fixture',
           displayName: null,

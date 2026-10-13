@@ -14,6 +14,7 @@ import {
 } from '@mastra/core/workspace';
 import { ThreadError } from './errors.js';
 import { directorySkillConfig } from './skill-source.js';
+import { workspaceLspConfig, workspaceLspHooks } from './workspace-lsp.js';
 import {
   projectWorkspaceSchema,
   type ProjectWorkspace,
@@ -96,26 +97,35 @@ export function getWorkspace(
     : dirname(path) === userDirectory(root, userId);
   if (!valid) throw new ThreadError('WORKSPACE_UNAVAILABLE', 500);
   const userPath = userDirectory(root, userId);
+  const workspaceFilesystem =
+    filesystem ??
+    new LocalFilesystem({
+      basePath: path,
+      contained: true,
+      allowedPaths: [...(projectId ? [] : [userPath])],
+    });
+  const workingDirectory =
+    workspaceFilesystem instanceof LocalFilesystem
+      ? workspaceFilesystem.basePath
+      : path;
   return new Workspace({
     ...directorySkillConfig(skillPaths),
     id: basename(path),
-    filesystem:
-      filesystem ??
-      new LocalFilesystem({
-        basePath: path,
-        contained: true,
-        allowedPaths: [...(projectId ? [] : [userPath])],
-      }),
+    filesystem: workspaceFilesystem,
     sandbox: new LocalSandbox({
-      workingDirectory:
-        filesystem instanceof LocalFilesystem ? filesystem.basePath : path,
+      workingDirectory,
       env: {
-        NODE_ENV: 'development',
+        // NODE_ENV: 'development',
         SKILL_HOME: projectId ? resolve(projectDirectory(root, projectId), '.agents', 'skills') : resolve(userPath, '.agents', 'skills'),
       },
     }),
+    lsp: workspaceLspConfig(workingDirectory),
     bm25: true,
     tools: {
+      hooks: workspaceLspHooks(workingDirectory, workspaceFilesystem),
+      [WORKSPACE_TOOLS.LSP.LSP_INSPECT]: {
+        name: 'lsp_inspect',
+      },
       [WORKSPACE_TOOLS.SANDBOX.EXECUTE_COMMAND]: {
         name: 'execute_command',
       },

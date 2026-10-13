@@ -11,15 +11,38 @@ import {
   normalizeModelDefaults,
   type AvailableModels,
   providerGroup,
+  defaultModelKeys,
+  defaultModelTypes,
+  modelSupportsType,
+  modelTypeSchema,
 } from '@aime/shared/providers';
 import { ProviderError, requestProviderJson } from './network.js';
 import { NewApiProvider } from '../../mastra/providers/newapi.js';
 import { OpenAICompatibleProvider } from '../../mastra/providers/openai-compatible.js';
+import { XinferenceProvider } from '../../mastra/providers/xinference.js';
+import type { requestWebResource } from '../../mastra/web/request.js';
 
 const settingsId = 'models';
-const modelKeys = ['defaultModel', 'fastModel', 'imageModel'] as const;
+const modelKeys = defaultModelKeys;
 const discoverySchema = z.object({
-  data: z.array(z.object({ id: z.string().trim().min(1).max(256) })).max(10000),
+  data: z
+    .array(
+      z.object({
+        id: modelInputSchema.shape.id,
+        name: z.string().optional(),
+        modelType: modelTypeSchema.optional(),
+        modalitiesInput: modelInputSchema.shape.modalitiesInput
+          .removeDefault()
+          .optional(),
+        modalitiesOutput: modelInputSchema.shape.modalitiesOutput
+          .removeDefault()
+          .optional(),
+        limitContext: modelInputSchema.shape.limitContext
+          .removeDefault()
+          .optional(),
+      }),
+    )
+    .max(10000),
 });
 const catalogSchema = z.record(
   z.string(),
@@ -86,6 +109,7 @@ export class ProviderService {
   constructor(
     private database: DataSource,
     private requestJson: RequestJson = requestProviderJson,
+    private requestResource?: typeof requestWebResource,
   ) {}
 
   private async write<T>(
@@ -199,6 +223,7 @@ export class ProviderService {
           ).models.map((model) => ({
             providerId: model.providerId,
             id: model.id,
+            modelType: model.modelType,
             name: model.name,
             displayName: model.displayName,
             description: model.description,
@@ -225,6 +250,8 @@ export class ProviderService {
   }
   private createProviderInstance(provider: Provider) {
     this.assertLanguageModelProvider(provider);
+    if (provider.type === 'xinference')
+      return new XinferenceProvider(provider, this.requestResource);
     return provider.type === 'newapi'
       ? new NewApiProvider(provider)
       : new OpenAICompatibleProvider(provider, this.requestJson);
@@ -233,6 +260,46 @@ export class ProviderService {
     const provider = await this.getProviderRecord(id);
     if (!provider.enabled) throw new ProviderError('INVALID_MODEL');
     return this.createProviderInstance(provider);
+  }
+
+  private async resolveDefaultModel(
+    key: 'embeddingModel' | 'rerankModel' | 'speechModel',
+    reference?: string,
+  ) {
+    const ref = reference ?? (await this.getDefaults())[key];
+    if (!ref) throw new ProviderError('INVALID_MODEL');
+    const model = await this.getModel(ref);
+    if (!model.enabled || !modelSupportsType(model, defaultModelTypes[key]))
+      throw new ProviderError('INVALID_MODEL');
+    return {
+      provider: await this.getProviderInstance(model.providerId),
+      modelId: model.id,
+      modelName: model.name,
+    };
+  }
+
+  async getEmbeddingModel(reference?: string) {
+    const { provider, modelId } = await this.resolveDefaultModel(
+      'embeddingModel',
+      reference,
+    );
+    return provider.embeddingModel(modelId);
+  }
+
+  async getRerankModel(reference?: string) {
+    const { provider, modelId } = await this.resolveDefaultModel(
+      'rerankModel',
+      reference,
+    );
+    return provider.rerankingModel(modelId);
+  }
+
+  async getSpeechModel(reference?: string) {
+    const { provider, modelId, modelName } = await this.resolveDefaultModel(
+      'speechModel',
+      reference,
+    );
+    return provider.speechModel(modelId, { modelName });
   }
   // Server-only persisted configuration, including credentials, for model clients.
   async getProvider(id: string) {
@@ -351,9 +418,11 @@ export class ProviderService {
         await this.assertUnused(manager, providerId, id);
       const defaults = await this.defaults(manager);
       if (
-        defaults.imageModel === modelReference(providerId, id) &&
-        input.modalitiesOutput &&
-        !input.modalitiesOutput.includes('image')
+        modelKeys.some(
+          (key) =>
+            defaults[key] === modelReference(providerId, id) &&
+            !modelSupportsType({ ...model, ...input }, defaultModelTypes[key]),
+        )
       )
         throw new ProviderError('MODEL_IN_USE', 409);
       if (nextId !== id) {
@@ -409,7 +478,7 @@ export class ProviderService {
           !provider ||
           providerGroup(provider.type) !== 'languageModel' ||
           !model ||
-          (key === 'imageModel' && !model.modalitiesOutput.includes('image'))
+          !modelSupportsType(model, defaultModelTypes[key])
         )
           throw new ProviderError('INVALID_MODEL');
       }
@@ -445,9 +514,7 @@ export class ProviderService {
     let discovered: unknown;
     try {
       discovered = {
-        data: await this.createProviderInstance(
-          provider,
-        ).getLanguageModelList(),
+        data: await this.createProviderInstance(provider).getModelList(),
       };
     } catch (error) {
       if (error instanceof ProviderError) throw error;
@@ -462,6 +529,9 @@ export class ProviderService {
     )
       throw new ProviderError('UPSTREAM_ERROR', 502);
     const ids = [...new Set(response.data.data.map(({ id }) => id))];
+    const discoveredModels = new Map(
+      response.data.data.map((model) => [model.id, model]),
+    );
     let catalog: unknown = {};
     let catalogAvailable = false;
     try {
@@ -490,6 +560,7 @@ export class ProviderService {
           id,
           name: id,
           ...catalogFields(lookupModel(id)),
+          ...(provider.type === 'xinference' ? discoveredModels.get(id) : {}),
           deprecated: false,
         });
         const old = await manager.findOne(ProviderModel, {

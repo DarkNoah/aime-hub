@@ -21,14 +21,14 @@ export const webOriginSchema = z
 
 export const webOriginsEnvSchema = z
   .string()
-  .default('')
   .transform((value) =>
     value
       .split(',')
       .map((origin) => origin.trim())
       .filter(Boolean),
   )
-  .pipe(z.array(webOriginSchema));
+  .pipe(z.array(webOriginSchema).min(1))
+  .transform((origins) => [...new Set(origins)]);
 
 // Keep callers that configure a single origin compatible.
 export type WebOrigins = string | readonly string[];

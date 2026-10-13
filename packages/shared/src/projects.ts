@@ -69,9 +69,76 @@ export const projectInputSchema = z
     name: z.string().trim().min(1).max(120),
   })
   .strict();
-export const projectCreateSchema = projectInputSchema.extend({
-  workspace: projectWorkspaceSchema.default(defaultProjectWorkspace),
-});
+export const gitHubRepositoryUrlSchema = z
+  .string()
+  .trim()
+  .max(300)
+  .regex(
+    /^(?:https:\/\/github\.com\/)?[a-zA-Z0-9][a-zA-Z0-9-]*\/[a-zA-Z0-9_-][a-zA-Z0-9_.-]*(?:\/)?$/i,
+    'projects.github.invalidUrl',
+  )
+  .transform((value) => {
+    const repository = value
+      .replace(/^https:\/\/github\.com\//i, '')
+      .replace(/\/$/, '')
+      .replace(/\.git$/i, '');
+    return `https://github.com/${repository}.git`;
+  });
+
+export const projectGitHubSourceSchema = z
+  .object({
+    type: z.literal('github'),
+    repositoryUrl: gitHubRepositoryUrlSchema,
+    branch: z
+      .string()
+      .trim()
+      .max(255, 'projects.github.invalidBranch')
+      .refine(
+        (value) =>
+          !value ||
+          (value !== '@' &&
+            !value.startsWith('-') &&
+            !/[\s~^:?*[\\]/.test(value) &&
+            ![...value].some(
+              (character) =>
+                character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+            ) &&
+            !value.includes('..') &&
+            !value.includes('@{') &&
+            value
+              .split('/')
+              .every(
+                (part) =>
+                  part &&
+                  !part.startsWith('.') &&
+                  !part.endsWith('.') &&
+                  !part.endsWith('.lock'),
+              )),
+        'projects.github.invalidBranch',
+      )
+      .transform((value) => value || undefined)
+      .optional(),
+  })
+  .strict();
+export type ProjectGitHubSource = z.infer<typeof projectGitHubSourceSchema>;
+
+export const projectCreateSchema = projectInputSchema
+  .extend({
+    workspace: projectWorkspaceSchema.default(defaultProjectWorkspace),
+    source: projectGitHubSourceSchema.optional(),
+  })
+  .superRefine((input, context) => {
+    if (
+      input.source &&
+      (input.workspace.mode !== 'simple' ||
+        input.workspace.provider !== 'local')
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['workspace'],
+        message: 'projects.github.localRequired',
+      });
+  });
 export type ProjectCreateInput = z.input<typeof projectCreateSchema>;
 export const projectUpdateSchema = projectInputSchema
   .partial()
@@ -100,6 +167,7 @@ export type ProjectSummary = {
 export type ProjectDetail = ProjectSummary & {
   settings: ChatSettings;
   workspace: ProjectWorkspace;
+  source?: ProjectGitHubSource;
 };
 export type ProjectList = {
   projects: ProjectSummary[];

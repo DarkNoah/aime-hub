@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PreviewImage } from '@/components/image-viewer/preview-image';
+import { AudioClip } from '@/components/audio/audio-clip';
 import type { ReadFileBlock } from './read-file-output';
 
 export function ToolMedia({
@@ -18,6 +19,9 @@ export function ToolMedia({
   const name = filename?.split('/').at(-1) || t('chat.readFile.attachment');
   const onError = () => setFailedSource(source);
   const kind = mediaType.split('/', 1)[0];
+  if (kind === 'audio') {
+    return <AudioClip src={source} filename={name} mediaType={mediaType} />;
+  }
   return (
     <section
       aria-label={t('chat.readFile.media')}
@@ -63,14 +67,6 @@ export function ToolMedia({
             alt={name}
             loading="lazy"
             referrerPolicy="no-referrer"
-            onError={onError}
-          />
-        ) : kind === 'audio' ? (
-          <audio
-            src={source}
-            controls
-            preload="metadata"
-            className="w-full"
             onError={onError}
           />
         ) : kind === 'video' ? (

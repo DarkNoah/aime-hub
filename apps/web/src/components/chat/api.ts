@@ -120,6 +120,12 @@ export function chatErrorKey(error: unknown) {
       return 'projects.errors.user';
     case 'PROJECT_MEMBER_EXISTS':
       return 'projects.errors.exists';
+    case 'PROJECT_GIT_UNAVAILABLE':
+      return 'projects.github.gitUnavailable';
+    case 'PROJECT_CLONE_TIMEOUT':
+      return 'projects.github.timeout';
+    case 'PROJECT_CLONE_FAILED':
+      return 'projects.github.failed';
     case 'MODEL_NOT_CONFIGURED':
       return 'chat.errors.noModel';
     case 'MODEL_UNAVAILABLE':

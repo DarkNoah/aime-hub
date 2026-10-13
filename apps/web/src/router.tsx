@@ -15,6 +15,11 @@ import {
 import { AppLayout } from '@/layouts/app-layout';
 import { LoadingState } from '@/components/loading-state';
 
+const AdminUsagePage = lazy(() =>
+  import('@/pages/admin/usage/page').then((m) => ({
+    default: m.AdminUsagePage,
+  })),
+);
 const AuthPage = lazy(() =>
   import('@/pages/auth/page').then((m) => ({ default: m.AuthPage })),
 );
@@ -224,6 +229,11 @@ const routeTree = rootRoute.addChildren([
         ]),
       ]),
       adminRoute.addChildren([
+        createRoute({
+          getParentRoute: () => adminRoute,
+          path: '/usage',
+          component: AdminUsagePage,
+        }),
         createRoute({
           getParentRoute: () => adminRoute,
           path: '/mcp',

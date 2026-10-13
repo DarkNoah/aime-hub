@@ -1,9 +1,15 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { chatApi } from '@/components/chat/api';
 import { createThreadListResource } from './list-resource';
 import { ThreadListContext } from './use-thread-list';
 
 export function ThreadListProvider({ children }: { children: ReactNode }) {
-  const [resource] = useState(createThreadListResource);
+  const [resource] = useState(() =>
+    createThreadListResource(
+      (page, signal) => chatApi.list(page, signal, undefined, 5),
+      5,
+    ),
+  );
   useEffect(() => {
     void resource.loadMore();
     return () => resource.cancel();

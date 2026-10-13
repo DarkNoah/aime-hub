@@ -17,6 +17,12 @@ import { CreateGeneratedAssets1780000009000 } from './migrations/1780000009000-c
 import { AddGeneratedAssetCreator1780000010000 } from './migrations/1780000010000-add-generated-asset-creator.js';
 import { AddGeneratedAssetMetadata1780000011000 } from './migrations/1780000011000-add-generated-asset-metadata.js';
 
+import { CreateUsageRecords1780000012000 } from './migrations/1780000012000-create-usage-records.js';
+import { ProviderModelType1780000013000 } from './migrations/1780000013000-provider-model-type.js';
+
+import { UsageRecord } from './usage-entity.js';
+export { UsageRecord };
+
 export { GeneratedAsset };
 
 export { EnvironmentVariable };
@@ -38,6 +44,7 @@ export function createDataSource(databaseUrl: string): DataSource {
       ProjectMember,
       EnvironmentVariable,
       ChatRequestLog,
+      UsageRecord,
       GeneratedAsset,
     ],
     migrations: [
@@ -52,6 +59,8 @@ export function createDataSource(databaseUrl: string): DataSource {
       CreateGeneratedAssets1780000009000,
       AddGeneratedAssetCreator1780000010000,
       AddGeneratedAssetMetadata1780000011000,
+      CreateUsageRecords1780000012000,
+      ProviderModelType1780000013000,
     ],
     synchronize: false,
     migrationsRun: false,

@@ -5,6 +5,7 @@ import { languageModelProviders as catalogProviders } from './provider-catalog.j
 export const languageModelProviders = {
   ...catalogProviders,
   newapi: 'New API',
+  xinference: 'Xinference',
 } as const;
 export const otherProviders = {
   mineru: 'MinerU',
@@ -68,9 +69,47 @@ export const providerUpdateSchema = providerInputSchema.partial().extend({
   enabled: providerInputSchema.shape.enabled.removeDefault().optional(),
   metadata: providerInputSchema.shape.metadata.removeDefault().optional(),
 });
+export const modelTypes = [
+  'language',
+  'embedding',
+  'rerank',
+  'speech',
+  'image',
+] as const;
+export const modelTypeSchema = z.enum(modelTypes);
+export type ModelType = z.infer<typeof modelTypeSchema>;
+export const defaultModelTypes = {
+  defaultModel: 'language',
+  fastModel: 'language',
+  imageModel: 'image',
+  embeddingModel: 'embedding',
+  rerankModel: 'rerank',
+  speechModel: 'speech',
+} as const;
+export const defaultModelKeys = Object.keys(defaultModelTypes) as Array<
+  keyof typeof defaultModelTypes
+>;
+
+export function modelSupportsType(
+  model: { modelType?: ModelType; modalitiesOutput: readonly string[] },
+  type: ModelType,
+) {
+  const modelType = model.modelType ?? 'language';
+  if (type === 'image')
+    return (
+      (modelType === 'image' || modelType === 'language') &&
+      model.modalitiesOutput.includes('image')
+    );
+  return (
+    modelType === type &&
+    (type !== 'language' || model.modalitiesOutput.includes('text'))
+  );
+}
+
 export const modelInputSchema = z
   .object({
     id: modelId,
+    modelType: modelTypeSchema.default('language'),
     name: z.string().trim().min(1).max(256),
     description: z.string().max(10000).nullable().default(null),
     displayName: z.string().trim().max(256).nullable().default(null),
@@ -105,6 +144,7 @@ export const modelInputSchema = z
   })
   .strict();
 export const modelUpdateSchema = modelInputSchema.partial().extend({
+  modelType: modelInputSchema.shape.modelType.removeDefault().optional(),
   description: modelInputSchema.shape.description.removeDefault().optional(),
   displayName: modelInputSchema.shape.displayName.removeDefault().optional(),
   enabled: modelInputSchema.shape.enabled.removeDefault().optional(),
@@ -127,6 +167,9 @@ export const modelDefaultsSchema = z
     defaultModel: z.string().min(3).max(512).nullable(),
     fastModel: z.string().min(3).max(512).nullable(),
     imageModel: z.string().min(3).max(512).nullable(),
+    embeddingModel: z.string().min(3).max(512).nullable().default(null),
+    rerankModel: z.string().min(3).max(512).nullable().default(null),
+    speechModel: z.string().min(3).max(512).nullable().default(null),
     thinkingMode: z.enum(thinkingLevels),
   })
   .strict();
@@ -151,6 +194,7 @@ export type AvailableModel = Pick<
   ProviderModel,
   | 'providerId'
   | 'id'
+  | 'modelType'
   | 'name'
   | 'displayName'
   | 'description'
@@ -183,6 +227,9 @@ export const emptyModelDefaults: ModelDefaults = {
   defaultModel: null,
   fastModel: null,
   imageModel: null,
+  embeddingModel: null,
+  rerankModel: null,
+  speechModel: null,
   thinkingMode: 'medium',
 };
 export function modelReference(providerId: string, id: string) {

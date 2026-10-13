@@ -1,3 +1,5 @@
+import type { UsageService } from './modules/usage/service.js';
+import { usageRouter } from './modules/usage/rpc.js';
 import { Hono } from 'hono';
 import { secureHeaders } from 'hono/secure-headers';
 import { bodyLimit } from 'hono/body-limit';
@@ -65,6 +67,7 @@ export function createApp(
   notifications?: { service: NotificationService; webOrigin: WebOrigins },
   mcp?: { service: McpService; webOrigin: WebOrigins },
   systemSettings?: { service: SystemSettingsService; webOrigin: WebOrigins },
+  usage?: { service: UsageService; webOrigin: WebOrigins },
 ) {
   const app = new Hono<HttpEnv>();
   const webOrigins = normalizeWebOrigins(
@@ -79,6 +82,7 @@ export function createApp(
       notifications?.webOrigin ??
       mcp?.webOrigin ??
       systemSettings?.webOrigin ??
+      usage?.webOrigin ??
       [],
   );
   app.use('*', secureHeaders());
@@ -90,6 +94,7 @@ export function createApp(
     await next();
   });
   const router = rpc.router({
+    usage: usageRouter(usage?.service),
     providers: providerRouter(providers?.service),
     threads: threadRouter(chat?.threads, chat?.models),
     projects: projectRouter(chat?.projects, chat?.threads, chat?.models),

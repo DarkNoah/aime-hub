@@ -16,10 +16,12 @@ import {
   projectCreateSchema,
   projectWorkspaceSchema,
   defaultProjectWorkspace,
+  projectGitHubSourceSchema,
 } from '@aime/shared/projects';
 import { chatSettingsSchema, type ChatSettings } from '@aime/shared/threads';
 import { ThreadError } from '../threads/errors.js';
 import { requireMemberChange, requireProjectManager } from './permissions.js';
+import { importGitHubProject, type CloneRepository } from './github.js';
 
 export interface ProjectThreadAccess {
   list?(
@@ -52,7 +54,13 @@ function summary(
 }
 
 export class ProjectService implements ProjectThreadAccess {
-  constructor(private database: DataSource) {}
+  constructor(
+    private database: DataSource,
+    private options?: {
+      workspaceRoot: string;
+      cloneRepository?: CloneRepository;
+    },
+  ) {}
 
   private async access(
     userId: string,
@@ -80,6 +88,9 @@ export class ProjectService implements ProjectThreadAccess {
       workspace: projectWorkspaceSchema.parse(
         project.metadata.workspace ?? defaultProjectWorkspace,
       ),
+      ...(project.metadata.source
+        ? { source: projectGitHubSourceSchema.parse(project.metadata.source) }
+        : {}),
     };
   }
 
@@ -127,30 +138,50 @@ export class ProjectService implements ProjectThreadAccess {
 
   async create(userId: string, input: ProjectCreateInput) {
     const parsed = projectCreateSchema.parse(input);
-    return this.database.transaction(async (manager) => {
-      const project = await manager.save(
-        Project,
-        manager.create(Project, {
-          id: nanoid(16),
-          name: parsed.name,
-          createdBy: userId,
-          metadata: { workspace: parsed.workspace },
-        }),
+    const id = nanoid(16);
+    let rollback: (() => Promise<void>) | undefined;
+    if (parsed.source) {
+      if (!this.options) throw new ThreadError('WORKSPACE_UNAVAILABLE', 503);
+      rollback = await importGitHubProject(
+        this.options.workspaceRoot,
+        id,
+        parsed.source,
+        this.options.cloneRepository,
       );
-      await manager.save(
-        ProjectMember,
-        manager.create(ProjectMember, {
-          projectId: project.id,
-          userId,
-          role: 'owner',
-        }),
-      );
-      return {
-        ...summary(project, 'owner'),
-        settings: chatSettingsSchema.parse({}),
-        workspace: parsed.workspace,
-      };
-    });
+    }
+    try {
+      return await this.database.transaction(async (manager) => {
+        const project = await manager.save(
+          Project,
+          manager.create(Project, {
+            id,
+            name: parsed.name,
+            createdBy: userId,
+            metadata: {
+              workspace: parsed.workspace,
+              ...(parsed.source ? { source: parsed.source } : {}),
+            },
+          }),
+        );
+        await manager.save(
+          ProjectMember,
+          manager.create(ProjectMember, {
+            projectId: project.id,
+            userId,
+            role: 'owner',
+          }),
+        );
+        return {
+          ...summary(project, 'owner'),
+          settings: chatSettingsSchema.parse({}),
+          workspace: parsed.workspace,
+          ...(parsed.source ? { source: parsed.source } : {}),
+        };
+      });
+    } catch (error) {
+      await rollback?.();
+      throw error;
+    }
   }
 
   // Lock the project before changing roles or settings, including concurrent removal and deletion.

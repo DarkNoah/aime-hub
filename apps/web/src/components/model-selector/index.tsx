@@ -17,6 +17,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { groupModelOptions, modelOptions } from './model-options';
 import { useAvailableModels } from '@/features/models/use-available-models';
 import { cn } from '@/lib/utils';
+import type { ModelType } from '@aime/shared/providers';
 
 export type { ModelOption } from './model-options';
 
@@ -24,6 +25,7 @@ export type ModelSelectorProps = {
   id?: string;
   label: string;
   imageOnly?: boolean;
+  modelType?: ModelType;
   textOnly?: boolean;
   compact?: boolean;
   iconOnly?: boolean;
@@ -39,6 +41,7 @@ export function ModelSelector({
   id,
   label,
   imageOnly = false,
+  modelType,
   textOnly = false,
   compact = false,
   iconOnly = false,
@@ -58,9 +61,9 @@ export function ModelSelector({
         textOnly
           ? models.filter((model) => model.modalitiesOutput.includes('text'))
           : models,
-        imageOnly,
+        modelType ?? imageOnly,
       ),
-    [providers, models, imageOnly, textOnly],
+    [providers, models, imageOnly, textOnly, modelType],
   );
   const noneText = noneLabel ?? t('modelSelector.none');
   const [open, setOpen] = useState(false);

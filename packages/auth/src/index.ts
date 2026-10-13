@@ -11,7 +11,6 @@ import type { Pool } from 'pg';
 type AuthConfig = {
   pool: Pool;
   secret: string;
-  baseURL: string;
   webOrigin: WebOrigins;
   admins: string;
   isRegistrationEnabled?: () => Promise<boolean>;
@@ -19,16 +18,29 @@ type AuthConfig = {
 
 export function createAuthOptions(config: AuthConfig) {
   const reserved = new Set(parseAdminUsernames(config.admins));
+  const webOrigins = normalizeWebOrigins(config.webOrigin);
+  if (!webOrigins.length) throw new Error('WEB_ORIGINS 至少需要一个来源');
   return {
     appName: 'Aime Hub',
     database: config.pool,
     secret: config.secret,
-    baseURL: config.baseURL,
+    baseURL: {
+      // Scheme-qualified entries keep Better Auth's implicit trusted origins exact.
+      allowedHosts: webOrigins,
+      fallback: webOrigins[0],
+      protocol: 'auto',
+    },
     basePath: '/api/auth',
     advanced: {
+      // Vite/Nginx overwrite these headers; the API stays behind that proxy.
+      trustedProxyHeaders: true,
+      // Explicit HTTP origins must also work in opted-in production deployments.
+      useSecureCookies: webOrigins.every((origin) =>
+        origin.startsWith('https://'),
+      ),
       ipAddress: { ipAddressHeaders: ['x-aime-client-ip'] },
     },
-    trustedOrigins: normalizeWebOrigins(config.webOrigin),
+    trustedOrigins: webOrigins,
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 8,

@@ -46,6 +46,8 @@ import type { GeneratedAsset } from '@aime/shared/assets';
 import { useAssetAttachments } from '@/components/generated-assets/context';
 import { assetsApi } from '@/components/generated-assets/api';
 import { fileErrorKey, filesApi } from '@/components/file-manager/api';
+import { useAuthSession } from '@/features/auth/session-context';
+import { useChatDraft } from './use-chat-draft';
 
 function GeneratedAttachments({
   assets,
@@ -228,7 +230,16 @@ export function ChatComposer({
         toast.error(t(chatErrorKey(cause)), { id: 'chat-preferences' }),
       );
   }
-  const [text, setText] = useState('');
+  const { data: session } = useAuthSession();
+  const {
+    text,
+    setText,
+    clear: clearDraft,
+  } = useChatDraft({
+    userId: session?.user.id,
+    threadId,
+    projectId,
+  });
   const [assetAttachments, setAssetAttachments] = useState<GeneratedAsset[]>(
     [],
   );
@@ -389,7 +400,7 @@ export function ChatComposer({
                 throw new ChatApiError('VALIDATION_ERROR');
               }
               await onSend(result.data);
-              setText('');
+              clearDraft(goalText ?? draft);
               setAssetAttachments([]);
               setGoalDraft(false);
               retryId.current = null;

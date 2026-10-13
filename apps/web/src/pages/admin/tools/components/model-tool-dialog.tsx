@@ -2,7 +2,7 @@ import { useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
-import { imageGenConfigSchema, type ToolConfig } from '@aime/shared/tools';
+import { toolConfigSchemas, type ToolConfig } from '@aime/shared/tools';
 import type { TranslationKey } from '@/i18n/config';
 import { api } from '@/lib/rpc';
 import { ModelSelector } from '@/components/model-selector';
@@ -21,18 +21,34 @@ import {
 } from '@/components/ui/dialog';
 import { toolErrorKey } from '../api';
 
-export function ImageGenDialog({
+export function ModelToolDialog({
   tool,
   onSaved,
   onClose,
   restoreFocus,
 }: {
-  tool: Extract<ToolConfig, { id: 'image_gen' }>;
+  tool: Extract<ToolConfig, { kind: 'image_gen' | 'speech' }>;
   onSaved: (tool: ToolConfig) => void;
   onClose: () => void;
   restoreFocus: () => void;
 }) {
   const { t } = useTranslation();
+  const speech = tool.kind === 'speech';
+  const labels = {
+    configure: speech ? 'tools.configureSpeech' : 'tools.configureImage',
+    enable: speech ? 'tools.enableSpeech' : 'tools.enableImage',
+    model: speech ? 'defaults.speechModel' : 'defaults.imageModel',
+    defaultModel: speech
+      ? 'tools.defaultSpeechModel'
+      : 'tools.defaultImageModel',
+    modelHint: speech ? 'tools.speechModelHint' : 'tools.imageModelHint',
+    providerHint: speech
+      ? 'tools.speechProviderHint'
+      : 'tools.imageProviderHint',
+    invalidModel: speech
+      ? 'tools.invalidSpeechModel'
+      : 'tools.invalidImageModel',
+  } satisfies Record<string, TranslationKey>;
   const [enabled, setEnabled] = useState(tool.config.enabled);
   const [model, setModel] = useState(tool.config.model);
   const [timeout, setTimeout] = useState(String(tool.config.timeoutMs / 1000));
@@ -44,7 +60,7 @@ export function ImageGenDialog({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (submitting.current) return;
-    const parsed = imageGenConfigSchema.safeParse({
+    const parsed = toolConfigSchemas[tool.kind].safeParse({
       enabled,
       model,
       timeoutMs: Number(timeout) * 1000,
@@ -54,7 +70,7 @@ export function ImageGenDialog({
       for (const issue of parsed.error.issues) {
         if (issue.path[0] === 'timeoutMs')
           next.timeout = 'tools.imageTimeoutHint';
-        else next.model = 'tools.invalidImageModel';
+        else next.model = labels.invalidModel;
       }
       setErrors(next);
       return;
@@ -64,14 +80,14 @@ export function ImageGenDialog({
     setErrors({});
     try {
       const saved = await api.tools.update({
-        params: { toolId: 'image_gen' },
+        params: { toolId: tool.kind },
         body: parsed.data,
       });
       onSaved(saved);
       toast.success(t('tools.saved'));
       onClose();
     } catch (error) {
-      const key = toolErrorKey(error, 'image_gen');
+      const key = toolErrorKey(error, tool.kind);
       setErrors({ form: key });
       toast.error(t(key));
     } finally {
@@ -99,7 +115,7 @@ export function ImageGenDialog({
         onPointerDownOutside={(event) => event.preventDefault()}
       >
         <DialogHeader>
-          <DialogTitle>{t('tools.configureImage')}</DialogTitle>
+          <DialogTitle>{t(labels.configure)}</DialogTitle>
           <DialogDescription>{t('tools.applyHint')}</DialogDescription>
         </DialogHeader>
         <form
@@ -113,24 +129,24 @@ export function ImageGenDialog({
           >
             <fieldset disabled={pending} className="space-y-5 p-1">
               <div className="flex items-center justify-between gap-4">
-                <Label htmlFor="image-enabled">{t('tools.enableImage')}</Label>
+                <Label htmlFor="generation-enabled">{t(labels.enable)}</Label>
                 <Switch
-                  id="image-enabled"
+                  id="generation-enabled"
                   checked={enabled}
                   onCheckedChange={setEnabled}
                   disabled={pending}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="image-model">{t('defaults.imageModel')}</Label>
+                <Label htmlFor="generation-model">{t(labels.model)}</Label>
                 <ModelSelector
-                  id="image-model"
-                  label={t('defaults.imageModel')}
-                  imageOnly
+                  id="generation-model"
+                  label={t(labels.model)}
+                  modelType={speech ? 'speech' : 'image'}
                   value={model}
                   onValueChange={setModel}
                   disabled={pending}
-                  noneLabel={t('tools.defaultImageModel')}
+                  noneLabel={t(labels.defaultModel)}
                 />
                 <p
                   className={
@@ -139,13 +155,13 @@ export function ImageGenDialog({
                       : 'text-xs leading-5 text-muted-foreground'
                   }
                 >
-                  {t(errors.model ?? 'tools.imageModelHint')}
+                  {t(errors.model ?? labels.modelHint)}
                 </p>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="image-timeout">{t('tools.timeout')}</Label>
+                <Label htmlFor="generation-timeout">{t('tools.timeout')}</Label>
                 <Input
-                  id="image-timeout"
+                  id="generation-timeout"
                   type="number"
                   min={1}
                   max={600}
@@ -153,10 +169,10 @@ export function ImageGenDialog({
                   value={timeout}
                   onChange={(event) => setTimeout(event.target.value)}
                   aria-invalid={!!errors.timeout}
-                  aria-describedby="image-timeout-hint"
+                  aria-describedby="generation-timeout-hint"
                 />
                 <p
-                  id="image-timeout-hint"
+                  id="generation-timeout-hint"
                   className={
                     errors.timeout
                       ? 'text-xs text-destructive'
@@ -167,7 +183,7 @@ export function ImageGenDialog({
                 </p>
               </div>
               <p className="rounded-lg bg-muted/50 p-3 text-xs leading-5 text-muted-foreground">
-                {t('tools.imageProviderHint')}
+                {t(labels.providerHint)}
               </p>
               {errors.form && (
                 <p role="alert" className="text-sm text-destructive">

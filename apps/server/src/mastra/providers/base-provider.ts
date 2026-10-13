@@ -3,9 +3,10 @@ import type {
   EmbeddingModel,
   ImageModel,
   LanguageModel,
-  Provider,
   RerankingModel,
+  SpeechModel,
 } from 'ai';
+import type { ModelInput } from '@aime/shared/providers';
 import { z } from 'zod';
 
 export type WebFetchResult = {
@@ -32,7 +33,12 @@ export type ProviderConfig = {
   timeoutMs?: number;
 };
 
-export type ProviderModelInfo = { id: string; name: string };
+export type ProviderModelInfo = { id: string; name: string } & Partial<
+  Pick<
+    ModelInput,
+    'modelType' | 'modalitiesInput' | 'modalitiesOutput' | 'limitContext'
+  >
+>;
 
 export interface BaseProviderParams {
   provider: ProviderConfig;
@@ -63,11 +69,32 @@ export abstract class BaseProvider {
     throw new Error(`Rerank model is not supported: ${this.type}/${modelId}`);
   }
 
+  embeddingModel(modelId: string): EmbeddingModel {
+    return this.textEmbeddingModel(modelId);
+  }
+
+  rerankingModel(modelId: string): RerankingModel {
+    return this.rerankModel(modelId);
+  }
+
+  speechModel(modelId: string, options?: { modelName?: string }): SpeechModel {
+    void options;
+    throw new Error(`Speech model is not supported: ${this.type}/${modelId}`);
+  }
+
   imageModel(modelId: string): ImageModel {
     throw new Error(`Image model is not supported: ${this.type}/${modelId}`);
   }
 
   getLanguageModelList(): Promise<ProviderModelInfo[]> {
+    return Promise.resolve([]);
+  }
+
+  getModelList(): Promise<ProviderModelInfo[]> {
+    return this.getLanguageModelList();
+  }
+
+  getSpeechModelList(): Promise<ProviderModelInfo[]> {
     return Promise.resolve([]);
   }
 

@@ -11,7 +11,6 @@ try {
   const authOptions = createAuthOptions({
     pool,
     secret: env.BETTER_AUTH_SECRET,
-    baseURL: env.BETTER_AUTH_URL,
     webOrigin: env.WEB_ORIGINS,
     admins: env.ADMINS,
   });

@@ -10,10 +10,23 @@ import {
   type ReactNode,
 } from 'react';
 import type { UIMessage } from 'ai';
-import { Braces, Columns2, Files, Images, ScanText } from 'lucide-react';
+import {
+  Braces,
+  ChevronDown,
+  Columns2,
+  Files,
+  Images,
+  ScanText,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { usePanelRef } from 'react-resizable-panels';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   ResizableHandle,
   ResizablePanel,
@@ -38,7 +51,10 @@ import { cn } from '@/lib/utils';
 import { useFileManager } from '@/components/file-manager/use-file-manager';
 import { WorkspaceFileContext } from '@/components/file-manager/context';
 import { FloatingWindow } from '@/components/floating-window';
-import { FloatingChatContext } from './layout-context';
+import {
+  ChatWorkspaceMenuContext,
+  FloatingChatContext,
+} from './layout-context';
 import './chat-floating.css';
 import { AssetAttachmentProvider } from '@/components/generated-assets/attachment-context';
 
@@ -51,6 +67,13 @@ const FileManager = lazy(
 );
 
 const EMPTY_MESSAGES: UIMessage[] = [];
+
+const workspaceViews = [
+  { view: 'files', label: 'files.title', icon: Files },
+  { view: 'assets', label: 'assets.title', icon: Images },
+  { view: 'messages', label: 'chat.inspector.title', icon: Braces },
+  { view: 'preview', label: 'chat.preview.title', icon: ScanText },
+] as const;
 
 /** Keep the chat mounted while resizing or switching to the compact drawer. */
 export function ChatWorkspace({
@@ -84,7 +107,9 @@ export function ChatWorkspace({
     .flatMap((message) =>
       message.parts.flatMap((part) =>
         (part.type === 'tool-image_gen' ||
-          (part.type === 'dynamic-tool' && part.toolName === 'image_gen')) &&
+          part.type === 'tool-speech' ||
+          (part.type === 'dynamic-tool' &&
+            (part.toolName === 'image_gen' || part.toolName === 'speech'))) &&
         'state' in part &&
         part.state === 'output-available'
           ? [part.toolCallId]
@@ -151,9 +176,45 @@ export function ChatWorkspace({
   };
   const close = () => {
     if (compact) setDrawerOpen(false);
-    else collapseInspector();
-    toggleRef.current?.focus();
+    else {
+      collapseInspector();
+      toggleRef.current?.focus();
+    }
   };
+  const workspaceMenu = compact ? (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          ref={toggleRef}
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t('chat.workspace.menu')}
+          title={t('chat.workspace.menu')}
+        >
+          <ChevronDown className="size-4" aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        onCloseAutoFocus={(event) => {
+          if (drawerOpen) event.preventDefault();
+        }}
+      >
+        {workspaceViews.map(({ view: nextView, label, icon: Icon }) => (
+          <DropdownMenuItem
+            key={nextView}
+            onSelect={() => {
+              setView(nextView);
+              setDrawerOpen(true);
+            }}
+          >
+            <Icon className="size-4" aria-hidden="true" />
+            {t(label)}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  ) : null;
   const title = t(
     view === 'files'
       ? 'files.title'
@@ -251,7 +312,9 @@ export function ChatWorkspace({
                   }
                 >
                   <FloatingChatContext.Provider value={floating}>
-                    {children}
+                    <ChatWorkspaceMenuContext.Provider value={workspaceMenu}>
+                      {children}
+                    </ChatWorkspaceMenuContext.Provider>
                   </FloatingChatContext.Provider>
                 </FloatingWindow>
               </ResizablePanel>
@@ -363,60 +426,13 @@ export function ChatWorkspace({
             </ResizablePanelGroup>
             {compact && (
               <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
-                <div className="flex w-12 shrink-0 flex-col items-center gap-2 border-l bg-muted/20 py-3">
-                  <Button
-                    ref={toggleRef}
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={t('files.title')}
-                    title={t('files.title')}
-                    onClick={() => {
-                      setView('files');
-                      setDrawerOpen(true);
-                    }}
-                  >
-                    <Files className="size-4" aria-hidden="true" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={t('assets.title')}
-                    title={t('assets.title')}
-                    onClick={() => {
-                      setView('assets');
-                      setDrawerOpen(true);
-                    }}
-                  >
-                    <Images className="size-4" aria-hidden="true" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={t('chat.inspector.title')}
-                    title={t('chat.inspector.title')}
-                    onClick={() => {
-                      setView('messages');
-                      setDrawerOpen(true);
-                    }}
-                  >
-                    <Braces className="size-4" aria-hidden="true" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={t('chat.preview.title')}
-                    title={t('chat.preview.title')}
-                    onClick={() => {
-                      setView('preview');
-                      setDrawerOpen(true);
-                    }}
-                  >
-                    <ScanText className="size-4" aria-hidden="true" />
-                  </Button>
-                </div>
                 <SheetContent
                   className="w-full max-w-full gap-0 sm:max-w-lg"
                   showCloseButton={false}
+                  onCloseAutoFocus={(event) => {
+                    event.preventDefault();
+                    toggleRef.current?.focus();
+                  }}
                 >
                   <SheetTitle className="sr-only">{title}</SheetTitle>
                   <SheetDescription className="sr-only">

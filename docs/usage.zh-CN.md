@@ -94,6 +94,14 @@ workspaces/
 
 会话右侧面板可切换 **文件** 和 **原始消息**，窄屏使用抽屉。文件支持多标签预览及下载；文本预览上限为 512 KiB，超出部分可下载查看，未知二进制文件提供下载。文件操作受当前会话的工作目录及权限约束，不提供任意服务器路径访问。
 
+### 代码语义检查（LSP）
+
+支持工具调用的会话会通过 Workspace 自动获得 `lsp_inspect`，与 `read_file`、`grep` 一起使用。服务端已包含 TypeScript/JavaScript 语言服务和协议依赖，Docker 构建也会携带这些依赖，无需在每个项目中重新安装语言服务。其他语言需要在服务器或容器中安装对应语言服务及运行时；不会在查询时自动下载。
+
+调用时提供文件路径、从 1 开始的 `line`，以及该行原文的 `match`；在目标符号前插入且仅插入一个 `<<<`。例如：`{ "path": "src/main.ts", "line": 2, "match": "const total = <<<count;" }`。普通工作区支持相对路径或工作区内的绝对路径，组合挂载支持 `/挂载名/文件路径`。输入路径会校验当前工作区边界和符号链接目标。
+
+结果预览展示类型/文档、当前行诊断、定义及实现位置；语言服务不支持的字段可能缺省。定义可能指向依赖包的声明文件。LSP 直接读取服务器上已挂载的文件，并非独立安全沙箱；项目配置和依赖仍需可信。语言服务按需启动，每个 Workspace 最多保留 4 个客户端，并随会话运行资源销毁而关闭。它属于 Workspace 原生工具，不列入后台应用工具注册表；配置位于 `apps/server/src/modules/threads/workspace-lsp.ts`。
+
 ### Skills 管理
 
 `apps/server/src/mastra/skills/` 存放随服务发布的全局内置技能，每个包需包含 `SKILL.md`。构建时会将完整目录复制到 `apps/server/dist/mastra/skills/`；服务每次启动、接受请求之前，将其中的技能包同步到 `WORKSPACE_ROOT/.agents/skills/builtin/`。开发模式直接读取源码目录，生产模式读取构建产物，用户无需安装。新增、更新或删除内置包后，重新部署或重启服务即可刷新；生产模式需先重新构建。
@@ -164,6 +172,16 @@ GitHub 来源的组标题提供仓库跳转按钮，删除按钮左边提供一�
 
 请求发送后立即入库，响应完成或中断后更新同一条记录的 `duration_ms`、`http_status`、`response_status`、响应类型、编码、接收字节数及响应内容。耗时从 Undici 创建请求开始计时，包含连接、发送及完整流式接收过程；每次 HTTP 重试单独计时。响应通过传输层分块捕获，JSON 与 SSE 保留原始文本，gzip / deflate / brotli 自动解压；无法还原为 UTF-8 文本的内容保存原始接收字节的 Base64。`response_bytes` 统计解压前的接收字节数，请求发送状态与响应接收状态分别展示，HTTP 错误响应也会保留。列表不加载请求或响应正文，详情提供请求 / 响应切换和复制；等待响应完成时详情自动更新。旧日志的响应与耗时字段为 `NULL`。
 
+## 用量统计
+
+管理员在 **管理后台 → 用量统计**（`/admin/usage`）查看用户、项目和供应商／模型的 tokens 消耗。可选择近 7／30／90 天或自定义日期（最多 366 天），按用户 ID、项目 ID、供应商 ID、模型 ID 组合筛选，并切换统计时区。排行展示前 100 项，点击名称可筛选；个人聊天归入“个人聊天”。页面提供每日趋势、可翻页的 GitHub 风格热力图（卡片占满可用宽度，默认连续 12 个完整月份，可切换 3／6／12 个月，每次翻页移动同样数量的月份；按天汇总，沿用用户／项目／模型筛选，独立于上方日期范围）、分页步骤记录和详情。
+
+数据来自 Mastra runtime 的 `onStepFinish`，直接读取每一步的 `event.usage`，独立保存在 `usage_records` 表，不读取请求日志或 HTTP 响应正文。每步在执行前分配唯一 ID，同一记录重复提交不会重复计数；项目消息按 runtime 当前处理的消息作者归属。模型保留配置引用和 runtime 实际返回的模型 ID，模型 ID 相同但供应商不同的用量分开汇总。步骤耗时包含模型响应和该步工具执行。输入、输出及总量独立保存；缓存命中、缓存写入和推理 tokens 为细分项，不重复叠加到总量。没有返回的值保存为 `NULL`，展示为 `—`；汇总仅累加已知值并显示总量返回覆盖率。
+
+首次使用需执行 `pnpm db:migrate` 并运行更新后的服务。仅统计接入后完成的对话模型步骤（包含工具循环和该 runtime 路径的自动化）；历史用量不回填。标题生成、记忆压缩、目标判断等独立辅助调用，以及未触发步骤完成回调的中断请求不在当前统计范围内。数据库写入失败会记录不含对话内容的错误日志，不中断聊天；此类步骤可能缺失，不应将这里的汇总作为供应商账单。
+
+接口 `usage.summary` / `usage.records` 同时提供 `GET /api/admin/usage` 和 `GET /api/admin/usage/records`，HTTP 与 RPC 都仅允许管理员访问。查询用 `from`、`to`（含当天，`YYYY-MM-DD`）和 IANA `timezone` 指定时间范围；筛选 ID 精确匹配，项目筛选 `__none__` 表示个人聊天。记录采用开始时间和 ID 的游标分页，刷新保留当前页。删除用户、项目或供应商后保留历史用量及原 ID。
+
 ## 路由与 API 架构
 
 页面使用 `apps/web/src/router.tsx` 中的 TanStack Router 路由树。页面仍按业务存放于 `pages/`，通过懒加载拆分；动态链接使用 `$projectId` / `$threadId` 和类型化 `params`，登录、会话和管理员布局共用原有会话状态。
@@ -176,7 +194,7 @@ GitHub 来源的组标题提供仓库跳转按钮，删除按钮左边提供一�
 - `/api/threads/events`、`/api/threads/:threadId/messages`：Hono SSE，保留独立订阅、心跳、权限复查和断开清理。取消订阅不会停止服务端执行。
 - `/api/threads/:threadId/files/raw`：Hono 文件响应，保留权限检查、Range / HEAD、下载与内容安全响应头。
 
-新增业务接口先增加共享契约，再实现对应模块过程，最后通过类型化客户端调用。会话和管理员检查在 oRPC 中间件中执行，非安全 HTTP 方法（包括 RPC POST）要求匹配 `WEB_ORIGIN` / `WEB_ORIGINS` 的来源白名单；HTTP 和 RPC 共用业务权限检查及稳定错误码。API 时间字段显式转换为 ISO 字符串，避免 RPC 的 Date 支持改变既有 DTO。
+新增业务接口先增加共享契约，再实现对应模块过程，最后通过类型化客户端调用。会话和管理员检查在 oRPC 中间件中执行，非安全 HTTP 方法（包括 RPC POST）要求匹配 `WEB_ORIGINS` 的来源白名单；HTTP 和 RPC 共用业务权限检查及稳定错误码。API 时间字段显式转换为 ISO 字符串，避免 RPC 的 Date 支持改变既有 DTO。
 
 框架参考：[TanStack Router](https://tanstack.com/router/latest/docs/quick-start)、[Hono Node.js](https://hono.dev/docs/getting-started/nodejs)、[oRPC Contract First](https://v1.orpc.dev/docs/contract-first/implement-contract)。
 

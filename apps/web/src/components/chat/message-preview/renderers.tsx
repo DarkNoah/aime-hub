@@ -17,7 +17,9 @@ import { GrepPreview } from './grep';
 import { ReadFilePreview } from './read-file';
 import { WebSearchPreview } from './web-search';
 import { WebFetchPreview } from './web-fetch';
-import { ImageGenPreview } from './image-gen';
+import { ImageGenPreview } from './generated-media';
+import { SpeechPreview } from './speech';
+import { LspPreview } from './lsp';
 import type { PreviewPart } from './selection';
 import { getToolName } from '../tool-renderers/registry';
 
@@ -110,6 +112,9 @@ const previewRenderers: Partial<Record<string, ComponentType<PreviewProps>>> = {
   'tool:web_search': WebSearchPreview,
   'tool:web_fetch': WebFetchPreview,
   'tool:image_gen': ImageGenPreview,
+  'tool:speech': SpeechPreview,
+  'tool:lsp_inspect': LspPreview,
+  'tool:mastra_workspace_lsp_inspect': LspPreview,
   'data-om-observation-end': ObservationPreview,
   'data-om-buffering-end': ObservationPreview,
   'data-om-activation': ObservationPreview,

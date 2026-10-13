@@ -1,3 +1,4 @@
+import { UsageService } from './modules/usage/service.js';
 import 'reflect-metadata';
 import { Pool } from 'pg';
 import { serve } from '@hono/node-server';
@@ -50,7 +51,6 @@ const pool = new Pool({ connectionString: env.DATABASE_URL });
 const auth = createAuth({
   pool,
   secret: env.BETTER_AUTH_SECRET,
-  baseURL: env.BETTER_AUTH_URL,
   webOrigin: env.WEB_ORIGINS,
   admins: env.ADMINS,
   isRegistrationEnabled: async () =>
@@ -78,12 +78,13 @@ try {
 const providers = new ProviderService(database);
 const assets = new AssetService(database);
 const requestLogs = new RequestLogService(database);
+const usage = new UsageService(database);
 const disposeChatRequestLogging = installChatRequestLogging(
   undefined,
   (request) => requestLogs.record(request),
   (response) => requestLogs.recordResponse(response),
 );
-const projects = new ProjectService(database);
+const projects = new ProjectService(database, { workspaceRoot });
 const notifications = new NotificationService(
   new PgNotificationStore(pool),
   createPushTransport({
@@ -117,7 +118,15 @@ const agents = new AgentService(
 const models = new LanguageModelService(database, providers, agents);
 const threads = new ThreadService(
   memory,
-  createChatRunner(mastra, models, workspaceRoot, projects, tools, agents),
+  createChatRunner(
+    mastra,
+    models,
+    workspaceRoot,
+    projects,
+    tools,
+    agents,
+    usage,
+  ),
   projects,
   mastra.backgroundTaskManager,
   async (id) => {
@@ -162,6 +171,7 @@ const app = createApp(
   { service: notifications, webOrigin: env.WEB_ORIGINS },
   { service: mcp, webOrigin: env.WEB_ORIGINS },
   { service: systemSettings, webOrigin: env.WEB_ORIGINS },
+  { service: usage, webOrigin: env.WEB_ORIGINS },
 );
 const server = serve(
   { fetch: app.fetch, port: env.SERVER_PORT, hostname: env.SERVER_HOST },

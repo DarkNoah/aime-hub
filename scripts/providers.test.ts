@@ -164,6 +164,7 @@ test('model schema 支持 slash ID、能力、nullable 字段并拒绝越界及�
   });
   assert.deepEqual(model, {
     id: 'org/family/model',
+    modelType: 'language',
     name: 'Model',
     description: null,
     displayName: null,
@@ -436,15 +437,14 @@ test(
     await root.query(`CREATE SCHEMA "${schema}"`);
     schemaCreated = true;
     await database.initialize();
-    const migrations = await database.runMigrations();
     const authConfig = {
       pool,
       secret: randomBytes(32).toString('hex'),
-      baseURL: webOrigin,
       webOrigin,
       admins: 'admin',
     };
     await (await getMigrations(createAuthOptions(authConfig))).runMigrations();
+    const migrations = await database.runMigrations();
     const auth = createAuth(authConfig);
     const httpResponses: Record<string, unknown> = {};
     const httpFake = fakeJson(httpResponses);
@@ -637,6 +637,7 @@ test(
           {
             providerId: provider,
             id: 'org/shared/model',
+            modelType: 'language',
             name: 'Shared',
             displayName: 'Friendly',
             description: null,
@@ -1038,6 +1039,7 @@ test(
           emptyModelDefaults,
         );
         const defaults: ModelDefaults = {
+          ...emptyModelDefaults,
           defaultModel: modelReference(provider, 'org/chat'),
           fastModel: modelReference(provider, 'org/fast'),
           imageModel: modelReference(provider, 'org/image'),

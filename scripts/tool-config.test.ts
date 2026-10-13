@@ -9,6 +9,7 @@ import {
   defaultWebSearchConfig,
   defaultWebFetchConfig,
   defaultImageGenConfig,
+  defaultSpeechConfig,
   webFetchConfigSchema,
   webSearchConfigSchema,
 } from '@aime/shared/tools';
@@ -57,6 +58,9 @@ function fixture() {
         defaultModel: null,
         fastModel: null,
         imageModel: null,
+        embeddingModel: null,
+        rerankModel: null,
+        speechModel: null,
         thinkingMode: 'medium',
       };
     },
@@ -242,6 +246,7 @@ test('persisted configuration controls new tool instances, without credentials i
       { id: 'web_search', config: defaultWebSearchConfig },
       { id: 'web_fetch', config: defaultWebFetchConfig },
       { id: 'image_gen', config: defaultImageGenConfig },
+      { id: 'speech', config: defaultSpeechConfig },
     ],
   );
   const saved = {
@@ -273,6 +278,7 @@ test('persisted configuration controls new tool instances, without credentials i
   assert.deepEqual(Object.keys(await restored.buildTools(toolIds)), [
     'web_fetch',
     'image_gen',
+    'speech',
   ]);
   await restored.update('web_search', { ...saved, enabled: true });
   const next = (await restored.buildTools(toolIds)).web_search;
@@ -311,6 +317,7 @@ test('only enabled SerpAPI credentials can be selected; later disable/removal tr
   assert.deepEqual(Object.keys(await f.service.buildTools(toolIds)), [
     'web_fetch',
     'image_gen',
+    'speech',
   ]);
 });
 
@@ -352,9 +359,20 @@ test('tool settings HTTP and RPC enforce admin, origin and schema validation', a
       params: { toolId: 'sleep' },
       body: { enabled: false },
     });
+  const updateSpeech = () =>
+    client.tools.update({
+      params: { toolId: 'speech' },
+      body: defaultSpeechConfig,
+    });
   for (const value of [undefined, 'user', 'admin-assistant']) {
     role = value;
-    for (const call of [() => client.tools.list(), update, updateImage, toggle])
+    for (const call of [
+      () => client.tools.list(),
+      update,
+      updateImage,
+      updateSpeech,
+      toggle,
+    ])
       await assert.rejects(call(), {
         code: role ? 'FORBIDDEN' : 'UNAUTHORIZED',
       });
@@ -378,6 +396,7 @@ test('tool settings HTTP and RPC enforce admin, origin and schema validation', a
     requestOrigin = value;
     await assert.rejects(update(), { code: 'FORBIDDEN' });
     await assert.rejects(updateImage(), { code: 'FORBIDDEN' });
+    await assert.rejects(updateSpeech(), { code: 'FORBIDDEN' });
     await assert.rejects(toggle(), { code: 'FORBIDDEN' });
   }
   assert.equal(f.rows.size, 0);
@@ -397,6 +416,7 @@ test('tool settings HTTP and RPC enforce admin, origin and schema validation', a
   assert.equal(invalid.status, 400);
   assert.deepEqual((await update()).config, body);
   assert.deepEqual((await updateImage()).config, defaultImageGenConfig);
+  assert.deepEqual((await updateSpeech()).config, defaultSpeechConfig);
   assert.equal((await toggle()).config.enabled, false);
   assert.deepEqual(await f.service.buildTools(['sleep']), {});
   await assert.rejects(
@@ -491,6 +511,7 @@ test('web fetch settings select only Jina AI credentials, persist limits and ind
   assert.deepEqual(Object.keys(await f.service.buildTools(toolIds)), [
     'web_search',
     'image_gen',
+    'speech',
   ]);
 });
 

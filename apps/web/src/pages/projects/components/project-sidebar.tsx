@@ -41,7 +41,6 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
   // Remember expansion between route changes. The current project opens on entry.
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const isExpanded = (id: string) => expanded[id] ?? id === activeProjectId;
-  const anyExpanded = list.projects.some((project) => isExpanded(project.id));
   return (
     <>
       <Collapsible open={open} onOpenChange={setOpen}>
@@ -82,7 +81,6 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
               label={t('projects.list')}
               moreLabel={t('projects.loadMore')}
               loadMore={projects.loadMore}
-              maxHeight={anyExpanded ? 'min(25rem,55dvh)' : '11.25rem'}
             >
               {!list.loading && !list.error && !list.projects.length && (
                 <p className="px-2 py-3 text-xs text-muted-foreground">
@@ -224,7 +222,7 @@ function ProjectItem({
         />
       </div>
       <CollapsibleContent forceMount hidden={!open}>
-        <div className="">
+        <div className="ml-3">
           <SidebarPageList
             {...list}
             label={t('projects.threadList', { name: project.name })}

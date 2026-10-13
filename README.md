@@ -47,8 +47,7 @@ openssl rand -base64 32
 ```dotenv
 DATABASE_URL=postgresql://user:password@127.0.0.1:5432/aime_hub
 BETTER_AUTH_SECRET=<replace-with-generated-secret>
-BETTER_AUTH_URL=http://127.0.0.1:5173
-WEB_ORIGIN=http://127.0.0.1:5173
+WEB_ORIGINS=http://127.0.0.1:5173
 ADMINS=admin
 ```
 
@@ -75,7 +74,7 @@ pnpm dev
 
 访问 **[http://127.0.0.1:5173](http://127.0.0.1:5173)**。Vite 将同域 `/api` 请求代理到 `127.0.0.1:3001`，浏览器只需访问前端入口。API 健康检查为 `/api/health`。
 
-前端端口由 `WEB_ORIGIN` 决定，端口被占用时不会自动切换。浏览器来源必须匹配 `WEB_ORIGIN` 或 `WEB_ORIGINS` 中的协议、主机与端口；修改 `.env` 后重启服务。需要局域网访问时，使用实际 IP 并加入 `WEB_ORIGINS`，不要将监听地址 `0.0.0.0` 当作浏览器入口。
+只需配置 `WEB_ORIGINS`，多个完整 HTTP(S) 来源用逗号分隔，第一项是默认浏览器入口并决定 Vite 端口；端口被占用时不会自动切换。Better Auth 使用动态 `baseURL`，认证链接跟随受信任请求的访问地址；没有请求地址或主机未匹配时回退到第一项。浏览器来源必须精确匹配列表中的协议、主机与端口，未知来源仍会被拒绝。修改 `.env` 后重启服务。需要局域网访问时，将实际 IP 加入列表，不要将监听地址 `0.0.0.0` 当作浏览器入口。不同主机分别登录，不共享 Cookie。旧配置迁移时，把原默认入口放到 `WEB_ORIGINS` 第一项，然后删除 `WEB_ORIGIN` 和 `BETTER_AUTH_URL`。
 
 ### 4. 接入模型，开始对话
 
@@ -116,9 +115,7 @@ Linux 还需安装 Playwright 所需的系统库。项目默认使用本地文�
 | ---------------------------------------------- | ---------------------------------------------------------------- |
 | `DATABASE_URL`                                 | 必填，PostgreSQL 连接串                                          |
 | `BETTER_AUTH_SECRET`                           | 必填，至少 32 字符的随机认证密钥                                 |
-| `BETTER_AUTH_URL`                              | 必填，认证使用的主地址                                           |
-| `WEB_ORIGIN`                                   | 必填，默认浏览器入口；决定 Vite 端口                             |
-| `WEB_ORIGINS`                                  | 可选，逗号分隔的额外来源；自动包含 `WEB_ORIGIN`                  |
+| `WEB_ORIGINS`                                  | 必填，逗号分隔的来源白名单；第一项为默认入口并决定 Vite 端口     |
 | `WEB_HOST`                                     | Vite 监听地址，默认 `0.0.0.0`                                    |
 | `SERVER_HOST` / `SERVER_PORT`                  | API 监听地址与端口，默认 `0.0.0.0:3001`                          |
 | `ADMINS`                                       | 保留管理员用户名，逗号分隔，默认 `admin`；需运行初始化脚本       |
@@ -136,7 +133,7 @@ Linux 还需安装 Playwright 所需的系统库。项目默认使用本地文�
 pnpm --filter @aime/server exec web-push generate-vapid-keys --json
 ```
 
-Compose 还需要 `POSTGRES_PASSWORD`，并在容器内生成 `DATABASE_URL`、令 `BETTER_AUTH_URL` 与 `WEB_ORIGIN` 一致。镜像覆盖及内网端口等部署变量见[部署说明](docs/deployment.md)。
+Compose 还需要 `POSTGRES_PASSWORD`，并在容器内生成 `DATABASE_URL`，将 `WEB_ORIGINS` 传给 API。镜像覆盖及内网端口等部署变量见[部署说明](docs/deployment.md)。
 
 ## 部署
 
@@ -146,7 +143,7 @@ Compose 还需要 `POSTGRES_PASSWORD`，并在容器内生成 `DATABASE_URL`、�
 
 [Dockerfile](Dockerfile) 构建 API 与 Nginx 镜像；[compose.yaml](compose.yaml) 提供 `server`、`web` 和 `postgres` 服务。
 
-- 配置 `WEB_ORIGIN`、`POSTGRES_PASSWORD`、`BETTER_AUTH_SECRET`，并将 HTTPS 入口路由至 `web:80`。基础 Compose 仅暴露容器端口，不映射宿主机端口。
+- 配置 `WEB_ORIGINS`、`POSTGRES_PASSWORD`、`BETTER_AUTH_SECRET`，并将 HTTPS 入口路由至 `web:80`。基础 Compose 仅暴露容器端口，不映射宿主机端口。
 - API 容器启动时执行 `pnpm db:migrate`；启动后在 `server` 容器中执行 `pnpm auth:create-admin`。
 - PostgreSQL 与工作区分别使用 `postgres-data`、`workspace-data` 命名卷，应一起备份。
 - `server` 的 FUSE 配置需要 Linux 宿主机提供 `/dev/fuse`，并使用配置中的 `SYS_ADMIN` 等权限。
@@ -213,7 +210,7 @@ docs/                  # 使用、部署、架构与模块说明
 
 | 问题                       | 检查方向                                                          |
 | -------------------------- | ----------------------------------------------------------------- |
-| 登录或 API 提示来源错误    | 核对实际浏览器来源与 `WEB_ORIGIN` / `WEB_ORIGINS`，修改后重启     |
+| 登录或 API 提示来源错误    | 核对实际浏览器来源与 `WEB_ORIGINS`，修改后重启                    |
 | 提示环境配置无效           | 检查报错列出的变量，尤其是必填项与认证密钥长度                    |
 | 数据库连接失败或结构未就绪 | 检查数据库连接与权限，并执行 `pnpm db:migrate`                    |
 | 网页能打开但无法聊天       | 在后台配置供应商，启用模型并设置默认模型                          |

@@ -35,7 +35,6 @@ test(
     const authConfig = {
       pool,
       secret: randomBytes(32).toString('hex'),
-      baseURL: webOrigin,
       webOrigin,
       admins: 'admin',
     };
