@@ -1,6 +1,87 @@
 import type { en } from './en.js';
 
 export const zhCN = {
+  'home.title': 'Aime Hub 产品首页',
+  'home.subtitle': '可自行部署的 AI 工作空间',
+  'home.preview': '界面预览',
+  'home.features': '功能特点',
+  'home.deploy': '自行部署',
+  'home.enter': '进入工作区',
+  'home.start': '开始使用',
+  'home.headlineFirst': '把 AI，带进',
+  'home.headlineSecond': '你的工作现场。',
+  'home.description':
+    '从一次对话到一个项目，将模型、Agent、文件与自动化放在同一个空间。让思路有延续，让协作有上下文。',
+  'home.previewChat': 'AI 对话',
+  'home.previewWorkspace': '工作空间',
+  'home.previewProjects': '项目协作',
+  'home.previewDark': '深色模式',
+  'home.chatAlt': 'Aime Hub 对话界面：Markdown 回复、模型选择与聊天输入框',
+  'home.workspaceAlt': 'Aime Hub 工作空间首页：新建对话、最近对话与项目入口',
+  'home.projectsAlt': 'Aime Hub 项目列表：项目角色、置顶状态与快捷操作',
+  'home.darkAlt': 'Aime Hub 深色模式下的对话界面',
+  'home.enlarge': '在新标签页查看{{name}}完整截图',
+  'home.previewNote': '真实界面 · 示例数据 · 点击图片查看大图',
+  'home.discover': '了解工作方式',
+  'home.featuresHeading': '从想法到成果，\n每一步都在这里。',
+  'home.featuresIntro':
+    '自由选择模型，把 Agent 和工具用在合适的任务里。个人探索与团队协作，共用一套熟悉的工作方式。',
+  'home.modelsTitle': '模型，由你选择',
+  'home.modelsDescription':
+    '接入模型供应商，管理模型能力，按任务切换模型与思考等级。',
+  'home.modelsDetail': '统一入口 · 个人与项目默认配置',
+  'home.agentsTitle': '把经验变成能力',
+  'home.agentsDescription':
+    '创建专属 Agent，导入与管理 Skills，在对话中复用成熟的工作方法。',
+  'home.agentsDetail': 'Agent 发布 · GitHub 技能导入',
+  'home.toolsTitle': '连接工作所需的工具',
+  'home.toolsDescription':
+    '使用网页搜索、内容读取等工具，通过 MCP 连接更多外部服务。',
+  'home.toolsDetail': '工具调用可见 · MCP 连接管理',
+  'home.automationsTitle': '让重复工作按时发生',
+  'home.automationsDescription':
+    '为个人或项目安排定时任务，查看执行记录，并按需开启完成通知。',
+  'home.automationsDetail': '启停与立即运行 · 执行历史',
+  'home.projectsHeading': '对话有上下文，\n协作有共同空间。',
+  'home.projectsDescription':
+    '围绕项目组织讨论与资料。成员在同一个工作区接着推进，文件和对话不必散落在不同位置。',
+  'home.projectFiles': '文件树、上传下载与多种格式预览',
+  'home.projectMembers': '按 owner / admin / member 管理成员权限',
+  'home.projectContext': '共享对话与项目默认模型配置',
+  'home.deployHeading': '你的空间，按你的方式部署。',
+  'home.deployDescription':
+    '使用 Docker Compose 或 Dokploy 部署，统一管理账号、模型与运行配置。对话在服务端执行，关闭网页后仍可继续运行。',
+  'home.deployDocs': '查看部署指南',
+  'home.sourceDocs': '阅读项目文档',
+  'home.stackWeb': '界面与交互',
+  'home.stackAgent': 'Agent 与服务',
+  'home.stackData': '数据与部署',
+  'home.footer': '对话、项目与自动化，汇于一处。',
+
+  'workspace.startTitle': '从一个想法，开始今天的工作。',
+  'workspace.startDescription':
+    '研究问题、整理资料、编写代码。选择适合的模型与 Agent，让对话成为工作的起点。',
+  'workspace.openProjects': '打开项目',
+  'workspace.focusChat': '多模型与 Agent 对话',
+  'workspace.focusProjects': '对话与文件，共享协作',
+  'workspace.focusAutomations': '定时运行，随时查看',
+  'workspace.recent': '继续上次的思路',
+  'workspace.recentEmpty': '你的下一段思路，从这里开始',
+  'workspace.recentEmptyHint': '开始一次对话后，你可以在这里随时回来继续。',
+  'workspace.explore': '为工作找到合适的空间',
+  'workspace.projectsHint': '把相关对话与文件放在一起，和成员共同推进。',
+  'workspace.automationsHint': '安排重复任务，按计划运行并查看结果。',
+  'workspace.skillsHint': '保存和复用工作方法，用 / 在对话中调用。',
+  'chat.welcomeResearch': '探索问题',
+  'chat.welcomeResearchHint': '拆解问题，梳理思路与信息。',
+  'chat.welcomeWrite': '整理与创作',
+  'chat.welcomeWriteHint': '从零散的想法，到清晰的表达。',
+  'chat.welcomeBuild': '编写与调试',
+  'chat.welcomeBuildHint': '理解代码，一起找到解决方案。',
+  'auth.productTitle': '让想法有起点，让工作有进展。',
+  'auth.productDescription':
+    '在同一个空间里，与 AI 对话、协作管理项目文件、安排自动化任务。按照自己的方式部署和使用。',
+
   'nav.usage': '用量统计',
   'usage.description':
     '按用户、项目和模型查看 runtime 的 tokens 用量、时间分布及步骤记录。',
@@ -1279,6 +1360,10 @@ export const zhCN = {
   'chat.errorTitle': '回复失败',
   'chat.retry': '重试',
   'chat.retrying': '正在重试…',
+  'chat.continue': '继续',
+  'chat.continuing': '正在继续…',
+  'chat.errors.continueUnavailable':
+    '当前没有可继续的工具消息，请先处理待确认的交互或发送新消息。',
   'chat.errors.retryUnavailable': '没有可重试的消息，请发送一条新消息。',
   'common.loading': '正在加载页面…',
   'providers.search': '搜索名称或地址',

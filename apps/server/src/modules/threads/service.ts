@@ -10,8 +10,9 @@ import type { StorageThreadType } from '@mastra/core/memory';
 import type { WorkspaceFilesystem } from '@mastra/core/workspace';
 import type { UIMessage } from 'ai';
 import {
-  mergeThreadMessage,
-  sortThreadMessages,
+  canContinueThread,
+  mergeThreadMessages,
+  threadMessageSourceIds,
 } from '@aime/shared/thread-messages';
 import type {
   ChatSettings,
@@ -549,7 +550,10 @@ export class ThreadService {
       if (event.type === 'message') {
         this.upsert(runtime, event.message);
         if (event.active && runtime.data.activeId)
-          runtime.activeMessageId = event.message.id;
+          runtime.activeMessageId =
+            runtime.messages.find((message) =>
+              threadMessageSourceIds(message).includes(event.message.id),
+            )?.id ?? null;
         this.publish(runtime, true);
         return;
       }
@@ -1187,18 +1191,26 @@ export class ThreadService {
   }
 
   private upsert(runtime: Runtime, message: UIMessage) {
-    runtime.removedMessageIds.delete(message.id);
-    const index = runtime.messages.findIndex((item) => item.id === message.id);
-    if (index >= 0)
-      message = mergeThreadMessage(runtime.messages[index], message);
-    runtime.messages = sortThreadMessages(
-      index < 0
-        ? [...runtime.messages, structuredClone(message)]
-        : runtime.messages.map((item, i) =>
-            i === index ? structuredClone(message) : item,
-          ),
-    );
-    runtime.changedMessages.set(message.id, structuredClone(message));
+    const previous = new Map(runtime.messages.map((item) => [item.id, item]));
+    runtime.messages = mergeThreadMessages(runtime.messages, [
+      structuredClone(message),
+    ]);
+    const ids = new Set(runtime.messages.map((item) => item.id));
+    for (const id of previous.keys()) {
+      if (ids.has(id)) continue;
+      runtime.changedMessages.delete(id);
+      runtime.removedMessageIds.add(id);
+    }
+    for (const item of runtime.messages) {
+      runtime.removedMessageIds.delete(item.id);
+      if (previous.get(item.id) !== item)
+        runtime.changedMessages.set(item.id, structuredClone(item));
+      if (
+        runtime.activeMessageId &&
+        threadMessageSourceIds(item).includes(runtime.activeMessageId)
+      )
+        runtime.activeMessageId = item.id;
+    }
   }
 
   abort(userId: string, id: string) {
@@ -1240,14 +1252,36 @@ export class ThreadService {
   }
 
   retry(userId: string, id: string) {
+    return this.continueFromHistory(userId, id, 'retry');
+  }
+
+  continueRun(userId: string, id: string) {
+    return this.continueFromHistory(userId, id, 'continue');
+  }
+
+  private continueFromHistory(
+    userId: string,
+    id: string,
+    action: 'retry' | 'continue',
+  ) {
     return this.scopeLocked(userId, id, async () => {
       if (this.closing) throw new ThreadError('SERVER_STOPPING', 503);
       const runtime = await this.runtime(userId, id);
-      if (this.busy(runtime) || !runtime.data.error)
+      if (this.busy(runtime) || (action === 'retry' && !runtime.data.error))
         return this.summary(runtime.thread, runtime);
       if (
-        runtime.data.toolInteractions.some((item) => !item.response) ||
-        !runtime.messages.some((message) => message.role === 'user')
+        action === 'continue' &&
+        !canContinueThread(
+          runtime.messages,
+          runtime.data,
+          runtime.data.toolInteractions,
+        )
+      )
+        throw new ThreadError('CONTINUE_UNAVAILABLE', 409);
+      if (
+        action === 'retry' &&
+        (runtime.data.toolInteractions.some((item) => !item.response) ||
+          !runtime.messages.some((message) => message.role === 'user'))
       )
         throw new ThreadError('RETRY_UNAVAILABLE', 409);
       const settings: ChatSettings = {
@@ -1262,6 +1296,7 @@ export class ThreadService {
         reasoningEffort: runtime.data.reasoningEffort,
       };
       const session = await this.session(runtime, settings);
+      // The native retry starts a stream with no new input, preserving tool results.
       await session.retry(settings);
       runtime.data.error = null;
       runtime.data.status = 'pending';

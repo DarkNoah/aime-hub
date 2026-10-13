@@ -14,7 +14,7 @@ export function ChatGoal({
   return (
     <Badge
       variant="outline"
-      className="gap-1.5 border-primary/20 bg-primary/5 text-primary"
+      className="size-7 shrink-0 justify-center gap-0 border-primary/20 bg-primary/5 p-0 text-primary @xl/chat:h-auto @xl/chat:w-auto @xl/chat:gap-1.5 @xl/chat:px-2 @xl/chat:py-0.5"
       data-chat-goal
     >
       <Button
@@ -25,11 +25,11 @@ export function ChatGoal({
         onClick={onClose}
         aria-label={t('chat.goal.close')}
         title={t('chat.goal.close')}
-        className="-ml-1 size-5 rounded-full text-current hover:bg-primary/10 hover:text-primary focus-visible:ring-inset"
+        className="size-6 rounded-full text-current hover:bg-primary/10 hover:text-primary focus-visible:ring-inset @xl/chat:-ml-1 @xl/chat:size-5"
       >
         <X className="size-3" aria-hidden="true" />
       </Button>
-      <span>{t('chat.goal.title')}</span>
+      <span className="hidden @xl/chat:inline">{t('chat.goal.title')}</span>
     </Badge>
   );
 }

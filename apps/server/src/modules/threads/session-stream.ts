@@ -46,6 +46,12 @@ export async function consumeSessionStream(
       await current.done;
     }
   };
+  const reconcileTurn = async () => {
+    if (!streamedMessageIds.size) return;
+    const ids = [...streamedMessageIds];
+    await onTurnFinished(ids);
+    for (const id of ids) streamedMessageIds.delete(id);
+  };
   const beginSegment = (id?: string) => {
     messageId = id;
     let controller!: ReadableStreamDefaultController<ChunkType>;
@@ -119,7 +125,7 @@ export async function consumeSessionStream(
       if (native.type === 'start') {
         started = true;
         await closeSegment();
-        streamedMessageIds.clear();
+        await reconcileTurn();
         status = 'running';
         emit({ type: 'status', status, runId });
         beginSegment(
@@ -179,6 +185,7 @@ export async function consumeSessionStream(
       } else if (native.type === 'abort') {
         status = 'canceled';
         await closeSegment();
+        await reconcileTurn();
         emit({ type: 'status', status, runId });
       } else if (native.type === 'finish') {
         await closeSegment();
@@ -189,14 +196,14 @@ export async function consumeSessionStream(
               : native.payload.stepResult.reason === 'tripwire'
                 ? 'tripwire'
                 : 'success';
-        // Native continuations can persist into an earlier assistant message
-        // while emitting a fresh stream ID. Reconcile only after this turn has
-        // finished, so live drafts are never discarded during generation.
-        if (status === 'success') await onTurnFinished([...streamedMessageIds]);
+        // Reconcile every terminal state. Reconciliation only coalesces proven
+        // overlap, retaining partial text/tools that have not reached storage.
+        await reconcileTurn();
         emit({ type: 'status', status, runId });
       }
     }
   } finally {
     await closeSegment();
+    await reconcileTurn();
   }
 }

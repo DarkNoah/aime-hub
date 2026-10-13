@@ -57,7 +57,7 @@ export function ChatContextUsage({ usage }: { usage: ChatUsage }) {
       <div className="flex items-center gap-1 text-xs text-muted-foreground">
         {hasLimit && usage.totalTokens !== undefined ? (
           <ContextTrigger
-            className="h-7 gap-1.5 px-2 text-xs"
+            className="size-7 gap-0 p-0 text-xs [&>span]:hidden @xl/chat:w-auto @xl/chat:gap-1.5 @xl/chat:px-2 @xl/chat:[&>span]:inline"
             aria-label={t('chat.usage.title')}
           />
         ) : (

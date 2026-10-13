@@ -216,6 +216,14 @@ export function useThreadChat(
     error,
     activeMessageId,
     send,
+    continueRun: async () => {
+      setSubmitting(true);
+      try {
+        updateThread(await chatApi.continue(threadId));
+      } finally {
+        setSubmitting(false);
+      }
+    },
     loadEarlier,
     hasEarlier: history?.hasMore ?? false,
     loadingHistory,

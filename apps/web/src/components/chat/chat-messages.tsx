@@ -261,7 +261,12 @@ export const ChatMessage = memo(function ChatMessage({
               />
             );
           }
-          if (part.type === 'text' && part.state !== 'streaming')
+          // Aborted streams may never send text-end. Their partial text still
+          // belongs in the stopped conversation instead of remaining hidden.
+          if (
+            part.type === 'text' &&
+            (part.state !== 'streaming' || !streaming)
+          )
             return message.role === 'user' ? (
               <p key={index} className="whitespace-pre-wrap">
                 {part.text}

@@ -29,6 +29,7 @@ export type ModelSelectorProps = {
   textOnly?: boolean;
   compact?: boolean;
   iconOnly?: boolean;
+  collapseOnNarrow?: boolean;
   value: string | null;
   onValueChange: (value: string | null) => void;
   disabled?: boolean;
@@ -45,6 +46,7 @@ export function ModelSelector({
   textOnly = false,
   compact = false,
   iconOnly = false,
+  collapseOnNarrow = false,
   value,
   onValueChange,
   disabled = false,
@@ -104,6 +106,9 @@ export function ModelSelector({
             compact &&
               !iconOnly &&
               'h-8 gap-1.5 px-2 text-xs text-muted-foreground',
+            collapseOnNarrow &&
+              !iconOnly &&
+              'size-7 justify-center gap-0 p-0 has-[>svg]:px-0 @xl:h-8 @xl:w-full @xl:justify-between @xl:gap-1.5 @xl:px-2',
           )}
           aria-label={`${label}: ${selectedLabel}`}
           title={selectedLabel}
@@ -116,13 +121,16 @@ export function ModelSelector({
                 className={cn(
                   'flex min-w-0 items-center gap-2',
                   compact && 'gap-1.5',
+                  collapseOnNarrow && 'gap-0 @xl:gap-1.5',
                 )}
               >
                 <Box
                   className="shrink-0 text-muted-foreground"
                   aria-hidden="true"
                 />
-                <ModelSelectorName>
+                <ModelSelectorName
+                  className={collapseOnNarrow ? 'hidden @xl:block' : undefined}
+                >
                   {selected?.displayName ?? selectedLabel}
                 </ModelSelectorName>
               </span>
@@ -130,6 +138,7 @@ export function ModelSelector({
                 className={cn(
                   'shrink-0 text-muted-foreground',
                   compact && 'size-3',
+                  collapseOnNarrow && 'hidden @xl:block',
                 )}
                 aria-hidden="true"
               />

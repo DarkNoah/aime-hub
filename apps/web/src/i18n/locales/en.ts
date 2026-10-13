@@ -1,4 +1,92 @@
 export const en = {
+  'home.title': 'Aime Hub product home',
+  'home.subtitle': 'An AI workspace you host yourself',
+  'home.preview': 'Product tour',
+  'home.features': 'Features',
+  'home.deploy': 'Self-host',
+  'home.enter': 'Open workspace',
+  'home.start': 'Get started',
+  'home.headlineFirst': 'Bring AI into',
+  'home.headlineSecond': 'your everyday work.',
+  'home.description':
+    'From a conversation to a shared project, keep models, agents, files, and scheduled tasks in one place. Pick up your work with its context intact.',
+  'home.previewChat': 'AI chat',
+  'home.previewWorkspace': 'Workspace',
+  'home.previewProjects': 'Projects',
+  'home.previewDark': 'Dark mode',
+  'home.chatAlt':
+    'Aime Hub chat with a Markdown response, model selection, and message composer',
+  'home.workspaceAlt':
+    'Aime Hub workspace with new chat, recent conversations, and project links',
+  'home.projectsAlt':
+    'Aime Hub project list with member roles, pinned state, and quick actions',
+  'home.darkAlt': 'Aime Hub conversation in dark mode',
+  'home.enlarge': 'Open the full {{name}} screenshot in a new tab',
+  'home.previewNote':
+    'Actual interface · Illustrative data · Select an image to enlarge',
+  'home.discover': 'Explore the workflow',
+  'home.featuresHeading': 'One workspace, from idea to outcome.',
+  'home.featuresIntro':
+    'Choose your models and put agents and tools to work. Use the same familiar workspace for personal exploration and team projects.',
+  'home.modelsTitle': 'Choose your models',
+  'home.modelsDescription':
+    'Connect providers, configure model capabilities, and choose a model and reasoning level for each task.',
+  'home.modelsDetail': 'One catalog · Personal and project defaults',
+  'home.agentsTitle': 'Make workflows reusable',
+  'home.agentsDescription':
+    'Create agents, import Skills, and reuse established workflows in your conversations.',
+  'home.agentsDetail': 'Agent publishing · Skills from GitHub',
+  'home.toolsTitle': 'Connect the tools you need',
+  'home.toolsDescription':
+    'Use web search and page reading, and connect additional services through MCP.',
+  'home.toolsDetail': 'Visible tool results · MCP connections',
+  'home.automationsTitle': 'Put recurring work on a schedule',
+  'home.automationsDescription':
+    'Schedule personal or project tasks, review run history, and optionally enable completion notifications.',
+  'home.automationsDetail': 'Pause, resume, and run · Execution history',
+  'home.projectsHeading': 'Shared context. A shared place to work.',
+  'home.projectsDescription':
+    'Organize discussions and files around a project. Give members a shared workspace to continue the work together.',
+  'home.projectFiles': 'File trees, uploads, downloads, and media previews',
+  'home.projectMembers': 'Owner, admin, and member access roles',
+  'home.projectContext': 'Shared conversations and project model defaults',
+  'home.deployHeading': 'Your workspace. Your deployment.',
+  'home.deployDescription':
+    'Deploy with Docker Compose or Dokploy and manage accounts, models, and settings centrally. Conversations execute on the server and can continue after the page closes.',
+  'home.deployDocs': 'Read the deployment guide',
+  'home.sourceDocs': 'Read the documentation',
+  'home.stackWeb': 'Interface',
+  'home.stackAgent': 'Agents and server',
+  'home.stackData': 'Data and deployment',
+  'home.footer': 'Conversations, projects, and automations in one place.',
+
+  'workspace.startTitle': 'Start with an idea. Make it happen.',
+  'workspace.startDescription':
+    'Research a question, organize your notes, or write code. Choose a model and agent to get started.',
+  'workspace.openProjects': 'Open projects',
+  'workspace.focusChat': 'Models and agents',
+  'workspace.focusProjects': 'Shared chats and files',
+  'workspace.focusAutomations': 'Scheduled tasks',
+  'workspace.recent': 'Pick up where you left off',
+  'workspace.recentEmpty': 'Your next idea starts here',
+  'workspace.recentEmptyHint':
+    'Once you start a conversation, return here to continue it.',
+  'workspace.explore': 'A space for every task',
+  'workspace.projectsHint':
+    'Keep related chats and files together with your team.',
+  'workspace.automationsHint':
+    'Schedule recurring work and review the results.',
+  'workspace.skillsHint': 'Reuse your workflows with / commands in chat.',
+  'chat.welcomeResearch': 'Explore a question',
+  'chat.welcomeResearchHint': 'Break down a topic and organize what you learn.',
+  'chat.welcomeWrite': 'Write and organize',
+  'chat.welcomeWriteHint': 'Turn rough notes into something worth sharing.',
+  'chat.welcomeBuild': 'Build and debug',
+  'chat.welcomeBuildHint': 'Understand the code and work through a solution.',
+  'auth.productTitle': 'A place for ideas. A workspace for progress.',
+  'auth.productDescription':
+    'Chat with AI, collaborate on project files, and schedule recurring tasks in a workspace you host yourself.',
+
   'nav.usage': 'Usage',
   'usage.description':
     'Explore runtime token usage by user, project and model, with activity patterns and step records.',
@@ -1404,6 +1492,10 @@ export const en = {
   'chat.errorTitle': 'Response failed',
   'chat.retry': 'Retry',
   'chat.retrying': 'Retrying…',
+  'chat.continue': 'Continue',
+  'chat.continuing': 'Continuing…',
+  'chat.errors.continueUnavailable':
+    'No tool turn to continue. Resolve any pending interaction or send a new message.',
   'chat.errors.retryUnavailable':
     'No message to retry. Please send a new message.',
   'chat.errors.failed':

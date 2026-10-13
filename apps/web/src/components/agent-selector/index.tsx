@@ -24,6 +24,7 @@ export function AgentSelector({
   disabled,
   allowDefault = true,
   compact = false,
+  collapseOnNarrow = false,
   label,
   id,
 }: {
@@ -34,6 +35,7 @@ export function AgentSelector({
   disabled?: boolean;
   allowDefault?: boolean;
   compact?: boolean;
+  collapseOnNarrow?: boolean;
   label: string;
   id?: string;
 }) {
@@ -78,6 +80,8 @@ export function AgentSelector({
             'w-full min-w-0 justify-between gap-2 px-3 font-normal',
             compact &&
               'h-8 gap-1.5 px-2 text-xs text-muted-foreground has-[>svg]:px-2',
+            collapseOnNarrow &&
+              'size-7 justify-center gap-0 p-0 has-[>svg]:px-0 @xl:h-8 @xl:w-full @xl:justify-between @xl:gap-1.5 @xl:px-2 @xl:has-[>svg]:px-2',
           )}
           aria-label={`${label}: ${selectedLabel}`}
           title={
@@ -87,11 +91,16 @@ export function AgentSelector({
           }
         >
           <Bot className="shrink-0 text-muted-foreground" aria-hidden="true" />
-          <ModelSelectorName>{selectedLabel}</ModelSelectorName>
+          <ModelSelectorName
+            className={collapseOnNarrow ? 'hidden @xl:block' : undefined}
+          >
+            {selectedLabel}
+          </ModelSelectorName>
           <ChevronDown
             className={cn(
               'shrink-0 text-muted-foreground',
               compact && 'size-3',
+              collapseOnNarrow && 'hidden @xl:block',
             )}
             aria-hidden="true"
           />

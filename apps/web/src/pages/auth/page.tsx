@@ -4,8 +4,9 @@ import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import {
   ArrowRight,
-  Eye,
-  EyeOff,
+  FolderOpen,
+  MessageSquare,
+  Clock3,
   LoaderCircle,
   ShieldCheck,
 } from 'lucide-react';
@@ -16,6 +17,7 @@ import { useRegistrationStatus } from '@/features/auth/use-registration-status';
 import { Brand } from '@/components/brand';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
 import { Button } from '@/components/ui/button';
+import { PasswordInput } from '@/components/password-input';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { LoadingState } from '@/components/loading-state';
@@ -41,7 +43,6 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<ErrorKey | null>(null);
   const [accountCreated, setAccountCreated] = useState(false);
@@ -122,7 +123,13 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
   return (
     <main className="relative flex min-h-dvh flex-col">
       <header className="flex items-center justify-between gap-4 px-6 py-6 sm:px-10">
-        <Brand />
+        <Link
+          to="/home"
+          aria-label={t('home.title')}
+          className="rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Brand />
+        </Link>
         <div className="flex shrink-0 items-center gap-3">
           <span className="hidden rounded-full border bg-card/70 px-3 py-1 text-xs text-muted-foreground sm:inline-flex">
             {t('auth.tagline')}
@@ -130,8 +137,39 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
           <ThemeToggle />
         </div>
       </header>
-      <div className="flex flex-1 items-center justify-center px-4 py-8 sm:py-12">
-        <div className="w-full max-w-[420px]">
+      <div className="mx-auto grid w-full max-w-6xl flex-1 items-center gap-14 px-5 py-8 sm:px-10 sm:py-12 lg:grid-cols-[1.1fr_1fr]">
+        <section
+          className="hidden self-stretch rounded-2xl bg-[var(--feature-surface)] p-10 text-white lg:flex lg:flex-col lg:justify-between"
+          aria-labelledby="auth-product-title"
+        >
+          <div>
+            <span className="text-sm text-white/75">{t('auth.tagline')}</span>
+            <h2
+              id="auth-product-title"
+              className="mt-7 max-w-sm text-4xl leading-snug font-semibold"
+            >
+              {t('auth.productTitle')}
+            </h2>
+            <p className="mt-5 max-w-sm text-sm leading-7 text-white/80">
+              {t('auth.productDescription')}
+            </p>
+          </div>
+          <ul className="mt-12 space-y-5 border-t border-white/20 pt-7">
+            <li className="flex items-center gap-3 text-sm text-white/90">
+              <MessageSquare className="size-4" aria-hidden />
+              {t('workspace.focusChat')}
+            </li>
+            <li className="flex items-center gap-3 text-sm text-white/90">
+              <FolderOpen className="size-4" aria-hidden />
+              {t('workspace.focusProjects')}
+            </li>
+            <li className="flex items-center gap-3 text-sm text-white/90">
+              <Clock3 className="size-4" aria-hidden />
+              {t('workspace.focusAutomations')}
+            </li>
+          </ul>
+        </section>
+        <div className="mx-auto w-full max-w-[420px]">
           <div className="mb-7 text-center">
             <h1 className="text-3xl font-semibold tracking-tight sm:text-[34px]">
               {registering ? t('auth.registerHeading') : t('auth.loginHeading')}
@@ -233,51 +271,32 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
                     )}
                     <div className="space-y-2">
                       <Label htmlFor="password">{t('auth.password')}</Label>
-                      <div className="relative">
-                        <Input
-                          id="password"
-                          name="password"
-                          type={showPassword ? 'text' : 'password'}
-                          autoComplete={
-                            registering ? 'new-password' : 'current-password'
-                          }
-                          required
-                          minLength={8}
-                          maxLength={128}
-                          placeholder={
-                            registering
-                              ? t('auth.newPasswordPlaceholder')
-                              : t('auth.passwordPlaceholder')
-                          }
-                          value={password}
-                          onChange={(event) => setPassword(event.target.value)}
-                          className="pr-11"
-                        />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="absolute top-0.5 right-0.5"
-                          onClick={() => setShowPassword(!showPassword)}
-                          aria-label={
-                            showPassword
-                              ? t('auth.hidePassword')
-                              : t('auth.showPassword')
-                          }
-                          aria-pressed={showPassword}
-                        >
-                          {showPassword ? <EyeOff /> : <Eye />}
-                        </Button>
-                      </div>
+                      <PasswordInput
+                        id="password"
+                        name="password"
+                        autoComplete={
+                          registering ? 'new-password' : 'current-password'
+                        }
+                        required
+                        minLength={8}
+                        maxLength={128}
+                        placeholder={
+                          registering
+                            ? t('auth.newPasswordPlaceholder')
+                            : t('auth.passwordPlaceholder')
+                        }
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                      />
                     </div>
                     {registering && (
                       <div className="space-y-2">
                         <Label htmlFor="confirm-password">
                           {t('auth.confirmPassword')}
                         </Label>
-                        <Input
+                        <PasswordInput
                           id="confirm-password"
                           name="confirmPassword"
-                          type={showPassword ? 'text' : 'password'}
                           autoComplete="new-password"
                           required
                           minLength={8}

@@ -58,9 +58,9 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   }
 
   const linkClass =
-    'flex h-10 items-center gap-3 rounded-lg px-3 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring';
+    'sidebar-link flex h-9 items-center gap-3 rounded-lg px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring';
   const activeProps = {
-    className: 'bg-card font-semibold text-primary ring-1 ring-border',
+    className: 'bg-accent font-semibold text-primary',
   };
   const inactiveProps = {
     className: 'text-muted-foreground hover:bg-accent/70 hover:text-foreground',
@@ -68,18 +68,18 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="px-5 pt-6 pb-8">
+      <div className="px-5 pt-6 pb-6">
         <Brand />
       </div>
       <ScrollArea
         className="min-h-0 flex-1"
         viewportProps={{ className: '[&>div]:block!' }}
       >
-        <nav aria-label={t('nav.main')} className="space-y-7 px-3">
+        <nav aria-label={t('nav.main')} className="space-y-6 px-3 pb-3">
           <Item
             asChild
             variant="ghost"
-            className="h-10 w-full gap-3 px-3 py-0 text-primary"
+            className="sidebar-new-chat h-10 w-full gap-3 border-primary/15 bg-card px-3 py-0 text-primary"
           >
             <button
               type="button"

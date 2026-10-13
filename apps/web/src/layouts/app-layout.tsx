@@ -2,6 +2,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, Outlet, useLocation, useParams } from '@tanstack/react-router';
 import { ChevronRight, Menu } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
 import {
@@ -85,7 +86,7 @@ function LayoutContent() {
         <Sidebar />
       </aside>
       <div className="min-w-0 flex-1">
-        <header className="flex h-16 items-center gap-3 border-b bg-card px-5 sm:px-8">
+        <header className="flex h-16 items-center gap-3 border-b bg-background px-5 sm:px-8">
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger asChild>
               <Button
@@ -136,9 +137,13 @@ function LayoutContent() {
             )}
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
-            <span className="hidden rounded-md bg-muted px-2.5 py-1 text-xs text-muted-foreground sm:inline-block">
+            <Badge
+              variant="outline"
+              className="hidden gap-1.5 bg-card font-normal text-muted-foreground sm:inline-flex"
+            >
+              <span className="size-1.5 rounded-full bg-primary" aria-hidden />
               {t('nav.initialVersion')}
-            </span>
+            </Badge>
             <ThemeToggle />
           </div>
         </header>

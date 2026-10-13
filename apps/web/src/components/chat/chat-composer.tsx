@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowUp, Paperclip, Square } from 'lucide-react';
+import { ArrowUp, Paperclip, RotateCw, Square } from 'lucide-react';
 import { nanoid } from 'nanoid';
 import { toast } from 'sonner';
 import {
@@ -170,6 +170,7 @@ function AttachButton({ disabled }: { disabled: boolean }) {
       type="button"
       size="icon-sm"
       variant="ghost"
+      className="size-7 @xl/chat:size-8"
       disabled={disabled}
       aria-label={t('chat.attach')}
       title={t('chat.imageHint')}
@@ -456,8 +457,8 @@ export function ChatComposer({
               )}
             />
           </PromptInputBody>
-          <PromptInputFooter className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-x-2 gap-y-1 @md/chat:flex">
-            <div className="flex min-w-0 flex-wrap items-center gap-1">
+          <PromptInputFooter className="flex min-w-0 flex-nowrap items-center gap-1">
+            <div className="flex shrink-0 items-center gap-1">
               <AttachButton disabled={pending || !!disabled || !!stopping} />
               {(goalDraft || goal) && (
                 <ChatGoal
@@ -478,10 +479,11 @@ export function ChatComposer({
                 />
               )}
             </div>
-            <div className="order-first col-span-2 flex min-w-0 items-center gap-1 @md/chat:order-none @md/chat:flex-1">
-              <div className="min-w-0 max-w-24 flex-1">
+            <div className="flex min-w-0 flex-1 items-center gap-1">
+              <div className="w-7 shrink-0 @xl/chat:w-auto @xl/chat:min-w-0 @xl/chat:max-w-24 @xl/chat:flex-1">
                 <AgentSelector
                   compact
+                  collapseOnNarrow
                   label={t('chat.agent')}
                   value={settings.agentId ?? null}
                   agents={agentCatalog.data?.agents ?? []}
@@ -512,16 +514,20 @@ export function ChatComposer({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="sm"
+                  size="icon-sm"
+                  className="size-7 @xl/chat:size-8"
+                  aria-label={t('agents.retry')}
+                  title={t('agents.retry')}
                   onClick={agentCatalog.retry}
                 >
-                  {t('agents.retry')}
+                  <RotateCw aria-hidden="true" />
                 </Button>
               )}
             </div>
-            <div className="ml-auto flex shrink-0 items-center gap-2">
+            <div className="ml-auto flex shrink-0 items-center gap-1">
               {usage && <ChatContextUsage usage={usage} />}
               <PromptInputSubmit
+                className="size-7 @xl/chat:size-8"
                 disabled={
                   showStop ? stopping : pending || unavailable || stopping
                 }

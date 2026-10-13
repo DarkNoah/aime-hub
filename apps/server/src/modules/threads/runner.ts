@@ -18,6 +18,10 @@ import { RequestContext } from '@mastra/core/request-context';
 import { createObservabilityContext } from '@mastra/core/observability';
 import { ThreadMessageMemory } from './message-memory.js';
 import { chatSettingsSchema, type ChatSettings } from '@aime/shared/threads';
+import {
+  reconcileThreadMessages,
+  sortThreadMessages,
+} from '@aime/shared/thread-messages';
 import type { Mastra } from '@mastra/core/mastra';
 import type { UIMessage } from 'ai';
 import type { LanguageModelService } from '../models/language-model.js';
@@ -217,18 +221,25 @@ export function createChatRunner(
         const refreshMessages = async (streamedMessageIds: string[] = []) => {
           await memory.settled();
           const history = await memory.recall({ ...target, perPage: 80 });
-          const persisted = threadMessages(history.messages);
-          const persistedIds = new Set(persisted.map((message) => message.id));
-          const removedMessageIds = streamedMessageIds.filter(
-            (id) => !persistedIds.has(id),
+          const persisted = sortThreadMessages(
+            threadMessages(history.messages),
           );
-          for (const id of removedMessageIds) messages.delete(id);
-          for (const message of persisted) {
+          const reconciled = reconcileThreadMessages(
+            [...messages.values()],
+            persisted,
+            streamedMessageIds,
+          );
+          const retainedIds = new Set(reconciled.map((message) => message.id));
+          const removedMessageIds = [
+            ...new Set([...messages.keys(), ...streamedMessageIds]),
+          ].filter((id) => !retainedIds.has(id));
+          messages.clear();
+          for (const message of reconciled) {
             messages.set(message.id, structuredClone(message));
           }
           onEvent({
             type: 'reconcile',
-            messages: persisted,
+            messages: reconciled,
             removedMessageIds,
           });
           onEvent({ type: 'goal' });

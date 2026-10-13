@@ -12,6 +12,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { Slider } from '@/components/ui/slider';
+import { cn } from '@/lib/utils';
 import { FloatingChatContext } from './layout-context';
 
 export function ChatSettingsFields({
@@ -40,7 +41,13 @@ export function ChatSettingsFields({
   const label = t(`chat.reasoning.${efforts[level]}`);
   return (
     <>
-      <div className="min-w-0 max-w-[min(11rem,38cqw)] flex-1">
+      <div
+        className={cn(
+          'w-7 shrink-0',
+          !floating &&
+            '@xl/chat:w-auto @xl/chat:min-w-0 @xl/chat:max-w-44 @xl/chat:flex-1',
+        )}
+      >
         <ModelSelector
           label={t('chat.model')}
           value={modelOverride ?? value.model ?? defaults?.defaultModel ?? null}
@@ -49,6 +56,7 @@ export function ChatSettingsFields({
           allowNone={false}
           textOnly
           compact
+          collapseOnNarrow
           iconOnly={floating}
         />
       </div>
@@ -58,13 +66,17 @@ export function ChatSettingsFields({
             type="button"
             variant="ghost"
             size="sm"
-            className="h-8 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground"
+            className={cn(
+              'size-7 shrink-0 gap-0 p-0 text-xs text-muted-foreground has-[>svg]:px-0',
+              !floating &&
+                '@xl/chat:h-8 @xl/chat:w-auto @xl/chat:gap-1.5 @xl/chat:px-2 @xl/chat:has-[>svg]:px-2',
+            )}
             disabled={disabled}
             aria-label={`${t('chat.reasoningLevel')}: ${t(`chat.reasoning.${effectiveEffort}`)}`}
             title={`${t('chat.reasoningLevel')}: ${t(`chat.reasoning.${effectiveEffort}`)}`}
           >
             <Brain className="size-4" />
-            <span className={floating ? 'sr-only' : 'hidden @md/chat:inline'}>
+            <span className={floating ? 'sr-only' : 'hidden @xl/chat:inline'}>
               {t(`chat.reasoning.${effectiveEffort}`)}
             </span>
           </Button>

@@ -1,7 +1,6 @@
 import {
   BarChart3,
   Bot,
-  ArrowRight,
   FileJson2,
   Plug,
   Users,
@@ -9,7 +8,7 @@ import {
   Sparkles,
   TerminalSquare,
 } from 'lucide-react';
-import { Link } from '@tanstack/react-router';
+import { NavigationCard } from '@/components/navigation-card';
 import { useTranslation } from 'react-i18next';
 import { PageHeader } from '@/components/page-header';
 
@@ -77,22 +76,13 @@ export function AdminOverviewPage() {
         className="divide-y overflow-hidden rounded-xl border bg-card"
       >
         {modules.map(({ to, title, description, icon: Icon }) => (
-          <Link
+          <NavigationCard
             key={to}
             to={to}
-            className="group flex items-center gap-4 p-5 outline-none transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:p-6"
-          >
-            <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
-              <Icon className="size-5" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <h2 className="text-sm font-semibold">{t(title)}</h2>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                {t(description)}
-              </p>
-            </div>
-            <ArrowRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1" />
-          </Link>
+            title={t(title)}
+            description={t(description)}
+            icon={Icon}
+          />
         ))}
       </section>
     </div>

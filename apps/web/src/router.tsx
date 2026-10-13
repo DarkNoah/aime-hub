@@ -15,6 +15,9 @@ import {
 import { AppLayout } from '@/layouts/app-layout';
 import { LoadingState } from '@/components/loading-state';
 
+const HomePage = lazy(() =>
+  import('@/pages/home/page').then((m) => ({ default: m.HomePage })),
+);
 const AdminUsagePage = lazy(() =>
   import('@/pages/admin/usage/page').then((m) => ({
     default: m.AdminUsagePage,
@@ -118,6 +121,17 @@ const NotFoundPage = lazy(() =>
 
 const rootRoute = createRootRoute({
   component: () => (
+    <Suspense fallback={<LoadingState className="mx-auto mt-20 max-w-xl" />}>
+      <Outlet />
+    </Suspense>
+  ),
+  notFoundComponent: NotFoundPage,
+});
+// Public product content remains available even while the API is offline.
+const applicationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  id: 'application',
+  component: () => (
     <SessionProvider>
       <AvailableModelsProvider>
         <Suspense
@@ -128,15 +142,14 @@ const rootRoute = createRootRoute({
       </AvailableModelsProvider>
     </SessionProvider>
   ),
-  notFoundComponent: NotFoundPage,
 });
 const publicRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => applicationRoute,
   id: 'public',
   component: PublicOnly,
 });
 const sessionRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => applicationRoute,
   id: 'session',
   component: RequireSession,
 });
@@ -161,134 +174,141 @@ const projectChatRoute = createRoute({
   path: 'threads',
 });
 const routeTree = rootRoute.addChildren([
-  publicRoute.addChildren([
-    createRoute({
-      getParentRoute: () => publicRoute,
-      path: '/login',
-      component: () => <AuthPage key="login" mode="login" />,
-    }),
-    createRoute({
-      getParentRoute: () => publicRoute,
-      path: '/register',
-      component: () => <AuthPage key="register" mode="register" />,
-    }),
-  ]),
-  sessionRoute.addChildren([
-    layoutRoute.addChildren([
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/home',
+    component: HomePage,
+  }),
+  applicationRoute.addChildren([
+    publicRoute.addChildren([
       createRoute({
-        getParentRoute: () => layoutRoute,
-        path: '/automations',
-        component: PersonalAutomationsPage,
+        getParentRoute: () => publicRoute,
+        path: '/login',
+        component: () => <AuthPage key="login" mode="login" />,
       }),
       createRoute({
-        getParentRoute: () => layoutRoute,
-        path: '/skills',
-        component: PersonalSkillsPage,
+        getParentRoute: () => publicRoute,
+        path: '/register',
+        component: () => <AuthPage key="register" mode="register" />,
       }),
-      createRoute({
-        getParentRoute: () => layoutRoute,
-        path: '/settings',
-        component: PersonalSettingsPage,
-      }),
-      createRoute({
-        getParentRoute: () => layoutRoute,
-        path: '/',
-        component: WorkspacePage,
-      }),
-      createRoute({
-        getParentRoute: () => layoutRoute,
-        path: '/threads',
-        validateSearch: (
-          search: Record<string, unknown>,
-        ): { draft?: string } => ({
-          draft: typeof search.draft === 'string' ? search.draft : undefined,
-        }),
-        component: ThreadsPage,
-      }),
-      createRoute({
-        getParentRoute: () => layoutRoute,
-        path: '/threads/$threadId',
-        component: ThreadsPage,
-      }),
-      createRoute({
-        getParentRoute: () => layoutRoute,
-        path: '/projects',
-        component: ProjectsPage,
-      }),
-      projectRoute.addChildren([
+    ]),
+    sessionRoute.addChildren([
+      layoutRoute.addChildren([
         createRoute({
-          getParentRoute: () => projectRoute,
-          path: 'automations',
-          component: ProjectAutomationsPage,
+          getParentRoute: () => layoutRoute,
+          path: '/automations',
+          component: PersonalAutomationsPage,
         }),
-        projectChatRoute.addChildren([
+        createRoute({
+          getParentRoute: () => layoutRoute,
+          path: '/skills',
+          component: PersonalSkillsPage,
+        }),
+        createRoute({
+          getParentRoute: () => layoutRoute,
+          path: '/settings',
+          component: PersonalSettingsPage,
+        }),
+        createRoute({
+          getParentRoute: () => layoutRoute,
+          path: '/',
+          component: WorkspacePage,
+        }),
+        createRoute({
+          getParentRoute: () => layoutRoute,
+          path: '/threads',
+          validateSearch: (
+            search: Record<string, unknown>,
+          ): { draft?: string } => ({
+            draft: typeof search.draft === 'string' ? search.draft : undefined,
+          }),
+          component: ThreadsPage,
+        }),
+        createRoute({
+          getParentRoute: () => layoutRoute,
+          path: '/threads/$threadId',
+          component: ThreadsPage,
+        }),
+        createRoute({
+          getParentRoute: () => layoutRoute,
+          path: '/projects',
+          component: ProjectsPage,
+        }),
+        projectRoute.addChildren([
           createRoute({
-            getParentRoute: () => projectChatRoute,
-            path: '$threadId',
+            getParentRoute: () => projectRoute,
+            path: 'automations',
+            component: ProjectAutomationsPage,
+          }),
+          projectChatRoute.addChildren([
+            createRoute({
+              getParentRoute: () => projectChatRoute,
+              path: '$threadId',
+            }),
+          ]),
+        ]),
+        adminRoute.addChildren([
+          createRoute({
+            getParentRoute: () => adminRoute,
+            path: '/usage',
+            component: AdminUsagePage,
+          }),
+          createRoute({
+            getParentRoute: () => adminRoute,
+            path: '/mcp',
+            component: AdminMcpPage,
+          }),
+          createRoute({
+            getParentRoute: () => adminRoute,
+            path: '/automations',
+            component: AdminAutomationsPage,
+          }),
+          createRoute({
+            getParentRoute: () => adminRoute,
+            path: '/agents',
+            component: AdminAgentsPage,
+          }),
+          createRoute({
+            getParentRoute: () => adminRoute,
+            path: '/tools',
+            component: AdminToolsPage,
+          }),
+          createRoute({
+            getParentRoute: () => adminRoute,
+            path: '/request-logs',
+            component: AdminRequestLogsPage,
+          }),
+          createRoute({
+            getParentRoute: () => adminRoute,
+            path: '/',
+            component: AdminOverviewPage,
+          }),
+          createRoute({
+            getParentRoute: () => adminRoute,
+            path: '/providers',
+            component: AdminProvidersPage,
+          }),
+          createRoute({
+            getParentRoute: () => adminRoute,
+            path: '/users',
+            component: AdminUsersPage,
+          }),
+          createRoute({
+            getParentRoute: () => adminRoute,
+            path: '/skills',
+            component: AdminSkillsPage,
+          }),
+          createRoute({
+            getParentRoute: () => adminRoute,
+            path: '/environment-variables',
+            component: AdminEnvironmentVariablesPage,
+          }),
+          createRoute({
+            getParentRoute: () => adminRoute,
+            path: '/settings',
+            component: AdminSettingsPage,
           }),
         ]),
-      ]),
-      adminRoute.addChildren([
-        createRoute({
-          getParentRoute: () => adminRoute,
-          path: '/usage',
-          component: AdminUsagePage,
-        }),
-        createRoute({
-          getParentRoute: () => adminRoute,
-          path: '/mcp',
-          component: AdminMcpPage,
-        }),
-        createRoute({
-          getParentRoute: () => adminRoute,
-          path: '/automations',
-          component: AdminAutomationsPage,
-        }),
-        createRoute({
-          getParentRoute: () => adminRoute,
-          path: '/agents',
-          component: AdminAgentsPage,
-        }),
-        createRoute({
-          getParentRoute: () => adminRoute,
-          path: '/tools',
-          component: AdminToolsPage,
-        }),
-        createRoute({
-          getParentRoute: () => adminRoute,
-          path: '/request-logs',
-          component: AdminRequestLogsPage,
-        }),
-        createRoute({
-          getParentRoute: () => adminRoute,
-          path: '/',
-          component: AdminOverviewPage,
-        }),
-        createRoute({
-          getParentRoute: () => adminRoute,
-          path: '/providers',
-          component: AdminProvidersPage,
-        }),
-        createRoute({
-          getParentRoute: () => adminRoute,
-          path: '/users',
-          component: AdminUsersPage,
-        }),
-        createRoute({
-          getParentRoute: () => adminRoute,
-          path: '/skills',
-          component: AdminSkillsPage,
-        }),
-        createRoute({
-          getParentRoute: () => adminRoute,
-          path: '/environment-variables',
-          component: AdminEnvironmentVariablesPage,
-        }),
-        createRoute({
-          getParentRoute: () => adminRoute,
-          path: '/settings',
-          component: AdminSettingsPage,
-        }),
       ]),
     ]),
   ]),

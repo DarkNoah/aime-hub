@@ -1,4 +1,5 @@
 import { isThreadActive } from '@aime/shared/threads';
+import { canContinueThread } from '@aime/shared/thread-messages';
 import {
   useContext,
   useEffect,
@@ -9,10 +10,11 @@ import {
 } from 'react';
 import type { UIMessage } from 'ai';
 import { useTranslation } from 'react-i18next';
-import { MessageSquare, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ChatSettings, ThreadSummary } from '@aime/shared/threads';
-import { ConversationEmptyState } from '@/components/ai-elements/conversation';
+import { ChatWelcome } from './chat-welcome';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { chatApi, chatErrorKey, ChatApiError } from './api';
@@ -23,6 +25,7 @@ import { ChatWorkspace } from './chat-workspace';
 import { LoadingState } from '@/components/loading-state';
 import { ChatMessages } from './chat-messages';
 import { ChatErrorCard } from './chat-error-card';
+import { ChatContinueButton } from './chat-continue-button';
 import { ChatRunningTasks } from './chat-running-tasks';
 import { useThreadChat } from './use-thread-chat';
 import { PersonalChatSettingsProvider } from './personal-chat-settings-provider';
@@ -157,14 +160,14 @@ function ChatPanelSession({
         actions={headerActions}
         navigation={navigation}
       />
-      <div className="flex min-h-0 flex-1 overflow-auto">
-        <ConversationEmptyState
-          title={t('chat.welcome')}
-          description={t('chat.welcomeHint')}
-          icon={<MessageSquare className="size-7 text-primary" />}
-          className="m-auto max-w-lg [&_h3]:text-xl [&_p]:mt-3 [&_p]:leading-7"
-        />
-      </div>
+      <ScrollArea
+        className="min-h-0 flex-1"
+        viewportProps={{
+          className: 'h-full [&>div]:flex! [&>div]:min-h-full [&>div]:min-w-0',
+        }}
+      >
+        <ChatWelcome />
+      </ScrollArea>
       <ChatComposer
         className={chatContentClassName}
         projectId={projectId}
@@ -318,6 +321,11 @@ function ExistingChat({
   const chat = useThreadChat(threadId, onThreadUpdated);
   const running = isThreadActive(chat.thread?.status);
   const [stopping, setStopping] = useState(false);
+  const canContinue = canContinueThread(
+    chat.messages,
+    chat.thread,
+    chat.toolInteractions,
+  );
   const notifyError = (cause: unknown) => toast.error(t(chatErrorKey(cause)));
   return (
     <>
@@ -422,12 +430,7 @@ function ExistingChat({
           onToolResponse={chat.respondToTool}
           disabled={!chat.connected || running || stopping}
         />
-        {chat.thread && !chat.messages.length && (
-          <ConversationEmptyState
-            title={t('chat.welcome')}
-            description={t('chat.welcomeHint')}
-          />
-        )}
+        {chat.thread && !chat.messages.length && <ChatWelcome />}
         {running && !chat.activeMessageId && (
           <p
             role="status"
@@ -435,6 +438,12 @@ function ExistingChat({
           >
             {t('chat.thinking')}
           </p>
+        )}
+        {canContinue && (
+          <ChatContinueButton
+            disabled={!chat.connected || stopping || chat.sending}
+            onContinue={chat.continueRun}
+          />
         )}
         {chat.thread?.error && (
           <ChatErrorCard

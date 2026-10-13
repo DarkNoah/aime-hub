@@ -163,6 +163,15 @@ export const threadsContract = {
     })
     .input(z.object({ params: z.object({ threadId }) }))
     .output(type<ThreadSummary>()),
+  continue: procedure
+    .route({
+      method: 'POST',
+      path: '/threads/{threadId}/continue',
+      inputStructure: 'detailed',
+      successStatus: 202,
+    })
+    .input(z.object({ params: z.object({ threadId }) }))
+    .output(type<ThreadSummary>()),
   compact: procedure
     .route({
       method: 'POST',

@@ -60,6 +60,8 @@ export const chatApi = {
       body: response,
     }),
   retry: (threadId: string) => api.threads.retry({ params: { threadId } }),
+  continue: (threadId: string) =>
+    api.threads.continue({ params: { threadId } }),
   queued: (threadId: string, messageId: string, signal?: AbortSignal) =>
     api.threads.queued({ params: { threadId, messageId } }, { signal }),
   updateQueued: (
@@ -136,6 +138,8 @@ export function chatErrorKey(error: unknown) {
       return 'chat.errors.interrupted';
     case 'RETRY_UNAVAILABLE':
       return 'chat.errors.retryUnavailable';
+    case 'CONTINUE_UNAVAILABLE':
+      return 'chat.errors.continueUnavailable';
     case 'THREAD_BUSY':
       return 'chat.errors.busy';
     case 'COMPACTION_BUSY':

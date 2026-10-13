@@ -3,6 +3,7 @@ import { Link, useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { Folder, Plus } from 'lucide-react';
 import type { ProjectSummary } from '@aime/shared/projects';
+import { LoadingState } from '@/components/loading-state';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -60,7 +61,7 @@ export function ProjectsPage() {
               </Button>
             </div>
           )}
-          <ItemGroup className="gap-1">
+          <ItemGroup className="gap-0 overflow-hidden rounded-xl border bg-card">
             {!projects.length && !loading && !error && (
               <div className="px-6 py-16 text-center">
                 <Folder className="mx-auto mb-4 size-8 text-muted-foreground" />
@@ -85,9 +86,11 @@ export function ProjectsPage() {
                 key={project.id}
                 role="listitem"
                 variant="ghost"
-                className="flex-nowrap gap-3 px-5 py-5 text-base sm:px-6"
+                className="project-row flex-nowrap gap-3 rounded-none border-0 border-b border-border px-5 py-5 text-base last:border-b-0 sm:px-6"
               >
-                <Folder className="hidden size-5 shrink-0 text-primary sm:block" />
+                <span className="hidden size-10 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary sm:flex">
+                  <Folder className="size-5" aria-hidden />
+                </span>
                 <Link
                   className="min-w-0 flex-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   to="/projects/$projectId"
@@ -130,14 +133,7 @@ export function ProjectsPage() {
                 <ProjectActions project={project} />
               </Item>
             ))}
-            {loading && (
-              <p
-                role="status"
-                className="p-6 text-center text-sm text-muted-foreground"
-              >
-                {t('common.loading')}
-              </p>
-            )}
+            {loading && <LoadingState />}
           </ItemGroup>
           {hasMore && !loading && !error && (
             <Button

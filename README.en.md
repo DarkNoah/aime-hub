@@ -4,9 +4,21 @@
 
 [简体中文](README.md) · **English**
 
-[Features](#features) · [Quick start](#quick-start) · [Environment variables](#environment-variables) · [Deployment](#deployment) · [Documentation](#documentation)
+[Product preview](#product-preview) · [Features](#features) · [Quick start](#quick-start) · [Environment variables](#environment-variables) · [Deployment](#deployment) · [Documentation](#documentation)
 
 Aime Hub is built with React, Hono, oRPC, and Mastra, with PostgreSQL storing accounts, configuration, and conversations. Once an administrator connects a model provider, users can chat privately or share conversations and working directories in projects with membership-based access. Conversations run on the server and synchronize over SSE; closing the page does not stop an active conversation.
+
+## Product preview
+
+After starting the app locally, open the **[Home Page](http://127.0.0.1:5173/home)** for interface previews, features, and deployment links. `/home` is public; the existing `/` workspace route is unchanged.
+
+![Aime Hub: AI conversations and workspace](apps/web/public/product/chat-light.jpg)
+
+- **Organize AI around your work**: Explore in personal chats, then bring conversations, members, and shared files together in projects.
+- **Choose capabilities for each task**: Switch models and agents, reuse Skills, and connect tools and MCP services.
+- **Keep work moving**: Conversations execute on the server and automations run on a schedule, with a consistent interface across light, dark, and mobile views.
+
+Screenshots show actual frontend components with isolated illustrative data, without real accounts or private content. All images live in [`apps/web/public/product/`](apps/web/public/product/README.md) and are shared by the Home Page and README.
 
 ## Features
 

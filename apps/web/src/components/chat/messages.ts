@@ -11,8 +11,8 @@ import {
 } from './message-compression.js';
 import { getToolName, isSpecialTool } from './tool-renderers/registry.js';
 import {
-  mergeThreadMessage,
-  sortThreadMessages,
+  mergeThreadMessages,
+  threadMessageSourceIds,
 } from '@aime/shared/thread-messages';
 
 export type ChatMessagePart =
@@ -73,7 +73,7 @@ export function groupChatMessages(
 ) {
   const compressions = getMessageCompressions(messages);
   const rows: { message: UIMessage; sourceIds: string[] }[] = [];
-  for (const message of messages) {
+  for (const message of mergeThreadMessages([], messages)) {
     const previous = rows.at(-1);
     const lastPart = previous?.message.parts.reduce<
       UIMessage['parts'][number] | undefined
@@ -91,8 +91,8 @@ export function groupChatMessages(
         ...previous.message,
         parts: [...previous.message.parts, ...message.parts],
       };
-      previous.sourceIds.push(message.id);
-    } else rows.push({ message, sourceIds: [message.id] });
+      previous.sourceIds.push(...threadMessageSourceIds(message));
+    } else rows.push({ message, sourceIds: threadMessageSourceIds(message) });
   }
   return rows.map((row) => ({
     ...row,
@@ -106,17 +106,7 @@ export function mergeMessages(
   older = false,
   removedMessageIds: string[] = [],
 ) {
-  const messages = new Map<string, UIMessage>();
-  const removed = new Set(removedMessageIds);
-  for (const message of older
-    ? [...incoming, ...current]
-    : [...current, ...incoming]) {
-    if (removed.has(message.id)) continue;
-    const previous = messages.get(message.id);
-    messages.set(
-      message.id,
-      previous ? mergeThreadMessage(previous, message) : message,
-    );
-  }
-  return sortThreadMessages([...messages.values()]);
+  return older
+    ? mergeThreadMessages(incoming, current, removedMessageIds)
+    : mergeThreadMessages(current, incoming, removedMessageIds);
 }
