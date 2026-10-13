@@ -37,10 +37,11 @@ RUN apt-get update \
     && python3 -m venv /opt/python \
     && ln -s /usr/local/bin/bun /usr/local/bin/bunx \
     && rm -rf /var/lib/apt/lists/*
+ARG AGENTFS_DOWNLOAD_BASE_URL=https://github.com/tursodatabase/agentfs/releases/download
 RUN set -eu; \
     case "$(uname -m)" in x86_64) arch=x86_64 ;; aarch64) arch=aarch64 ;; *) exit 1 ;; esac; \
     archive="agentfs-${arch}-unknown-linux-gnu.tar.xz"; \
-    base="https://github.com/tursodatabase/agentfs/releases/download/v${AGENTFS_VERSION}"; \
+    base="${AGENTFS_DOWNLOAD_BASE_URL%/}/v${AGENTFS_VERSION}"; \
     cd /tmp; \
     curl -fsSL --http1.1 --retry 3 --retry-all-errors --connect-timeout 15 --max-time 180 "${base}/${archive}" -o "${archive}"; \
     curl -fsSL --http1.1 --retry 3 --retry-all-errors --connect-timeout 15 --max-time 180 "${base}/${archive}.sha256" -o "${archive}.sha256"; \

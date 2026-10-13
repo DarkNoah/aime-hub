@@ -22,6 +22,7 @@ services:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
         BUN_IMAGE: ${BUN_IMAGE:-oven/bun:1}
         BROWSER_CACHE_IMAGE: ${BROWSER_CACHE_IMAGE:-base}
+        AGENTFS_DOWNLOAD_BASE_URL: ${AGENTFS_DOWNLOAD_BASE_URL:-https://github.com/tursodatabase/agentfs/releases/download}
     restart: unless-stopped
     init: true
     stop_grace_period: 60s

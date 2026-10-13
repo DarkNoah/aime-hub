@@ -8,7 +8,9 @@
 
 项目共享工作区需要 Linux FUSE，因此仅 `server` 配置 `/dev/fuse`、`SYS_ADMIN` 和 `apparmor:unconfined`，宿主机须提供 `/dev/fuse`。不要运行多个 API 副本：队列、调度器和工作区挂载由单个进程管理。
 
-浏览器下载缓慢时，可将一个已验证且包含 `/opt/playwright` 的同架构镜像预载到服务器，并设置 `BROWSER_CACHE_IMAGE` 为该镜像。构建只从中复制浏览器目录；系统依赖仍由 Playwright 检查安装，应用代码仍从 Git 构建。所需浏览器版本不在缓存中时会正常下载。默认无需设置此变量。
+浏览器下载缓慢时，可将一个已验证且包含 `/opt/playwright` 的同架构镜像预载到服务器，并设置 `BROWSER_CACHE_IMAGE` 为该镜像。构建只从中复制浏览器目录；系统依赖仍由 Playwright 检查安装，应用代码仍从 Git 构建。所需浏览器版本不在缓存中时会正常下载。默认无需设置此变量。缓存镜像必须对实际构建器可用；本地镜像被清理后，构建器可能尝试从 Docker Hub 拉取同名镜像并失败。此时删除该变量或设置为 `base`，恢复正常浏览器下载。
+
+服务器无法访问 GitHub Releases 时，可通过 `AGENTFS_DOWNLOAD_BASE_URL` 指定可信的 AgentFS 下载源，默认值为 `https://github.com/tursodatabase/agentfs/releases/download`。例如，配置 `https://githubproxy.cc/https://github.com/tursodatabase/agentfs/releases/download` 使用代理通道。构建会追加 `/v<版本号>/<架构对应文件名>`，下载发行包和 `.sha256` 文件并校验。使用备用源前应将其校验值与官方发布的校验值核对。
 
 ## Dokploy 配置
 
