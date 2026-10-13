@@ -186,6 +186,7 @@ export class SkillService {
     input: string,
     signal?: AbortSignal,
     original?: SkillSource,
+    legacyPaths?: Set<string>,
   ): Promise<SkillScan> {
     const repository = parseGitHubRepository(input);
     let snapshot: RepositorySnapshot | undefined;
@@ -213,22 +214,74 @@ export class SkillService {
       const counts = new Map<string, number>();
       for (const candidate of candidates)
         counts.set(candidate.name, (counts.get(candidate.name) ?? 0) + 1);
+      const named = candidates.map((candidate) => ({
+        ...candidate,
+        name:
+          counts.get(candidate.name)! > 1
+            ? `${candidate.name}-${createHash('sha256').update(candidate.file.path).digest('hex').slice(0, 8)}`
+            : candidate.name,
+      }));
+      const { scopePath, fileOnly } = snapshot;
+      const scoped = named.filter(
+        ({ file }) =>
+          !scopePath ||
+          (fileOnly
+            ? file.path === scopePath
+            : file.path.startsWith(`${scopePath}/`)),
+      );
+      const entryPath = snapshot.fileOnly
+        ? snapshot.scopePath!
+        : snapshot.scopePath
+          ? `${snapshot.scopePath}/SKILL.md`
+          : 'SKILL.md';
+      const entry = scoped.find(({ file }) => file.path === entryPath);
+      // The previous Python installer used the repository name for root packages.
+      const legacyName = [
+        ...(entry ? [entry.name] : []),
+        ...(entryPath === 'SKILL.md' ? [slug(repository.repo)] : []),
+      ].find((name) =>
+        legacyPaths?.has(`${repository.owner}/${repository.repo}/${name}`),
+      );
+      const installation =
+        original?.installation ??
+        (legacyName || (entry && !legacyPaths)
+          ? {
+              mode: 'package' as const,
+              path: entryPath,
+              name: legacyName ?? entry!.name,
+            }
+          : { mode: 'collection' as const });
+      let selected = scoped;
+      if (installation.mode === 'package') {
+        const entry = scoped.find(
+          ({ file }) => file.path === installation.path,
+        );
+        if (!entry) throw new SkillError('SKILL_UPDATE_SOURCE_NOT_FOUND', 409);
+        selected = [{ ...entry, name: installation.name }];
+      } else {
+        // A collection remains a collection even if upstream later adds a root manifest.
+        const children = scoped.filter(({ file }) => file.path !== entryPath);
+        const manifests = new Set(children.map(({ file }) => file.path));
+        selected = children.filter(({ file }) => {
+          let parent = dirname(dirname(file.path));
+          while (parent !== '.') {
+            if (manifests.has(`${parent}/SKILL.md`)) return false;
+            parent = dirname(parent);
+          }
+          return true;
+        });
+      }
       const skills: RepositorySkill[] = [];
-      for (const { file, content, name: baseName } of candidates) {
-        if (
-          snapshot.scopePath &&
-          (snapshot.fileOnly
-            ? file.path !== snapshot.scopePath
-            : !file.path.startsWith(`${snapshot.scopePath}/`))
-        )
-          continue;
-        const name =
-          counts.get(baseName)! > 1
-            ? `${baseName}-${createHash('sha256').update(file.path).digest('hex').slice(0, 8)}`
-            : baseName;
+      for (const { file, content, name } of selected) {
         const files = skillFiles(snapshot, file.path);
         const regular = files.filter(isRegularFile);
         const metadata = describe(content, name);
+        const bundledSkills = regular
+          .filter(
+            (entry) =>
+              entry.path !== file.path && /(^|\/)SKILL\.md$/.test(entry.path),
+          )
+          .map((entry) => entry.path);
         const destination = `${repository.owner}/${repository.repo}/${name}`;
         const parent = await this.directory([
           repository.owner,
@@ -247,6 +300,8 @@ export class SkillService {
           fileCount: regular.length,
           bytes: regular.reduce((total, entry) => total + entry.size, 0),
           skippedFiles: files.length - regular.length,
+          package: installation.mode === 'package' || bundledSkills.length > 0,
+          bundledSkills,
         });
       }
       const result: SkillScan = {
@@ -271,6 +326,7 @@ export class SkillService {
           url: normalizeSkillSource(input),
           ref: snapshot.ref ?? null,
           scope: snapshot.scopePath ?? '',
+          installation,
         },
       });
       return result;
@@ -409,10 +465,10 @@ export class SkillService {
       if (!safeRepositoryPath(group))
         throw new SkillError('SKILL_UNSAFE_PATH', 403);
       const directory = await this.directory(group.split('/'));
-      if (
-        !directory ||
-        !(await this.list()).skills.some((skill) => skill.group === group)
-      )
+      const current = (await this.list()).skills.filter(
+        (skill) => skill.group === group,
+      );
+      if (!directory || !current.length)
         throw new SkillError('SKILL_NOT_FOUND', 404);
       const sources: (string | SkillSource)[] = source
         ? [normalizeSkillSource(source, group)]
@@ -435,6 +491,7 @@ export class SkillService {
               typeof source === 'string' ? source : source.url,
               undefined,
               typeof source === 'string' ? undefined : source,
+              new Set(current.map((skill) => skill.path)),
             );
           } catch (error) {
             if (

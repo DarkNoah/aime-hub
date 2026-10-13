@@ -49,12 +49,13 @@ const fixtureFiles = {
   'broken/SKILL.md': '---\nname: broken\n---\nMissing description',
 };
 
-async function fixture(t: test.TestContext) {
+async function fixture(t: test.TestContext, rootPackage = false) {
   const directory = await mkdtemp(join(tmpdir(), 'admin-skills-test-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const repo = join(directory, 'repo');
   await mkdir(repo);
   for (const [path, content] of Object.entries(fixtureFiles)) {
+    if (path === 'SKILL.md' && !rootPackage) continue;
     await mkdir(dirname(join(repo, path)), { recursive: true });
     await writeFile(join(repo, path), content, {
       mode: path.endsWith('.sh') ? 0o755 : 0o644,
@@ -180,7 +181,7 @@ test('full and scoped scans find all manifests with stable destinations and vali
   const { service, snapshot } = await fixture(t);
   const all = await service.scan('owner/repo');
   assert.equal(all.commit, snapshot.commit);
-  assert.equal(all.skills.length, 6);
+  assert.equal(all.skills.length, 5);
   assert.ok(
     all.skills.some((skill) => skill.path === '.agents/skills/hidden/SKILL.md'),
   );
@@ -296,19 +297,25 @@ test('failed batches leave no partially installed skills or staging directories'
   assert.deepEqual(await readdir(join(workspace, '.agents')), ['skills']);
 });
 
-test('root and nested skills install as independent packages without discovering bundled manifests twice', async (t) => {
-  const { service, workspace } = await fixture(t);
+test('a root package includes nested skills without offering or installing them separately', async (t) => {
+  const { service, workspace } = await fixture(t, true);
   const scan = await service.scan('owner/repo');
-  await service.install(scan.id, ['SKILL.md', 'skills/analysis/SKILL.md']);
+  assert.deepEqual(
+    scan.skills.map((skill) => skill.path),
+    ['SKILL.md'],
+  );
+  assert.equal(scan.skills[0].package, true);
+  assert.ok(scan.skills[0].bundledSkills?.includes('skills/analysis/SKILL.md'));
+  await service.install(scan.id, ['SKILL.md']);
   assert.deepEqual(
     (await service.list()).skills.map((skill) => skill.name).sort(),
-    ['analysis', 'root-skill'],
+    ['root-skill'],
   );
   assert.deepEqual(
     (await listChatSkills(workspace, 'alice'))
       .map((skill) => skill.name)
       .sort(),
-    ['analysis', 'root-skill'],
+    ['root-skill'],
   );
   assert.equal(
     await readFile(
@@ -386,9 +393,12 @@ test('concurrent installs do not overwrite and existing ancestor skills remain i
     manifest('owner'),
   );
   const ancestor = await service.scan('owner/repo');
-  await assert.rejects(service.install(ancestor.id, ['SKILL.md']), {
-    code: 'SKILL_CONFLICT',
-  });
+  await assert.rejects(
+    service.install(ancestor.id, ['skills/analysis/SKILL.md']),
+    {
+      code: 'SKILL_CONFLICT',
+    },
+  );
   assert.equal(
     await readFile(join(workspace, '.agents/skills/owner/SKILL.md'), 'utf8'),
     manifest('owner'),

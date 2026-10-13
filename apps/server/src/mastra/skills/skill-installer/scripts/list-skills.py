@@ -47,7 +47,8 @@ def main(argv: list[str]) -> int:
         else:
             for row in rows:
                 state = "installed" if row["installed"] else "destination exists" if row.get("conflict") else "available"
-                print(f"{row['name']} [{state}] — {row['path'] or '.'}")
+                package = "; complete package" if row.get("package") else ""
+                print(f"{row['name']} [{state}{package}] — {row['path'] or '.'}")
         return 0
     except (SkillError, OSError, UnicodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

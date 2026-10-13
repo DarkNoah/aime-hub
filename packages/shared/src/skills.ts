@@ -46,6 +46,9 @@ export type RepositorySkill = {
   fileCount: number;
   bytes: number;
   skippedFiles: number;
+  /** Descendant manifests included as resources, never separate install targets. */
+  bundledSkills?: string[];
+  package?: boolean;
 };
 
 export type SkillScan = {

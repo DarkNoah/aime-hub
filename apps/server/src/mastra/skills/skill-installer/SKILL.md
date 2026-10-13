@@ -22,7 +22,7 @@ Global skills reside in `WORKSPACE_ROOT/.agents/skills` and are maintained throu
 
 Check `SKILL_HOME` first. If it is missing or is not an absolute path, stop writing and explain that the runtime has not supplied an installation location. Do not guess an account, project, user home, or session directory. A personal session's dated directory is not the personal skill root. Do not change `SKILL_HOME` to target another user, another project, or the global directory.
 
-Skills are installed at `$SKILL_HOME/<owner>/<repo>/<skill-name>/SKILL.md`. Skill names use normalized package directory names. Bundled scripts, references, and assets are preserved. The group's `.skill-sources.json` records the source so management-page updates can retain the original branch and path.
+Skills are installed at `$SKILL_HOME/<owner>/<repo>/<skill-name>/SKILL.md`. Skill names use normalized package directory names; a repository-root package uses its manifest name, falling back to the repository name. Bundled scripts, references, and assets are preserved. The group's `.skill-sources.json` records the source and installation mode so management-page updates retain the original branch, path, and package boundary.
 
 ## Workflow
 
@@ -82,7 +82,9 @@ python3 scripts/install-skill.py --repo owner/repository --path skills/research 
 python3 scripts/install-skill.py --url https://github.com/owner/repository/tree/main/skills
 ```
 
-A repository source without a path scans the entire repository. Omit the installation scope only when the user requests all skills. `--path` accepts repository-relative paths to individual packages or directories containing multiple packages. `--ref` selects a branch, tag, or full commit SHA. URLs support `tree/<ref>/<path>` and `blob/<ref>/<path>/SKILL.md`; branch names may contain `/`.
+A repository source without a path scans the entire repository. If the root contains `SKILL.md`, it is one complete package: install it without `--path` (or with `--path .`), preserving the whole repository structure and shared resources. Internal `SKILL.md` files are bundled entries, not additional install targets. For example, `--repo wjgoarxiv/autoresearch-skill` installs the complete package once.
+
+Without a root entry, the repository is a collection. Select the requested packages with `--path`; omit the scope only when the user requests the collection. Discovery stops at each package's `SKILL.md`, preserving any nested entries inside that package. Explicit folder or file scopes are honored; do not select an internal subdirectory of a complete package unless the user specifically wants a separate installation and its resources are self-contained. `--ref` selects a branch, tag, or full commit SHA. URLs support `tree/<ref>/<path>` and `blob/<ref>/<path>/SKILL.md`; branch names may contain `/`.
 
 ## Installation Behavior
 
@@ -90,5 +92,6 @@ A repository source without a path scans the entire repository. Omit the install
 - Try the original source first. After a network transfer failure, retry with `https://githubproxy.cc/` and then `https://ghfast.top/` as transport prefixes. Stop after success and retain the original source URL in the records. If the original path is missing, report an error instead of falling back to the repository root.
 - Apply no limits to repository size, file count, skill count, or individual file size. Skip symbolic links and submodules, reject paths that escape the allowed scope, and exclude the repository's `.git` directory from installed packages.
 - Do not overwrite existing skill directories. Check batch destinations and resources before writing. On failure, roll back the current additions and preserve previously installed skills. Use the management page's update action for updates or replacements instead of deleting existing directories before attempting a download.
+- Updates preserve the saved installation mode. Complete packages retain their entry and installation directory, never expanding into separate child installs. If the entry disappears or becomes invalid, keep the previous package. Collections refresh their original scope as collections. Source records from older installs remain readable.
 - Clean up download and installation staging directories after success, failure, or cancellation.
 - The scripts check that each package contains a regular `SKILL.md` file. The runtime remains responsible for full skill-format and usability validation.

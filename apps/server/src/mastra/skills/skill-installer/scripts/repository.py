@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -140,7 +141,9 @@ class Snapshot:
 
     def candidates(self) -> list[dict]:
         manifests = [file for file in self.files if file["path"].split("/")[-1] == "SKILL.md"]
-        names = [slug(PurePosixPath(file["path"]).parent.name or self.source.repo) for file in manifests]
+        names = [slug(PurePosixPath(file["path"]).parent.name or
+                      manifest_name(git(["cat-file", "blob", file["oid"]], self.folder).decode("utf-8")) or
+                      self.source.repo) for file in manifests]
         counts = Counter(names)
         result = []
         for file, name in zip(manifests, names):
@@ -148,7 +151,10 @@ class Snapshot:
                 name += "-" + hashlib.sha256(file["path"].encode()).hexdigest()[:8]
             path = str(PurePosixPath(file["path"]).parent)
             path = "" if path == "." else path
-            result.append({"name": name, "path": path, "manifest": file["path"]})
+            bundled = [entry["path"] for entry in manifests if entry["path"] != file["path"]
+                       and (not path or entry["path"].startswith(path + "/"))]
+            result.append({"name": name, "path": path, "manifest": file["path"],
+                           "package": not path or bool(bundled), "bundledSkills": bundled})
         return result
 
     def select(self, paths: list[str] | None) -> tuple[list[dict], list[str]]:
@@ -158,20 +164,40 @@ class Snapshot:
         for scope in scopes:
             if self.scope and not (scope == self.scope or (self.source.kind != "blob" and scope.startswith(self.scope + "/"))):
                 raise SkillError("The requested path is outside the source URL scope.")
+            if not any(not scope or skill["path"] == scope or skill["manifest"] == scope
+                       or skill["manifest"].startswith(scope + "/") for skill in candidates):
+                raise SkillError(f"No skills found at the requested path: {scope or '.'}")
+        # Selecting a package and one of its descendants still installs it once.
+        def scope_directory(scope):
+            directory = str(PurePosixPath(scope).parent) if scope.split("/")[-1] == "SKILL.md" else scope
+            return "" if directory == "." else directory
+        scopes = [scope for index, scope in enumerate(scopes) if not any(
+            (scope_directory(other) == scope_directory(scope) and other_index < index) or
+            (scope_directory(other) != scope_directory(scope) and
+             (not scope_directory(other) or scope_directory(scope).startswith(scope_directory(other) + "/")))
+            for other_index, other in enumerate(scopes))]
+        for scope in scopes:
             matches = [skill for skill in candidates if not scope or skill["path"] == scope
                        or skill["manifest"] == scope or skill["manifest"].startswith(scope + "/")]
             if not matches:
                 raise SkillError(f"No skills found at the requested path: {scope or '.'}")
             for skill in matches:
-                selected[skill["manifest"]] = skill
+                if not any(other["manifest"] != skill["manifest"] and
+                           (not other["path"] or skill["manifest"].startswith(other["path"] + "/"))
+                           for other in matches):
+                    selected[skill["manifest"]] = {**skill, "package": skill["package"] or scope_directory(scope) == skill["path"]}
         return list(selected.values()), scopes
 
     def origin(self, scope: str) -> dict:
+        entry = scope if scope.split("/")[-1] == "SKILL.md" else (scope + "/" if scope else "") + "SKILL.md"
+        package = next((skill for skill in self.candidates() if skill["manifest"] == entry), None)
+        installation = {"mode": "package", "path": entry, "name": package["name"]} if package else {"mode": "collection"}
         if not scope and self.source.ref is None and not self.source.ref_path:
-            return {"url": self.source.url, "ref": None, "scope": ""}
+            return {"url": self.source.url, "ref": None, "scope": "", "installation": installation}
         kind = "blob" if scope.split("/")[-1] == "SKILL.md" else "tree"
         suffix = self.ref + ("/" + scope if scope else "")
-        return {"url": f"{self.source.url}/{kind}/{quote(suffix, safe='/')}", "ref": self.ref, "scope": scope}
+        return {"url": f"{self.source.url}/{kind}/{quote(suffix, safe='/')}", "ref": self.ref, "scope": scope,
+                "installation": installation}
 
     def copy(self, skill: dict, target: Path):
         prefix = skill["path"] + "/" if skill["path"] else ""
@@ -187,6 +213,34 @@ class Snapshot:
 
 def slug(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")[:54].rstrip("-") or "skill"
+
+
+def manifest_name(content: str) -> str:
+    """Read the standard skill-name scalar without a third-party YAML dependency."""
+    frontmatter = re.match(r"^---\s*\n(.*?)\n---", content, re.DOTALL)
+    if not frontmatter:
+        return ""
+    text = frontmatter[1].strip()
+    if text.startswith("{"):
+        try:
+            value = json.loads(text).get("name", "")
+            return value if isinstance(value, str) else ""
+        except (ValueError, AttributeError):
+            return ""
+    name = re.search(r"^name:\s*(.+)$", text, re.MULTILINE)
+    if not name:
+        return ""
+    scalar = name[1].strip()
+    if scalar.startswith('"'):
+        try:
+            value, _ = json.JSONDecoder().raw_decode(scalar)
+            return value if isinstance(value, str) else ""
+        except ValueError:
+            return ""
+    if scalar.startswith("'"):
+        quoted = re.match(r"^'((?:[^']|'')*)'", scalar)
+        return quoted[1].replace("''", "'") if quoted else ""
+    return re.split(r"\s+#", scalar, maxsplit=1)[0].strip()
 
 
 @contextmanager

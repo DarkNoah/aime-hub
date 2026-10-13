@@ -649,14 +649,18 @@ export const zhCN = {
     '原来源分支或路径已不存在，未更新此技能组。请检查 GitHub 项目。',
   'skills.updateEmpty': '原来源路径下没有有效技能，当前技能组已保留。',
   'skills.sourceUnknown':
-    '此技能组尚未保存原始来源。请填写最初导入的 GitHub 地址，保留原分支和路径；更新会重新安装该路径下的全部有效技能。',
+    '此技能组尚未保存原始来源。请填写最初导入的 GitHub 地址，保留原分支和路径；完整技能包保持整体安装，技能合集更新该范围下的有效技能。',
   'skills.sourceMismatch': 'GitHub 来源必须属于当前技能组对应的仓库。',
   'skills.restoreSourceTitle': '补充技能组来源',
   'skills.previewNamed': '预览技能 {{name}}',
   'skills.preview': '预览',
   'skills.sourceContent': '源文件',
   'skills.loadingContent': '正在加载技能内容…',
-  'skills.importHint': '搜索仓库中的技能，按文件夹或单个技能勾选后批量安装。',
+  'skills.importHint': '含根入口的仓库按完整技能包安装；技能合集可按项勾选。',
+  'skills.completePackage': '完整技能包',
+  'skills.packageHint':
+    '保留包内目录结构、子技能及共享资源，更新时保持完整安装。',
+  'skills.bundledSkills': '查看包含的 {{count}} 个子入口',
   'skills.source': 'GitHub 来源',
   'skills.sourceHint':
     '支持 owner/repo、仓库链接、tree 文件夹链接或 blob SKILL.md 链接，输入后自动扫描。',

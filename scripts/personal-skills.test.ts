@@ -170,7 +170,12 @@ test('group update replaces the whole folder with every latest skill under the o
   await writeFile(join(directory, 'loose-old.txt'), 'old');
   assert.deepEqual(await readSkillSources(directory), [source]);
   assert.deepEqual(await readSkillSourceRecords(directory), [
-    { url: source, ref: 'feature/skills', scope: 'catalog' },
+    {
+      url: source,
+      ref: 'feature/skills',
+      scope: 'catalog',
+      installation: { mode: 'collection' },
+    },
   ]);
   files.delete('catalog/one/obsolete.txt');
   files.set('catalog/one/SKILL.md', manifest('one', 'Latest instructions'));
@@ -204,7 +209,12 @@ test('new branches sharing a prefix with the source path cannot widen the saved 
     ['one', 'two'],
   );
   assert.deepEqual(await readSkillSourceRecords(join(alice.root, group)), [
-    { url: source, ref: 'feature/skills', scope: 'catalog' },
+    {
+      url: source,
+      ref: 'feature/skills',
+      scope: 'catalog',
+      installation: { mode: 'collection' },
+    },
   ]);
 });
 

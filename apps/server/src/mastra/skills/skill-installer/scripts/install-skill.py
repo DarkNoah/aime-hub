@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
 import shutil
 import sys
 import tempfile
@@ -23,17 +24,29 @@ def read_sources(group: Path) -> list[dict]:
         return []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        if set(data) != {"version", "sources"} or data["version"] != 1:
+        if set(data) != {"version", "sources"} or data["version"] not in (1, 2):
             raise ValueError()
         sources = data["sources"]
         if not isinstance(sources, list) or not sources:
             raise ValueError()
         for source in sources:
-            if (set(source) != {"url", "ref", "scope"}
+            if (not {"url", "ref", "scope"} <= set(source) or set(source) - {"url", "ref", "scope", "installation"}
                     or not isinstance(source["url"], str) or not source["url"]
                     or not isinstance(source["scope"], str)
                     or source["ref"] is not None and (not isinstance(source["ref"], str) or not source["ref"])):
                 raise ValueError()
+            installation = source.get("installation")
+            if installation is not None:
+                if not isinstance(installation, dict):
+                    raise ValueError()
+                if installation.get("mode") == "package":
+                    if (set(installation) != {"mode", "path", "name"}
+                            or not isinstance(installation["path"], str) or not installation["path"]
+                            or not isinstance(installation["name"], str)
+                            or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", installation["name"])):
+                        raise ValueError()
+                elif installation != {"mode": "collection"}:
+                    raise ValueError()
             parsed = parse_source(source["url"])
             if (parsed.owner, parsed.repo) != (group.parent.name, group.name):
                 raise ValueError()
@@ -72,7 +85,7 @@ def install(root: Path, snapshot, paths: list[str] | None) -> list[Path]:
             for skill in selected:
                 snapshot.copy(skill, staged / skill["name"])
             (staged / SOURCES_FILE).write_text(
-                json.dumps({"version": 1, "sources": list(sources.values())}, indent=2) + "\n",
+                json.dumps({"version": 2, "sources": list(sources.values())}, indent=2) + "\n",
                 encoding="utf-8",
             )
             try:

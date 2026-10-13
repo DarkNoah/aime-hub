@@ -28,57 +28,87 @@ function SkillRow({
 }: SelectionProps & { skill: RepositorySkill }) {
   const { t } = useTranslation();
   return (
-    <label className="flex cursor-pointer items-start gap-3 rounded-lg px-3 py-3 transition-colors hover:bg-muted/50 has-[[data-state=checked]]:bg-secondary/50">
-      <Checkbox
-        className="mt-1"
-        aria-label={t('skills.selectSkill', { name: skill.name })}
-        checked={selected.has(skill.path)}
-        disabled={disabled || skill.installed || !skill.valid}
-        onCheckedChange={(checked) => onSelect([skill], checked === true)}
-      />
-      <FileText
-        className="mt-1 size-4 shrink-0 text-muted-foreground"
-        aria-hidden="true"
-      />
-      <span className="min-w-0 flex-1 space-y-1.5">
-        <span className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium break-all">{skill.name}</span>
-          {skill.installed ? (
-            <Badge variant="secondary">{t('skills.installed')}</Badge>
+    <div>
+      <label className="flex cursor-pointer items-start gap-3 rounded-lg px-3 py-3 transition-colors hover:bg-muted/50 has-[[data-state=checked]]:bg-secondary/50">
+        <Checkbox
+          className="mt-1"
+          aria-label={t('skills.selectSkill', { name: skill.name })}
+          checked={selected.has(skill.path)}
+          disabled={disabled || skill.installed || !skill.valid}
+          onCheckedChange={(checked) => onSelect([skill], checked === true)}
+        />
+        <FileText
+          className="mt-1 size-4 shrink-0 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <span className="min-w-0 flex-1 space-y-1.5">
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium break-all">{skill.name}</span>
+            {skill.package ? (
+              <Badge variant="outline">{t('skills.completePackage')}</Badge>
+            ) : null}
+            {skill.installed ? (
+              <Badge variant="secondary">{t('skills.installed')}</Badge>
+            ) : null}
+            {!skill.valid ? (
+              <Badge variant="destructive">{t('skills.invalid')}</Badge>
+            ) : null}
+          </span>
+          <span className="block break-all font-mono text-xs text-muted-foreground">
+            {skill.path}
+          </span>
+          {skill.description ? (
+            <span
+              className="line-clamp-2 text-xs leading-5 text-muted-foreground"
+              title={skill.description}
+            >
+              {skill.description}
+            </span>
+          ) : null}
+          <span className="block text-xs text-muted-foreground">
+            {t('skills.files', { count: skill.fileCount })}
+          </span>
+          {skill.package ? (
+            <span className="block text-xs text-muted-foreground">
+              {t('skills.packageHint')}
+            </span>
+          ) : null}
+          <span className="block break-all text-xs text-muted-foreground">
+            {t('skills.destination', { path: skill.destination })}
+          </span>
+          {skill.skippedFiles > 0 ? (
+            <span className="block text-xs text-muted-foreground">
+              {t('skills.skippedFiles', { count: skill.skippedFiles })}
+            </span>
           ) : null}
           {!skill.valid ? (
-            <Badge variant="destructive">{t('skills.invalid')}</Badge>
+            <span className="block text-xs text-destructive">
+              {skill.errors.join(' ')}
+            </span>
           ) : null}
         </span>
-        <span className="block break-all font-mono text-xs text-muted-foreground">
-          {skill.path}
-        </span>
-        {skill.description ? (
-          <span
-            className="line-clamp-2 text-xs leading-5 text-muted-foreground"
-            title={skill.description}
-          >
-            {skill.description}
-          </span>
-        ) : null}
-        <span className="block text-xs text-muted-foreground">
-          {t('skills.files', { count: skill.fileCount })}
-        </span>
-        <span className="block break-all text-xs text-muted-foreground">
-          {t('skills.destination', { path: skill.destination })}
-        </span>
-        {skill.skippedFiles > 0 ? (
-          <span className="block text-xs text-muted-foreground">
-            {t('skills.skippedFiles', { count: skill.skippedFiles })}
-          </span>
-        ) : null}
-        {!skill.valid ? (
-          <span className="block text-xs text-destructive">
-            {skill.errors.join(' ')}
-          </span>
-        ) : null}
-      </span>
-    </label>
+      </label>
+      {skill.bundledSkills?.length ? (
+        <Collapsible className="ml-10 px-3 pb-3">
+          <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground [&[data-state=open]>svg]:rotate-90">
+            <ChevronRight
+              className="size-3.5 transition-transform"
+              aria-hidden="true"
+            />
+            {t('skills.bundledSkills', { count: skill.bundledSkills.length })}
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <ul className="mt-2 space-y-1 border-l pl-3 text-xs text-muted-foreground">
+              {skill.bundledSkills.map((path) => (
+                <li key={path} className="break-all font-mono">
+                  {path}
+                </li>
+              ))}
+            </ul>
+          </CollapsibleContent>
+        </Collapsible>
+      ) : null}
+    </div>
   );
 }
 

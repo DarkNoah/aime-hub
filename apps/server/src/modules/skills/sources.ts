@@ -5,17 +5,28 @@ import { SkillError } from './errors.js';
 import { parseGitHubRepository } from './github.js';
 
 export const SKILL_SOURCES_FILE = '.skill-sources.json';
+const installationSchema = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('collection') }).strict(),
+  z
+    .object({
+      mode: z.literal('package'),
+      path: z.string().min(1),
+      name: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+    })
+    .strict(),
+]);
 const sourceSchema = z
   .object({
     url: z.string().min(1),
     ref: z.string().min(1).nullable(),
     scope: z.string(),
+    installation: installationSchema.optional(),
   })
   .strict();
 export type SkillSource = z.infer<typeof sourceSchema>;
 const sourcesSchema = z
   .object({
-    version: z.literal(1),
+    version: z.union([z.literal(1), z.literal(2)]),
     sources: z.array(sourceSchema).min(1),
   })
   .strict();
@@ -51,7 +62,7 @@ export async function readSkillSources(
 export function serializeSkillSources(sources: SkillSource[]) {
   return JSON.stringify(
     {
-      version: 1,
+      version: 2,
       sources: [
         ...new Map(sources.map((source) => [source.url, source])).values(),
       ],

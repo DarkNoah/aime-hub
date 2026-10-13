@@ -14,6 +14,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { readSkillSources } from '../apps/server/src/modules/skills/sources.js';
+import { SkillService } from '../apps/server/src/modules/skills/service.js';
+import { readGitSnapshot } from '../apps/server/src/modules/skills/github.js';
 import { listChatSkills } from '../apps/server/src/modules/threads/skills.js';
 
 const exec = promisify(execFile);
@@ -27,7 +29,7 @@ const proxies = ['https://githubproxy.cc/', 'https://ghfast.top/'].map(
 const manifest = (name: string) =>
   `---\nname: ${name}\ndescription: Fixture instructions\n---\n# Use ${name}\n`;
 
-async function fixture(t: test.TestContext) {
+async function fixture(t: test.TestContext, rootPackage = false) {
   const root = await mkdtemp(join(tmpdir(), 'skill-installer-test-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const repo = join(root, 'source');
@@ -52,6 +54,13 @@ async function fixture(t: test.TestContext) {
     Buffer.from([0, 255, 13, 10]),
   );
   await symlink('/etc/passwd', join(repo, 'catalog/alpha/link'));
+  if (rootPackage) {
+    await writeFile(join(repo, 'SKILL.md'), manifest('"complete-package"'));
+    await mkdir(join(repo, 'scripts'));
+    await writeFile(join(repo, 'scripts/shared.py'), '# shared script');
+    await mkdir(join(repo, 'assets'));
+    await writeFile(join(repo, 'assets/template.md'), '# shared template');
+  }
   const git = (...args: string[]) =>
     exec('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd: repo });
   await git('init', '-b', 'main');
@@ -113,6 +122,7 @@ process.exit(result.status ?? 1);
     failingBlob,
     run,
     python,
+    git,
     control: (value: object) => writeFile(control, JSON.stringify(value)),
     calls: async () =>
       (await readFile(calls, 'utf8'))
@@ -178,6 +188,11 @@ test('skill script installs into the personal scope, preserves resources and int
       url: 'https://github.com/owner/repo/tree/main/catalog/alpha',
       ref: 'main',
       scope: 'catalog/alpha',
+      installation: {
+        mode: 'package',
+        path: 'catalog/alpha/SKILL.md',
+        name: 'alpha',
+      },
     },
   ]);
   const installed = JSON.parse(
@@ -190,6 +205,112 @@ test('skill script installs into the personal scope, preserves resources and int
   const catalog = await listChatSkills(f.workspace, 'user');
   assert.equal(catalog.length, 1);
   assert.equal(catalog[0]?.name, 'alpha');
+  await f.clean();
+});
+
+test('Python root-package installs match management discovery and remain whole during management updates', async (t) => {
+  const f = await fixture(t, true);
+  const listing = JSON.parse(
+    (
+      await f.run('list-skills.py', [
+        '--repo',
+        'owner/repo',
+        '--format',
+        'json',
+      ])
+    ).stdout,
+  );
+  assert.deepEqual(
+    listing.map((row: { manifest: string }) => row.manifest),
+    ['SKILL.md'],
+  );
+  assert.equal(listing[0].name, 'complete-package');
+  assert.equal(listing[0].package, true);
+  assert.deepEqual(listing[0].bundledSkills, [
+    'catalog/alpha/SKILL.md',
+    'catalog/beta/SKILL.md',
+  ]);
+  await assert.rejects(
+    f.run('install-skill.py', [
+      '--repo',
+      'owner/repo',
+      '--path',
+      '.',
+      'catalog/missing',
+    ]),
+    /No skills found/,
+  );
+  await f.run('install-skill.py', [
+    '--repo',
+    'owner/repo',
+    '--path',
+    '.',
+    'SKILL.md',
+    'catalog/alpha',
+  ]);
+  const group = join(f.home, 'owner/repo');
+  assert.deepEqual((await readdir(group)).sort(), [
+    '.skill-sources.json',
+    'complete-package',
+  ]);
+  assert.deepEqual((await readSkillSources(group))[0].installation, {
+    mode: 'package',
+    path: 'SKILL.md',
+    name: 'complete-package',
+  });
+  assert.equal(
+    await readFile(join(group, 'complete-package/scripts/shared.py'), 'utf8'),
+    '# shared script',
+  );
+  assert.equal(
+    await readFile(join(group, 'complete-package/assets/template.md'), 'utf8'),
+    '# shared template',
+  );
+  assert.equal((await listChatSkills(f.workspace, 'user')).length, 1);
+
+  const service = new SkillService(f.workspace, async () =>
+    readGitSnapshot(f.repo),
+  );
+  t.after(() => service.dispose());
+  const personal = service.forUser('user');
+  const scan = await personal.scan('owner/repo');
+  assert.equal(scan.skills.length, 1);
+  assert.equal(scan.skills[0].name, listing[0].name);
+  assert.equal(scan.skills[0].installed, true);
+  await personal.discard(scan.id);
+  await writeFile(join(f.repo, 'scripts/shared.py'), '# updated script');
+  await f.git('add', '.');
+  await f.git(
+    '-c',
+    'user.name=Fixture',
+    '-c',
+    'user.email=fixture@example.invalid',
+    '-c',
+    'commit.gpgsign=false',
+    'commit',
+    '-m',
+    'update',
+  );
+  assert.deepEqual(
+    (await personal.updateGroup('owner/repo')).map((skill) => skill.name),
+    ['complete-package'],
+  );
+  assert.deepEqual((await readdir(group)).sort(), [
+    '.skill-sources.json',
+    'complete-package',
+  ]);
+  assert.equal(
+    await readFile(join(group, 'complete-package/scripts/shared.py'), 'utf8'),
+    '# updated script',
+  );
+  // Python must also read source records written by the management service.
+  await f.run('install-skill.py', [
+    '--repo',
+    'owner/repo',
+    '--path',
+    'catalog/alpha',
+  ]);
+  assert.equal((await readSkillSources(group)).length, 2);
   await f.clean();
 });
 
@@ -261,7 +382,12 @@ test('direct and proxy failures retry in order and retain the original source', 
     [remote, ...proxies],
   );
   assert.deepEqual(await readSkillSources(join(f.home, 'owner/repo')), [
-    { url: 'https://github.com/owner/repo', ref: null, scope: '' },
+    {
+      url: 'https://github.com/owner/repo',
+      ref: null,
+      scope: '',
+      installation: { mode: 'collection' },
+    },
   ]);
   await f.clean();
 });

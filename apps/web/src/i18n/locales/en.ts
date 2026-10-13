@@ -701,7 +701,7 @@ export const en = {
   'skills.updateEmpty':
     'No valid skills remain at the original source path. The current skill group was kept.',
   'skills.sourceUnknown':
-    'This group has no saved source. Enter the original GitHub URL, including its branch and path. Updating reinstalls all valid skills under that path.',
+    'This group has no saved source. Enter the original GitHub URL, including its branch and path. Complete packages stay intact; collections refresh valid skills within that scope.',
   'skills.sourceMismatch':
     'The GitHub source must belong to this skill group’s repository.',
   'skills.restoreSourceTitle': 'Restore skill group source',
@@ -710,7 +710,11 @@ export const en = {
   'skills.sourceContent': 'Source',
   'skills.loadingContent': 'Loading skill content…',
   'skills.importHint':
-    'Find skills in a repository, select folders or individual skills, then install them together.',
+    'Repositories with a root entry install as complete packages; collections allow individual selection.',
+  'skills.completePackage': 'Complete package',
+  'skills.packageHint':
+    'Preserves directories, bundled skills and shared resources, including on updates.',
+  'skills.bundledSkills': 'View {{count}} bundled entries',
   'skills.source': 'GitHub source',
   'skills.sourceHint':
     'Accepts owner/repo, a repository URL, a tree folder URL, or a blob SKILL.md URL. Scans automatically after typing.',
