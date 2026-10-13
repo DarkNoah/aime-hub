@@ -11,6 +11,7 @@ import {
   type Tool,
   type ToolExecutionContext,
   type NeedsApprovalFn,
+  type ValidationError,
 } from '@mastra/core/tools';
 import { createWorkspaceTools, createSkillTools } from '@mastra/core/workspace';
 import { z } from 'zod';
@@ -194,14 +195,18 @@ Examples: text(ALL_TOOLS.filter(t => t.name.startsWith('mcp__'))); text(await to
       }
       return output.result;
     },
-    toModelOutput: (output: ExecOutput['result']) => ({
-      type: 'content',
-      value: output.content.map((part) =>
-        part.type === 'image'
-          ? { type: 'image-data', data: part.data, mediaType: part.mimeType }
-          : part,
-      ),
-    }),
+    toModelOutput: (output: ExecOutput['result'] | ValidationError) => {
+      // Mastra also maps validation failures, which have no content array.
+      if (isValidationError(output)) return { type: 'json', value: output };
+      return {
+        type: 'content',
+        value: output.content.map((part) =>
+          part.type === 'image'
+            ? { type: 'image-data', data: part.data, mediaType: part.mimeType }
+            : part,
+        ),
+      };
+    },
   });
 }
 

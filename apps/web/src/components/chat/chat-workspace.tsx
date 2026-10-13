@@ -57,6 +57,10 @@ import {
 } from './layout-context';
 import './chat-floating.css';
 import { AssetAttachmentProvider } from '@/components/generated-assets/attachment-context';
+import {
+  readWorkspaceLayout,
+  saveWorkspaceLayout,
+} from './workspace-layout-storage';
 
 const AssetPanel = lazy(
   () => import('@/components/generated-assets/asset-panel'),
@@ -95,10 +99,10 @@ export function ChatWorkspace({
   const panelRef = usePanelRef();
   const pendingLayoutAction = useRef<'restore' | 'collapse' | null>(null);
   const contentId = useId();
+  const [layout, setLayout] = useState(readWorkspaceLayout);
   const [compact, setCompact] = useState(true);
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(layout.mode !== 'collapsed');
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [chatNarrow, setChatNarrow] = useState(false);
   const [view, setView] = useState<'files' | 'messages' | 'preview' | 'assets'>(
     'files',
   );
@@ -120,6 +124,12 @@ export function ChatWorkspace({
   const [selection, setSelection] = useState<MessagePreviewSelection | null>(
     null,
   );
+  useEffect(() => saveWorkspaceLayout(layout), [layout]);
+  const expandInspector = useCallback(() => {
+    if (!panelRef.current?.isCollapsed()) return;
+    setLayout((previous) => ({ ...previous, mode: 'docked' }));
+    panelRef.current.resize(`${layout.inspectorSize}%`);
+  }, [layout.inspectorSize, panelRef]);
   const openPreview = useCallback(
     (part: PreviewPart) => {
       const next = selectMessagePart(messages, part);
@@ -127,19 +137,20 @@ export function ChatWorkspace({
       setSelection(next);
       setView('preview');
       if (compact) setDrawerOpen(true);
-      else panelRef.current?.expand();
+      else expandInspector();
     },
-    [messages, compact, panelRef],
+    [messages, compact, expandInspector],
   );
-  const floating = !compact && chatNarrow;
+  const floating = !compact && layout.mode === 'floating';
   // Apply explicit exits only after React has removed the floating size constraint.
   useLayoutEffect(() => {
-    if (floating || !pendingLayoutAction.current) return;
+    if (compact || floating || !pendingLayoutAction.current) return;
     const action = pendingLayoutAction.current;
     pendingLayoutAction.current = null;
-    if (action === 'restore') panelRef.current?.resize('38%');
+    if (action === 'restore')
+      panelRef.current?.resize(`${layout.inspectorSize}%`);
     else panelRef.current?.collapse();
-  }, [floating, panelRef]);
+  }, [compact, floating, layout.inspectorSize, panelRef]);
   const files = useFileManager(
     threadId,
     view === 'files' && (compact ? drawerOpen : expanded),
@@ -149,11 +160,11 @@ export function ChatWorkspace({
     (path: string, kind: 'file' | 'directory' = 'file') => {
       setView('files');
       if (compact) setDrawerOpen(true);
-      else panelRef.current?.expand();
+      else expandInspector();
       if (kind === 'directory') revealDirectory(path);
       else revealFile(path);
     },
-    [compact, panelRef, revealDirectory, revealFile],
+    [compact, expandInspector, revealDirectory, revealFile],
   );
 
   useEffect(() => {
@@ -171,8 +182,8 @@ export function ChatWorkspace({
   const collapseInspector = () => {
     if (floating) {
       pendingLayoutAction.current = 'collapse';
-      setChatNarrow(false);
     } else panelRef.current?.collapse();
+    setLayout((previous) => ({ ...previous, mode: 'collapsed' }));
   };
   const close = () => {
     if (compact) setDrawerOpen(false);
@@ -275,13 +286,52 @@ export function ChatWorkspace({
             ref={containerRef}
             className="relative flex min-h-0 min-w-0 flex-1"
           >
-            <ResizablePanelGroup orientation="horizontal" disabled={floating}>
+            <ResizablePanelGroup
+              orientation="horizontal"
+              disabled={floating}
+              onLayoutChanged={(
+                sizes,
+                { isUserInteraction, requestedLayout },
+              ) => {
+                if (compact || floating || !isUserInteraction) return;
+                const inspector = panelRef.current;
+                if (!inspector) return;
+                if (inspector.isCollapsed()) {
+                  setLayout((previous) => ({ ...previous, mode: 'collapsed' }));
+                } else {
+                  const inspectorSize = (requestedLayout ?? sizes)[
+                    `${contentId}-inspector`
+                  ];
+                  setLayout((previous) =>
+                    previous.mode === 'floating' ||
+                    !inspectorSize ||
+                    inspectorSize >= 100
+                      ? previous
+                      : { mode: 'docked', inspectorSize },
+                  );
+                }
+              }}
+            >
               <ResizablePanel
                 id={`${contentId}-chat`}
                 minSize={0}
                 // Keep the inspector full-width even if an in-flight drag writes another layout.
                 maxSize={floating ? '0%' : '100%'}
-                onResize={(size) => setChatNarrow(size.inPixels < 360)}
+                onResize={(size) => {
+                  // Compact mode temporarily removes the inspector; it must not reset the saved mode.
+                  if (
+                    !compact &&
+                    !floating &&
+                    !pendingLayoutAction.current &&
+                    (containerRef.current?.clientWidth ?? 0) >= 760 &&
+                    size.inPixels < 360
+                  ) {
+                    setLayout((previous) => ({
+                      ...previous,
+                      mode: 'floating',
+                    }));
+                  }
+                }}
                 className="h-full min-h-0"
                 style={{ overflow: 'visible' }}
               >
@@ -303,8 +353,17 @@ export function ChatWorkspace({
                       aria-label={t('chat.inspector.restore')}
                       title={t('chat.inspector.restore')}
                       onClick={() => {
+                        // Save a width that leaves docked chat usable on the current screen.
+                        const width = containerRef.current?.clientWidth ?? 760;
                         pendingLayoutAction.current = 'restore';
-                        setChatNarrow(false);
+                        setLayout((previous) => ({
+                          ...previous,
+                          mode: 'docked',
+                          inspectorSize: Math.min(
+                            previous.inspectorSize,
+                            ((width - 361) / width) * 100,
+                          ),
+                        }));
                       }}
                     >
                       <Columns2 className="size-3.5" aria-hidden="true" />
@@ -328,7 +387,11 @@ export function ChatWorkspace({
                   <ResizablePanel
                     id={`${contentId}-inspector`}
                     panelRef={panelRef}
-                    defaultSize="38%"
+                    defaultSize={
+                      layout.mode === 'collapsed'
+                        ? 48
+                        : `${layout.inspectorSize}%`
+                    }
                     minSize={320}
                     maxSize="100%"
                     collapsible
@@ -350,7 +413,7 @@ export function ChatWorkspace({
                         onClick={() => {
                           setView('files');
                           if (expanded && view === 'files') collapseInspector();
-                          else panelRef.current?.expand();
+                          else expandInspector();
                         }}
                       >
                         <Files className="size-4" aria-hidden="true" />
@@ -368,7 +431,7 @@ export function ChatWorkspace({
                           setView('assets');
                           if (expanded && view === 'assets')
                             collapseInspector();
-                          else panelRef.current?.expand();
+                          else expandInspector();
                         }}
                       >
                         <Images className="size-4" aria-hidden="true" />
@@ -388,7 +451,7 @@ export function ChatWorkspace({
                           setView('messages');
                           if (expanded && view === 'messages')
                             collapseInspector();
-                          else panelRef.current?.expand();
+                          else expandInspector();
                         }}
                       >
                         <Braces className="size-4" aria-hidden="true" />
@@ -406,7 +469,7 @@ export function ChatWorkspace({
                           setView('preview');
                           if (expanded && view === 'preview')
                             collapseInspector();
-                          else panelRef.current?.expand();
+                          else expandInspector();
                         }}
                       >
                         <ScanText className="size-4" aria-hidden="true" />

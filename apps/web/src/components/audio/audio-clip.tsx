@@ -141,7 +141,7 @@ function AudioClipContent({
             }}
           />
           <AudioPlayerTimeRange className="flex! h-6 w-full min-w-0 border-0! px-0! shadow-none!" />
-          <div className="mt-1 flex items-center gap-2">
+          <div className="mt-1 flex flex-wrap items-center gap-2">
             <AudioPlayerPlayButton className="size-9! shrink-0 rounded-full! border-0! bg-primary! text-primary-foreground shadow-none! [--media-icon-color:var(--color-primary-foreground)] [--media-control-hover-background:var(--color-primary)]" />
             <AudioPlayerTimeDisplay
               showDuration

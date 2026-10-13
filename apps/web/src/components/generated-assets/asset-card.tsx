@@ -1,16 +1,10 @@
 import { lazy, Suspense, useState } from 'react';
-import {
-  ArrowUpRight,
-  Check,
-  Download,
-  Expand,
-  File,
-  Music2,
-} from 'lucide-react';
+import { ArrowUpRight, Check, Download, Expand, File } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { GeneratedAsset } from '@aime/shared/assets';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { AudioClip } from '@/components/audio/audio-clip';
 import { useWorkspaceFile } from '@/components/file-manager/context';
 import { filesApi } from '@/components/file-manager/api';
 import { cn } from '@/lib/utils';
@@ -62,7 +56,8 @@ export function AssetCard({
         <span
           aria-hidden="true"
           className={cn(
-            'pointer-events-none absolute top-2 right-2 z-20 flex size-6 items-center justify-center rounded-full border shadow-sm transition-opacity',
+            'pointer-events-none absolute right-2 z-20 flex size-6 items-center justify-center rounded-full border shadow-sm transition-opacity',
+            asset.kind === 'audio' ? 'bottom-2' : 'top-2',
             selected
               ? 'border-primary bg-primary text-primary-foreground'
               : 'border-border bg-background/90 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100',
@@ -103,20 +98,19 @@ export function AssetCard({
               className="relative z-20 w-full"
             />
           ) : asset.kind === 'audio' ? (
-            <div className="space-y-3 p-3">
-              <Music2
-                aria-hidden="true"
-                className="mx-auto my-4 size-8 text-muted-foreground"
-              />
-              <audio
-                src={url}
-                controls
-                preload="none"
-                aria-label={asset.name}
-                onError={() => setFailed(true)}
-                className="relative z-20 h-9 w-full min-w-0"
-              />
-            </div>
+            <AudioClip
+              src={url}
+              filename={asset.name}
+              mediaType={asset.mimeType}
+              sampleRate={
+                typeof asset.metadata.sampleRate === 'number'
+                  ? asset.metadata.sampleRate
+                  : undefined
+              }
+              downloadUrl={downloadUrl}
+              onOpen={openFile ? () => openFile(asset.path) : undefined}
+              className="relative z-20 rounded-none border-0"
+            />
           ) : (
             <File
               aria-hidden="true"
@@ -171,21 +165,23 @@ export function AssetCard({
                 <Expand className="size-4" />
               </Button>
             )}
-            <Button
-              asChild
-              variant="ghost"
-              size="icon-sm"
-              className="relative z-20 text-muted-foreground"
-            >
-              <a
-                href={downloadUrl}
-                download={asset.name}
-                aria-label={t('assets.download', { name: asset.name })}
-                title={t('assets.download', { name: asset.name })}
+            {asset.kind !== 'audio' && (
+              <Button
+                asChild
+                variant="ghost"
+                size="icon-sm"
+                className="relative z-20 text-muted-foreground"
               >
-                <Download className="size-4" />
-              </a>
-            </Button>
+                <a
+                  href={downloadUrl}
+                  download={asset.name}
+                  aria-label={t('assets.download', { name: asset.name })}
+                  title={t('assets.download', { name: asset.name })}
+                >
+                  <Download className="size-4" />
+                </a>
+              </Button>
+            )}
           </div>
         </div>
       </article>

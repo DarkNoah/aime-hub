@@ -4,7 +4,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { ToolsInput } from '@mastra/core/agent';
+import { Agent, type ToolsInput } from '@mastra/core/agent';
+import { MastraLanguageModelV2Mock } from '@mastra/core/test-utils/llm-mock';
 import {
   createTool,
   isValidationError,
@@ -43,6 +44,81 @@ const texts = (output: { content: { type: string; text?: string }[] }) =>
     .filter((p) => p.type === 'text')
     .map((p) => p.text)
     .join('\n');
+
+test('native Mastra streaming returns exec validation errors to the model and allows a corrected call', async () => {
+  let executions = 0;
+  const tool = createExecTool({
+    getTools: async () => {
+      executions++;
+      return {};
+    },
+  });
+  let step = 0;
+  const model = new MastraLanguageModelV2Mock({
+    doStream: async () => ({
+      stream: new ReadableStream({
+        start(controller) {
+          step++;
+          if (step <= 2)
+            controller.enqueue({
+              type: 'tool-call',
+              toolCallId: `exec-call-${step}`,
+              toolName: 'exec',
+              input: JSON.stringify({
+                code: 'text("recovered")',
+                yield_time_ms: 60000,
+                max_output_tokens: step === 1 ? 25000 : 10000,
+              }),
+            });
+          else {
+            controller.enqueue({ type: 'text-start', id: 'text' });
+            controller.enqueue({
+              type: 'text-delta',
+              id: 'text',
+              delta: 'Done',
+            });
+            controller.enqueue({ type: 'text-end', id: 'text' });
+          }
+          controller.enqueue({
+            type: 'finish',
+            finishReason: step <= 2 ? 'tool-calls' : 'stop',
+            usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+          });
+          controller.close();
+        },
+      }),
+    }),
+  });
+  const agent = new Agent({
+    id: 'exec-validation-test',
+    name: 'Exec validation test',
+    instructions: 'Correct invalid exec arguments and continue.',
+    model,
+    tools: { exec: tool },
+  });
+  const result = await agent.stream('Run the script', { maxSteps: 3 });
+  await result.consumeStream();
+  assert.equal(await result.text, 'Done');
+  assert.equal(executions, 1, 'invalid arguments must not execute the script');
+  assert.equal(model.doStreamCalls.length, 3);
+  const validation = model.doStreamCalls[1].prompt
+    .filter((message) => message.role === 'tool')
+    .flatMap((message) => message.content)
+    .find((part) => part.toolCallId === 'exec-call-1');
+  assert.ok(validation);
+  assert.equal(validation.output.type, 'json');
+  assert.ok(isValidationError(validation.output.value));
+  assert.match(validation.output.value.message, /max_output_tokens.*10000/);
+  assert.ok(validation.output.value.validationErrors.fields);
+  const recovered = model.doStreamCalls[2].prompt
+    .filter((message) => message.role === 'tool')
+    .flatMap((message) => message.content)
+    .find((part) => part.toolCallId === 'exec-call-2');
+  assert.deepEqual(recovered?.output, {
+    type: 'content',
+    value: [{ type: 'text', text: 'recovered' }],
+  });
+});
 
 test('only explicit output is returned, preserving call order and fresh runtime state', async () => {
   const f = fixture();
