@@ -1,5 +1,8 @@
 import type { RepositorySkill } from '@aime/shared/skills';
 
+type SelectableSkill = Pick<RepositorySkill, 'path' | 'valid'> &
+  Partial<Pick<RepositorySkill, 'installed'>>;
+
 export type SkillFolder = {
   path: string;
   label: string;
@@ -40,13 +43,13 @@ export function skillFolders(skills: RepositorySkill[]): SkillFolder {
   return root;
 }
 
-export function selectableSkills(skills: RepositorySkill[]) {
+export function selectableSkills<T extends SelectableSkill>(skills: T[]) {
   return skills.filter((skill) => skill.valid && !skill.installed);
 }
 
 export function selectionState(
-  skills: RepositorySkill[],
-  selected: Set<string>,
+  skills: SelectableSkill[],
+  selected: ReadonlySet<string>,
 ): boolean | 'indeterminate' {
   const available = selectableSkills(skills);
   const count = available.filter((skill) => selected.has(skill.path)).length;
@@ -58,8 +61,8 @@ export function selectionState(
 }
 
 export function toggleSkills(
-  selected: Set<string>,
-  skills: RepositorySkill[],
+  selected: ReadonlySet<string>,
+  skills: SelectableSkill[],
   checked: boolean,
 ) {
   const next = new Set(selected);

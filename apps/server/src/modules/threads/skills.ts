@@ -1,8 +1,41 @@
 import { Workspace } from '@mastra/core/workspace';
 import { resolve, sep } from 'node:path';
 import type { ChatSkill } from '@aime/shared/threads';
-import { discoverPersonalSkills, discoverProjectSkills } from './workspace.js';
+import type { AdminAgent } from '@aime/shared/agents';
+import { AgentError } from '../agents/errors.js';
+import {
+  discoverInstalledSkills,
+  discoverPersonalSkills,
+  discoverProjectSkills,
+} from './workspace.js';
 import { directorySkillConfig } from './skill-source.js';
+
+/** Resolve only server-owned roots for the already-authorized conversation scope. */
+export async function resolveAgentSkillPaths(
+  root: string,
+  userId: string,
+  agent: Pick<AdminAgent, 'source' | 'skillsMode' | 'skillPaths'>,
+  projectId?: string,
+): Promise<string[]> {
+  if (agent.source === 'code' || agent.skillsMode === 'auto') {
+    const skills = await (projectId
+      ? discoverProjectSkills(root, projectId)
+      : discoverPersonalSkills(root, userId));
+    return skills.map((skill) => skill.path);
+  }
+  if (!agent.skillPaths.length) return [];
+  // Custom selections pin exact global installation paths, including when a
+  // personal/project skill has the same name. Never add an unselected override.
+  const installed = new Set(
+    (await discoverInstalledSkills(root)).map((skill) => skill.path),
+  );
+  return agent.skillPaths.map((path) => {
+    const directory = resolve(root, '.agents', 'skills', path);
+    if (!installed.has(directory))
+      throw new AgentError('AGENT_SKILL_UNAVAILABLE');
+    return directory;
+  });
+}
 
 export async function listChatSkills(
   root: string,

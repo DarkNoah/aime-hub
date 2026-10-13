@@ -270,9 +270,12 @@ export function AdminAgentsPage() {
                             : t('agents.toolsManaged')}
                         </Badge>
                         <Badge variant="outline">
-                          {t('agents.skillsCount', {
-                            count: agent.skillPaths.length,
-                          })}
+                          {agent.source === 'code' ||
+                          agent.skillsMode === 'auto'
+                            ? t('agents.skillsAutoSummary')
+                            : t('agents.skillsCount', {
+                                count: agent.skillPaths.length,
+                              })}
                         </Badge>
                       </div>
                     </div>

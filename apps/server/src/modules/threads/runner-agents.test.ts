@@ -37,23 +37,31 @@ test(
     }
     const first: AdminAgent = {
       id: 'code:first',
-      source: 'code',
+      source: 'database',
+      status: 'published',
+      versionId: 'version-one',
+      versionNumber: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       name: 'First',
       description: '',
       instructions: 'FIRST_AGENT_INSTRUCTIONS',
       model: 'mock/fixed',
       tools: ['curr_time'],
       disabledTools: ['sleep'],
+      skillsMode: 'custom',
       skillPaths: ['selected'],
     };
     const second: AdminAgent = {
       ...first,
       id: 'code:second',
+      source: 'code',
       name: 'Second',
       instructions: 'SECOND_AGENT_INSTRUCTIONS',
       model: null,
       tools: ['sleep'],
       disabledTools: ['curr_time'],
+      skillsMode: 'auto',
       skillPaths: [],
     };
     const lookups: Array<string | null | undefined> = [];
@@ -189,10 +197,9 @@ test(
     );
     const last = requests.at(-1)!;
     assert.match(last.prompt, /SECOND_AGENT_INSTRUCTIONS/);
-    assert.doesNotMatch(
-      last.prompt,
-      /FIRST_AGENT_INSTRUCTIONS|selected skill marker/,
-    );
+    assert.doesNotMatch(last.prompt, /FIRST_AGENT_INSTRUCTIONS/);
+    assert.match(last.prompt, /selected skill marker/);
+    assert.match(last.prompt, /unselected skill marker/);
     assert.ok(last.tools.includes('sleep'));
     assert.ok(!last.tools.includes('curr_time'));
     assert.equal(toolSelections.at(-1), undefined);
@@ -224,6 +231,7 @@ test(
       model: null,
       tools: ['ask_user'],
       disabledTools: [],
+      skillsMode: 'custom',
       skillPaths: [],
       status: 'published',
       versionId: 'version-one',

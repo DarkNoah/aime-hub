@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import {
   adjustWindow,
   fitWindow,
   initialWindow,
   type ResizeDirection,
 } from '../apps/web/src/components/floating-window/geometry.js';
+import {
+  readWindowRect,
+  saveWindowRect,
+} from '../apps/web/src/components/floating-window/storage.js';
 
 const bounds = { width: 1200, height: 800 };
 const rect = { x: 200, y: 160, width: 400, height: 400 };
@@ -96,4 +100,86 @@ test('initial and saved windows fit a reduced workspace, even below minimum size
     width: 0,
     height: 0,
   });
+});
+
+function mockStorage(t: TestContext, value: string | null = null) {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const values = new Map<string, string>();
+  if (value !== null) values.set('chat-floating-window:v1', value);
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, next: string) => values.set(key, next),
+    },
+  });
+  t.after(() => {
+    if (original) Object.defineProperty(globalThis, 'localStorage', original);
+    else Reflect.deleteProperty(globalThis, 'localStorage');
+  });
+  return values;
+}
+
+test('floating geometry persists all four values and restores within current bounds', (t) => {
+  const values = mockStorage(t);
+  const key = 'chat-floating-window:v1';
+  assert.equal(readWindowRect(key), null);
+  saveWindowRect(key, rect);
+  assert.deepEqual(JSON.parse(values.get(key)!), rect);
+  assert.deepEqual(readWindowRect(key), rect);
+  assert.deepEqual(
+    fitWindow(readWindowRect(key)!, { width: 350, height: 360 }),
+    {
+      x: 8,
+      y: 8,
+      width: 334,
+      height: 344,
+    },
+  );
+  // Automatic fitting should not overwrite the user's preferred dimensions.
+  assert.deepEqual(readWindowRect(key), rect);
+});
+
+test('corrupt or invalid stored geometry falls back without throwing', (t) => {
+  const values = mockStorage(t);
+  const key = 'chat-floating-window:v1';
+  for (const value of [
+    'broken JSON',
+    'null',
+    '[]',
+    '{}',
+    JSON.stringify({ ...rect, x: '200' }),
+    JSON.stringify({ ...rect, width: 0 }),
+    JSON.stringify({ ...rect, height: -1 }),
+    '{"x":1e999,"y":0,"width":400,"height":400}',
+  ]) {
+    values.set(key, value);
+    assert.equal(readWindowRect(key), null);
+  }
+  values.delete(key);
+  saveWindowRect(key, { ...rect, width: 0 });
+  saveWindowRect(key, { ...rect, y: Number.NaN });
+  assert.equal(values.has(key), false);
+});
+
+test('unavailable browser storage does not interrupt floating window interactions', (t) => {
+  mockStorage(t);
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    get: () => {
+      throw new Error('Storage is blocked');
+    },
+  });
+  assert.equal(readWindowRect('chat-floating-window:v1'), null);
+  assert.doesNotThrow(() => saveWindowRect('chat-floating-window:v1', rect));
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('Quota exceeded');
+      },
+    },
+  });
+  assert.doesNotThrow(() => saveWindowRect('chat-floating-window:v1', rect));
 });

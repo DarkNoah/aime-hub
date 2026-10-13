@@ -88,7 +88,7 @@ export function getWorkspace(
   userId: string,
   path: string,
   projectId?: string,
-  skillPaths: string[] = [],
+  skillPaths: Parameters<typeof directorySkillConfig>[0] = [],
   filesystem?: WorkspaceFilesystem,
 ) {
   const valid = projectId
@@ -109,6 +109,10 @@ export function getWorkspace(
     sandbox: new LocalSandbox({
       workingDirectory:
         filesystem instanceof LocalFilesystem ? filesystem.basePath : path,
+      env: {
+        NODE_ENV: 'development',
+        SKILL_HOME: projectId ? resolve(projectDirectory(root, projectId), '.agents', 'skills') : resolve(userPath, '.agents', 'skills'),
+      },
     }),
     bm25: true,
     tools: {

@@ -59,6 +59,7 @@ const input: AgentInput = {
   instructions: '  # Role\n请保留空格和换行。\n',
   model: `${providerId}/fixture/model`,
   tools: ['web_fetch', 'ask_user'],
+  skillsMode: 'custom',
   skillPaths: ['example/research'],
 };
 
@@ -124,6 +125,7 @@ test('agent input rejects unsafe paths, invalid legacy tool IDs, duplicate selec
     { skillPaths: ['x\\y'] },
     { skillPaths: ['a//b'] },
     { skillPaths: ['a', 'a'] },
+    { skillsMode: 'invalid' },
     { enabled: true },
     { id: fallbackAgentId },
   ]) {
@@ -220,7 +222,11 @@ test('native agent CRUD preserves prompt and versioned tools/skills, rejects sta
   assert.deepEqual(version1?.workspace, {
     type: 'provider',
     provider: 'installed-skills',
-    config: { skillPaths: input.skillPaths, disabledTools: [] },
+    config: {
+      skillsMode: 'custom',
+      skillPaths: input.skillPaths,
+      disabledTools: [],
+    },
   });
   assert.deepEqual(version1?.model, {
     provider: 'openai',
@@ -268,6 +274,49 @@ test('native agent CRUD preserves prompt and versioned tools/skills, rejects sta
   assert.equal(await store.getById(created.id), null);
   assert.equal(await store.countVersions(created.id), 0);
   await assert.rejects(service.get(created.id), { code: 'AGENT_NOT_FOUND' });
+});
+
+test('skill modes default to auto, persist in versions and preserve legacy selections', async () => {
+  const store = (await new InMemoryStore().getStore('agents'))!;
+  const service = serviceFor(store);
+  const created = await service.create('admin', {
+    ...input,
+    skillsMode: undefined,
+    skillPaths: ['removed-skill'],
+  });
+  assert.equal(created.skillsMode, 'auto');
+  assert.deepEqual(created.skillPaths, []);
+  const custom = await service.update(created.id, {
+    ...input,
+    skillsMode: 'custom',
+    skillPaths: [],
+    versionId: created.versionId,
+  });
+  assert.equal(custom.skillsMode, 'custom');
+  assert.deepEqual(custom.skillPaths, []);
+  assert.equal((await service.get(created.id)).skillsMode, 'custom');
+  assert.deepEqual((await store.getVersion(created.versionId))?.workspace, {
+    type: 'provider',
+    provider: 'installed-skills',
+    config: { skillsMode: 'auto', skillPaths: [], disabledTools: [] },
+  });
+  for (const skillPaths of [[], input.skillPaths]) {
+    const latest = (await store.getLatestVersion(created.id))!;
+    await store.createVersion({
+      ...latest,
+      id: randomUUID(),
+      versionNumber: latest.versionNumber + 1,
+      workspace: {
+        type: 'provider',
+        provider: 'installed-skills',
+        config: { skillPaths },
+      },
+    });
+    const legacy = await service.get(created.id);
+    assert.equal(legacy.skillsMode, skillPaths.length ? 'custom' : 'auto');
+    assert.deepEqual(legacy.skillPaths, skillPaths);
+  }
+  assert.equal(getCodeAgent(fallbackAgentId)?.skillsMode, 'auto');
 });
 
 test('catalog and validation use available resources without exposing filesystem roots or provider credentials', async () => {

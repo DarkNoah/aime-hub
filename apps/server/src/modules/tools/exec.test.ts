@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -15,6 +15,7 @@ import { RequestContext } from '@mastra/core/request-context';
 import { z } from 'zod';
 import { createExecTool } from '../../mastra/tools/exec.js';
 import { getWorkspace, userDirectory } from '../threads/workspace.js';
+import { resolveAgentSkillPaths } from '../threads/skills.js';
 import { buildTools } from './service.js';
 
 const png =
@@ -142,6 +143,54 @@ test('parallel built-in and MCP calls preserve results, schema validation and re
   );
   assert.equal(caught.isError, undefined);
   assert.match(texts(caught), /validation|invalid/i);
+});
+
+test('exec skill tools honor dynamic automatic and custom scope restrictions', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'exec-skills-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  for (const [path, marker] of [
+    ['.agents/skills/shared', 'GLOBAL_SKILL_CONTENT'],
+    ['users/tester/.agents/skills/personal', 'PERSONAL_SKILL_CONTENT'],
+    ['users/other/.agents/skills/private', 'PRIVATE_SKILL_CONTENT'],
+  ]) {
+    const directory = join(root, path);
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      join(directory, 'SKILL.md'),
+      `---\nname: ignored\ndescription: ${marker}\n---\n${marker}`,
+    );
+  }
+  for (const { skillsMode, skillPaths } of [
+    { skillsMode: 'auto', skillPaths: [] },
+    { skillsMode: 'custom', skillPaths: ['shared'] },
+    { skillsMode: 'custom', skillPaths: [] },
+  ] as const) {
+    const workspace = getWorkspace(
+      root,
+      'tester',
+      join(userDirectory(root, 'tester'), skillsMode),
+      undefined,
+      () =>
+        resolveAgentSkillPaths(root, 'tester', {
+          source: 'database',
+          skillsMode,
+          skillPaths: [...skillPaths],
+        }),
+    );
+    t.after(() => workspace.destroy());
+    const output = await fixture().run(
+      'text(await tools.skill({name:"shared"})); text(await tools.skill({name:"personal"})); text(await tools.skill({name:"private"}));',
+      { workspace, requestContext: new RequestContext() },
+    );
+    assert.equal(output.isError, undefined, texts(output));
+    if (skillsMode === 'auto' || skillPaths.length)
+      assert.match(texts(output), /GLOBAL_SKILL_CONTENT/);
+    else assert.doesNotMatch(texts(output), /GLOBAL_SKILL_CONTENT/);
+    assert.doesNotMatch(texts(output), /PRIVATE_SKILL_CONTENT/);
+    if (skillsMode === 'auto')
+      assert.match(texts(output), /PERSONAL_SKILL_CONTENT/);
+    else assert.doesNotMatch(texts(output), /PERSONAL_SKILL_CONTENT/);
+  }
 });
 
 test('real workspace tools honor paths, disabled tools and multimodal read output', async (t) => {

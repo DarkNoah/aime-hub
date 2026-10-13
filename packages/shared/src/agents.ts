@@ -38,6 +38,7 @@ export const agentInputSchema = z.strictObject({
     .max(128)
     .refine((values) => new Set(values).size === values.length)
     .default([]),
+  skillsMode: z.enum(['auto', 'custom']).default('auto'),
   skillPaths: z
     .array(skillPath)
     .max(100)

@@ -17,6 +17,7 @@ import {
   type WindowOperation,
   type WindowRect,
 } from './geometry';
+import { readWindowRect, saveWindowRect } from './storage';
 
 const handles: Record<ResizeDirection, string> = {
   n: 'inset-x-3 -top-1 h-2 cursor-ns-resize',
@@ -33,6 +34,7 @@ const handles: Record<ResizeDirection, string> = {
 export function FloatingWindow({
   active,
   boundaryRef,
+  storageKey,
   title,
   moveLabel,
   resizeLabel,
@@ -43,6 +45,7 @@ export function FloatingWindow({
 }: Omit<ComponentProps<'div'>, 'title'> & {
   active: boolean;
   boundaryRef: RefObject<HTMLElement | null>;
+  storageKey?: string;
   title: string;
   moveLabel: string;
   resizeLabel: (direction: ResizeDirection) => string;
@@ -76,6 +79,8 @@ export function FloatingWindow({
   useLayoutEffect(() => {
     if (!active || !boundaryRef.current) return;
     const boundary = boundaryRef.current;
+    if (!rectRef.current && storageKey)
+      rectRef.current = readWindowRect(storageKey);
     const fit = () => {
       const size = {
         width: boundary.clientWidth,
@@ -94,7 +99,7 @@ export function FloatingWindow({
       observer.disconnect();
       gestureRef.current = null;
     };
-  }, [active, boundaryRef]);
+  }, [active, boundaryRef, storageKey]);
 
   function start(event: PointerEvent<HTMLElement>, operation: WindowOperation) {
     if (event.button !== 0 || !event.isPrimary || !rectRef.current) return;
@@ -127,6 +132,8 @@ export function FloatingWindow({
   function end(event: PointerEvent<HTMLElement>) {
     if (gestureRef.current?.pointerId !== event.pointerId) return;
     gestureRef.current = null;
+    if (storageKey && rectRef.current)
+      saveWindowRect(storageKey, rectRef.current);
     if (event.currentTarget.hasPointerCapture(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId);
   }
@@ -143,7 +150,9 @@ export function FloatingWindow({
       event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0;
     const dy =
       event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0;
-    paint(adjustWindow(rectRef.current, operation, dx, dy, bounds()));
+    const next = adjustWindow(rectRef.current, operation, dx, dy, bounds());
+    paint(next);
+    if (storageKey) saveWindowRect(storageKey, next);
   }
 
   function resizeStart(event: PointerEvent<HTMLButtonElement>) {

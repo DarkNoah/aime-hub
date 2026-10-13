@@ -97,6 +97,12 @@ export class AgentService {
         : `${model.providerId}/${model.name}`,
       tools: Object.keys(version.tools ?? {}),
       disabledTools: settings.disabledTools ?? [],
+      // Preserve explicit selections in versions saved before modes existed.
+      skillsMode:
+        settings.skillsMode ??
+        (Array.isArray(settings.skillPaths) && settings.skillPaths.length
+          ? 'custom'
+          : 'auto'),
       skillPaths: settings.skillPaths ?? [],
     });
     if (!config.success) throw new AgentError('AGENT_CONFIG_UNSUPPORTED', 409);
@@ -221,6 +227,7 @@ export class AgentService {
       this.modelConfig(data.model),
     ]);
     if (
+      data.skillsMode === 'custom' &&
       data.skillPaths.some(
         (path) => !catalog.skills.some((skill) => skill.path === path),
       )
@@ -237,7 +244,8 @@ export class AgentService {
         provider: skillProvider,
         // Keep application runtime settings in the same native version snapshot.
         config: {
-          skillPaths: data.skillPaths,
+          skillsMode: data.skillsMode,
+          skillPaths: data.skillsMode === 'custom' ? data.skillPaths : [],
           disabledTools: data.disabledTools,
         },
       },
@@ -297,6 +305,7 @@ export class AgentService {
         model: data.model,
         tools: data.tools,
         disabledTools: data.disabledTools,
+        skillsMode: data.skillsMode,
         skillPaths: data.skillPaths,
       };
       const snapshot = await this.snapshot(configuration);

@@ -8,10 +8,12 @@ import {
   type AgentCatalog,
   type ManagedAgent,
 } from '@aime/shared/agents';
+import type { InstalledSkill } from '@aime/shared/skills';
 import { api } from '@/lib/rpc';
 import type { TranslationKey } from '@/i18n/config';
 import { ModelSelector } from '@/components/model-selector';
 import { InstalledSkillsList } from '@/components/skills/installed-skills-list';
+import { toggleSkills } from '@/components/skills/selection';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -19,6 +21,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Sheet,
   SheetContent,
@@ -36,6 +45,7 @@ type Field =
   | 'model'
   | 'tools'
   | 'disabledTools'
+  | 'skillsMode'
   | 'skillPaths'
   | 'form';
 
@@ -56,6 +66,9 @@ export function AgentSheet({
   const [instructions, setInstructions] = useState(agent?.instructions ?? '');
   const [model, setModel] = useState<string | null>(agent?.model ?? null);
   const [skillPaths, setSkillPaths] = useState(agent?.skillPaths ?? []);
+  const [skillsMode, setSkillsMode] = useState<'auto' | 'custom'>(
+    agent?.skillsMode ?? 'auto',
+  );
   const [disabledTools, setDisabledTools] = useState(
     agent?.disabledTools ?? [],
   );
@@ -86,6 +99,12 @@ export function AgentSheet({
     return () => controller.abort();
   }, [revision]);
 
+  function selectSkills(skills: InstalledSkill[], checked: boolean) {
+    setSkillPaths((current) => [
+      ...toggleSkills(new Set(current), skills, checked),
+    ]);
+  }
+
   function hint(field: Field) {
     return errors[field] ? (
       <p
@@ -108,7 +127,8 @@ export function AgentSheet({
       model,
       tools: agent?.tools ?? [],
       disabledTools,
-      skillPaths,
+      skillsMode,
+      skillPaths: skillsMode === 'custom' ? skillPaths : [],
     });
     setErrors({});
     if (!parsed.success) {
@@ -120,6 +140,7 @@ export function AgentSheet({
         model: 'agents.modelUnavailable',
         tools: 'agents.invalid',
         disabledTools: 'agents.invalid',
+        skillsMode: 'agents.invalid',
         skillPaths: 'agents.skillUnavailable',
       };
       for (const issue of parsed.error.issues) {
@@ -409,7 +430,11 @@ export function AgentSheet({
                       <h3 className="text-sm font-semibold">
                         {t('agents.skills')}
                       </h3>
-                      <Badge variant="secondary">{skillPaths.length}</Badge>
+                      <Badge variant="secondary">
+                        {skillsMode === 'auto'
+                          ? t('agents.skillsAuto')
+                          : skillPaths.length}
+                      </Badge>
                       <Button
                         asChild
                         type="button"
@@ -427,64 +452,100 @@ export function AgentSheet({
                         </Link>
                       </Button>
                     </div>
-                    <p className="text-xs leading-5 text-muted-foreground">
-                      {t('agents.skillsHint')}
-                    </p>
-                    <div className="relative">
-                      <Search className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground" />
-                      <Input
-                        className="pl-9"
-                        value={search}
-                        onChange={(event) => setSearch(event.target.value)}
-                        placeholder={t('agents.searchSkills')}
-                        aria-label={t('agents.searchSkills')}
-                      />
-                    </div>
-                    {missing.map((path) => (
-                      <label
-                        key={path}
-                        className="flex items-start gap-3 rounded-lg border border-destructive/30 p-3"
+                    <div className="flex items-center justify-between gap-3">
+                      <Label htmlFor="agent-skills-mode">
+                        {t('agents.skillsMode')}
+                      </Label>
+                      <Select
+                        value={skillsMode}
+                        disabled={pending}
+                        onValueChange={(value) => {
+                          if (value !== 'auto' && value !== 'custom') return;
+                          setSkillsMode(value);
+                          setErrors((current) => ({
+                            ...current,
+                            skillPaths: undefined,
+                          }));
+                        }}
                       >
-                        <Checkbox
-                          className="mt-1"
-                          checked
-                          disabled={pending}
-                          onCheckedChange={() =>
-                            setSkillPaths((current) =>
-                              current.filter((value) => value !== path),
-                            )
-                          }
-                        />
-                        <span className="min-w-0 break-all text-xs">
-                          <span className="block font-medium text-destructive">
-                            {t('agents.unavailable')}
-                          </span>
-                          {path}
-                        </span>
-                      </label>
-                    ))}
-                    {visibleSkills.length ? (
-                      <div className="overflow-hidden rounded-lg border">
-                        <InstalledSkillsList
-                          mode="select"
-                          skills={visibleSkills}
-                          selected={new Set(skillPaths)}
-                          disabled={pending}
-                          onSelect={(skill, checked) =>
-                            setSkillPaths((current) =>
+                        <SelectTrigger id="agent-skills-mode" className="w-36">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="auto">
+                            {t('agents.skillsAuto')}
+                          </SelectItem>
+                          <SelectItem value="custom">
+                            {t('agents.skillsCustom')}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      {t(
+                        skillsMode === 'auto'
+                          ? 'agents.skillsAutoHint'
+                          : 'agents.skillsHint',
+                      )}
+                    </p>
+                    {skillsMode === 'custom' && (
+                      <>
+                        <div className="relative">
+                          <Search className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground" />
+                          <Input
+                            className="pl-9"
+                            value={search}
+                            onChange={(event) => setSearch(event.target.value)}
+                            placeholder={t('agents.searchSkills')}
+                            aria-label={t('agents.searchSkills')}
+                          />
+                        </div>
+                        {missing.map((path) => (
+                          <label
+                            key={path}
+                            className="flex items-start gap-3 rounded-lg border border-destructive/30 p-3"
+                          >
+                            <Checkbox
+                              className="mt-1"
                               checked
-                                ? [...current, skill.path]
-                                : current.filter((path) => path !== skill.path),
-                            )
-                          }
-                        />
-                      </div>
-                    ) : catalog ? (
-                      <p className="rounded-lg border border-dashed p-5 text-sm text-muted-foreground">
-                        {t(search ? 'agents.noMatches' : 'agents.noSkills')}
-                      </p>
-                    ) : null}
-                    {hint('skillPaths')}
+                              disabled={pending}
+                              onCheckedChange={() =>
+                                setSkillPaths((current) =>
+                                  current.filter((value) => value !== path),
+                                )
+                              }
+                            />
+                            <span className="min-w-0 break-all text-xs">
+                              <span className="block font-medium text-destructive">
+                                {t('agents.unavailable')}
+                              </span>
+                              {path}
+                            </span>
+                          </label>
+                        ))}
+                        {visibleSkills.length ? (
+                          <div className="overflow-hidden rounded-lg border">
+                            <InstalledSkillsList
+                              mode="select"
+                              skills={catalog?.skills ?? []}
+                              search={search}
+                              selected={new Set(skillPaths)}
+                              disabled={pending}
+                              onSelect={(skill, checked) =>
+                                selectSkills([skill], checked)
+                              }
+                              onSelectGroup={selectSkills}
+                            />
+                          </div>
+                        ) : catalog ? (
+                          <p className="rounded-lg border border-dashed p-5 text-sm text-muted-foreground">
+                            {t(search ? 'agents.noMatches' : 'agents.noSkills')}
+                          </p>
+                        ) : null}
+                        {hint('skillPaths')}
+                      </>
+                    )}
+                    {hint('skillsMode')}
                   </section>
                 </TabsContent>
               </fieldset>

@@ -20,6 +20,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
+import { selectableSkills, selectionState } from './selection';
 
 type Props = {
   skills: InstalledSkill[];
@@ -35,8 +36,10 @@ type Props = {
     }
   | {
       mode: 'select';
+      search?: string;
       selected: ReadonlySet<string>;
       onSelect: (skill: InstalledSkill, checked: boolean) => void;
+      onSelectGroup: (skills: InstalledSkill[], checked: boolean) => void;
     }
 );
 
@@ -44,6 +47,8 @@ type Props = {
 export function InstalledSkillsList(props: Props) {
   const { t } = useTranslation();
   const id = useId();
+  const query =
+    props.mode === 'select' ? props.search?.trim().toLowerCase() : '';
   const groups = new Map<string, InstalledSkill[]>();
   for (const skill of props.skills) {
     const group = groups.get(skill.group) ?? [];
@@ -51,6 +56,14 @@ export function InstalledSkillsList(props: Props) {
     groups.set(skill.group, group);
   }
   return [...groups].map(([group, skills]) => {
+    const visibleSkills = query
+      ? skills.filter((skill) =>
+          `${skill.name} ${skill.path} ${skill.description}`
+            .toLowerCase()
+            .includes(query),
+        )
+      : skills;
+    if (!visibleSkills.length) return null;
     const repositoryUrl = skillGroupRepositoryUrl(group);
     const label = group || t('skills.localGroup');
     const heading = (
@@ -69,6 +82,17 @@ export function InstalledSkillsList(props: Props) {
       <Collapsible key={group} defaultOpen asChild>
         <section aria-label={label}>
           <div className="flex items-center border-b bg-muted/50">
+            {props.mode === 'select' ? (
+              <Checkbox
+                className="ml-4 sm:ml-5"
+                aria-label={t('skills.selectGroup', { name: label })}
+                checked={selectionState(skills, props.selected)}
+                disabled={props.disabled || !selectableSkills(skills).length}
+                onCheckedChange={(checked) =>
+                  props.onSelectGroup(skills, checked === true)
+                }
+              />
+            ) : null}
             <h2 className="min-w-0 flex-1 text-sm font-medium">
               {group ? (
                 <CollapsibleTrigger className="flex w-full items-center gap-2 px-4 py-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-5 [&[data-state=open]>svg:first-child]:rotate-90">
@@ -132,7 +156,7 @@ export function InstalledSkillsList(props: Props) {
           </div>
           <CollapsibleContent>
             <div className="divide-y">
-              {skills.map((skill) => (
+              {visibleSkills.map((skill) => (
                 <article
                   key={skill.path}
                   className="relative flex items-start gap-3 px-4 py-4 sm:px-5"

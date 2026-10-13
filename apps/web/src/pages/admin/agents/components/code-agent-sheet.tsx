@@ -72,20 +72,11 @@ export function CodeAgentSheet({
               )}
             </section>
             <section className="space-y-2">
-              <h3 className="text-sm font-medium">Skills</h3>
-              <div className="flex flex-wrap gap-2">
-                {agent.skillPaths.length ? (
-                  agent.skillPaths.map((path) => (
-                    <Badge key={path} variant="outline">
-                      {path}
-                    </Badge>
-                  ))
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    {t('agents.noSelectedSkills')}
-                  </p>
-                )}
-              </div>
+              <h3 className="text-sm font-medium">{t('agents.skills')}</h3>
+              <Badge variant="secondary">{t('agents.skillsAuto')}</Badge>
+              <p className="text-sm text-muted-foreground">
+                {t('agents.skillsAutoHint')}
+              </p>
             </section>
           </div>
         </ScrollArea>

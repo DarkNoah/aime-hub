@@ -4,10 +4,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Agent } from '@mastra/core/agent';
+import { RequestContext } from '@mastra/core/request-context';
 import { validateSkillContent } from '@mastra/core/skills';
 import { createMockModel } from '@mastra/core/test-utils/llm-mock';
 import { directorySkillConfig } from './skill-source.js';
-import { listChatSkills } from './skills.js';
+import { listChatSkills, resolveAgentSkillPaths } from './skills.js';
 import {
   createPersonalWorkspace,
   discoverPersonalSkills,
@@ -151,4 +152,126 @@ test('normalization only replaces identity and retains validation of other metad
   assert.ok(
     invalid.errors.some((error) => error.toLowerCase().includes('description')),
   );
+});
+
+test('automatic skills respect personal/project scopes and custom selections pin exact directories', async (t) => {
+  const root = await fixture(t);
+  const projectId = 'project123456789';
+  const global = await writeSkill(
+    root,
+    '.agents/skills/group/shared',
+    manifest('Global shared'),
+  );
+  const common = await writeSkill(
+    root,
+    '.agents/skills/common',
+    manifest('Common'),
+  );
+  const personal = await writeSkill(
+    root,
+    'users/alice/.agents/skills/shared',
+    manifest('Personal shared'),
+  );
+  await writeSkill(
+    root,
+    'users/bob/.agents/skills/private',
+    manifest('Other user private'),
+  );
+  const project = await writeSkill(
+    root,
+    `projects/${projectId}/.agents/skills/shared`,
+    manifest('Project shared'),
+  );
+  await writeSkill(
+    root,
+    'projects/other12345678901/.agents/skills/private',
+    manifest('Other project private'),
+  );
+  for (const source of ['code', 'database'] as const) {
+    const auto = {
+      source,
+      skillsMode: 'auto' as const,
+      skillPaths: ['missing'],
+    };
+    assert.deepEqual(
+      new Set(await resolveAgentSkillPaths(root, 'alice', auto)),
+      new Set([common, personal]),
+    );
+    assert.deepEqual(
+      new Set(await resolveAgentSkillPaths(root, 'alice', auto, projectId)),
+      new Set([common, project]),
+    );
+  }
+  const custom = {
+    source: 'database' as const,
+    skillsMode: 'custom' as const,
+    skillPaths: ['group/shared'],
+  };
+  assert.deepEqual(await resolveAgentSkillPaths(root, 'alice', custom), [
+    global,
+  ]);
+  assert.deepEqual(
+    await resolveAgentSkillPaths(root, 'alice', custom, projectId),
+    [global],
+  );
+  assert.deepEqual(
+    await resolveAgentSkillPaths(root, 'alice', { ...custom, skillPaths: [] }),
+    [],
+  );
+  await assert.rejects(
+    resolveAgentSkillPaths(root, 'alice', {
+      ...custom,
+      skillPaths: ['missing'],
+    }),
+    { code: 'AGENT_SKILL_UNAVAILABLE' },
+  );
+});
+
+test('dynamic Agent skills refresh between requests and retain directory identity and reference access', async (t) => {
+  const root = await fixture(t);
+  const config = {
+    source: 'database' as const,
+    skillsMode: 'auto' as const,
+    skillPaths: [],
+  };
+  const workspace = getWorkspace(
+    root,
+    'alice',
+    await createPersonalWorkspace(root, 'alice'),
+    undefined,
+    () => resolveAgentSkillPaths(root, 'alice', config),
+  );
+  t.after(() => workspace.destroy());
+  const agent = new Agent({
+    id: 'dynamic-directory-test',
+    name: 'Dynamic directory test',
+    instructions: 'Use skills',
+    model: createMockModel({ mockText: 'Done', version: 'v2' }),
+    workspace,
+  });
+  const names = async () =>
+    (await agent.listSkills({ requestContext: new RequestContext() })).map(
+      (skill) => skill.name,
+    );
+  assert.deepEqual(await names(), []);
+  const directory = await writeSkill(
+    root,
+    'users/alice/.agents/skills/added',
+    manifest('Added later'),
+  );
+  await mkdir(join(directory, 'references'));
+  await writeFile(join(directory, 'references/readme.md'), 'Reference body');
+  assert.deepEqual(await names(), ['added']);
+  const context = { requestContext: new RequestContext() };
+  assert.equal(
+    (await agent.getSkill('added', context))?.description,
+    'Added later',
+  );
+  const scoped = await workspace.skills!.getScoped!(context);
+  assert.equal(
+    await scoped.getReference('added', 'references/readme.md'),
+    'Reference body',
+  );
+  await rm(directory, { recursive: true });
+  assert.deepEqual(await names(), []);
 });

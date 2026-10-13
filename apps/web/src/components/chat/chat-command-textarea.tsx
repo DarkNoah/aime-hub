@@ -17,6 +17,7 @@ import {
   type SlashCommandItem,
 } from './slash-command';
 import type { TranslationKey } from '@/i18n/config';
+import './chat-command-textarea.css';
 
 export function ChatCommandTextarea({
   value,
@@ -50,6 +51,7 @@ export function ChatCommandTextarea({
   const [dismissed, setDismissed] = useState(false);
   const [selection, setSelection] = useState({ start: 0, end: 0 });
   const [selected, setSelected] = useState('');
+  const [keyboardSelection, setKeyboardSelection] = useState(false);
   const command = getSlashCommand(value, selection.start, selection.end);
   const open = focused && !disabled && !dismissed && command !== null;
   const filteredGroups = filterCommandGroups(groups, command?.query ?? '');
@@ -107,6 +109,7 @@ export function ChatCommandTextarea({
             });
             setDismissed(false);
             setSelected('');
+            setKeyboardSelection(false);
           }}
           onSelect={(event) =>
             setSelection({
@@ -153,6 +156,7 @@ export function ChatCommandTextarea({
             ) {
               event.preventDefault();
               const step = event.key === 'ArrowDown' ? 1 : -1;
+              setKeyboardSelection(true);
               setSelected(
                 matches[(activeIndex + step + matches.length) % matches.length]
                   .id,
@@ -233,8 +237,8 @@ export function ChatCommandTextarea({
               </p>
             ) : (
               <ScrollArea
-                className="max-h-64"
-                viewportProps={{ className: 'max-h-64' }}
+                className="min-w-0 max-h-64"
+                viewportProps={{ className: 'max-h-64 [&>div]:block!' }}
               >
                 <div className="space-y-2 p-1">
                   {filteredGroups.map((group) => (
@@ -266,21 +270,41 @@ export function ChatCommandTextarea({
                               variant="ghost"
                               role="option"
                               aria-selected={item.id === activeId}
+                              data-keyboard-active={
+                                keyboardSelection && item.id === activeId
+                              }
                               tabIndex={-1}
-                              onMouseMove={() => setSelected(item.id)}
+                              onMouseMove={() => {
+                                setSelected(item.id);
+                                setKeyboardSelection(false);
+                              }}
                               onClick={() => complete(item)}
-                              title={`/${item.name} · ${item.description}`}
                               className={cn(
-                                'h-8 w-full min-w-0 justify-start gap-2 rounded-md px-2.5 text-left font-normal',
+                                'chat-command-option relative block h-auto min-h-8 w-full min-w-0 rounded-md px-2.5 py-0 text-left font-normal whitespace-normal transition-colors',
                                 item.id === activeId &&
                                   'bg-accent text-accent-foreground',
                               )}
                             >
-                              <span className="max-w-1/2 shrink-0 truncate">
-                                /{item.name}
+                              <span
+                                aria-hidden="true"
+                                className="chat-command-summary pointer-events-none absolute inset-0 flex min-w-0 items-center gap-2 px-2.5"
+                              >
+                                <span className="max-w-1/2 shrink-0 truncate">
+                                  /{item.name}
+                                </span>
+                                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                                  {item.description}
+                                </span>
                               </span>
-                              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                                {item.description}
+                              <span className="chat-command-details grid min-w-0">
+                                <span className="min-h-0 overflow-hidden">
+                                  <span className="flex min-w-0 flex-col gap-1 py-2 [overflow-wrap:anywhere]">
+                                    <span>/{item.name}</span>
+                                    <span className="text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
+                                      {item.description}
+                                    </span>
+                                  </span>
+                                </span>
                               </span>
                             </Button>
                           ))}

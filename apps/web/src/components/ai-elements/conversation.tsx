@@ -13,7 +13,7 @@ export type ConversationProps = ComponentProps<typeof StickToBottom>;
 
 export const Conversation = ({ className, ...props }: ConversationProps) => (
   <StickToBottom
-    className={cn('relative flex-1 overflow-y-hidden', className)}
+    className={cn('relative min-w-0 flex-1 overflow-hidden', className)}
     initial="smooth"
     resize="smooth"
     role="log"
@@ -34,15 +34,22 @@ export const ConversationContent = ({
   const context = useStickToBottomContext();
   return (
     <ScrollArea
-      className="h-full"
+      className="h-full w-full min-w-0"
       viewportProps={{
         ref: context.scrollRef,
-        className: cn('overscroll-contain', scrollClassName),
+        // Radix's table wrapper otherwise grows to the width of long tables/code.
+        className: cn(
+          'relative overscroll-contain [&>div]:block!',
+          scrollClassName,
+        ),
       }}
     >
       {/* Observe the padded content's full height, including composer clearance. */}
-      <div ref={context.contentRef}>
-        <div className={cn('flex flex-col gap-8 p-4', className)} {...props}>
+      <div ref={context.contentRef} className="min-w-0 max-w-full">
+        <div
+          className={cn('flex min-w-0 flex-col gap-8 p-4', className)}
+          {...props}
+        >
           {/* Preserve the render-prop API; passing the context does not read its refs. */}
           {/* eslint-disable-next-line react-hooks/refs */}
           {typeof children === 'function' ? children(context) : children}

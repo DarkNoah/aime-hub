@@ -265,7 +265,14 @@ export const zhCN = {
     '默认使用全局已启用的工具。可为此 Agent 单独关闭工具；全局停用的工具无法在此启用。',
   'agents.toolGloballyDisabled': '全局已停用',
   'agents.toolsExcluded': '已关闭 {{count}} 个工具',
-  'agents.skillsHint': '选择后台 Skills 中已安装的有效技能，按目录路径引用。',
+  'agents.skillsMode': '加载方式',
+  'agents.skillsAuto': '自动',
+  'agents.skillsCustom': '自定义',
+  'agents.skillsAutoSummary': '自动加载 Skills',
+  'agents.skillsAutoHint':
+    '自动加载当前会话有权使用的全部技能：个人会话包含全局和个人技能，项目会话包含全局和项目技能。新增或移除技能会在后续执行时生效。',
+  'agents.skillsHint':
+    '仅加载下方选中的全局技能，按目录固定范围；不选择则不加载任何技能。',
   'agents.searchSkills': '搜索技能名称、目录或说明…',
   'agents.globallyDisabled': '全局已停用',
   'agents.unavailable': '已不可用，请取消选择',
@@ -554,6 +561,7 @@ export const zhCN = {
   'skills.filter': '搜索技能、描述或文件夹…',
   'skills.selectAll': '全选当前结果',
   'skills.selectFolder': '选择文件夹 {{name}}',
+  'skills.selectGroup': '选择整组技能 {{name}}',
   'skills.selectSkill': '选择技能 {{name}}',
   'skills.found': '发现 {{count}} 个技能',
   'skills.selected': '已选 {{count}} 项',

@@ -10,6 +10,8 @@ import {
 } from './markdown-file-link';
 
 type MarkdownLinkProps = ComponentProps<'a'> & ExtraProps;
+const badgeClassName = 'mx-1 max-w-full align-baseline whitespace-nowrap';
+const badgeTextClassName = 'min-w-0 max-w-[24ch] truncate';
 
 function getWebUrl(href?: string): string | undefined {
   if (!href) return undefined;
@@ -50,15 +52,13 @@ export const MarkdownLink = memo(
       return (
         <Badge
           asChild
-          className={cn(
-            'mx-1 max-w-full align-baseline whitespace-normal',
-            className,
-          )}
+          className={cn(className, badgeClassName)}
           variant="secondary"
         >
           <a
             {...props}
             href="#"
+            title={props.title ?? filePath}
             onAuxClick={(event) => {
               onAuxClick?.(event);
               if (!event.defaultPrevented && event.button === 1)
@@ -77,7 +77,7 @@ export const MarkdownLink = memo(
             ) : (
               <FileText className="size-3 shrink-0" aria-hidden="true" />
             )}
-            <span className="min-w-0 [overflow-wrap:anywhere]">{children}</span>
+            <span className={badgeTextClassName}>{children}</span>
           </a>
         </Badge>
       );
@@ -91,10 +91,7 @@ export const MarkdownLink = memo(
       return (
         <Badge
           asChild
-          className={cn(
-            'max-w-full align-baseline whitespace-normal mx-1',
-            className,
-          )}
+          className={cn(className, badgeClassName)}
           variant="outline"
         >
           <a
@@ -104,7 +101,7 @@ export const MarkdownLink = memo(
             target="_blank"
             title={props.title ?? webUrl}
           >
-            <span className="min-w-0 [overflow-wrap:anywhere]">{children}</span>
+            <span className={badgeTextClassName}>{children}</span>
             <ExternalLink className="size-3 shrink-0" aria-hidden="true" />
           </a>
         </Badge>

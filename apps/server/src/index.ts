@@ -9,6 +9,7 @@ import { loadEnv } from '@aime/shared/env';
 import { createApp } from './app.js';
 import { ProviderService } from './modules/providers/service.js';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createMastraRuntime } from './mastra/index.js';
 import { createChatRunner } from './modules/threads/runner.js';
 import { LanguageModelService } from './modules/models/language-model.js';
@@ -17,6 +18,7 @@ import { RequestLogService } from './modules/request-logs/service.js';
 import { ThreadService } from './modules/threads/service.js';
 import { ProjectService } from './modules/projects/service.js';
 import { SkillService } from './modules/skills/service.js';
+import { syncBuiltinSkills } from './modules/skills/builtin.js';
 import { EnvironmentVariableService } from './modules/environment-variables/service.js';
 import { projectAgentMounts } from './modules/threads/workspace.js';
 import { ToolService } from './modules/tools/service.js';
@@ -34,6 +36,14 @@ import { AssetService } from './modules/assets/service.js';
 import { SystemSettingsService } from './modules/system-settings/service.js';
 
 const env = loadEnv();
+const workspaceRoot = resolve(
+  process.env.INIT_CWD ?? process.cwd(),
+  env.WORKSPACE_ROOT,
+);
+await syncBuiltinSkills(
+  fileURLToPath(new URL('./mastra/skills/', import.meta.url)),
+  workspaceRoot,
+);
 const database = createDataSource(env.DATABASE_URL);
 const systemSettings = new SystemSettingsService(database);
 const pool = new Pool({ connectionString: env.DATABASE_URL });
@@ -89,10 +99,6 @@ const { mastra, storage, memory } = createMastraRuntime(
   scheduleHooks,
 );
 await storage.init();
-const workspaceRoot = resolve(
-  process.env.INIT_CWD ?? process.cwd(),
-  env.WORKSPACE_ROOT,
-);
 const skills = new SkillService(workspaceRoot);
 const agentStore = await storage.getStore('agents');
 if (!agentStore) throw new Error('Mastra agents storage is required');

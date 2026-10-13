@@ -1,16 +1,19 @@
 import { basename, resolve } from 'node:path';
-import { LocalSkillSource } from '@mastra/core/workspace';
+import { LocalSkillSource, type SkillsResolver } from '@mastra/core/workspace';
 import { validateSkillContent } from '@mastra/core/skills';
 
 /** Normalize skill identity on read; never rewrite the user's manifest. */
 class DirectorySkillSource extends LocalSkillSource {
-  private readonly names: Map<string, string>;
+  private readonly names = new Map<string, string>();
 
   constructor(paths: string[]) {
     super();
-    this.names = new Map(
-      paths.map((path) => [resolve(path, 'SKILL.md'), basename(path)]),
-    );
+    this.registerPaths(paths);
+  }
+
+  registerPaths(paths: string[]) {
+    for (const path of paths)
+      this.names.set(resolve(path, 'SKILL.md'), basename(path));
   }
 
   override async readFile(path: string): Promise<string | Buffer> {
@@ -25,9 +28,18 @@ class DirectorySkillSource extends LocalSkillSource {
   }
 }
 
-export function directorySkillConfig(paths: string[]) {
+export function directorySkillConfig(paths: SkillsResolver) {
+  const source = new DirectorySkillSource(Array.isArray(paths) ? paths : []);
+  const skills: SkillsResolver =
+    typeof paths === 'function'
+      ? async (context) => {
+          const resolved = await paths(context);
+          source.registerPaths(resolved);
+          return resolved;
+        }
+      : paths;
   return {
-    skills: paths,
-    skillSource: new DirectorySkillSource(paths),
+    skills,
+    skillSource: source,
   };
 }

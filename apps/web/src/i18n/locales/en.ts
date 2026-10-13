@@ -289,8 +289,14 @@ export const en = {
     'Inherit globally enabled tools by default. Turn off individual tools for this agent; globally disabled tools cannot be enabled here.',
   'agents.toolGloballyDisabled': 'Globally disabled',
   'agents.toolsExcluded': '{{count}} tools excluded',
+  'agents.skillsMode': 'Loading mode',
+  'agents.skillsAuto': 'Auto',
+  'agents.skillsCustom': 'Custom',
+  'agents.skillsAutoSummary': 'Automatic skills',
+  'agents.skillsAutoHint':
+    'Load all skills available to this conversation: global and personal skills for personal chats, or global and project skills for project chats. Added or removed skills take effect on subsequent executions.',
   'agents.skillsHint':
-    'Select valid skills installed in Skills administration. References use directory paths.',
+    'Load only the selected global skill directories. Leave the selection empty to load no skills.',
   'agents.searchSkills': 'Search skill names, paths, or descriptions…',
   'agents.globallyDisabled': 'Globally disabled',
   'agents.unavailable': 'Unavailable — remove this selection',
@@ -607,6 +613,7 @@ export const en = {
   'skills.filter': 'Search skills, descriptions, or folders…',
   'skills.selectAll': 'Select all results',
   'skills.selectFolder': 'Select folder {{name}}',
+  'skills.selectGroup': 'Select all skills in {{name}}',
   'skills.selectSkill': 'Select skill {{name}}',
   'skills.found': '{{count}} skills found',
   'skills.selected': '{{count}} selected',

@@ -11,5 +11,6 @@ export const assistantAgent: CodeAgent = {
   model: null,
   tools: [],
   disabledTools: [],
+  skillsMode: 'auto',
   skillPaths: [],
 };

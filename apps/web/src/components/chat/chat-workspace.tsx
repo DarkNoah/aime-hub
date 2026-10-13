@@ -227,6 +227,7 @@ export function ChatWorkspace({
                 <FloatingWindow
                   active={floating}
                   boundaryRef={containerRef}
+                  storageKey="chat-floating-window:v1"
                   title={t('chat.inspector.floating')}
                   moveLabel={t('chat.inspector.moveWindow')}
                   resizeLabel={(direction) =>

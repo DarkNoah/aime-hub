@@ -3,7 +3,6 @@ import {
   buildAgent,
   type AgentRuntimeOptions,
 } from '../../mastra/agents/factory.js';
-import { resolve } from 'node:path';
 import type { AgentService } from '../agents/service.js';
 import { fallbackAgentId, getCodeAgent } from '../../mastra/agents/index.js';
 import { AgentError } from '../agents/errors.js';
@@ -28,12 +27,11 @@ import {
   removePersonalWorkspace,
   createProjectFilesystem,
   createProjectWorkspace,
-  discoverInstalledSkills,
   getWorkspace,
   projectDirectory,
 } from './workspace.js';
 import { threadScope } from './scope.js';
-import { listChatSkills } from './skills.js';
+import { listChatSkills, resolveAgentSkillPaths } from './skills.js';
 import { getChatUsage } from './usage.js';
 import { getBrowser } from './browser.js';
 import { threadMessages } from './message-conversion.js';
@@ -169,15 +167,6 @@ export function createChatRunner(
       let workspace: ReturnType<typeof getWorkspace> | undefined;
       try {
         await filesystem?.init?.();
-        const discovered = await discoverInstalledSkills(workspaceRoot);
-        const skills = config.skillPaths.map((path) => {
-          const skill = discovered.find(
-            (item) =>
-              item.path === resolve(workspaceRoot, '.agents', 'skills', path),
-          );
-          if (!skill) throw new AgentError('AGENT_SKILL_UNAVAILABLE');
-          return skill;
-        });
         workspace = getWorkspace(
           workspaceRoot,
           userId,
@@ -185,7 +174,10 @@ export function createChatRunner(
             ? projectDirectory(workspaceRoot, projectId)
             : String(thread.metadata?.workspace),
           projectId,
-          skills.map((skill) => skill.path),
+          // The native resolver runs per execution, so automatic skills follow
+          // current installations while the Agent configuration stays pinned.
+          () =>
+            resolveAgentSkillPaths(workspaceRoot, userId, config, projectId),
           filesystem,
         );
         const agent = await getAgent(config.id, {
