@@ -37,7 +37,7 @@ export class EnvironmentVariableService {
     return this.database.getRepository(EnvironmentVariable);
   }
 
-  // Only the administrator router calls these explicit value-bearing reads.
+  // Values are selected explicitly for administrator reads and command execution.
   private query() {
     return this.repository
       .createQueryBuilder('variable')
@@ -48,6 +48,14 @@ export class EnvironmentVariableService {
     return (await this.query().orderBy('variable.name', 'ASC').getMany()).map(
       toDto,
     );
+  }
+
+  async getEnv(): Promise<Record<string, string>> {
+    const rows = await this.repository
+      .createQueryBuilder('variable')
+      .select(['variable.name', 'variable.value'])
+      .getMany();
+    return Object.fromEntries(rows.map(({ name, value }) => [name, value]));
   }
 
   async get(id: string): Promise<EnvironmentVariableDto> {

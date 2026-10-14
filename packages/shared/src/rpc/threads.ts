@@ -198,6 +198,22 @@ export const threadsContract = {
     })
     .input(z.object({ params: z.object({ threadId, taskId: id }) }))
     .output(type<void>()),
+  cleanupCommandSession: procedure
+    .route({
+      method: 'DELETE',
+      path: '/threads/{threadId}/command-sessions/{sessionId}',
+      inputStructure: 'detailed',
+      successStatus: 204,
+    })
+    .input(
+      z.object({
+        params: z.object({
+          threadId,
+          sessionId: z.coerce.number().int().min(1).max(2_147_483_647),
+        }),
+      }),
+    )
+    .output(type<void>()),
   respondToTool: procedure
     .route({
       method: 'POST',

@@ -1,6 +1,8 @@
 // Export tool instances here. Their own IDs register them in settings and every Agent.
 export { sleep } from './sleep.js';
 export { exec } from './exec.js';
+export { execCommand } from './exec_command.js';
+export { writeStdin } from './write_stdin.js';
 export { currTime } from './clock.js';
 export { webSearch } from './web_search.js';
 export { webFetch } from './web_fetch.js';

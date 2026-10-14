@@ -387,6 +387,7 @@ export class ThreadService {
       goal: runtime.goal,
       backgroundTasks: runtime.backgroundTasks,
       backgroundTasksError: runtime.backgroundTasksError,
+      commandSessions: runtime.session?.commands?.list() ?? [],
       toolInteractions: runtime.data.toolInteractions.map((item) => ({
         id: item.id,
         kind: item.kind,
@@ -463,6 +464,7 @@ export class ThreadService {
     if (
       this.closing ||
       this.busy(runtime) ||
+      this.hasRunningCommands(runtime) ||
       runtime.listeners.size ||
       runtime.backgroundTasks.some(
         (task) => task.status === 'pending' || task.status === 'running',
@@ -470,7 +472,11 @@ export class ThreadService {
     )
       return;
     runtime.expiry = setTimeout(() => {
-      if (!this.busy(runtime) && !runtime.listeners.size) {
+      if (
+        !this.busy(runtime) &&
+        !this.hasRunningCommands(runtime) &&
+        !runtime.listeners.size
+      ) {
         void runtime.backgroundObserver?.stop();
         void runtime.session?.close();
         this.runtimes.delete(runtime.thread.id);
@@ -519,10 +525,24 @@ export class ThreadService {
     );
   }
 
+  private hasRunningCommands(runtime: Runtime) {
+    return (
+      runtime.session?.commands
+        ?.list()
+        .some((command) => command.status !== 'exited') ?? false
+    );
+  }
+
   private observe(runtime: Runtime, event: ChatSessionEvent) {
     // Serialize snapshot/storage updates only. Mastra schedules all model work.
     return this.locked(runtime.thread.id, async () => {
       if (this.runtimes.get(runtime.thread.id) !== runtime) return;
+      if (event.type === 'commands') {
+        // Read the live registry, so delayed events cannot restore released handles.
+        this.publish(runtime);
+        this.release(runtime);
+        return;
+      }
       if (event.type === 'goal') {
         // Read native state after taking the lock. A late event must never
         // restore the objective that the user has just cleared.
@@ -636,6 +656,7 @@ export class ThreadService {
     if (runtime.session && key !== runtime.sessionKey) {
       if (
         this.busy(runtime) ||
+        this.hasRunningCommands(runtime) ||
         runtime.data.toolInteractions.some((item) => !item.response) ||
         runtime.backgroundTasks.some(isBackgroundTaskActive) ||
         runtime.goal?.status === 'active'
@@ -1294,6 +1315,19 @@ export class ThreadService {
     });
   }
 
+  cleanupCommandSession(userId: string, id: string, sessionId: number) {
+    return this.scopeLocked(userId, id, async () => {
+      await this.accessible(userId, id);
+      // Never open a new Workspace to clean up a stale or already released handle.
+      const runtime = this.runtimes.get(id);
+      await runtime?.session?.commands?.cleanup(sessionId);
+      if (runtime) {
+        this.publish(runtime);
+        this.release(runtime);
+      }
+    });
+  }
+
   retry(userId: string, id: string) {
     return this.continueFromHistory(userId, id, 'retry');
   }
@@ -1482,6 +1516,9 @@ export class ThreadService {
   }
 
   private async assertNoBackgroundTasks(thread: StorageThreadType) {
+    const runtime = this.runtimes.get(thread.id);
+    if (runtime && this.hasRunningCommands(runtime))
+      throw new ThreadError('THREAD_BUSY', 409);
     const activeTasks = await this.backgroundTaskManager?.listTasks({
       threadId: thread.id,
       resourceId: thread.resourceId!,
@@ -1532,7 +1569,8 @@ export class ThreadService {
           result.threads.some(
             (thread) =>
               !!this.runtimes.get(thread.id) &&
-              this.busy(this.runtimes.get(thread.id)!),
+              (this.busy(this.runtimes.get(thread.id)!) ||
+                this.hasRunningCommands(this.runtimes.get(thread.id)!)),
           )
         )
           throw new ThreadError('PROJECT_BUSY', 409);

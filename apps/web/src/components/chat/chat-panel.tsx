@@ -343,9 +343,13 @@ function ExistingChat({
         details={
           <ChatRunningTasks
             tasks={chat.backgroundTasks}
+            commands={chat.commandSessions}
             unavailable={!!chat.backgroundTasksError}
             disabled={!chat.connected}
             onStop={(taskId) => chatApi.cancelBackgroundTask(threadId, taskId)}
+            onCleanup={(sessionId) =>
+              chatApi.cleanupCommandSession(threadId, sessionId)
+            }
           />
         }
         onClose={onClose}

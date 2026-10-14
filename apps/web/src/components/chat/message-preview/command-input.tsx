@@ -16,19 +16,38 @@ import {
 } from '@/components/ai-elements/code-block';
 import { ToolInput } from '@/components/ai-elements/tool';
 import { Badge } from '@/components/ui/badge';
+import { CommandOptions } from './command-options';
 
 export function CommandInput({ input }: { input: unknown }) {
   const { t } = useTranslation();
   if (
     !input ||
     typeof input !== 'object' ||
-    !('command' in input) ||
-    typeof input.command !== 'string'
+    !(
+      ('command' in input && typeof input.command === 'string') ||
+      ('cmd' in input && typeof input.cmd === 'string')
+    )
   )
     return input === undefined ? null : <ToolInput input={input} />;
 
-  const { command, description, cwd, timeout, tail, background, ...extra } =
-    input as Record<string, unknown> & { command: string };
+  const {
+    command: legacyCommand,
+    cmd,
+    description,
+    cwd: legacyCwd,
+    workdir,
+    timeout,
+    tail,
+    background,
+    shell,
+    login,
+    tty,
+    yield_time_ms,
+    max_output_tokens,
+    ...extra
+  } = input as Record<string, unknown>;
+  const command = typeof cmd === 'string' ? cmd : (legacyCommand as string);
+  const cwd = workdir ?? legacyCwd;
   const hasTimeout = typeof timeout === 'number' || typeof timeout === 'string';
   const hasTail = typeof tail === 'number' || typeof tail === 'string';
 
@@ -61,56 +80,70 @@ export function CommandInput({ input }: { input: unknown }) {
           </CodeBlockActions>
         </CodeBlockHeader>
       </CodeBlock>
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-4 gap-y-2 text-xs leading-5">
-        {typeof cwd === 'string' && cwd && (
-          <>
-            <dt className="flex items-center gap-2 text-muted-foreground">
-              <FolderOpen className="size-3.5" aria-hidden="true" />
-              {t('chat.command.cwd')}
-            </dt>
-            <dd className="font-mono [overflow-wrap:anywhere]">{cwd}</dd>
-          </>
-        )}
-        {hasTimeout && (
-          <>
-            <dt className="flex items-center gap-2 text-muted-foreground">
-              <Clock3 className="size-3.5" aria-hidden="true" />
-              {t('chat.command.timeout')}
-            </dt>
-            <dd>{t('chat.command.seconds', { value: timeout })}</dd>
-          </>
-        )}
-        {hasTail && (
-          <>
-            <dt className="flex items-center gap-2 text-muted-foreground">
-              <ListEnd className="size-3.5" aria-hidden="true" />
-              {t('chat.command.outputLimit')}
-            </dt>
-            <dd>
-              {Number(tail) === 0
-                ? t('chat.command.unlimited')
-                : t('chat.command.lastLines', { value: tail })}
-            </dd>
-          </>
-        )}
-        {typeof background === 'boolean' && (
-          <>
-            <dt className="flex items-center gap-2 text-muted-foreground">
-              <Play className="size-3.5" aria-hidden="true" />
-              {t('chat.command.mode')}
-            </dt>
-            <dd>
-              <Badge variant="outline">
-                {t(
-                  background
-                    ? 'chat.command.background'
-                    : 'chat.command.foreground',
-                )}
-              </Badge>
-            </dd>
-          </>
-        )}
-      </dl>
+      {typeof cmd === 'string' ? (
+        <CommandOptions
+          command
+          input={{
+            workdir,
+            shell,
+            login,
+            tty,
+            yield_time_ms,
+            max_output_tokens,
+          }}
+        />
+      ) : (
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-4 gap-y-2 text-xs leading-5">
+          {typeof cwd === 'string' && cwd && (
+            <>
+              <dt className="flex items-center gap-2 text-muted-foreground">
+                <FolderOpen className="size-3.5" aria-hidden="true" />
+                {t('chat.command.cwd')}
+              </dt>
+              <dd className="font-mono [overflow-wrap:anywhere]">{cwd}</dd>
+            </>
+          )}
+          {hasTimeout && (
+            <>
+              <dt className="flex items-center gap-2 text-muted-foreground">
+                <Clock3 className="size-3.5" aria-hidden="true" />
+                {t('chat.command.timeout')}
+              </dt>
+              <dd>{t('chat.command.seconds', { value: timeout })}</dd>
+            </>
+          )}
+          {hasTail && (
+            <>
+              <dt className="flex items-center gap-2 text-muted-foreground">
+                <ListEnd className="size-3.5" aria-hidden="true" />
+                {t('chat.command.outputLimit')}
+              </dt>
+              <dd>
+                {Number(tail) === 0
+                  ? t('chat.command.unlimited')
+                  : t('chat.command.lastLines', { value: tail })}
+              </dd>
+            </>
+          )}
+          {typeof background === 'boolean' && (
+            <>
+              <dt className="flex items-center gap-2 text-muted-foreground">
+                <Play className="size-3.5" aria-hidden="true" />
+                {t('chat.command.mode')}
+              </dt>
+              <dd>
+                <Badge variant="outline">
+                  {t(
+                    background
+                      ? 'chat.command.background'
+                      : 'chat.command.foreground',
+                  )}
+                </Badge>
+              </dd>
+            </>
+          )}
+        </dl>
+      )}
       {Object.keys(extra).length > 0 && <ToolInput input={extra} />}
     </div>
   );

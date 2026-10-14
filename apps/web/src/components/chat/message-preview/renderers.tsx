@@ -104,6 +104,8 @@ function ObservationPreview({ part }: PreviewProps) {
 // Add a data part type or `tool:<toolName>` here to give it a dedicated preview.
 const previewRenderers: Partial<Record<string, ComponentType<PreviewProps>>> = {
   'tool:execute_command': ExecuteCommandPreview,
+  'tool:exec_command': ExecuteCommandPreview,
+  'tool:write_stdin': ExecuteCommandPreview,
   'tool:edit_file': EditFilePreview,
   'tool:write_file': WriteFilePreview,
   'tool:grep': GrepPreview,

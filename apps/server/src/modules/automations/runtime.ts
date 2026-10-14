@@ -13,6 +13,7 @@ import type { LanguageModelService } from '../models/language-model.js';
 import type { ProjectService } from '../projects/service.js';
 import type { ToolService } from '../tools/service.js';
 import type { ThreadService } from '../threads/service.js';
+import type { EnvironmentVariableService } from '../environment-variables/service.js';
 import { ThreadError } from '../threads/errors.js';
 import {
   createPersonalWorkspace,
@@ -41,6 +42,7 @@ export function createAutomationRuntime({
   scheduleHooks,
   threads,
   notifications,
+  environmentVariables,
 }: {
   mastra: Mastra;
   pool: Pick<Pool, 'query'>;
@@ -55,6 +57,7 @@ export function createAutomationRuntime({
     'refreshAutomationThread' | 'refreshNavigation'
   >;
   notifications?: Pick<NotificationService, 'publish'>;
+  environmentVariables?: Pick<EnvironmentVariableService, 'getEnv'>;
 }) {
   const storage = mastra.getStorage()!;
   const memory = new Memory({
@@ -206,6 +209,7 @@ export function createAutomationRuntime({
       projectId,
       skillPaths,
       filesystem,
+      environmentVariables,
     );
     try {
       await filesystem?.init?.();

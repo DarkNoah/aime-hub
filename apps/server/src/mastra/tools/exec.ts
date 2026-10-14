@@ -46,7 +46,7 @@ Examples: text(ALL_TOOLS.filter(t => t.name.startsWith('mcp__'))); text(await to
         .number()
         .int()
         .min(1)
-        .max(60_000)
+        .max(3600_000)
         .default(30_000)
         .describe(
           'Total execution timeout in milliseconds; no background continuation',

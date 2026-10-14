@@ -15,6 +15,9 @@ FROM ${BROWSER_CACHE_IMAGE} AS browser-cache
 RUN mkdir -p /opt/playwright
 
 FROM base AS build
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 build-essential \
+    && rm -rf /var/lib/apt/lists/*
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=hub-pnpm-store,target=/pnpm/store \
     NODE_OPTIONS=--max-old-space-size=1536 nice -n 10 pnpm --store-dir=/pnpm/store --network-concurrency=4 --child-concurrency=1 fetch --frozen-lockfile

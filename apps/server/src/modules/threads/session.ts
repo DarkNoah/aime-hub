@@ -8,11 +8,13 @@ import type {
   QueuedMessageDetail,
   UpdateQueuedMessage,
   ThreadStreamStatus,
+  ThreadCommandSession,
   ToolInteraction,
   ToolResponse,
 } from '@aime/shared/threads';
 
 export type ChatSessionEvent =
+  | { type: 'commands' }
   | {
       type: 'goal';
       objective?: string;
@@ -39,6 +41,10 @@ export type ChatSessionContext = {
 
 /** Mastra owns input scheduling. This interface only submits and observes it. */
 export interface ChatSession {
+  commands?: {
+    list(): ThreadCommandSession[];
+    cleanup(sessionId: number): Promise<void>;
+  };
   send(input: RunInput): Promise<void>;
   generateTitle(input: RunInput): Promise<string | undefined>;
   compact(): Promise<{ observed: boolean }>;

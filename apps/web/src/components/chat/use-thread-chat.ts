@@ -9,6 +9,7 @@ import type {
   ToolInteraction,
   ToolResponse,
   ThreadBackgroundTask,
+  ThreadCommandSession,
   ThreadGoal,
 } from '@aime/shared/threads';
 import { chatApi, ChatApiError } from './api';
@@ -27,6 +28,9 @@ export function useThreadChat(
   >([]);
   const [backgroundTasksError, setBackgroundTasksError] =
     useState<ThreadSnapshot<UIMessage>['backgroundTasksError']>(null);
+  const [commandSessions, setCommandSessions] = useState<
+    ThreadCommandSession[]
+  >([]);
   const [toolInteractions, setToolInteractions] = useState<ToolInteraction[]>(
     [],
   );
@@ -84,6 +88,7 @@ export function useThreadChat(
           setUsage(snapshot.usage ?? null);
           setGoal(snapshot.goal ?? null);
           setBackgroundTasks(snapshot.backgroundTasks ?? []);
+          setCommandSessions(snapshot.commandSessions ?? []);
           setBackgroundTasksError(snapshot.backgroundTasksError ?? null);
           setToolInteractions(snapshot.toolInteractions ?? []);
           if (recovering)
@@ -143,6 +148,7 @@ export function useThreadChat(
           setUsage(null);
           setGoal(null);
           setBackgroundTasks([]);
+          setCommandSessions([]);
           setBackgroundTasksError(null);
           setToolInteractions([]);
           setHistory(null);
@@ -206,6 +212,7 @@ export function useThreadChat(
       setGoal(null);
     },
     backgroundTasks,
+    commandSessions,
     backgroundTasksError,
     toolInteractions,
     respondToTool: async (interactionId: string, response: ToolResponse) => {

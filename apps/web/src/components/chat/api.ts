@@ -50,6 +50,8 @@ export const chatApi = {
     api.threads.clearGoal({ params: { threadId } }),
   cancelBackgroundTask: (threadId: string, taskId: string) =>
     api.threads.cancelBackgroundTask({ params: { threadId, taskId } }),
+  cleanupCommandSession: (threadId: string, sessionId: number) =>
+    api.threads.cleanupCommandSession({ params: { threadId, sessionId } }),
   respondToTool: (
     threadId: string,
     interactionId: string,

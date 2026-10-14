@@ -91,6 +91,7 @@ const disposeChatRequestLogging = installChatRequestLogging(
   () => requestLoggingEnabled,
 );
 const projects = new ProjectService(database, { workspaceRoot });
+const environmentVariables = new EnvironmentVariableService(database);
 const notifications = new NotificationService(
   new PgNotificationStore(pool),
   createPushTransport({
@@ -131,6 +132,7 @@ const threads = new ThreadService(
     tools,
     agents,
     usage,
+    environmentVariables,
   ),
   projects,
   mastra.backgroundTaskManager,
@@ -153,6 +155,7 @@ const automations = createAutomationRuntime({
   projects,
   tools,
   workspaceRoot,
+  environmentVariables,
 });
 await automations.initialize();
 // Restore persisted schedules on every boot, even before the first API request.
@@ -166,7 +169,7 @@ const app = createApp(
   { threads, models, projects, assets, webOrigin: env.WEB_ORIGINS },
   { service: skills, webOrigin: env.WEB_ORIGINS },
   {
-    service: new EnvironmentVariableService(database),
+    service: environmentVariables,
     webOrigin: env.WEB_ORIGINS,
   },
   { service: requestLogs, webOrigin: env.WEB_ORIGINS },

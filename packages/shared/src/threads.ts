@@ -202,6 +202,18 @@ export type ThreadSnapshot<Message> = {
   toolInteractions?: ToolInteraction[];
   backgroundTasks?: ThreadBackgroundTask[];
   backgroundTasksError?: 'BACKGROUND_TASKS_UNAVAILABLE' | null;
+  commandSessions?: ThreadCommandSession[];
+};
+/** Live command handles owned by this thread's Workspace, not persisted jobs. */
+export type ThreadCommandSession = {
+  sessionId: number;
+  cmd: string;
+  workdir: string;
+  tty: boolean;
+  pid?: string;
+  status: 'starting' | 'running' | 'stopping' | 'exited';
+  createdAt: string;
+  exitCode?: number;
 };
 /** Public projection of Mastra's durable thread objective. */
 export type ThreadGoal = {

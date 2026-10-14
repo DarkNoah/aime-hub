@@ -36,6 +36,7 @@
     "image-size": "^2.0.4",
     "linkedom": "^0.18.13",
     "nanoid": "^6.0.1",
+    "node-pty": "1.2.0-beta.15",
     "pg": "^8.16.0",
     "playwright-core": "1.64.0",
     "quickjs-emscripten": "0.31.0",

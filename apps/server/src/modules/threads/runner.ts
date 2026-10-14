@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { runtimeTokenCounts } from '../usage/runtime.js';
 import type { UsageService } from '../usage/service.js';
+import type { EnvironmentVariableService } from '../environment-variables/service.js';
 import { mastraDBMessageToSignal } from '@mastra/core/agent';
 import {
   buildAgent,
@@ -49,6 +50,7 @@ import type { RunInput } from '@aime/shared/threads';
 import { GOAL_MAX_RUNS, readThreadGoal } from './goals.js';
 import { compactMemory } from './compact-memory.js';
 import { buildTools, type ToolService } from '../tools/service.js';
+import { CommandSandbox } from '../../mastra/tools/command/sandbox.js';
 
 export function createChatRunner(
   mastra: Mastra,
@@ -58,6 +60,7 @@ export function createChatRunner(
   tools?: Pick<ToolService, 'buildTools'>,
   agents?: Pick<AgentService, 'getConfig' | 'getAgent'>,
   usage?: Pick<UsageService, 'record'>,
+  environmentVariables?: Pick<EnvironmentVariableService, 'getEnv'>,
 ): ChatRunner {
   const getConfig = async (id?: string | null) => {
     if (agents) return agents.getConfig(id);
@@ -176,6 +179,7 @@ export function createChatRunner(
         ? await projectFilesystem(userId, projectId)
         : undefined;
       let workspace: ReturnType<typeof getWorkspace> | undefined;
+      let unsubscribeCommands: (() => void) | undefined;
       try {
         await filesystem?.init?.();
         workspace = getWorkspace(
@@ -190,6 +194,13 @@ export function createChatRunner(
           () =>
             resolveAgentSkillPaths(workspaceRoot, userId, config, projectId),
           filesystem,
+          environmentVariables,
+        );
+        const commands = workspace.sandbox;
+        if (!(commands instanceof CommandSandbox))
+          throw new Error('Command sandbox is unavailable');
+        unsubscribeCommands = commands.onCommandSessionsChanged(() =>
+          onEvent({ type: 'commands' }),
         );
         const projectInstructions = projectId
           ? ' This is a shared project conversation. Its workspace is shared by project members and other project conversations. File tools and the command sandbox share the same mounted storage. In composite mode, a file tool path such as /data/file.txt is data/file.txt relative to the command working directory. Do not unmount or replace mount directories.'
@@ -533,6 +544,10 @@ export function createChatRunner(
                 });
         };
         return {
+          commands: {
+            list: () => commands.listCommandSessions(),
+            cleanup: (sessionId) => commands.cleanupCommandSession(sessionId),
+          },
           async generateTitle(input) {
             const selection = await sessionModel(input);
             const requestContext = new RequestContext();
@@ -667,6 +682,7 @@ export function createChatRunner(
             pending.clear();
           },
           async close() {
+            unsubscribeCommands?.();
             runAbort.abort();
             agent.abortThreadStream({ ...target, clearPendingSignals: true });
             subscription.unsubscribe();
@@ -678,6 +694,7 @@ export function createChatRunner(
           },
         };
       } catch (error) {
+        unsubscribeCommands?.();
         if (workspace) await workspace.destroy();
         else await filesystem?.destroy?.();
         throw error;

@@ -84,6 +84,14 @@ export function threadRouter(
         input.params.taskId,
       ),
     ),
+    cleanupCommandSession: p.cleanupCommandSession.handler(
+      ({ context, input }) =>
+        threads().cleanupCommandSession(
+          context.userId,
+          input.params.threadId,
+          input.params.sessionId,
+        ),
+    ),
     respondToTool: p.respondToTool.handler(({ context, input }) =>
       threads().respondToTool(
         context.userId,

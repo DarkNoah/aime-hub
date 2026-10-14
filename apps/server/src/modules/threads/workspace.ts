@@ -7,14 +7,15 @@ import { nanoid } from 'nanoid';
 import {
   CompositeFilesystem,
   LocalFilesystem,
-  LocalSandbox,
   Workspace,
   WORKSPACE_TOOLS,
   type WorkspaceFilesystem,
 } from '@mastra/core/workspace';
 import { ThreadError } from './errors.js';
+import { CommandSandbox } from '../../mastra/tools/command/sandbox.js';
 import { directorySkillConfig } from './skill-source.js';
 import { workspaceLspConfig, workspaceLspHooks } from './workspace-lsp.js';
+import type { EnvironmentVariableService } from '../environment-variables/service.js';
 import {
   projectWorkspaceSchema,
   type ProjectWorkspace,
@@ -99,6 +100,7 @@ export function getWorkspace(
   projectId?: string,
   skillPaths: Parameters<typeof directorySkillConfig>[0] = [],
   filesystem?: WorkspaceFilesystem,
+  environmentVariables?: Pick<EnvironmentVariableService, 'getEnv'>,
 ) {
   const valid = projectId
     ? path === projectDirectory(root, projectId)
@@ -127,32 +129,42 @@ export function getWorkspace(
     workspaceFilesystem instanceof LocalFilesystem
       ? workspaceFilesystem.basePath
       : path;
+  const skillHome = resolve(
+    projectId ? projectDirectory(root, projectId) : userPath,
+    '.agents',
+    'skills',
+  );
+  const sandbox = new CommandSandbox(
+    {
+      workingDirectory,
+      env: { SKILL_HOME: skillHome },
+    },
+    async () => ({
+      ...(await environmentVariables?.getEnv()),
+      SKILL_HOME: skillHome,
+    }),
+  );
+  const lspHooks = workspaceLspHooks(workingDirectory, workspaceFilesystem);
   return new Workspace({
     ...directorySkillConfig(skillPaths),
     id: basename(path),
     filesystem: workspaceFilesystem,
-    sandbox: new LocalSandbox({
-      workingDirectory,
-      env: {
-        // NODE_ENV: 'development',
-        SKILL_HOME: projectId ? resolve(projectDirectory(root, projectId), '.agents', 'skills') : resolve(userPath, '.agents', 'skills'),
-      },
-    }),
+    sandbox,
     lsp: workspaceLspConfig(workingDirectory),
     bm25: true,
     tools: {
-      hooks: workspaceLspHooks(workingDirectory, workspaceFilesystem),
+      hooks: lspHooks,
       [WORKSPACE_TOOLS.LSP.LSP_INSPECT]: {
         name: 'lsp_inspect',
       },
       [WORKSPACE_TOOLS.SANDBOX.EXECUTE_COMMAND]: {
-        name: 'execute_command',
+        enabled: false,
       },
       [WORKSPACE_TOOLS.SANDBOX.GET_PROCESS_OUTPUT]: {
-        name: 'get_process_output',
+        enabled: false,
       },
       [WORKSPACE_TOOLS.SANDBOX.KILL_PROCESS]: {
-        name: 'kill_process',
+        enabled: false,
       },
       [WORKSPACE_TOOLS.SEARCH.INDEX]: {
         // enabled: false,
