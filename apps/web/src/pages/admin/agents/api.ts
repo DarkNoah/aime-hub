@@ -10,6 +10,7 @@ const errors = {
   AGENT_CONFIG_UNSUPPORTED: 'agents.unsupported',
   AGENT_SKILL_UNAVAILABLE: 'agents.skillUnavailable',
   AGENT_MODEL_UNAVAILABLE: 'agents.modelUnavailable',
+  AGENT_SUBAGENT_UNAVAILABLE: 'agents.subagentUnavailable',
   VALIDATION_ERROR: 'agents.invalid',
   UNAUTHORIZED: 'errors.sessionExpired',
   FORBIDDEN: 'errors.forbidden',

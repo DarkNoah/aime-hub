@@ -5,6 +5,11 @@ import { toolIdSchema } from './tools.js';
 
 export type AgentToolId = string;
 
+export const agentIdSchema = z
+  .string()
+  .regex(/^[a-zA-Z0-9][a-zA-Z0-9:_-]{0,99}$/);
+export const subagentNameSchema = z.string().regex(/^[a-zA-Z0-9_-]{1,58}$/);
+
 const text = (max: number) =>
   z
     .string()
@@ -39,6 +44,8 @@ export const agentInputSchema = z.strictObject({
     .refine((values) => new Set(values).size === values.length)
     .default([]),
   skillsMode: z.enum(['auto', 'custom']).default('auto'),
+  // Only main Agents load these references; every child receives an empty map.
+  agents: z.record(subagentNameSchema, agentIdSchema).default({}),
   skillPaths: z
     .array(skillPath)
     .max(100)
@@ -54,9 +61,6 @@ export const agentStatusSchema = z.strictObject({
 export type AgentStatusInput = z.infer<typeof agentStatusSchema>;
 export type AgentInput = z.input<typeof agentInputSchema>;
 export type AgentUpdate = z.input<typeof agentUpdateSchema>;
-export const agentIdSchema = z
-  .string()
-  .regex(/^[a-zA-Z0-9][a-zA-Z0-9:_-]{0,99}$/);
 export const agentDefaultsSchema = z.strictObject({
   defaultAgentId: agentIdSchema,
 });
@@ -64,7 +68,9 @@ export type AgentDefaults = z.infer<typeof agentDefaultsSchema>;
 export type AgentDefinition = z.output<typeof agentInputSchema> & {
   id: string;
 };
-export type CodeAgent = AgentDefinition & { source: 'code' };
+export type BaseAgent = AgentDefinition & {
+  source: 'code';
+};
 export type ManagedAgent = z.output<typeof agentInputSchema> & {
   source: 'database';
   id: string;
@@ -74,13 +80,14 @@ export type ManagedAgent = z.output<typeof agentInputSchema> & {
   createdAt: string;
   updatedAt: string;
 };
-export type AdminAgent = ManagedAgent | CodeAgent;
+export type AdminAgent = ManagedAgent | BaseAgent;
 export type AvailableAgent = Pick<
   AgentDefinition,
   'id' | 'name' | 'description' | 'model'
 > & { source: AdminAgent['source'] };
 export type AvailableAgents = AgentDefaults & { agents: AvailableAgent[] };
 export type AgentCatalog = {
+  agents: AvailableAgent[];
   tools: { id: AgentToolId; enabled: boolean }[];
   skills: InstalledSkill[];
 };

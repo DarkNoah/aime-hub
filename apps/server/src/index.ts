@@ -25,6 +25,7 @@ import { projectAgentMounts } from './modules/threads/workspace.js';
 import { ToolService } from './modules/tools/service.js';
 import { AgentService } from './modules/agents/service.js';
 import { McpService } from './modules/mcp/service.js';
+import { initializeMcpAfterListen } from './modules/mcp/startup.js';
 import { agentSettingsStore } from './modules/agents/settings.js';
 import { createAutomationRuntime } from './modules/automations/runtime.js';
 import { hasAdminRole } from '@aime/shared';
@@ -106,7 +107,6 @@ if (!agentStore) throw new Error('Mastra agents storage is required');
 const mcpStore = await storage.getStore('mcpClients');
 if (!mcpStore) throw new Error('Mastra MCP clients storage is required');
 const mcp = new McpService(mcpStore);
-await mcp.initialize();
 const tools = new ToolService(database, providers, assets, mcp);
 const agents = new AgentService(
   agentStore,
@@ -179,6 +179,7 @@ const server = serve(
     console.log(`Aime Hub API: http://${env.SERVER_HOST}:${env.SERVER_PORT}`);
   },
 ) as Server;
+initializeMcpAfterListen(server, mcp);
 let stopping = false;
 function shutdown() {
   if (stopping) return;
@@ -211,3 +212,12 @@ function shutdown() {
 }
 process.once('SIGINT', shutdown);
 process.once('SIGTERM', shutdown);
+server.once('error', (error: NodeJS.ErrnoException) => {
+  console.error(
+    error.code === 'EADDRINUSE'
+      ? `API startup failed: ${env.SERVER_HOST}:${env.SERVER_PORT} is already in use`
+      : 'API server failed to listen',
+  );
+  process.exitCode = 1;
+  shutdown();
+});

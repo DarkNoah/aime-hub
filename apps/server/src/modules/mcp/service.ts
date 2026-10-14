@@ -28,6 +28,11 @@ type Connection = { client: Client; revision: string; tools: ToolMap };
 export class McpService {
   private mutations = Promise.resolve();
   private connections = new Map<string, Connection>();
+  private loads = new Map<string, Promise<McpServer>>();
+  private loadStates = new Map<
+    string,
+    { revision: string; status: 'loading' | 'error' }
+  >();
   private stopping = false;
   constructor(
     private readonly store: MCPClientsStorage,
@@ -46,9 +51,26 @@ export class McpService {
       config,
       revision,
       status: row.status,
+      ...this.runtimeState({ id: row.id, revision, status: row.status }),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
+  }
+
+  private runtimeState(
+    server: Pick<McpServer, 'id' | 'revision' | 'status'>,
+  ): Pick<McpServer, 'connectionStatus' | 'toolCount'> {
+    if (server.status !== 'published') return { connectionStatus: 'unloaded' };
+    const state = this.loadStates.get(server.id);
+    if (state?.revision === server.revision)
+      return { connectionStatus: state.status };
+    const connection = this.connections.get(server.id);
+    return connection?.revision === server.revision
+      ? {
+          connectionStatus: 'loaded',
+          toolCount: Object.keys(connection.tools).length,
+        }
+      : { connectionStatus: 'unloaded' };
   }
 
   private async record(id: string) {
@@ -154,7 +176,7 @@ export class McpService {
         throw error;
       }
       await this.replace(id, candidate);
-      return updated;
+      return { ...updated, ...this.runtimeState(updated) };
     });
   }
 
@@ -192,7 +214,7 @@ export class McpService {
         throw error;
       }
       await this.replace(id, candidate);
-      return updated;
+      return { ...updated, ...this.runtimeState(updated) };
     });
   }
 
@@ -221,26 +243,24 @@ export class McpService {
     return servers;
   }
 
-  /** Warm published connections once on process startup; one offline server cannot stop boot. */
-  initialize() {
-    return this.exclusive(async () => {
-      const servers = await this.published();
-      const results = await Promise.allSettled(
-        servers.map(async (server) => {
-          if (this.connections.get(server.id)?.revision === server.revision)
-            return;
-          await this.replace(server.id, await this.probe(server));
-        }),
+  /** Run after HTTP starts; each server probes independently without holding the mutation queue. */
+  async initialize() {
+    const servers = await this.published();
+    const results = await Promise.allSettled(
+      servers.map(async (server) => {
+        if (this.connections.get(server.id)?.revision === server.revision)
+          return;
+        await this.load(server.id);
+      }),
+    );
+    const failed = results.filter(
+      (result) => result.status === 'rejected',
+    ).length;
+    if (failed)
+      console.warn(
+        `MCP startup: ${failed} published connection(s) unavailable`,
       );
-      const failed = results.filter(
-        (result) => result.status === 'rejected',
-      ).length;
-      if (failed)
-        console.warn(
-          `MCP startup: ${failed} published connection(s) unavailable`,
-        );
-      return { connected: servers.length - failed, failed };
-    });
+    return { connected: servers.length - failed, failed };
   }
 
   /** Agents share the process-owned clients. Constructing an Agent never creates a client. */
@@ -292,19 +312,66 @@ export class McpService {
     });
   }
 
-  testConnection(id: string) {
-    return this.exclusive(async () => {
-      const [server] = await this.published([id]);
-      let connection = this.connections.get(id);
-      if (!connection || connection.revision !== server.revision) {
-        connection = await this.probe(server);
-        await this.replace(id, connection);
-      } else {
-        const tools = await this.discover(connection.client);
-        connection.tools = this.guardedTools(server, tools);
+  async testConnection(id: string) {
+    const server = await this.load(id);
+    return { toolCount: server.toolCount ?? 0 };
+  }
+
+  /** Discover first, then activate. Concurrent startup/UI requests share the same probe. */
+  async load(id: string): Promise<McpServer> {
+    if (this.stopping) throw new McpError('MCP_UNAVAILABLE', 503);
+    const [server] = await this.published([id]);
+    if (this.stopping) throw new McpError('MCP_UNAVAILABLE', 503);
+    const key = `${id}:${server.revision}`;
+    const pending = this.loads.get(key);
+    if (pending) return pending;
+    const previous = this.connections.get(id);
+    this.loadStates.set(id, { revision: server.revision, status: 'loading' });
+    const result = (async () => {
+      let candidate: Connection | undefined;
+      try {
+        candidate =
+          previous?.revision === server.revision
+            ? previous
+            : await this.probe(server);
+        const tools =
+          candidate === previous
+            ? this.guardedTools(server, await this.discover(candidate.client))
+            : candidate.tools;
+        return await this.exclusive(async () => {
+          const [current] = await this.published([id]);
+          if (current.revision !== server.revision)
+            throw new McpError('MCP_CONFLICT', 409);
+          candidate!.tools = tools;
+          await this.replace(id, candidate);
+          return { ...current, ...this.runtimeState(current) };
+        });
+      } catch (error) {
+        if (candidate && candidate !== previous)
+          await this.disconnect(candidate);
+        await this.exclusive(async () => {
+          // A late failure must not remove a newer publication or connection.
+          const current = await this.get(id);
+          if (
+            current.status !== 'published' ||
+            current.revision !== server.revision
+          )
+            return;
+          if (this.connections.get(id) === previous) await this.replace(id);
+          this.loadStates.set(id, {
+            revision: server.revision,
+            status: 'error',
+          });
+        }).catch(() => undefined);
+        throw error;
       }
-      return { toolCount: Object.keys(connection.tools).length };
-    });
+    })();
+    this.loads.set(key, result);
+    try {
+      return await result;
+    } finally {
+      this.loads.delete(key);
+    }
   }
 
   private async discover(client: Client) {
@@ -376,6 +443,7 @@ export class McpService {
   }
 
   private async replace(id: string, next?: Connection) {
+    this.loadStates.delete(id);
     const previous = this.connections.get(id);
     if (next) this.connections.set(id, next);
     else this.connections.delete(id);
@@ -392,6 +460,7 @@ export class McpService {
 
   async shutdown() {
     this.stopping = true;
+    await Promise.allSettled(this.loads.values());
     await this.mutations;
     const connections = [...this.connections.values()];
     this.connections.clear();

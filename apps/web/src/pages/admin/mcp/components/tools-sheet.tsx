@@ -25,10 +25,12 @@ import { mcpErrorKey } from '../api';
 
 export function McpToolsSheet({
   server,
+  onLoaded,
   onClose,
   restoreFocus,
 }: {
   server: McpServer;
+  onLoaded: (server: McpServer) => void;
   onClose: () => void;
   restoreFocus: () => void;
 }) {
@@ -64,6 +66,20 @@ export function McpToolsSheet({
   function refresh() {
     setLoading(true);
     setRevision((value) => value + 1);
+  }
+  async function reload() {
+    setLoading(true);
+    try {
+      const loaded = await api.mcp.load({ params: { id: server.id } });
+      onLoaded(loaded);
+      toast.success(t('mcp.loadSuccess', { count: loaded.toolCount ?? 0 }));
+      refresh();
+    } catch (cause) {
+      const message = mcpErrorKey(cause);
+      setError(message);
+      setLoading(false);
+      toast.error(t(message));
+    }
   }
   const query = search.trim().toLowerCase();
   const visible =
@@ -133,9 +149,9 @@ export function McpToolsSheet({
               variant="outline"
               size="sm"
               disabled={loading}
-              onClick={refresh}
+              onClick={() => void reload()}
             >
-              {t('mcp.retry')}
+              {t('mcp.load')}
             </Button>
           </div>
         ) : null}

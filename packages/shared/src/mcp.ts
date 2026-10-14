@@ -126,6 +126,8 @@ export type McpServer = McpInput & {
   id: string;
   status: 'draft' | 'published' | 'archived';
   revision: string;
+  connectionStatus: 'unloaded' | 'loading' | 'loaded' | 'error';
+  toolCount?: number;
   createdAt: string;
   updatedAt: string;
 };

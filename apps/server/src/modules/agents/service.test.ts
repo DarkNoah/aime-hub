@@ -8,7 +8,11 @@ import { agentSettingsStore } from './settings.js';
 import { LanguageModelService } from '../models/language-model.js';
 import type { ProviderService } from '../providers/service.js';
 import type { AgentSettingsStore } from './settings.js';
-import { fallbackAgentId, getCodeAgent } from '../../mastra/agents/index.js';
+import {
+  agentRegistry,
+  fallbackAgentId,
+  getAgent,
+} from '../../mastra/agents/index.js';
 import { Agent } from '@mastra/core/agent';
 import { MastraLanguageModelV2Mock } from '@mastra/core/test-utils/llm-mock';
 import { buildTools, registeredToolIds } from '../tools/service.js';
@@ -107,9 +111,24 @@ function serviceFor(
   );
 }
 
+test('agent registry resolves names and persisted IDs with isolated configurations', () => {
+  for (const [name, definition] of Object.entries(agentRegistry)) {
+    const config = getAgent(name)!;
+    assert.deepEqual(config, definition);
+    assert.deepEqual(getAgent(definition.id), definition);
+    config.instructions = 'Changed for one caller';
+    config.disabledTools.push('sleep');
+    config.skillPaths.push('fixture');
+    assert.deepEqual(getAgent(name), definition);
+  }
+  for (const id of ['missing', 'toString', 'constructor', '__proto__'])
+    assert.equal(getAgent(id), undefined);
+});
+
 test('agent input rejects unsafe paths, invalid legacy tool IDs, duplicate selections and invalid prompts', () => {
   assert.equal(agentInputSchema.parse(input).instructions, input.instructions);
   assert.equal(agentInputSchema.parse({ ...input, model: null }).model, null);
+  assert.deepEqual(agentInputSchema.parse(input).agents, {});
   for (const patch of [
     { name: ' ' },
     { instructions: '\n ' },
@@ -127,6 +146,11 @@ test('agent input rejects unsafe paths, invalid legacy tool IDs, duplicate selec
     { skillPaths: ['a//b'] },
     { skillPaths: ['a', 'a'] },
     { skillsMode: 'invalid' },
+    { agents: { 'invalid name': 'default' } },
+    { agents: { ['x'.repeat(59)]: 'default' } },
+    { agents: { worker: '' } },
+    { agents: { worker: '../agent' } },
+    { agents: ['default'] },
     { enabled: true },
     { id: fallbackAgentId },
   ]) {
@@ -227,6 +251,7 @@ test('native agent CRUD preserves prompt and versioned tools/skills, rejects sta
       skillsMode: 'custom',
       skillPaths: input.skillPaths,
       disabledTools: [],
+      agents: {},
     },
   });
   assert.deepEqual(version1?.model, {
@@ -299,7 +324,12 @@ test('skill modes default to auto, persist in versions and preserve legacy selec
   assert.deepEqual((await store.getVersion(created.versionId))?.workspace, {
     type: 'provider',
     provider: 'installed-skills',
-    config: { skillsMode: 'auto', skillPaths: [], disabledTools: [] },
+    config: {
+      skillsMode: 'auto',
+      skillPaths: [],
+      disabledTools: [],
+      agents: {},
+    },
   });
   for (const skillPaths of [[], input.skillPaths]) {
     const latest = (await store.getLatestVersion(created.id))!;
@@ -316,8 +346,9 @@ test('skill modes default to auto, persist in versions and preserve legacy selec
     const legacy = await service.get(created.id);
     assert.equal(legacy.skillsMode, skillPaths.length ? 'custom' : 'auto');
     assert.deepEqual(legacy.skillPaths, skillPaths);
+    assert.deepEqual(legacy.agents, {});
   }
-  assert.equal(getCodeAgent(fallbackAgentId)?.skillsMode, 'auto');
+  assert.equal(getAgent(fallbackAgentId)?.skillsMode, 'auto');
 });
 
 test('catalog and validation use available resources without exposing filesystem roots or provider credentials', async () => {
@@ -344,6 +375,103 @@ test('catalog and validation use available resources without exposing filesystem
   );
 });
 
+test('subagent configuration is versioned, supports published custom agents, and stops delegation at one level', async () => {
+  const store = (await new InMemoryStore().getStore('agents'))!;
+  const service = serviceFor(store);
+  const child = await service.create('admin', {
+    ...input,
+    model: null,
+    agents: { nested: 'default' },
+  });
+  assert.equal(
+    (await service.catalog()).agents.some((item) => item.id === child.id),
+    false,
+  );
+  await assert.rejects(
+    service.create('admin', { ...input, agents: { worker: child.id } }),
+    { code: 'AGENT_SUBAGENT_UNAVAILABLE' },
+  );
+  await service.setStatus(child.id, {
+    status: 'published',
+    versionId: child.versionId,
+  });
+  assert.ok(
+    (await service.catalog()).agents.some((item) => item.id === child.id),
+  );
+  const references = { worker: child.id, assistant: 'code:assistant' };
+  const parent = await service.create('admin', {
+    ...input,
+    model: null,
+    agents: { ...references, assistant: 'code' },
+  });
+  assert.deepEqual((await service.get(parent.id)).agents, references);
+  const version = (await store.getVersion(parent.versionId))!;
+  assert.ok(
+    version.workspace &&
+      !Array.isArray(version.workspace) &&
+      version.workspace.type === 'provider',
+  );
+  assert.deepEqual(version.workspace.config.agents, references);
+  await service.setStatus(parent.id, {
+    status: 'published',
+    versionId: parent.versionId,
+  });
+  const model = new MastraLanguageModelV2Mock({});
+  const runtime = await service.getAgent(parent.id, { model });
+  const worker = (await runtime.listAgents()).worker as Agent;
+  assert.equal(worker.id, child.id);
+  assert.deepEqual(await worker.listAgents(), {});
+  assert.deepEqual((await service.get(child.id)).agents, { nested: 'default' });
+
+  const edited = await service.update(parent.id, {
+    ...input,
+    model: null,
+    agents: { self: parent.id },
+    versionId: parent.versionId,
+  });
+  const updated = await service.getAgent(parent.id, { model });
+  const self = (await updated.listAgents()).self as Agent;
+  assert.equal(self.id, parent.id);
+  assert.notEqual(self, updated);
+  assert.deepEqual(await self.listAgents(), {});
+  const pinned = await service.getAgent(parent.id, {
+    model,
+    versionId: parent.versionId,
+  });
+  assert.deepEqual(Object.keys(await pinned.listAgents()), [
+    'worker',
+    'assistant',
+  ]);
+
+  await service.setStatus(child.id, {
+    status: 'draft',
+    versionId: child.versionId,
+  });
+  await assert.rejects(
+    service.getAgent(parent.id, { model, versionId: parent.versionId }),
+    { code: 'AGENT_SUBAGENT_UNAVAILABLE' },
+  );
+  await assert.rejects(
+    service.update(parent.id, {
+      ...input,
+      agents: { worker: 'missing' },
+      versionId: edited.versionId,
+    }),
+    { code: 'AGENT_SUBAGENT_UNAVAILABLE' },
+  );
+  const cleared = await service.update(parent.id, {
+    ...input,
+    model: null,
+    agents: {},
+    versionId: edited.versionId,
+  });
+  assert.deepEqual(cleared.agents, {});
+  assert.deepEqual(
+    await (await service.getAgent(parent.id, { model })).listAgents(),
+    {},
+  );
+});
+
 test('agents created outside administration are neither listed nor mutated', async () => {
   const store = (await new InMemoryStore().getStore('agents'))!;
   const service = serviceFor(store);
@@ -358,7 +486,7 @@ test('agents created outside administration are neither listed nor mutated', asy
   });
   assert.deepEqual(
     (await service.list()).map((row) => row.id),
-    [fallbackAgentId],
+    Object.values(agentRegistry).map((agent) => agent.id),
   );
   await assert.rejects(service.get(id), { code: 'AGENT_NOT_FOUND' });
   await assert.rejects(
@@ -413,7 +541,7 @@ test('code agents stay outside storage, remain read only, and share defaults wit
   assert.equal(catalog.defaultAgentId, custom.id);
   assert.deepEqual(
     catalog.agents.map((agent) => agent.id),
-    [fallbackAgentId, custom.id],
+    [...Object.values(agentRegistry).map((agent) => agent.id), custom.id],
   );
   assert.ok(
     catalog.agents.every(
@@ -442,7 +570,10 @@ test('only published stored agents can be selected or constructed and status swi
   });
   const created = await service.create('admin', { ...input, model: null });
   const model = new MastraLanguageModelV2Mock({});
-  assert.equal((await service.available()).agents.length, 1);
+  assert.equal(
+    (await service.available()).agents.length,
+    Object.keys(agentRegistry).length,
+  );
   for (const lookup of [
     () => service.getConfig(created.id),
     () => service.getAgent(created.id, { model }),
@@ -472,7 +603,10 @@ test('only published stored agents can be selected or constructed and status swi
   assert.equal(published.versionId, created.versionId);
   assert.equal(await store.countVersions(created.id), 1);
   assert.deepEqual(await service.getConfig(created.id), published);
-  assert.equal((await service.available()).agents.length, 2);
+  assert.equal(
+    (await service.available()).agents.length,
+    Object.keys(agentRegistry).length + 1,
+  );
   assert.equal((await service.getAgent(created.id, { model })).id, created.id);
   const updated = await service.update(created.id, {
     ...input,
@@ -511,7 +645,10 @@ test('only published stored agents can be selected or constructed and status swi
   });
   assert.equal(draft.status, 'draft');
   assert.equal(await store.countVersions(created.id), 2);
-  assert.equal((await service.available()).agents.length, 1);
+  assert.equal(
+    (await service.available()).agents.length,
+    Object.keys(agentRegistry).length,
+  );
   await assert.rejects(
     service.getAgent(created.id, { model, versionId: created.versionId }),
     { code: 'AGENT_NOT_PUBLISHED' },
@@ -525,7 +662,10 @@ test('only published stored agents can be selected or constructed and status swi
   // A status change outside administration also invalidates the saved default.
   await store.update({ id: created.id, status: 'archived' });
   assert.equal((await service.getDefaults()).defaultAgentId, fallbackAgentId);
-  assert.equal((await service.available()).agents.length, 1);
+  assert.equal(
+    (await service.available()).agents.length,
+    Object.keys(agentRegistry).length,
+  );
   await assert.rejects(service.getConfig(created.id), {
     code: 'AGENT_NOT_PUBLISHED',
   });
@@ -542,7 +682,10 @@ test('available agents do not load unsupported draft configurations', async () =
     versionNumber: 2,
     model: [{ value: { provider: 'openai', name: 'fixture', providerId } }],
   });
-  assert.equal((await service.available()).agents.length, 1);
+  assert.equal(
+    (await service.available()).agents.length,
+    Object.keys(agentRegistry).length,
+  );
   const withStaleDefault = serviceFor(store, undefined, {
     read: async () => ({ defaultAgentId: draft.id }),
     write: async () => {},
@@ -577,17 +720,25 @@ test('code IDs are reserved and code lookup wins without reading a conflicting s
     t.mock.method(store, method, () => {
       throw new Error('A code agent lookup must not read stored configuration');
     });
-  const builtin = getCodeAgent(fallbackAgentId)!;
-  assert.deepEqual(await service.get(fallbackAgentId), builtin);
-  assert.deepEqual(await service.getConfig(fallbackAgentId), builtin);
-  assert.deepEqual(await service.list(), [builtin]);
-  assert.equal((await service.available()).agents.length, 1);
-  const agent = await service.getAgent(fallbackAgentId, {
-    model: new MastraLanguageModelV2Mock({}),
-    versionId: 'ignored-for-code-agent',
-  });
-  assert.equal(await agent.getInstructions(), builtin.instructions);
-  assert.equal(agent.id, builtin.id);
+  const builtin = getAgent('code')!;
+  for (const id of ['code', fallbackAgentId]) {
+    assert.deepEqual(await service.get(id), builtin);
+    assert.deepEqual(await service.getConfig(id), builtin);
+    await assert.rejects(service.remove(id, randomUUID()), {
+      code: 'AGENT_READ_ONLY',
+    });
+    const agent = await service.getAgent(id, {
+      model: new MastraLanguageModelV2Mock({}),
+      versionId: 'ignored-for-code-agent',
+    });
+    assert.equal(await agent.getInstructions(), builtin.instructions);
+    assert.equal(agent.id, builtin.id);
+  }
+  assert.deepEqual(await service.list(), Object.values(agentRegistry));
+  assert.equal(
+    (await service.available()).agents.length,
+    Object.keys(agentRegistry).length,
+  );
 });
 
 test('getAgent builds a fresh Mastra Agent with runtime dependencies and can pin a stored version', async () => {
@@ -716,8 +867,10 @@ test('admin HTTP and typed RPC enforce session, role, origin and versioned CRUD'
       await assert.rejects(client.agents.available(), { code: 'UNAUTHORIZED' });
     else
       assert.equal(
-        (await client.agents.available()).agents[0]?.id,
-        fallbackAgentId,
+        (await client.agents.available()).agents
+          .map((agent) => agent.id)
+          .includes(fallbackAgentId),
+        true,
       );
     await assert.rejects(client.agents.defaults(), {
       code: role ? 'FORBIDDEN' : 'UNAUTHORIZED',
@@ -751,31 +904,47 @@ test('admin HTTP and typed RPC enforce session, role, origin and versioned CRUD'
   await assert.rejects(client.agents.create({ body: reserved }), {
     code: 'VALIDATION_ERROR',
   });
-  assert.equal((await client.agents.list()).length, 1);
+  assert.equal(
+    (await client.agents.list()).length,
+    Object.keys(agentRegistry).length,
+  );
   await assert.rejects(
     client.agents.create({ body: { ...input, tools: ['invalid tool'] } }),
     { code: 'VALIDATION_ERROR' },
   );
-  const created = await client.agents.create({ body: input });
-  assert.equal((await client.agents.available()).agents.length, 1);
+  const created = await client.agents.create({
+    body: { ...input, agents: { assistant: 'code:assistant' } },
+  });
+  assert.deepEqual(created.agents, { assistant: 'code:assistant' });
+  assert.equal(
+    (await client.agents.available()).agents.length,
+    Object.keys(agentRegistry).length,
+  );
   const published = await client.agents.setStatus({
     params: { id: created.id },
     body: { status: 'published', versionId: created.versionId },
   });
   assert.equal(published.status, 'published');
-  assert.equal((await client.agents.available()).agents.length, 2);
+  assert.equal(
+    (await client.agents.available()).agents.length,
+    Object.keys(agentRegistry).length + 1,
+  );
   assert.equal((await client.agents.catalog()).skills.length, 1);
   assert.deepEqual(
     await client.agents.get({ params: { id: created.id } }),
     published,
   );
-  assert.equal((await client.agents.list()).length, 2);
+  assert.equal(
+    (await client.agents.list()).length,
+    Object.keys(agentRegistry).length + 1,
+  );
   const updated = await client.agents.update({
     params: { id: created.id },
     body: {
       ...input,
       model: null,
       instructions: 'HTTP test',
+      agents: { worker: 'default' },
       versionId: created.versionId,
     },
   });
@@ -794,6 +963,7 @@ test('admin HTTP and typed RPC enforce session, role, origin and versioned CRUD'
   const detail = await response.json();
   assert.equal(detail.instructions, 'HTTP test');
   assert.equal(detail.model, null);
+  assert.deepEqual(detail.agents, { worker: 'default' });
   const unpublished = await app.request(`${path}/${created.id}/status`, {
     method: 'PATCH',
     headers: { Origin: origin, 'Content-Type': 'application/json' },
@@ -801,7 +971,10 @@ test('admin HTTP and typed RPC enforce session, role, origin and versioned CRUD'
   });
   assert.equal(unpublished.status, 200);
   assert.equal((await unpublished.json()).status, 'draft');
-  assert.equal((await client.agents.available()).agents.length, 1);
+  assert.equal(
+    (await client.agents.available()).agents.length,
+    Object.keys(agentRegistry).length,
+  );
   await client.agents.remove({
     params: { id: created.id },
     query: { versionId: updated.versionId },
@@ -841,11 +1014,18 @@ test(
     const store = (await storage.getStore('agents'))!;
     await store.init();
     const service = serviceFor(store, undefined, settings);
-    const created = await service.create('admin', input);
-    assert.equal((await service.list()).length, 2);
+    const created = await service.create('admin', {
+      ...input,
+      agents: { assistant: 'code:assistant' },
+    });
+    assert.equal(
+      (await service.list()).length,
+      Object.keys(agentRegistry).length + 1,
+    );
     const updated = await service.update(created.id, {
       ...input,
       name: 'Updated',
+      agents: { worker: 'default' },
       model: null,
       tools: [],
       skillPaths: [],
@@ -862,6 +1042,19 @@ test(
       undefined,
       agentSettingsStore(database),
     );
+    assert.deepEqual((await reopened.get(created.id)).agents, {
+      worker: 'default',
+    });
+    assert.deepEqual((await store.getVersion(created.versionId))?.workspace, {
+      type: 'provider',
+      provider: 'installed-skills',
+      config: {
+        skillsMode: 'custom',
+        skillPaths: input.skillPaths,
+        disabledTools: [],
+        agents: { assistant: 'code:assistant' },
+      },
+    });
     const published = await service.setStatus(created.id, {
       status: 'published',
       versionId: updated.versionId,
@@ -946,7 +1139,10 @@ test(
       }),
       { code: 'AGENT_NOT_PUBLISHED' },
     );
-    assert.equal((await service.available()).agents.length, 1);
+    assert.equal(
+      (await service.available()).agents.length,
+      Object.keys(agentRegistry).length,
+    );
     await reopened.remove(created.id, updated.versionId);
     assert.equal(await reopenedStore.countVersions(created.id), 0);
   },

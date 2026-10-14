@@ -143,11 +143,9 @@ const tokensCache = new Map<string, TokenizedCode>();
 // Subscribers for async token updates
 const subscribers = new Map<string, Set<(result: TokenizedCode) => void>>();
 
-const getTokensCacheKey = (code: string, language: BundledLanguage) => {
-  const start = code.slice(0, 100);
-  const end = code.length > 100 ? code.slice(-100) : '';
-  return `${language}:${code.length}:${start}:${end}`;
-};
+// Equal-length edits in the middle must not reuse another source's tokens.
+const getTokensCacheKey = (code: string, language: BundledLanguage) =>
+  `${language}:${code}`;
 
 const getHighlighter = (
   language: BundledLanguage,

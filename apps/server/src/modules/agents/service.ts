@@ -24,9 +24,9 @@ import type { ToolService } from '../tools/service.js';
 import type { ProviderService } from '../providers/service.js';
 import { AgentError } from './errors.js';
 import {
-  codeAgents,
+  agentRegistry,
   fallbackAgentId,
-  getCodeAgent,
+  getAgent,
 } from '../../mastra/agents/index.js';
 import type { AgentSettingsStore } from './settings.js';
 import {
@@ -51,11 +51,19 @@ export class AgentService {
   ) {}
 
   async catalog(): Promise<AgentCatalog> {
-    const [skills, tools] = await Promise.all([
+    const [skills, tools, agents] = await Promise.all([
       this.skills.list(),
       this.tools.list(),
+      this.list('published'),
     ]);
     return {
+      agents: agents.map(({ id, name, description, model, source }) => ({
+        id,
+        name,
+        description,
+        model,
+        source,
+      })),
       tools: tools.map(({ id, config }) => ({
         id,
         enabled: config.enabled,
@@ -65,7 +73,7 @@ export class AgentService {
   }
 
   private async record(id: string) {
-    if (getCodeAgent(id)) throw new AgentError('AGENT_READ_ONLY', 403);
+    if (getAgent(id)) throw new AgentError('AGENT_READ_ONLY', 403);
     const row = await this.store.getById(id);
     if (
       !row ||
@@ -104,6 +112,7 @@ export class AgentService {
           ? 'custom'
           : 'auto'),
       skillPaths: settings.skillPaths ?? [],
+      agents: settings.agents ?? {},
     });
     if (!config.success) throw new AgentError('AGENT_CONFIG_UNSUPPORTED', 409);
     return {
@@ -119,7 +128,7 @@ export class AgentService {
   }
 
   async get(id: string): Promise<AdminAgent> {
-    return getCodeAgent(id) ?? this.getStored(id);
+    return getAgent(id) ?? this.getStored(id);
   }
 
   private async getStored(
@@ -146,14 +155,14 @@ export class AgentService {
     );
     const agents = pages
       .flatMap((page) => page.agents)
-      .filter((agent) => !getCodeAgent(agent.id))
+      .filter((agent) => !getAgent(agent.id))
       .sort(
         (a, b) =>
           b.createdAt.getTime() - a.createdAt.getTime() ||
           a.id.localeCompare(b.id),
       );
     return [
-      ...structuredClone(codeAgents),
+      ...structuredClone(Object.values(agentRegistry)),
       ...(await Promise.all(agents.map((agent) => this.getStored(agent.id)))),
     ];
   }
@@ -189,14 +198,53 @@ export class AgentService {
   /** Code IDs take precedence; consult storage only when the code registry has no match. */
   async getConfig(id?: string | null, versionId?: string): Promise<AdminAgent> {
     const selectedId = id ?? (await this.getDefaults()).defaultAgentId;
-    return (
-      getCodeAgent(selectedId) ?? this.getStored(selectedId, versionId, true)
-    );
+    return getAgent(selectedId) ?? this.getStored(selectedId, versionId, true);
   }
 
   /** Construct an executable Mastra Agent with caller-owned runtime dependencies. */
   async getAgent(id: string | null | undefined, options: AgentRuntimeOptions) {
-    return buildAgent(await this.getConfig(id, options.versionId), options);
+    const config = await this.getConfig(id, options.versionId);
+    const children = new Map(
+      await Promise.all(
+        [...new Set(Object.values(config.agents))].map(
+          async (reference) =>
+            [
+              reference,
+              reference === config.id
+                ? config
+                : await this.getSubagent(reference),
+            ] as const,
+        ),
+      ),
+    );
+    return buildAgent(config, {
+      ...options,
+      resolveSubagent: (reference) => children.get(reference),
+    });
+  }
+
+  private async getSubagent(reference: string) {
+    try {
+      return await this.getConfig(reference);
+    } catch (error) {
+      if (
+        error instanceof AgentError &&
+        ['AGENT_NOT_FOUND', 'AGENT_NOT_PUBLISHED'].includes(error.code)
+      )
+        throw new AgentError('AGENT_SUBAGENT_UNAVAILABLE', 409);
+      throw error;
+    }
+  }
+
+  private async validateSubagents(
+    agents: Record<string, string>,
+    ownId?: string,
+  ) {
+    await Promise.all(
+      [...new Set(Object.values(agents))]
+        .filter((reference) => reference !== ownId)
+        .map((reference) => this.getSubagent(reference)),
+    );
   }
 
   async available(): Promise<AvailableAgents> {
@@ -220,7 +268,10 @@ export class AgentService {
     };
   }
 
-  private async snapshot(input: AgentInput): Promise<StorageAgentSnapshotType> {
+  private async snapshot(
+    input: AgentInput,
+    ownId?: string,
+  ): Promise<StorageAgentSnapshotType> {
     const data = agentInputSchema.parse(input);
     const [catalog, model] = await Promise.all([
       this.catalog(),
@@ -233,6 +284,7 @@ export class AgentService {
       )
     )
       throw new AgentError('AGENT_SKILL_UNAVAILABLE');
+    await this.validateSubagents(data.agents, ownId);
     return {
       name: data.name,
       description: data.description,
@@ -247,6 +299,13 @@ export class AgentService {
           skillsMode: data.skillsMode,
           skillPaths: data.skillsMode === 'custom' ? data.skillPaths : [],
           disabledTools: data.disabledTools,
+          // Keep delegation aliases and target IDs together in the versioned config.
+          agents: Object.fromEntries(
+            Object.entries(data.agents).map(([name, reference]) => [
+              name,
+              getAgent(reference)?.id ?? reference,
+            ]),
+          ),
         },
       },
     };
@@ -284,7 +343,7 @@ export class AgentService {
       // Code IDs are reserved even if a future built-in uses a UUID.
       // The strict input schema also rejects client-supplied IDs.
       let id = randomUUID();
-      while (getCodeAgent(id)) id = randomUUID();
+      while (getAgent(id)) id = randomUUID();
       const row = await this.store.create({
         agent: { id, authorId, metadata, ...snapshot },
       });
@@ -307,8 +366,9 @@ export class AgentService {
         disabledTools: data.disabledTools,
         skillsMode: data.skillsMode,
         skillPaths: data.skillPaths,
+        agents: data.agents,
       };
-      const snapshot = await this.snapshot(configuration);
+      const snapshot = await this.snapshot(configuration, id);
       const version = await this.store.createVersion({
         ...snapshot,
         id: randomUUID(),
@@ -335,6 +395,8 @@ export class AgentService {
         (await this.getDefaults()).defaultAgentId === id
       )
         throw new AgentError('AGENT_IS_DEFAULT', 409);
+      if (data.status === 'published')
+        await this.validateSubagents(current.agents, id);
       await this.store.update({
         id,
         status: data.status,

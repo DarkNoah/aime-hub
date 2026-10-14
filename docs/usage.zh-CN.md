@@ -132,7 +132,13 @@ GitHub 来源的组标题提供仓库跳转按钮，删除按钮左边提供一�
 
 ### 后台 Agent 管理与聊天选择
 
-管理员在 **管理后台 → Agent 管理**（`/admin/agents`）创建、编辑和删除自定义 Agent，配置系统提示词、模型、应用工具与后台已安装的 Skills。代码 Agent 定义在 `apps/server/src/mastra/agents/`，在 `index.ts` 注册；示例 `code:assistant` 是通用助手。代码配置直接从注册表读取，不写入 Agent 数据表，管理页仅提供只读详情，服务端也拒绝修改和删除。按 ID 查找时优先匹配代码注册表，未命中才读取数据库；已有同 ID 数据只展示和使用代码配置。自定义 Agent 的 ID 由服务端生成并避开代码已占用的 ID，创建接口不接受客户端指定 ID。
+管理员在 **管理后台 → Agent 管理**（`/admin/agents`）创建、编辑和删除自定义 Agent，配置系统提示词、模型、应用工具与后台已安装的 Skills。代码 Agent 定义在 `apps/server/src/mastra/agents/`，共用 `BaseAgent` 类型，并在 `index.ts` 的 `agentRegistry` 中按名称注册；通用助手通过 `getAgent('code')` 获取配置，已有会话保存的 `code:assistant` ID 也可继续查找。新增代码 Agent 时增加定义文件和注册项即可。代码配置直接从注册表读取，不写入 Agent 数据表，管理页仅提供只读详情，服务端也拒绝修改和删除。按名称或 ID 查找时优先匹配代码注册表，未命中才读取数据库；已有冲突数据只展示和使用代码配置。自定义 Agent 的 ID 由服务端生成并避开代码已占用的名称和 ID，创建接口不接受客户端指定 ID。
+
+代码 Agent 可通过 `agents` 配置 [Mastra subagents](https://mastra.ai/docs/subagents)，键为委派名称（字母、数字、下划线或短横线，1–58 个字符），值为 `agentRegistry` 注册名或稳定 ID。例如在 `default.ts` 中设置 `agents: { assistant: 'code' }`，运行时会生成原生 `agent-assistant` 委派工具；也可写 `agents: { assistant: 'code:assistant' }`。父 Agent 的提示词应说明何时委派，子 Agent 的 `description` 应说明职责和输出格式。只允许主 Agent 加载 `agents`：每个子 Agent 都强制使用空 `agents`，不会读取或执行它自身配置的任何子 Agent。允许主 Agent 引用自身，这会创建一个不能继续委派的独立子实例；下层的循环或失效引用也不会被展开。主 Agent 直接引用的目标必须存在且可用。
+
+自定义 Agent 的编辑面板提供「子 Agent」页签，通过下拉多选卡片选择代码 Agent 或已发布的自定义 Agent，选项与已选卡片均展示名称、ID 和描述，可直接取消勾选或移除。新增选择自动生成合法且唯一的委派名称，已有配置的委派名称保持不变。配置随版本保存在现有 workspace provider 配置中；旧版本缺少此字段时按空配置读取。代码 Agent 的只读详情通过卡片显示子 Agent 的名称、ID 与描述，列表显示子 Agent 数量。目标被删除或取消发布后，保存、发布和下一次构建会给出子 Agent 不可用提示。
+
+子代理按会话构建独立实例，使用自己的提示词与 `disabledTools`，共用当前会话的工作区、Skills、浏览器和全局工具配置。`model: null` 继承主 Agent 的模型选择（主 Agent 未指定时跟随当前聊天模型）；指定模型则通过现有模型服务解析，继续应用对应模型的推理参数和输出限制。子代理用量按自己的 Agent ID 记录；委派上下文、独立记忆线程与取消传播使用 Mastra 原生行为。直接调用 `buildAgent` 时，可用 `subagentOptions` 注入子代理模型及执行参数，固定模型必须提供此解析器；聊天运行时已接入。修改代码配置后需重启服务，使新会话实例加载配置。
 
 自定义 Agent 使用 Mastra 原生 `agents` storage domain，记录与版本分别保存在 `mastra.mastra_agents` 和 `mastra.mastra_agent_versions`；每次保存创建新版本，无需新增数据表。自定义 Agent 创建时为草稿，管理页通过发布开关切换 `draft` / `published`；只有 `published` 状态可进入可用列表、设置为默认项或构建运行实例，草稿和归档项均不可使用。编辑已发布项会保持发布状态并更新激活版本，运行中的会话仍保留原配置。修改、删除和状态切换携带版本 ID，单服务进程内串行检查以拒绝过期编辑；默认项需先更换后才能删除或取消发布。
 

@@ -5,6 +5,7 @@ export function mcpRouter(service?: McpService) {
   const p = rpc.mcp;
   const mcp = () => required(service);
   return p.router({
+    load: p.load.handler(({ input }) => mcp().load(input.params.id)),
     tools: p.tools.handler(({ input }) => mcp().listTools(input.params.id)),
     test: p.test.handler(({ input }) => mcp().testConnection(input.params.id)),
     list: p.list.handler(() => mcp().list()),

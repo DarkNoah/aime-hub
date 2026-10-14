@@ -11,6 +11,14 @@ import {
 
 const params = z.object({ id });
 export const mcpContract = {
+  load: procedure
+    .route({
+      method: 'POST',
+      path: '/admin/mcp/{id}/load',
+      inputStructure: 'detailed',
+    })
+    .input(z.object({ params }))
+    .output(type<McpServer>()),
   tools: procedure
     .route({
       method: 'GET',

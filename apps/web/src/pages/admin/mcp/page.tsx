@@ -68,6 +68,45 @@ export function AdminMcpPage() {
     return () => controller.abort();
   }, [revision]);
 
+  useEffect(() => {
+    const waiting = servers?.filter(
+      (server) =>
+        server.status === 'published' &&
+        ['unloaded', 'loading'].includes(server.connectionStatus),
+    );
+    if (!waiting?.length) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void Promise.allSettled(
+        waiting.map((server) =>
+          api.mcp.get(
+            { params: { id: server.id } },
+            { signal: controller.signal },
+          ),
+        ),
+      ).then((results) => {
+        if (controller.signal.aborted) return;
+        const updates = new Map(
+          results.flatMap((result) =>
+            result.status === 'fulfilled'
+              ? [[result.value.id, result.value] as const]
+              : [],
+          ),
+        );
+        setServers((current) =>
+          current?.map((server) => {
+            const update = updates.get(server.id);
+            return update?.revision === server.revision ? update : server;
+          }),
+        );
+      });
+    }, 1500);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [servers]);
+
   function saved(items: McpServer[]) {
     setServers((current = []) => {
       const next = new Map(current.map((item) => [item.id, item]));
@@ -105,14 +144,21 @@ export function AdminMcpPage() {
       setPending(undefined);
     }
   }
-  async function testConnection(server: McpServer) {
+  async function loadTools(server: McpServer) {
     if (submitting.current) return;
     submitting.current = true;
     setPending(server.id);
+    saved([{ ...server, connectionStatus: 'loading' }]);
     try {
-      const result = await api.mcp.test({ params: { id: server.id } });
-      toast.success(t('mcp.testSuccess', { count: result.toolCount }));
+      const result = await api.mcp.load({ params: { id: server.id } });
+      saved([result]);
+      toast.success(t('mcp.loadSuccess', { count: result.toolCount ?? 0 }));
     } catch (cause) {
+      try {
+        saved([await api.mcp.get({ params: { id: server.id } })]);
+      } catch {
+        saved([{ ...server, connectionStatus: 'error', toolCount: undefined }]);
+      }
       toast.error(t(mcpErrorKey(cause)));
     } finally {
       submitting.current = false;
@@ -233,6 +279,19 @@ export function AdminMcpPage() {
                               ? 'Stdio'
                               : 'Streamable HTTP / SSE'}
                           </Badge>
+                          {server.status === 'published' ? (
+                            <Badge
+                              variant={
+                                server.connectionStatus === 'error'
+                                  ? 'destructive'
+                                  : 'secondary'
+                              }
+                            >
+                              {t(`mcp.connection.${server.connectionStatus}`, {
+                                count: server.toolCount ?? 0,
+                              })}
+                            </Badge>
+                          ) : null}
                           <Badge
                             variant={
                               server.status === 'published'
@@ -248,7 +307,7 @@ export function AdminMcpPage() {
                         </p>
                       </div>
                     </div>
-                    <div className="flex shrink-0 items-center justify-end gap-2">
+                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-1 sm:gap-2">
                       <Button
                         variant="outline"
                         size="sm"
@@ -263,11 +322,15 @@ export function AdminMcpPage() {
                         {t('mcp.tools')}
                       </Button>
                       <Button
-                        variant="ghost"
-                        size="icon"
-                        disabled={busy || server.status !== 'published'}
-                        aria-label={t('mcp.testNamed', { name: server.name })}
-                        onClick={() => void testConnection(server)}
+                        variant="outline"
+                        size="sm"
+                        disabled={
+                          busy ||
+                          server.status !== 'published' ||
+                          server.connectionStatus === 'loading'
+                        }
+                        aria-label={t('mcp.loadNamed', { name: server.name })}
+                        onClick={() => void loadTools(server)}
                       >
                         <Plug
                           className={
@@ -276,6 +339,11 @@ export function AdminMcpPage() {
                               : undefined
                           }
                         />
+                        {t(
+                          server.connectionStatus === 'loaded'
+                            ? 'mcp.reload'
+                            : 'mcp.load',
+                        )}
                       </Button>
                       <Switch
                         checked={server.status === 'published'}
@@ -289,7 +357,7 @@ export function AdminMcpPage() {
                       />
                       <Button
                         variant="ghost"
-                        size="icon"
+                        size="icon-sm"
                         disabled={busy}
                         aria-label={t('mcp.editNamed', { name: server.name })}
                         onClick={(event) =>
@@ -300,7 +368,7 @@ export function AdminMcpPage() {
                       </Button>
                       <Button
                         variant="ghost"
-                        size="icon"
+                        size="icon-sm"
                         disabled={busy}
                         aria-label={t('mcp.deleteNamed', { name: server.name })}
                         onClick={(event) =>
@@ -346,6 +414,7 @@ export function AdminMcpPage() {
         <McpToolsSheet
           key={toolsServer.id}
           server={toolsServer}
+          onLoaded={(server) => saved([server])}
           onClose={() => setToolsServer(undefined)}
           restoreFocus={() => trigger.current?.focus()}
         />

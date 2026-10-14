@@ -10,7 +10,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { AdminAgent, CodeAgent, ManagedAgent } from '@aime/shared/agents';
+import type { AdminAgent, BaseAgent, ManagedAgent } from '@aime/shared/agents';
 import { AgentSelector } from '@/components/agent-selector';
 import { invalidateAvailableAgents } from '@/features/agents/use-available-agents';
 import { CodeAgentSheet } from './components/code-agent-sheet';
@@ -29,7 +29,7 @@ import { agentErrorKey } from './api';
 
 type Action =
   | { kind: 'create' }
-  | { kind: 'view'; agent: CodeAgent }
+  | { kind: 'view'; agent: BaseAgent }
   | { kind: 'edit' | 'delete'; agent: ManagedAgent };
 
 export function AdminAgentsPage() {
@@ -262,6 +262,13 @@ export function AdminAgentsPage() {
                         </p>
                       ) : null}
                       <div className="mt-3 flex flex-wrap gap-2">
+                        {Object.keys(agent.agents).length > 0 && (
+                          <Badge variant="outline">
+                            {t('agents.subagentsCount', {
+                              count: Object.keys(agent.agents).length,
+                            })}
+                          </Badge>
+                        )}
                         <Badge variant="outline">
                           {agent.disabledTools.length
                             ? t('agents.toolsExcluded', {
@@ -371,6 +378,7 @@ export function AdminAgentsPage() {
       {action?.kind === 'view' ? (
         <CodeAgentSheet
           agent={action.agent}
+          agents={agents ?? []}
           onClose={() => setAction(undefined)}
           restoreFocus={restoreFocus}
         />

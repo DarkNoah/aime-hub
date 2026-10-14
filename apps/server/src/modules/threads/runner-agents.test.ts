@@ -12,7 +12,31 @@ import type { LanguageModelService } from '../models/language-model.js';
 import { createChatRunner } from './runner.js';
 import { ThreadService } from './service.js';
 import { buildAgent } from '../../mastra/agents/factory.js';
+import { fallbackAgentId } from '../../mastra/agents/index.js';
 import { buildTools } from '../tools/service.js';
+
+test('runtime resolves registered names and persisted IDs without an AgentService', async (t) => {
+  const mastra = new Mastra({ storage: new InMemoryStore(), logger: false });
+  t.after(() => mastra.shutdown());
+  const runner = createChatRunner(
+    mastra,
+    {} as LanguageModelService,
+    '/tmp/runner-agent-registry',
+  );
+  const settings: ChatSettings = { model: null, reasoningEffort: 'auto' };
+  for (const agentId of ['code', fallbackAgentId, undefined]) {
+    const selected = { ...settings, agentId };
+    assert.equal(
+      (await runner.resolveSettings!(selected)).agentId,
+      fallbackAgentId,
+    );
+    assert.equal(await runner.sessionKey!(selected), `${fallbackAgentId}:code`);
+  }
+  await assert.rejects(
+    runner.resolveSettings!({ ...settings, agentId: 'missing' }),
+    { code: 'AGENT_NOT_FOUND' },
+  );
+});
 
 async function until(check: () => boolean | Promise<boolean>) {
   for (let i = 0; i < 500; i++) {
@@ -51,6 +75,7 @@ test(
       disabledTools: ['sleep'],
       skillsMode: 'custom',
       skillPaths: ['selected'],
+      agents: {},
     };
     const second: AdminAgent = {
       ...first,
@@ -223,6 +248,7 @@ test(
     const mastra = new Mastra({ storage, logger: false });
     const memory = new Memory({ storage, options: { generateTitle: false } });
     const original: AdminAgent = {
+      agents: {},
       source: 'database',
       id: 'stored-agent',
       name: 'Original',

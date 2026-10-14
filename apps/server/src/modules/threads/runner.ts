@@ -7,7 +7,7 @@ import {
   type AgentRuntimeOptions,
 } from '../../mastra/agents/factory.js';
 import type { AgentService } from '../agents/service.js';
-import { fallbackAgentId, getCodeAgent } from '../../mastra/agents/index.js';
+import { fallbackAgentId, getAgent } from '../../mastra/agents/index.js';
 import { AgentError } from '../agents/errors.js';
 import type {
   AgentExecutionOptions,
@@ -60,11 +60,11 @@ export function createChatRunner(
 ): ChatRunner {
   const getConfig = async (id?: string | null) => {
     if (agents) return agents.getConfig(id);
-    const config = getCodeAgent(id ?? fallbackAgentId);
+    const config = getAgent(id ?? fallbackAgentId);
     if (!config) throw new AgentError('AGENT_NOT_FOUND', 404);
     return config;
   };
-  const getAgent = async (id: string, options: AgentRuntimeOptions) =>
+  const createAgent = async (id: string, options: AgentRuntimeOptions) =>
     agents
       ? agents.getAgent(id, options)
       : buildAgent(await getConfig(id), options);
@@ -188,16 +188,86 @@ export function createChatRunner(
             resolveAgentSkillPaths(workspaceRoot, userId, config, projectId),
           filesystem,
         );
-        const agent = await getAgent(config.id, {
+        const projectInstructions = projectId
+          ? ' This is a shared project conversation. Its workspace is shared by project members and other project conversations. File tools and the command sandbox share the same mounted storage. In composite mode, a file tool path such as /data/file.txt is data/file.txt relative to the command working directory. Do not unmount or replace mount directories.'
+          : '';
+        const agent = await createAgent(config.id, {
           versionId:
             config.source === 'database' ? config.versionId : undefined,
           mastra,
-          instructions:
-            config.instructions +
-            (projectId
-              ? ' This is a shared project conversation. Its workspace is shared by project members and other project conversations. File tools and the command sandbox share the same mounted storage. In composite mode, a file tool path such as /data/file.txt is data/file.txt relative to the command working directory. Do not unmount or replace mount directories.'
-              : ''),
+          instructions: config.instructions + projectInstructions,
           model: resolved.model,
+          subagentOptions: (child) => {
+            // A null model follows the parent's current selection, including queued changes.
+            const childModel = () =>
+              child.model
+                ? models.getLanguageModel(
+                    userId,
+                    { ...currentSettings, model: child.model },
+                    projectId,
+                  )
+                : Promise.resolve(resolved);
+            return {
+              instructions: child.instructions + projectInstructions,
+              model: async () => (await childModel()).model,
+              workspace: async () =>
+                (await childModel()).toolCall ? workspace : undefined,
+              defaultOptions: async ({ requestContext }) => {
+                const selection = await childModel();
+                const author = String(requestContext.get('userId') ?? userId);
+                let startedAt = performance.now();
+                let createdAt = new Date();
+                let stepNumber = 0;
+                return {
+                  providerOptions: selection.providerOptions,
+                  modelSettings: {
+                    maxOutputTokens: selection.maxOutputTokens,
+                    maxRetries: 1,
+                    headers: {
+                      'X-THREAD-ID': thread.id,
+                      'X-RESOURCE-ID': thread.resourceId,
+                      'X-USER-ID': author,
+                      ...(projectId ? { 'X-PROJECT-ID': projectId } : {}),
+                    },
+                  },
+                  onStepFinish: async (event) => {
+                    if (usage) {
+                      const slash = selection.reference.indexOf('/');
+                      await usage.record({
+                        id: randomUUID(),
+                        createdAt,
+                        finishedAt: new Date(),
+                        durationMs: Math.max(
+                          0,
+                          Math.round(performance.now() - startedAt),
+                        ),
+                        userId: author,
+                        projectId: projectId ?? null,
+                        threadId: thread.id,
+                        agentId: child.id,
+                        runId: event.runId ?? null,
+                        stepNumber,
+                        providerId:
+                          slash > 0
+                            ? selection.reference.slice(0, slash)
+                            : null,
+                        model:
+                          event.response.modelId ??
+                          event.model?.modelId ??
+                          selection.reference.slice(slash + 1),
+                        modelReference: selection.reference,
+                        finishReason: event.finishReason ?? null,
+                        ...runtimeTokenCounts(event.usage),
+                      });
+                    }
+                    stepNumber += 1;
+                    startedAt = performance.now();
+                    createdAt = new Date();
+                  },
+                };
+              },
+            };
+          },
           goal: {
             judge: () => resolved.model,
             maxRuns: GOAL_MAX_RUNS,

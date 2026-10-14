@@ -250,8 +250,15 @@ export const en = {
     'Could not connect. Check the command or URL, credentials and server availability.',
   'mcp.testNamed': 'Test connection to {{name}}',
   'mcp.testSuccess': 'Connected. Found {{count}} tools.',
-  'mcp.unavailable':
-    'This server is not connected. Close the tool list and test the connection before retrying.',
+  'mcp.load': 'Load tools',
+  'mcp.reload': 'Reload tools',
+  'mcp.loadNamed': 'Load tools from {{name}}',
+  'mcp.loadSuccess': 'Loaded {{count}} tools.',
+  'mcp.connection.unloaded': 'Not loaded',
+  'mcp.connection.loading': 'Loading tools',
+  'mcp.connection.loaded': '{{count}} tools loaded',
+  'mcp.connection.error': 'Load failed',
+  'mcp.unavailable': 'This server is not loaded. Select Load tools to retry.',
   'mcp.tools': 'Tools',
   'mcp.toolsNamed': 'View tools for {{name}}',
   'mcp.toolsHint':
@@ -459,6 +466,18 @@ export const en = {
     'You are a product research assistant. Reply in the user’s language and cite sources for key findings.',
   'agents.tools': 'Tools',
   'agents.skills': 'Skills',
+  'agents.subagents': 'Subagents',
+  'agents.subagentsCount': '{{count}} subagents',
+  'agents.subagentsHint':
+    'Select one or more code agents or published custom agents. Subagents cannot call other agents.',
+  'agents.selectSubagents': 'Select subagents',
+  'agents.noDescription': 'No description',
+  'agents.removeSubagent': 'Remove subagent {{name}}',
+  'agents.noSubagents': 'No subagents configured',
+  'agents.subagentsInvalid':
+    'Invalid subagent configuration. Select the agents again.',
+  'agents.subagentUnavailable':
+    'A subagent was deleted or is unpublished. Choose another agent or remove it.',
   'agents.toolsHint':
     'Inherit globally enabled tools by default. Turn off individual tools for this agent; globally disabled tools cannot be enabled here.',
   'agents.toolGloballyDisabled': 'Globally disabled',
@@ -1097,6 +1116,11 @@ export const en = {
   'projects.errors.exists': 'This user is already a project member.',
 
   'chat.personal': 'Personal chat',
+  'chat.html.mode': 'HTML display mode',
+  'chat.html.preview': 'Preview',
+  'chat.html.title': 'HTML preview',
+  'chat.html.copy': 'Copy HTML source',
+  'chat.html.copied': 'HTML source copied.',
   'chat.compression.running': 'Compressing messages…',
   'chat.compression.buffered': 'Summary ready, awaiting activation',
   'chat.compression.completed': 'Messages compressed',

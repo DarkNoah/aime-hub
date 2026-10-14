@@ -1,5 +1,7 @@
 import { useTranslation } from 'react-i18next';
-import type { CodeAgent } from '@aime/shared/agents';
+import type { AvailableAgent, BaseAgent } from '@aime/shared/agents';
+import { AgentDetails } from '@/components/agent-selector/agent-details';
+import { Card } from '@/components/ui/card';
 import {
   Sheet,
   SheetContent,
@@ -11,10 +13,12 @@ import { Badge } from '@/components/ui/badge';
 
 export function CodeAgentSheet({
   agent,
+  agents,
   onClose,
   restoreFocus,
 }: {
-  agent: CodeAgent;
+  agent: BaseAgent;
+  agents: AvailableAgent[];
   onClose: () => void;
   restoreFocus: () => void;
 }) {
@@ -77,6 +81,35 @@ export function CodeAgentSheet({
               <p className="text-sm text-muted-foreground">
                 {t('agents.skillsAutoHint')}
               </p>
+            </section>
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-medium">{t('agents.subagents')}</h3>
+                <Badge variant="secondary">
+                  {Object.keys(agent.agents).length}
+                </Badge>
+              </div>
+              <p className="text-xs leading-5 text-muted-foreground">
+                {t('agents.subagentsHint')}
+              </p>
+              {[...new Set(Object.values(agent.agents))].map((reference) => (
+                <Card key={reference} className="gap-0 rounded-lg p-3">
+                  <AgentDetails
+                    agent={
+                      agents.find((item) => item.id === reference) ?? {
+                        id: reference,
+                        name: reference,
+                        description: '',
+                      }
+                    }
+                  />
+                </Card>
+              ))}
+              {Object.keys(agent.agents).length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  {t('agents.noSubagents')}
+                </p>
+              ) : null}
             </section>
           </div>
         </ScrollArea>

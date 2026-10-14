@@ -12,7 +12,7 @@ import { createMcpClient, toMastraServer } from './client.js';
 import { ToolService, registeredToolIds } from '../tools/service.js';
 import type { ProviderService } from '../providers/service.js';
 import { buildAgent } from '../../mastra/agents/factory.js';
-import { fallbackAgentId, getCodeAgent } from '../../mastra/agents/index.js';
+import { fallbackAgentId, getAgent } from '../../mastra/agents/index.js';
 import { MastraLanguageModelV2Mock } from '@mastra/core/test-utils/llm-mock';
 import { createApp } from '../../app.js';
 import { createApiClient } from '../../../../web/src/lib/rpc.js';
@@ -47,17 +47,18 @@ async function fixture(toolNames = ['read']) {
     emptyCatalog: boolean;
   }[] = [];
   let failNext = false;
+  let failServer: string | undefined;
   let pendingDiscovery: Promise<void> | undefined;
   const factory: typeof createMcpClient = (servers) => {
     const state = {
       closed: 0,
       discoveries: 0,
       runs: 0,
-      fail: failNext,
+      fail: failNext && (!failServer || failServer === servers[0].name),
       catalogReads: 0,
       emptyCatalog: false,
     };
-    failNext = false;
+    if (state.fail) failNext = false;
     instances.push(state);
     return {
       async listToolDefinitionsWithErrors() {
@@ -121,8 +122,9 @@ async function fixture(toolNames = ['read']) {
     instances,
     create,
     factory,
-    failNext: () => {
+    failNext: (name?: string) => {
       failNext = true;
+      failServer = name;
     },
     block: (promise: Promise<void>) => {
       pendingDiscovery = promise;
@@ -290,7 +292,7 @@ test('Agent construction excludes MCP tools; exec discovers resident tools and r
     undefined,
     f.service,
   );
-  const config = { ...getCodeAgent(fallbackAgentId)!, tools: [] };
+  const config = { ...getAgent(fallbackAgentId)!, tools: [] };
   const options = {
     model: new MastraLanguageModelV2Mock({}),
     buildTools: tools.buildTools.bind(tools),
@@ -419,6 +421,173 @@ test('startup restores only published clients and shutdown disconnects them', as
   await restarted.shutdown();
   assert.equal(f.instances[1].closed, 1);
   await assert.rejects(restarted.getTools(), { code: 'MCP_UNAVAILABLE' });
+});
+
+test('offline startup isolates failed tools and an explicit load recovers them', async (t) => {
+  const f = await fixture();
+  const first = await f.create();
+  const second = await f.create({ ...input, name: 'second' });
+  for (const row of [first, second]) {
+    await f.service.setStatus(row.id, {
+      status: 'published',
+      revision: row.revision,
+    });
+  }
+  await f.service.shutdown();
+  const restarted = new McpService(f.store, f.factory);
+  t.after(() => restarted.shutdown());
+  f.failNext('local');
+  assert.deepEqual(await restarted.initialize(), { connected: 1, failed: 1 });
+  assert.equal((await restarted.get(first.id)).connectionStatus, 'error');
+  assert.equal((await restarted.get(second.id)).connectionStatus, 'loaded');
+  assert.deepEqual(Object.keys(await restarted.getTools()), [
+    'mcp__second__read',
+  ]);
+  assert.equal(f.instances.find((instance) => instance.fail)!.closed, 1);
+  const loaded = await restarted.load(first.id);
+  assert.equal(loaded.connectionStatus, 'loaded');
+  assert.equal(loaded.toolCount, 1);
+  assert.equal(Object.keys(await restarted.getTools()).length, 2);
+  f.instances.at(-1)!.fail = true;
+  await assert.rejects(restarted.load(first.id), {
+    code: 'MCP_CONNECTION_FAILED',
+  });
+  assert.equal((await restarted.get(first.id)).connectionStatus, 'error');
+  assert.equal(f.instances.at(-1)!.closed, 1);
+  assert.deepEqual(Object.keys(await restarted.getTools()), [
+    'mcp__second__read',
+  ]);
+  assert.equal((await restarted.load(first.id)).connectionStatus, 'loaded');
+});
+
+test('pending startup shares UI discovery while admin writes and chat reads stay available', async (t) => {
+  const f = await fixture();
+  const row = await f.create();
+  await f.service.setStatus(row.id, {
+    status: 'published',
+    revision: row.revision,
+  });
+  await f.service.shutdown();
+  const restarted = new McpService(f.store, f.factory);
+  t.after(() => restarted.shutdown());
+  let release!: () => void;
+  f.block(
+    new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+  );
+  const startup = restarted.initialize();
+  await new Promise((resolve) => setImmediate(resolve));
+  const loading = restarted.load(row.id);
+  try {
+    assert.equal((await restarted.list())[0].connectionStatus, 'loading');
+    assert.deepEqual(await restarted.getTools(), {});
+    await restarted.create('admin', {
+      servers: [{ ...input, name: 'new-draft' }],
+    });
+    assert.equal(f.instances.length, 2);
+    assert.equal(f.instances[1].discoveries, 1);
+  } finally {
+    release();
+  }
+  assert.equal((await loading).connectionStatus, 'loaded');
+  assert.deepEqual(await startup, { connected: 1, failed: 0 });
+  assert.equal(f.instances.length, 2);
+});
+
+test('a late startup probe cannot reactivate an unpublished server', async (t) => {
+  const f = await fixture();
+  const row = await f.create();
+  const published = await f.service.setStatus(row.id, {
+    status: 'published',
+    revision: row.revision,
+  });
+  await f.service.shutdown();
+  const restarted = new McpService(f.store, f.factory);
+  t.after(() => restarted.shutdown());
+  let release!: () => void;
+  f.block(
+    new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+  );
+  const startup = restarted.initialize();
+  await new Promise((resolve) => setImmediate(resolve));
+  try {
+    const draft = await restarted.setStatus(row.id, {
+      status: 'draft',
+      revision: published.revision,
+    });
+    assert.equal(draft.connectionStatus, 'unloaded');
+  } finally {
+    release();
+  }
+  assert.deepEqual(await startup, { connected: 0, failed: 1 });
+  assert.deepEqual(await restarted.getTools(), {});
+  assert.equal((await restarted.get(row.id)).status, 'draft');
+  assert.equal(f.instances[1].closed, 1);
+});
+
+test('editing during startup rejects stale discovery and keeps the new connection', async (t) => {
+  const f = await fixture();
+  const row = await f.create();
+  const published = await f.service.setStatus(row.id, {
+    status: 'published',
+    revision: row.revision,
+  });
+  await f.service.shutdown();
+  const restarted = new McpService(f.store, f.factory);
+  t.after(() => restarted.shutdown());
+  let release!: () => void;
+  f.block(
+    new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+  );
+  const startup = restarted.initialize();
+  await new Promise((resolve) => setImmediate(resolve));
+  f.block(Promise.resolve());
+  try {
+    const updated = await restarted.update(row.id, {
+      ...input,
+      name: 'changed',
+      revision: published.revision,
+    });
+    assert.equal(updated.connectionStatus, 'loaded');
+  } finally {
+    release();
+  }
+  assert.deepEqual(await startup, { connected: 0, failed: 1 });
+  assert.equal((await restarted.get(row.id)).connectionStatus, 'loaded');
+  assert.deepEqual(Object.keys(await restarted.getTools()), [
+    'mcp__changed__read',
+  ]);
+  assert.equal(f.instances[1].closed, 1);
+  assert.equal(f.instances[2].closed, 0);
+});
+
+test('shutdown disposes a probe that completes after stopping', async () => {
+  const f = await fixture();
+  const row = await f.create();
+  await f.service.setStatus(row.id, {
+    status: 'published',
+    revision: row.revision,
+  });
+  await f.service.shutdown();
+  const restarted = new McpService(f.store, f.factory);
+  let release!: () => void;
+  f.block(
+    new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+  );
+  const startup = restarted.initialize();
+  await new Promise((resolve) => setImmediate(resolve));
+  const stopped = restarted.shutdown();
+  release();
+  await Promise.all([startup, stopped]);
+  assert.equal(f.instances[1].closed, 1);
+  await assert.rejects(restarted.load(row.id), { code: 'MCP_UNAVAILABLE' });
 });
 
 test('slow publication checks do not block chats from reading resident tools', async () => {
@@ -564,6 +733,7 @@ test('admin HTTP and typed RPC enforce session, exact role, origin, validation a
         body: { status: 'published', revision },
       }),
     () => client.mcp.test({ params: { id } }),
+    () => client.mcp.load({ params: { id } }),
     () => client.mcp.remove({ params: { id }, query: { revision } }),
   ];
   for (const role of [undefined, 'user', 'admin-assistant']) {
@@ -596,6 +766,9 @@ test('admin HTTP and typed RPC enforce session, exact role, origin, validation a
   await assert.rejects(client.mcp.test({ params: { id: row.id } }), {
     code: 'MCP_NOT_PUBLISHED',
   });
+  await assert.rejects(client.mcp.load({ params: { id: row.id } }), {
+    code: 'MCP_NOT_PUBLISHED',
+  });
   await assert.rejects(client.mcp.tools({ params: { id: row.id } }), {
     code: 'MCP_NOT_PUBLISHED',
   });
@@ -606,6 +779,9 @@ test('admin HTTP and typed RPC enforce session, exact role, origin, validation a
   assert.deepEqual(await client.mcp.test({ params: { id: row.id } }), {
     toolCount: 1,
   });
+  const loaded = await client.mcp.load({ params: { id: row.id } });
+  assert.equal(loaded.connectionStatus, 'loaded');
+  assert.equal(loaded.toolCount, 1);
   assert.deepEqual(await client.mcp.tools({ params: { id: row.id } }), [
     toolDefinition,
   ]);

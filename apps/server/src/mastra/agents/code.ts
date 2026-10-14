@@ -1,7 +1,7 @@
-import type { CodeAgent } from '@aime/shared/agents';
+import type { BaseAgent } from '@aime/shared/agents';
 
 /** Code-owned configuration. No database row or provider credentials are needed. */
-export const assistantAgent: CodeAgent = {
+export const assistantAgent: BaseAgent = {
   id: 'code:assistant',
   source: 'code',
   name: '通用助手',
@@ -13,4 +13,5 @@ export const assistantAgent: CodeAgent = {
   disabledTools: [],
   skillsMode: 'auto',
   skillPaths: [],
+  agents: {},
 };

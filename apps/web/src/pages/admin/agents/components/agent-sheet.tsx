@@ -37,6 +37,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { agentErrorKey } from '../api';
+import { SubagentsEditor } from './subagents-editor';
 
 type Field =
   | 'name'
@@ -47,6 +48,7 @@ type Field =
   | 'disabledTools'
   | 'skillsMode'
   | 'skillPaths'
+  | 'agents'
   | 'form';
 
 export function AgentSheet({
@@ -72,6 +74,7 @@ export function AgentSheet({
   const [disabledTools, setDisabledTools] = useState(
     agent?.disabledTools ?? [],
   );
+  const [subagents, setSubagents] = useState(agent?.agents ?? {});
   const [catalog, setCatalog] = useState<AgentCatalog>();
   const [catalogError, setCatalogError] = useState<TranslationKey>();
   const [revision, setRevision] = useState(0);
@@ -129,6 +132,7 @@ export function AgentSheet({
       disabledTools,
       skillsMode,
       skillPaths: skillsMode === 'custom' ? skillPaths : [],
+      agents: subagents,
     });
     setErrors({});
     if (!parsed.success) {
@@ -142,6 +146,7 @@ export function AgentSheet({
         disabledTools: 'agents.invalid',
         skillsMode: 'agents.invalid',
         skillPaths: 'agents.skillUnavailable',
+        agents: 'agents.subagentsInvalid',
       };
       for (const issue of parsed.error.issues) {
         const field = String(issue.path[0]) as Field;
@@ -153,7 +158,9 @@ export function AgentSheet({
           ? 'general'
           : next.instructions
             ? 'prompt'
-            : 'resources',
+            : next.agents
+              ? 'subagents'
+              : 'resources',
       );
       return;
     }
@@ -176,10 +183,13 @@ export function AgentSheet({
           ? 'model'
           : key === 'agents.skillUnavailable'
             ? 'skillPaths'
-            : 'form';
+            : key === 'agents.subagentUnavailable'
+              ? 'agents'
+              : 'form';
       setErrors({ [field]: key });
       if (field === 'model') setTab('general');
       if (field === 'skillPaths') setTab('resources');
+      if (field === 'agents') setTab('subagents');
       toast.error(t(key));
     } finally {
       submitting.current = false;
@@ -248,6 +258,9 @@ export function AgentSheet({
                 </TabsTrigger>
                 <TabsTrigger value="resources">
                   {t('agents.resources')}
+                </TabsTrigger>
+                <TabsTrigger value="subagents">
+                  {t('agents.subagents')}
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -335,6 +348,39 @@ export function AgentSheet({
                     {instructions.length.toLocaleString()} / 24,000
                   </p>
                   {hint('instructions')}
+                </TabsContent>
+                <TabsContent value="subagents" className="space-y-4">
+                  {catalogError ? (
+                    <div
+                      role="alert"
+                      className="space-y-2 text-sm text-destructive"
+                    >
+                      <p>{t(catalogError)}</p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setRevision((value) => value + 1)}
+                      >
+                        {t('agents.retry')}
+                      </Button>
+                    </div>
+                  ) : !catalog ? (
+                    <p role="status" className="text-sm text-muted-foreground">
+                      {t('agents.loading')}
+                    </p>
+                  ) : null}
+                  <SubagentsEditor
+                    value={subagents}
+                    onChange={setSubagents}
+                    agents={
+                      agent &&
+                      !catalog?.agents.some((item) => item.id === agent.id)
+                        ? [...(catalog?.agents ?? []), agent]
+                        : (catalog?.agents ?? [])
+                    }
+                    disabled={pending || !catalog}
+                  />
+                  {hint('agents')}
                 </TabsContent>
                 <TabsContent value="resources" className="space-y-7">
                   {catalogError ? (
