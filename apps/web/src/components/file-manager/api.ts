@@ -1,4 +1,4 @@
-import type { FileMutation } from '@aime/shared/files';
+import type { FileMutation, FileScope } from '@aime/shared/files';
 import { chatErrorKey } from '../chat/api.js';
 import { api, apiErrorCode } from '../../lib/rpc.js';
 import { uploadFile } from './upload.js';
@@ -6,16 +6,51 @@ import { uploadFile } from './upload.js';
 const base = (id: string) => `/api/threads/${encodeURIComponent(id)}/files`;
 export const filesApi = {
   upload: uploadFile,
-  list: (threadId: string, path: string, signal?: AbortSignal) =>
-    api.files.list({ params: { threadId }, query: { path } }, { signal }),
-  preview: (threadId: string, path: string, signal?: AbortSignal) =>
-    api.files.preview({ params: { threadId }, query: { path } }, { signal }),
-  search: (threadId: string, query: string, signal?: AbortSignal) =>
-    api.files.search({ params: { threadId }, query: { query } }, { signal }),
-  mutate: (threadId: string, input: FileMutation) =>
-    api.files.mutate({ params: { threadId }, body: input }),
-  raw: (id: string, path: string, download = false) =>
-    `${base(id)}/raw?${new URLSearchParams({ path, ...(download ? { download: '1' } : {}) })}`,
+  resolve: (threadId: string, path: string, signal?: AbortSignal) =>
+    api.files.resolve({ params: { threadId }, query: { path } }, { signal }),
+  list: (
+    threadId: string,
+    path: string,
+    signal?: AbortSignal,
+    scope: FileScope = 'thread',
+  ) =>
+    api.files.list(
+      { params: { threadId }, query: { path, scope } },
+      { signal },
+    ),
+  preview: (
+    threadId: string,
+    path: string,
+    signal?: AbortSignal,
+    scope: FileScope = 'thread',
+  ) =>
+    api.files.preview(
+      { params: { threadId }, query: { path, scope } },
+      { signal },
+    ),
+  search: (
+    threadId: string,
+    query: string,
+    signal?: AbortSignal,
+    scope: FileScope = 'thread',
+  ) =>
+    api.files.search(
+      { params: { threadId }, query: { query, scope } },
+      { signal },
+    ),
+  mutate: (
+    threadId: string,
+    input: FileMutation,
+    scope: FileScope = 'thread',
+  ) =>
+    api.files.mutate({ params: { threadId }, body: input, query: { scope } }),
+  raw: (
+    id: string,
+    path: string,
+    download = false,
+    scope: FileScope = 'thread',
+  ) =>
+    `${base(id)}/raw?${new URLSearchParams({ path, ...(scope === 'shared' ? { scope } : {}), ...(download ? { download: '1' } : {}) })}`,
 };
 
 export function fileErrorKey(error: unknown) {
@@ -32,6 +67,8 @@ export function fileErrorKey(error: unknown) {
         return 'files.uploadIncomplete';
       case 'FILE_INVALID_PATH':
         return 'files.invalidName';
+      case 'FILE_OUTSIDE_WORKSPACE':
+        return 'files.outsideWorkspace';
       case 'FILE_EXISTS':
         return 'files.exists';
       case 'FILE_NOT_FOUND':

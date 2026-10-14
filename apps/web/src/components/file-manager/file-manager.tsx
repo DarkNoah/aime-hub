@@ -1,20 +1,31 @@
-import { useEffect, useRef, useState } from 'react';
+import { Activity, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   File,
   FilePlus2,
   Files,
   FolderPlus,
+  Folder,
+  Folders,
+  ChevronDown,
   PanelRightClose,
   RotateCw,
   Search,
   X,
   Upload,
 } from 'lucide-react';
-import type { FileSearch } from '@aime/shared/files';
+import type { FileSearch, FileScope } from '@aime/shared/files';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   ResizableHandle,
   ResizablePanel,
@@ -34,10 +45,103 @@ import { UploadList } from './upload-list';
 
 export default function FileManager({
   state,
+  sharedState,
+  scope = 'thread',
+  onScopeChange,
   onClose,
 }: {
   state: FileManagerState;
+  sharedState?: FileManagerState;
+  scope?: FileScope;
+  onScopeChange?: (scope: FileScope) => void;
   onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const scopeTrigger = useRef<HTMLButtonElement>(null);
+  if (!sharedState) return <FileManagerPane state={state} onClose={onClose} />;
+  return (
+    <>
+      {(['thread', 'shared'] as const).map((location) => (
+        <Activity
+          key={location}
+          mode={scope === location ? 'visible' : 'hidden'}
+        >
+          <FileManagerPane
+            state={location === 'thread' ? state : sharedState}
+            onClose={onClose}
+            directoryMenu={
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    ref={scope === location ? scopeTrigger : undefined}
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 min-w-0 max-w-full gap-1 px-1 text-sm font-semibold"
+                    aria-label={`${t('files.location')}：${t(location === 'shared' ? 'files.sharedDirectory' : 'files.threadDirectory')}`}
+                    title={t(
+                      location === 'shared'
+                        ? 'files.sharedHint'
+                        : 'files.threadDirectory',
+                    )}
+                  >
+                    <span className="truncate">
+                      {t(
+                        location === 'shared'
+                          ? 'files.sharedDirectory'
+                          : 'files.threadDirectory',
+                      )}
+                    </span>
+                    <ChevronDown
+                      className="size-3.5 shrink-0"
+                      aria-hidden="true"
+                    />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  onCloseAutoFocus={(event) => {
+                    event.preventDefault();
+                    // The selected pane has its own trigger; restore focus after it becomes visible.
+                    requestAnimationFrame(() => scopeTrigger.current?.focus());
+                  }}
+                >
+                  <DropdownMenuLabel>{t('files.title')}</DropdownMenuLabel>
+                  <DropdownMenuRadioGroup
+                    value={scope}
+                    onValueChange={(value) =>
+                      onScopeChange?.(value as FileScope)
+                    }
+                  >
+                    <DropdownMenuRadioItem value="thread">
+                      <Folder aria-hidden="true" />
+                      {t('files.threadDirectory')}
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem
+                      value="shared"
+                      title={t('files.sharedHint')}
+                    >
+                      <Folders aria-hidden="true" />
+                      {t('files.sharedDirectory')}
+                    </DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            }
+          />
+        </Activity>
+      ))}
+    </>
+  );
+}
+
+function FileManagerPane({
+  state,
+  onClose,
+  directoryMenu,
+}: {
+  state: FileManagerState;
+  onClose: () => void;
+  directoryMenu?: ReactNode;
 }) {
   const { t } = useTranslation();
   const [action, setAction] = useState<EntryAction | null>(null);
@@ -108,10 +212,10 @@ export default function FileManager({
       className="flex h-full min-h-0 min-w-0 flex-col bg-card"
       aria-label={t('files.title')}
     >
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+      <header className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
         <Files className="size-4 shrink-0 text-primary" />
         <h2 className="min-w-0 flex-1 text-sm font-semibold">
-          {t('files.title')}
+          {directoryMenu ?? t('files.title')}
         </h2>
         <Button
           variant="ghost"

@@ -899,6 +899,10 @@ export const en = {
   'files.cancel': 'Cancel',
   'files.failed': 'Could not complete the file operation. Please retry.',
   'files.title': 'Files',
+  'files.location': 'File location',
+  'files.threadDirectory': 'Current thread',
+  'files.sharedDirectory': 'Personal shared',
+  'files.sharedHint': 'Files shared across all your personal chat threads',
   'files.root': 'Workspace root',
   'files.mountPoint': 'Mount',
   'files.mountProtected': 'Mount directories cannot be renamed or deleted',
@@ -942,6 +946,8 @@ export const en = {
   'files.notFound': 'This entry is no longer available. Refresh the file list.',
   'files.forbidden':
     'This entry is inaccessible. Symbolic links are not supported.',
+  'files.outsideWorkspace':
+    'This path is outside the directories available in the file manager. Only the current thread and personal shared folder are supported.',
   'files.unavailable': 'The workspace is currently unavailable.',
   'files.loading': 'Loading files…',
   'files.retry': 'Retry',
@@ -1538,6 +1544,11 @@ export const en = {
     'When disabled, public registration is closed. Existing users can still sign in, and administrators can still create accounts.',
   'settings.registrationEnabled': 'Open',
   'settings.registrationDisabled': 'Closed',
+  'settings.requestLogging': 'Enable request logging',
+  'settings.requestLoggingHint':
+    'Record model requests and responses. Disabling stops log capture and console output for new requests. In-flight requests finish logging, and existing logs remain available.',
+  'settings.requestLoggingEnabled': 'Enabled',
+  'settings.requestLoggingDisabled': 'Disabled',
   'settings.saved': 'System settings updated.',
   'settings.retry': 'Retry',
 

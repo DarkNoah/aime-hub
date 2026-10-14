@@ -8,6 +8,7 @@ import { threadMessages } from './message-conversion.js';
 import type { Memory } from '@mastra/memory';
 import type { StorageThreadType } from '@mastra/core/memory';
 import type { WorkspaceFilesystem } from '@mastra/core/workspace';
+import type { FileScope } from '@aime/shared/files';
 import type { UIMessage } from 'ai';
 import {
   canContinueThread,
@@ -38,6 +39,10 @@ import {
 } from '@aime/shared/threads';
 import type { ProjectSummary } from '@aime/shared/projects';
 import { ThreadError, threadErrorMessage } from './errors.js';
+import {
+  resolveFileReference,
+  validateFileReference,
+} from '../files/reference.js';
 import type { ProjectThreadAccess } from '../projects/service.js';
 import { threadScope } from './scope.js';
 import { ThreadNavigationFeed } from './navigation-feed.js';
@@ -98,6 +103,7 @@ export interface ChatRunner {
     projectId: string,
   ): Promise<WorkspaceFilesystem>;
   listSkills?(userId: string, projectId?: string): Promise<ChatSkill[]>;
+  personalSharedDirectory?(userId: string): Promise<string>;
   validate(
     userId: string,
     input: RunInput | ChatSettings,
@@ -158,6 +164,8 @@ function dataOf(thread: StorageThreadType): ThreadData {
     data.status =
       threadStreamStatusSchema.safeParse(data.status).data ?? 'failed';
   }
+  // Older stream adapters persisted tool errors even after a successful run.
+  if (data.status === 'success') data.error = null;
   return data;
 }
 const messageText = (input: RunInput) =>
@@ -595,6 +603,7 @@ export class ThreadService {
         )
           return;
         runtime.data.status = event.status;
+        if (event.status === 'success') runtime.data.error = null;
         if (runtime.goal) {
           runtime.goal.evaluating = false;
           if (event.status === 'running') runtime.goal.waitingForUser = false;
@@ -881,6 +890,29 @@ export class ThreadService {
     return path;
   }
 
+  async resolveWorkspaceFile(userId: string, id: string, path: string) {
+    const thread = await this.accessible(userId, id);
+    validateFileReference(path);
+    const directory = await this.workspaceDirectory(userId, id);
+    const target = await this.withWorkspaceFiles(userId, id, (root) =>
+      resolveFileReference(root, path, directory, 'thread'),
+    );
+    if (target) return target;
+    if (
+      threadScope(thread.resourceId).userId === userId &&
+      this.runner.personalSharedDirectory
+    ) {
+      const shared = await this.withWorkspaceFiles(
+        userId,
+        id,
+        (root) => resolveFileReference(root, path, directory, 'shared'),
+        'shared',
+      );
+      if (shared) return shared;
+    }
+    throw new ThreadError('FILE_OUTSIDE_WORKSPACE', 403);
+  }
+
   /** Resolve asset access from an authorized thread, never a client resource ID. */
   async assetScope(userId: string, id: string) {
     const thread = await this.accessible(userId, id);
@@ -898,9 +930,20 @@ export class ThreadService {
     userId: string,
     id: string,
     action: (root: string | WorkspaceFilesystem) => Promise<T>,
+    scope: FileScope = 'thread',
   ) {
     const thread = await this.accessible(userId, id);
     const { projectId } = threadScope(thread.resourceId);
+    if (scope === 'shared') {
+      if (threadScope(thread.resourceId).userId !== userId)
+        throw new ThreadError('FILE_FORBIDDEN', 403);
+      return this.locked(id, async () => {
+        await this.accessible(userId, id);
+        if (!this.runner.personalSharedDirectory)
+          throw new ThreadError('WORKSPACE_UNAVAILABLE', 404);
+        return action(await this.runner.personalSharedDirectory(userId));
+      });
+    }
     if (!projectId)
       return this.locked(id, async () =>
         action(await this.workspaceDirectory(userId, id)),

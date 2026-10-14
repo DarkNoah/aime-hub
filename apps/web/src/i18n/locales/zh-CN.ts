@@ -829,6 +829,10 @@ export const zhCN = {
   'files.cancel': '取消',
   'files.failed': '文件操作未完成，请重试。',
   'files.title': '文件管理',
+  'files.location': '文件目录',
+  'files.threadDirectory': '当前线程',
+  'files.sharedDirectory': '个人共享',
+  'files.sharedHint': '供你的所有个人聊天线程共用的文件夹',
   'files.root': '工作区根目录',
   'files.mountPoint': '挂载点',
   'files.mountProtected': '挂载目录不能重命名或删除',
@@ -868,6 +872,8 @@ export const zhCN = {
   'files.exists': '已存在同名文件或文件夹。',
   'files.notFound': '该文件或文件夹已不存在，请刷新文件列表。',
   'files.forbidden': '无法访问此文件或文件夹，不支持操作符号链接。',
+  'files.outsideWorkspace':
+    '此路径不在文件管理支持的目录内，仅支持当前线程及个人共享目录。',
   'files.unavailable': '工作区当前不可用。',
   'files.loading': '正在读取文件…',
   'files.retry': '重试',
@@ -1401,6 +1407,11 @@ export const zhCN = {
     '关闭后停止公开注册，现有用户仍可登录，管理员仍可创建账号。',
   'settings.registrationEnabled': '已开放',
   'settings.registrationDisabled': '已关闭',
+  'settings.requestLogging': '启用请求日志',
+  'settings.requestLoggingHint':
+    '记录模型请求与响应。关闭后停止采集新请求的日志和控制台输出，已开始的请求会完成记录，历史日志仍可查看。',
+  'settings.requestLoggingEnabled': '已启用',
+  'settings.requestLoggingDisabled': '已禁用',
   'settings.saved': '系统设置已更新。',
   'settings.retry': '重试',
 

@@ -37,6 +37,12 @@ export async function createProjectWorkspace(root: string, projectId: string) {
   return path;
 }
 
+export async function createPersonalSharedDirectory(root: string, userId: string) {
+  const path = resolve(userDirectory(root, userId), 'shared');
+  await mkdir(path, { recursive: true });
+  return path;
+}
+
 export async function createPersonalWorkspace(root: string, userId: string) {
   const date = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Shanghai',
@@ -44,7 +50,9 @@ export async function createPersonalWorkspace(root: string, userId: string) {
     month: '2-digit',
     day: '2-digit',
   }).format(new Date());
-  const path = resolve(userDirectory(root, userId), `${date}-${nanoid(6)}`);
+  const userPath = userDirectory(root, userId);
+  const path = resolve(userPath, `${date}-${nanoid(6)}`);
+  await createPersonalSharedDirectory(root, userId);
   await mkdir(path, { recursive: true });
   return path;
 }
@@ -97,12 +105,23 @@ export function getWorkspace(
     : dirname(path) === userDirectory(root, userId);
   if (!valid) throw new ThreadError('WORKSPACE_UNAVAILABLE', 500);
   const userPath = userDirectory(root, userId);
+  const sharedPath = resolve(userPath, 'shared');
   const workspaceFilesystem =
     filesystem ??
     new LocalFilesystem({
       basePath: path,
       contained: true,
-      allowedPaths: [...(projectId ? [] : [userPath])],
+      allowedPaths: projectId ? [] : [userPath, sharedPath],
+      onInit: projectId
+        ? undefined
+        : async () => {
+            // Existing personal threads also need the shared directory.
+            await createPersonalSharedDirectory(root, userId);
+          },
+      instructions: projectId
+        ? undefined
+        : ({ defaultInstructions }) =>
+            `${defaultInstructions}\nThe shared folder at "${sharedPath}" is shared by all personal chat threads belonging to the current user. Use "../shared/" relative to this thread's workspace, or its absolute path, to read and write files that should be available across the user's personal conversations.`,
     });
   const workingDirectory =
     workspaceFilesystem instanceof LocalFilesystem

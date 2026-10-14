@@ -89,7 +89,7 @@ function ChatPanelWorkspace(props: ChatPanelProps) {
       )}
       aria-label={t(props.projectId ? 'projects.chat' : 'chat.personal')}
     >
-      <ChatWorkspace {...snapshot}>
+      <ChatWorkspace {...snapshot} projectId={props.projectId}>
         <ChatPanelSession
           key={props.threadId ?? `new:${props.draftKey ?? 0}`}
           {...props}

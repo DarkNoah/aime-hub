@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { UIMessage } from 'ai';
+import type { FileScope } from '@aime/shared/files';
 import {
   Braces,
   ChevronDown,
@@ -19,6 +20,7 @@ import {
   ScanText,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 import { usePanelRef } from 'react-resizable-panels';
 import { Button } from '@/components/ui/button';
 import {
@@ -50,6 +52,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useFileManager } from '@/components/file-manager/use-file-manager';
 import { WorkspaceFileContext } from '@/components/file-manager/context';
+import { filesApi, fileErrorKey } from '@/components/file-manager/api';
 import { FloatingWindow } from '@/components/floating-window';
 import {
   ChatWorkspaceMenuContext,
@@ -86,12 +89,14 @@ export function ChatWorkspace({
   loading = false,
   hasEarlier = false,
   threadId,
+  projectId,
 }: {
   children: ReactNode;
   messages?: UIMessage[];
   loading?: boolean;
   hasEarlier?: boolean;
   threadId?: string;
+  projectId?: string;
 }) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -151,20 +156,62 @@ export function ChatWorkspace({
       panelRef.current?.resize(`${layout.inspectorSize}%`);
     else panelRef.current?.collapse();
   }, [compact, floating, layout.inspectorSize, panelRef]);
+  const [fileScope, setFileScope] = useState<FileScope>('thread');
+  const filesVisible = view === 'files' && (compact ? drawerOpen : expanded);
   const files = useFileManager(
     threadId,
-    view === 'files' && (compact ? drawerOpen : expanded),
+    filesVisible && fileScope === 'thread',
+  );
+  const sharedFiles = useFileManager(
+    projectId ? undefined : threadId,
+    !projectId && filesVisible && fileScope === 'shared',
+    'shared',
   );
   const { revealFile, revealDirectory } = files;
+  const {
+    revealFile: revealSharedFile,
+    revealDirectory: revealSharedDirectory,
+  } = sharedFiles;
+  const fileNavigation = useRef<AbortController | null>(null);
+  useEffect(() => () => fileNavigation.current?.abort(), [threadId]);
   const openWorkspaceFile = useCallback(
-    (path: string, kind: 'file' | 'directory' = 'file') => {
-      setView('files');
-      if (compact) setDrawerOpen(true);
-      else expandInspector();
-      if (kind === 'directory') revealDirectory(path);
-      else revealFile(path);
+    (path: string) => {
+      if (!threadId) return;
+      fileNavigation.current?.abort();
+      const controller = new AbortController();
+      fileNavigation.current = controller;
+      void filesApi
+        .resolve(threadId, path, controller.signal)
+        .then((target) => {
+          if (controller.signal.aborted) return;
+          setFileScope(target.scope);
+          setView('files');
+          if (compact) setDrawerOpen(true);
+          else expandInspector();
+          const reveal =
+            target.scope === 'shared'
+              ? target.kind === 'directory'
+                ? revealSharedDirectory
+                : revealSharedFile
+              : target.kind === 'directory'
+                ? revealDirectory
+                : revealFile;
+          reveal(target.path);
+        })
+        .catch((error: unknown) => {
+          if (!controller.signal.aborted) toast.error(t(fileErrorKey(error)));
+        });
     },
-    [compact, expandInspector, revealDirectory, revealFile],
+    [
+      threadId,
+      compact,
+      expandInspector,
+      revealDirectory,
+      revealFile,
+      revealSharedDirectory,
+      revealSharedFile,
+      t,
+    ],
   );
 
   useEffect(() => {
@@ -244,7 +291,13 @@ export function ChatWorkspace({
           </p>
         }
       >
-        <FileManager state={files} onClose={close} />
+        <FileManager
+          state={files}
+          sharedState={projectId ? undefined : sharedFiles}
+          scope={fileScope}
+          onScopeChange={setFileScope}
+          onClose={close}
+        />
       </Suspense>
     ) : view === 'assets' ? (
       <Suspense

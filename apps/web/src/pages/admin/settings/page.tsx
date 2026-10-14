@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, ShieldCheck } from 'lucide-react';
+import { ArrowUpRight, ScrollText, ShieldCheck } from 'lucide-react';
 import { Link } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import type { SystemSettings } from '@aime/shared/system-settings';
+import type {
+  SystemSettings,
+  SystemSettingsUpdate,
+} from '@aime/shared/system-settings';
 import { api, apiErrorCode } from '@/lib/rpc';
 import { PageHeader } from '@/components/page-header';
 import { LoadingState } from '@/components/loading-state';
@@ -43,14 +46,12 @@ export function AdminSettingsPage() {
     return () => controller.abort();
   }, [revision]);
 
-  async function setRegistrationEnabled(registrationEnabled: boolean) {
+  async function updateSettings(body: SystemSettingsUpdate) {
     if (!settings || changing.current) return;
     changing.current = true;
     setSaving(true);
     try {
-      setSettings(
-        await api.systemSettings.update({ body: { registrationEnabled } }),
-      );
+      setSettings(await api.systemSettings.update({ body }));
       toast.success(t('settings.saved'));
     } catch (cause) {
       const code = apiErrorCode(cause);
@@ -128,11 +129,65 @@ export function AdminSettingsPage() {
                   checked={settings.registrationEnabled}
                   disabled={saving}
                   onCheckedChange={(value) =>
-                    void setRegistrationEnabled(value)
+                    void updateSettings({ registrationEnabled: value })
                   }
                 />
               </div>
             </div>
+          ) : (
+            <LoadingState />
+          )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ScrollText className="size-4 text-muted-foreground" />
+            {t('nav.requestLogs')}
+          </CardTitle>
+          <CardDescription id="request-logging-hint">
+            {t('settings.requestLoggingHint')}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {settings ? (
+            <div
+              className="flex flex-wrap items-center justify-between gap-4 rounded-lg border p-4"
+              aria-busy={saving}
+            >
+              <Label
+                htmlFor="request-logging-enabled"
+                className="flex-1 leading-6"
+              >
+                {t('settings.requestLogging')}
+              </Label>
+              <div className="flex items-center gap-3">
+                <Badge
+                  variant={
+                    settings.requestLoggingEnabled ? 'secondary' : 'outline'
+                  }
+                >
+                  {t(
+                    settings.requestLoggingEnabled
+                      ? 'settings.requestLoggingEnabled'
+                      : 'settings.requestLoggingDisabled',
+                  )}
+                </Badge>
+                <Switch
+                  id="request-logging-enabled"
+                  aria-describedby="request-logging-hint"
+                  checked={settings.requestLoggingEnabled}
+                  disabled={saving || loadError}
+                  onCheckedChange={(value) =>
+                    void updateSettings({ requestLoggingEnabled: value })
+                  }
+                />
+              </div>
+            </div>
+          ) : loadError ? (
+            <p className="text-sm text-muted-foreground">
+              {t('errors.request')}
+            </p>
           ) : (
             <LoadingState />
           )}

@@ -27,7 +27,7 @@ export function createWebSearchTool(
     description:
       'Search the web for current information. Returns titles, URLs and snippets. Cite the result URLs in your answer. Use web_fetch to read a full page when needed.',
     inputSchema: z.strictObject({
-      query: z.string().trim().min(1).max(2000).describe('The search query'),
+      query: z.string().trim().describe('The search query'),
     }),
     outputSchema: z.object({
       results: z.array(searchResultSchema),

@@ -1,5 +1,13 @@
 import { z } from 'zod';
 
+export const fileScopeSchema = z.enum(['thread', 'shared']);
+export type FileScope = z.infer<typeof fileScopeSchema>;
+export type WorkspaceFileReference = {
+  scope: FileScope;
+  path: string;
+  kind: 'file' | 'directory';
+};
+
 export type FileEntry = {
   name: string;
   path: string;
@@ -45,6 +53,7 @@ export const FILE_UPLOAD_CHUNK_SIZE = 4 * 1024 * 1024;
 export const FILE_UPLOAD_MAX_SIZE = 1024 * 1024 * 1024;
 export const fileUploadSchema = z
   .object({
+    scope: fileScopeSchema.optional(),
     path: z.string().min(1).max(2048),
     size: z.number().int().min(0).max(FILE_UPLOAD_MAX_SIZE),
   })

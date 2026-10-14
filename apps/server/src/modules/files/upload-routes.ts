@@ -36,8 +36,11 @@ export function uploadRoutes(
     };
     const input = fileUploadSchema.parse(await c.req.json());
     await service
-      .withWorkspaceFiles(owner.userId, owner.threadId, (root) =>
-        uploadDestination(root, input.path),
+      .withWorkspaceFiles(
+        owner.userId,
+        owner.threadId,
+        (root) => uploadDestination(root, input.path),
+        input.scope,
       )
       .catch(fileError);
     return c.json(await uploads.create(owner, input));
@@ -67,8 +70,11 @@ export function uploadRoutes(
     return c.json(
       await uploads
         .complete(owner, c.req.param('uploadId'), (input, source) =>
-          service.withWorkspaceFiles(owner.userId, owner.threadId, (root) =>
-            publishUpload(root, input.path, source),
+          service.withWorkspaceFiles(
+            owner.userId,
+            owner.threadId,
+            (root) => publishUpload(root, input.path, source),
+            input.scope,
           ),
         )
         .catch(fileError),

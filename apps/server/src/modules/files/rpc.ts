@@ -17,11 +17,19 @@ export function fileRouter(service?: ThreadService) {
     }
   });
   return p.router({
+    resolve: p.resolve.handler(({ context, input }) =>
+      required(service).resolveWorkspaceFile(
+        context.userId,
+        input.params.threadId,
+        input.query.path,
+      ),
+    ),
     list: p.list.handler(({ context, input }) =>
       required(service).withWorkspaceFiles(
         context.userId,
         input.params.threadId,
         (root) => listWorkspaceFiles(root, input.query.path),
+        input.query.scope,
       ),
     ),
     preview: p.preview.handler(({ context, input }) =>
@@ -29,6 +37,7 @@ export function fileRouter(service?: ThreadService) {
         context.userId,
         input.params.threadId,
         (root) => previewWorkspaceFile(root, input.query.path),
+        input.query.scope,
       ),
     ),
     search: p.search.handler(({ context, input, signal }) =>
@@ -36,6 +45,7 @@ export function fileRouter(service?: ThreadService) {
         context.userId,
         input.params.threadId,
         (root) => searchWorkspaceFiles(root, input.query.query, signal),
+        input.query.scope,
       ),
     ),
     mutate: p.mutate.handler(({ context, input }) =>
@@ -43,6 +53,7 @@ export function fileRouter(service?: ThreadService) {
         context.userId,
         input.params.threadId,
         (root) => mutateWorkspaceFile(root, input.body),
+        input.query?.scope,
       ),
     ),
   });

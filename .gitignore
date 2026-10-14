@@ -8,3 +8,13 @@ dist/
 .aime-chat/
 workspaces/
 coverage/
+.local/
+
+# Local deployment files, documentation, and memory
+/deploy/
+/docs/
+/memory/
+
+# Test scripts
+*.test.*
+*.spec.*

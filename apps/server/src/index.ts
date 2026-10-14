@@ -47,7 +47,10 @@ await syncBuiltinSkills(
   workspaceRoot,
 );
 const database = createDataSource(env.DATABASE_URL);
-const systemSettings = new SystemSettingsService(database);
+let requestLoggingEnabled: boolean;
+const systemSettings = new SystemSettingsService(database, (settings) => {
+  requestLoggingEnabled = settings.requestLoggingEnabled;
+});
 const pool = new Pool({ connectionString: env.DATABASE_URL });
 const auth = createAuth({
   pool,
@@ -69,6 +72,7 @@ try {
   ) {
     throw new Error('数据库结构未就绪，请先运行 pnpm db:migrate');
   }
+  requestLoggingEnabled = (await systemSettings.get()).requestLoggingEnabled;
 } catch (error) {
   await Promise.allSettled([
     pool.end(),
@@ -84,6 +88,7 @@ const disposeChatRequestLogging = installChatRequestLogging(
   undefined,
   (request) => requestLogs.record(request),
   (response) => requestLogs.recordResponse(response),
+  () => requestLoggingEnabled,
 );
 const projects = new ProjectService(database, { workspaceRoot });
 const notifications = new NotificationService(

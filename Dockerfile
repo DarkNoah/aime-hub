@@ -64,7 +64,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
 CMD ["sh", "-c", "pnpm db:migrate && exec node apps/server/dist/index.js"]
 
 FROM ${NGINX_IMAGE} AS web
-COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

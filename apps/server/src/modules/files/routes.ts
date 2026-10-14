@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { stream } from 'hono/streaming';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { z } from 'zod';
+import { fileScopeSchema } from '@aime/shared/files';
 import type { Auth } from '@aime/auth';
 import { requireSession, type HttpEnv } from '../../http.js';
 import type { ThreadService } from '../threads/service.js';
@@ -25,6 +26,9 @@ export function fileRoutes(
       const userId = c.get('userId');
       const threadId = c.req.param('threadId')!;
       const path = z.string().max(2048).default('').parse(c.req.query('path'));
+      const scope = fileScopeSchema
+        .default('thread')
+        .parse(c.req.query('scope'));
       return await service.withWorkspaceFiles(
         userId,
         threadId,
@@ -86,18 +90,23 @@ export function fileRoutes(
           // Open a separate provider for the stream, and keep it alive until the
           // final chunk or client cancellation, rather than closing with headers.
           return stream(c, (output) =>
-            service.withWorkspaceFiles(userId, threadId, (filesystem) =>
-              streamWorkspaceFile(
-                filesystem,
-                path,
-                (chunk) => output.write(chunk),
-                () => output.aborted,
-                start,
-                end,
-              ),
+            service.withWorkspaceFiles(
+              userId,
+              threadId,
+              (filesystem) =>
+                streamWorkspaceFile(
+                  filesystem,
+                  path,
+                  (chunk) => output.write(chunk),
+                  () => output.aborted,
+                  start,
+                  end,
+                ),
+              scope,
             ),
           );
         },
+        scope,
       );
     } catch (error) {
       fileError(error);

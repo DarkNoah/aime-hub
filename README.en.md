@@ -43,7 +43,7 @@ These steps are for **local development**. For Docker Compose / Dokploy, see [De
 ### 1. Prepare the environment
 
 - Node.js **≥ 22.12.0** and **pnpm 10.12.1**, as specified in [package.json](package.json).
-- Git and an existing PostgreSQL application database. Provide your own database for source-based development; [compose.yaml](compose.yaml) includes a PostgreSQL 16 service.
+- Git and a PostgreSQL application database. Use [compose.local.yaml](compose.local.yaml) for PostgreSQL 16 with pgvector locally; [compose.yaml](compose.yaml) is for the full deployment.
 - Access to a model provider and its credentials, configured in the administration UI after startup.
 
 ```sh
@@ -64,6 +64,8 @@ ADMINS=admin
 ```
 
 Keep the remaining defaults from [.env.example](.env.example) as needed. `.env` and the default `workspaces/` directory are already ignored by Git.
+
+For a local Docker database, keep `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` in `.env` consistent with `DATABASE_URL`, then run `docker compose -f compose.local.yaml up -d`. It listens only on `127.0.0.1:55432` by default and includes pgvector in the image.
 
 ### 2. Initialize the database and administrator
 
@@ -174,7 +176,7 @@ pnpm start
 
 On first deployment, also run `pnpm auth:create-admin`. `pnpm start` **starts only the API**. Host `apps/web/dist` separately, provide an `index.html` fallback for SPA routes, and proxy same-origin `/api/*` requests to the API. `SERVER_HOST` controls the listen address and defaults to `0.0.0.0`; set it explicitly to `127.0.0.1` when using a reverse proxy on the same host.
 
-Use the [Nginx configuration](deploy/nginx.conf) as a reference for disabling SSE buffering and setting long connection timeouts. Queues, scheduling, and some state are process-local; do not run multiple API replicas. Forwarded headers are not trusted by default, so login rate limits behind a reverse proxy may share the proxy address's quota.
+Use the [Nginx configuration](apps/web/nginx.conf) as a reference for disabling SSE buffering and setting long connection timeouts. Queues, scheduling, and some state are process-local; do not run multiple API replicas. Forwarded headers are not trusted by default, so login rate limits behind a reverse proxy may share the proxy address's quota.
 
 ## Development
 
@@ -212,7 +214,6 @@ packages/
 ├── db/                # TypeORM business entities and migrations
 └── shared/            # Shared types, validation, environment loading, and RPC contracts
 scripts/               # Administrator provisioning, migrations, tests, and catalog updates
-deploy/                # Nginx and deployment helpers
 docs/                  # Usage, deployment, architecture, and module documentation
 ```
 

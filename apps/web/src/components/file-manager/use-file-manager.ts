@@ -5,7 +5,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { FileListing, FileMutation } from '@aime/shared/files';
+import type { FileListing, FileMutation, FileScope } from '@aime/shared/files';
 import { fileErrorKey } from './api';
 import { createWorkspaceFileClient } from './workspace-client';
 import { parentPath, renameTabs, withinPath, type FileTab } from './state';
@@ -16,8 +16,12 @@ type Directory = Partial<FileListing> & {
   error?: ReturnType<typeof fileErrorKey>;
 };
 
-export function useFileManager(threadId: string | undefined, visible: boolean) {
-  const [client] = useState(createWorkspaceFileClient);
+export function useFileManager(
+  threadId: string | undefined,
+  visible: boolean,
+  scope: FileScope = 'thread',
+) {
+  const [client] = useState(() => createWorkspaceFileClient(undefined, scope));
   const [available, setAvailable] = useState(!!threadId);
   if (threadId && !available) setAvailable(true);
   useLayoutEffect(() => {
@@ -112,7 +116,6 @@ export function useFileManager(threadId: string | undefined, visible: boolean) {
   const revealDirectory = useCallback(
     (path: string) => {
       const relativePath = path.replace(/^(\.\/)+/, '');
-      if (!relativePath) return;
       const directories: string[] = [];
       let directory = relativePath;
       while (directory) {

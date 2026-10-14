@@ -67,7 +67,8 @@ export async function consumeSessionStream(
       version: 'v6',
       sendReasoning: true,
       onError: (error) => {
-        emit({ type: 'error', error, runId });
+        // The adapter also calls this formatter for tool-output-error. Only
+        // native run errors and UI stream failures should fail the thread.
         return error instanceof Error ? error.message : String(error);
       },
     });

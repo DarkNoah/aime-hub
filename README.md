@@ -43,7 +43,7 @@ Aime Hub 基于 React、Hono、oRPC 和 Mastra 构建，使用 PostgreSQL 保存
 ### 1. 准备环境
 
 - Node.js **≥ 22.12.0**、**pnpm 10.12.1**（以 [package.json](package.json) 为准）。
-- Git，以及已创建的 PostgreSQL 应用数据库。源码开发需自行提供数据库；[compose.yaml](compose.yaml) 已包含 PostgreSQL 16 服务。
+- Git，以及 PostgreSQL 应用数据库。可通过 [compose.local.yaml](compose.local.yaml) 启动带 pgvector 的 PostgreSQL 16；[compose.yaml](compose.yaml) 用于完整部署。
 - 可访问的模型供应商与相应凭据，在启动后通过管理后台配置。
 
 ```sh
@@ -64,6 +64,8 @@ ADMINS=admin
 ```
 
 其他选项可保留 [.env.example](.env.example) 的默认值。`.env` 与默认 `workspaces/` 已被 Git 忽略。
+
+使用本地 Docker 数据库时，保持 `.env` 中的 `POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_DB` 与 `DATABASE_URL` 一致，然后执行 `docker compose -f compose.local.yaml up -d`。默认仅监听 `127.0.0.1:55432`，镜像内置 pgvector。
 
 ### 2. 初始化数据库与管理员
 
@@ -174,7 +176,7 @@ pnpm start
 
 首次部署还需运行 `pnpm auth:create-admin`。`pnpm start` **仅启动 API**；需另行托管 `apps/web/dist`，为 SPA 提供 `index.html` 回退，并将同域 `/api/*` 代理至 API。监听地址由 `SERVER_HOST` 控制，默认 `0.0.0.0`；同机反向代理场景可显式设为 `127.0.0.1`。
 
-参考 [Nginx 配置](deploy/nginx.conf) 为 SSE 关闭缓冲并配置长连接超时。队列、调度和部分状态由单进程持有，当前不要运行多个 API 副本。默认不信任转发头，反向代理后的登录限流可能共享代理地址额度。
+参考 [Nginx 配置](apps/web/nginx.conf) 为 SSE 关闭缓冲并配置长连接超时。队列、调度和部分状态由单进程持有，当前不要运行多个 API 副本。默认不信任转发头，反向代理后的登录限流可能共享代理地址额度。
 
 ## 开发
 
@@ -212,7 +214,6 @@ packages/
 ├── db/                # TypeORM 业务实体与迁移
 └── shared/            # 共享类型、校验、环境加载与 RPC 契约
 scripts/               # 管理员初始化、迁移、测试与目录更新
-deploy/                # Nginx 与部署辅助文件
 docs/                  # 使用、部署、架构与模块说明
 ```
 

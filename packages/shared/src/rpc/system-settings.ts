@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { procedure } from './base.js';
-import { systemSettingsSchema } from '../system-settings.js';
+import {
+  systemSettingsSchema,
+  systemSettingsUpdateSchema,
+} from '../system-settings.js';
 
 const path = '/admin/settings';
 
@@ -10,6 +13,6 @@ export const systemSettingsContract = {
     .output(systemSettingsSchema),
   update: procedure
     .route({ method: 'PATCH', path, inputStructure: 'detailed' })
-    .input(z.object({ body: systemSettingsSchema }))
+    .input(z.object({ body: systemSettingsUpdateSchema }))
     .output(systemSettingsSchema),
 };

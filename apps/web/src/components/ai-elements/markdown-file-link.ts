@@ -1,12 +1,16 @@
 const WORKSPACE_FILE_LINK_PREFIX = 'streamdown:workspace-file/';
-const INVALID_PATH_CHARACTERS = /[\0-\x1f\x7f]/;
+const hasControlCharacters = (value: string) =>
+  [...value].some(
+    (character) =>
+      character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+  );
 const URI_SCHEME = /^[a-z][a-z\d+.-]*:/i;
 
 function normalizeWorkspacePath(path: string): string | undefined {
   if (
     !path ||
-    INVALID_PATH_CHARACTERS.test(path) ||
-    path.startsWith('/') ||
+    hasControlCharacters(path) ||
+    path.startsWith('//') ||
     path.startsWith('\\') ||
     path.includes('?') ||
     path.includes('#')
@@ -14,8 +18,19 @@ function normalizeWorkspacePath(path: string): string | undefined {
     return undefined;
   }
 
+  const parts = path
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter((part) => part && part !== '.');
+  // Authorization and absolute-path mapping happen on the server when opened.
+  // Preserve the personal shared prefix through Streamdown's URL rewriting.
+  let prefix = path.startsWith('/') ? '/' : '';
+  if (!prefix && parts[0] === '..' && parts[1] === 'shared') {
+    prefix = '../shared';
+    parts.splice(0, 2);
+  }
   const segments: string[] = [];
-  for (const segment of path.replace(/\\/g, '/').split('/')) {
+  for (const segment of parts) {
     if (!segment || segment === '.') continue;
     if (segment === '..') {
       if (segments.length === 0) return undefined;
@@ -26,11 +41,15 @@ function normalizeWorkspacePath(path: string): string | undefined {
     segments.push(segment);
   }
 
-  return segments.length > 0 ? segments.join('/') : undefined;
+  if (prefix === '../shared')
+    return `${prefix}${segments.length ? '/' + segments.join('/') : ''}`;
+  return prefix || segments.length
+    ? `${prefix}${segments.join('/')}`
+    : undefined;
 }
 
 export function getWorkspaceFilePath(href?: string): string | undefined {
-  if (!href || INVALID_PATH_CHARACTERS.test(href)) return undefined;
+  if (!href || hasControlCharacters(href)) return undefined;
 
   if (href.toLowerCase().startsWith(WORKSPACE_FILE_LINK_PREFIX)) {
     try {
@@ -44,7 +63,7 @@ export function getWorkspaceFilePath(href?: string): string | undefined {
 
   if (
     URI_SCHEME.test(href) ||
-    href.startsWith('/') ||
+    href.startsWith('//') ||
     href.startsWith('\\') ||
     href.startsWith('#') ||
     href.startsWith('?')

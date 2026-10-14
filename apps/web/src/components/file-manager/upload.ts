@@ -1,6 +1,7 @@
 import {
   FILE_UPLOAD_MAX_SIZE,
   type FileUploadSession,
+  type FileScope,
 } from '@aime/shared/files';
 
 export type UploadOptions = {
@@ -72,6 +73,7 @@ export async function uploadFile(
   directory: string,
   file: File,
   options: UploadOptions,
+  scope: FileScope = 'thread',
 ) {
   if (file.size > FILE_UPLOAD_MAX_SIZE)
     throw new FileUploadError('FILE_UPLOAD_TOO_LARGE');
@@ -82,7 +84,11 @@ export async function uploadFile(
     method: 'POST',
     signal,
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path, size: file.size }),
+    body: JSON.stringify({
+      path,
+      size: file.size,
+      ...(scope === 'shared' ? { scope } : {}),
+    }),
   });
   const url = `${base}/${encodeURIComponent(session.id)}`;
   try {

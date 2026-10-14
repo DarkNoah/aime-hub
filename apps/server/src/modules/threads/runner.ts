@@ -31,6 +31,7 @@ import type { ChatRunner } from './service.js';
 import { ThreadError } from './errors.js';
 import {
   createPersonalWorkspace,
+  createPersonalSharedDirectory,
   removePersonalWorkspace,
   createProjectFilesystem,
   createProjectWorkspace,
@@ -104,6 +105,8 @@ export function createChatRunner(
       await store?.deleteState({ threadId, type: 'goal' });
     },
     projectFilesystem,
+    personalSharedDirectory: (userId) =>
+      createPersonalSharedDirectory(workspaceRoot, userId),
     async listSkills(userId, projectId) {
       const filesystem = projectId
         ? await projectFilesystem(userId, projectId)

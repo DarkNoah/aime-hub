@@ -76,6 +76,7 @@ export function installChatRequestLogging(
   log: (message: string) => void = (message) => console.info(message),
   onRequest?: (request: CapturedChatRequest) => void,
   onResponse?: (response: CapturedChatResponse) => void,
+  isEnabled: () => boolean = () => true,
 ) {
   if (uninstall) return uninstall;
 
@@ -104,7 +105,9 @@ export function installChatRequestLogging(
     };
   const onCreate = observe<DiagnosticsChannel.RequestCreateMessage>(
     ({ request }) => {
-      if (!isModelRequest(request.method, request.path)) return;
+      // Decide once per request: disabled requests never buffer bodies, while
+      // already captured requests finish together with their responses.
+      if (!isModelRequest(request.method, request.path) || !isEnabled()) return;
       const url = new URL(request.path, request.origin);
       requests.set(request, {
         id: randomUUID(),
