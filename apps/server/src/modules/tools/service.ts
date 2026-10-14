@@ -1,3 +1,5 @@
+import { enabledToolConfigSchema } from '@aime/shared/tools';
+import type { PluginService } from '../plugins/service.js';
 import type { DataSource } from 'typeorm';
 import { Setting } from '@aime/db';
 import type { ToolId, ToolConfig } from '@aime/shared/tools';
@@ -39,9 +41,12 @@ export class ToolService {
     >,
     private readonly assets?: Pick<AssetService, 'record'>,
     private readonly mcp?: { getTools(): Promise<ToolsInput> },
+    private readonly plugins?: PluginService,
   ) {}
 
   async get(id: ToolId): Promise<ToolConfig> {
+    if (this.plugins?.ownsTool(id))
+      return (await this.plugins.toolConfigs()).find((tool) => tool.id === id)!;
     this.requireTool(id);
     const row = await this.database
       .getRepository(Setting)
@@ -50,10 +55,21 @@ export class ToolService {
   }
 
   async list(): Promise<ToolConfig[]> {
-    return Promise.all(registeredToolIds.map((id) => this.get(id)));
+    const [builtins, plugins] = await Promise.all([
+      Promise.all(registeredToolIds.map((id) => this.get(id))),
+      this.plugins?.toolConfigs() ?? [],
+    ]);
+    return [...builtins, ...plugins];
   }
 
   async update(id: ToolId, input: unknown): Promise<ToolConfig> {
+    if (this.plugins?.ownsTool(id)) {
+      const config = enabledToolConfigSchema.parse(input);
+      await this.database
+        .getRepository(Setting)
+        .upsert({ id: `tool:${id}`, value: config }, ['id']);
+      return this.get(id);
+    }
     this.requireTool(id);
     const tool = parseToolConfig(id, input);
     const { config } = tool;
@@ -186,27 +202,45 @@ export class ToolService {
   }
 
   async buildTools(
-    ids: readonly RegisteredToolId[] = registeredToolIds,
+    ids?: readonly RegisteredToolId[],
     defaults: ToolDefaultConfigs = {},
     disabledTools: readonly string[] = [],
   ): Promise<ToolsInput> {
-    return buildTools(ids, defaults, {
-      disabledTools,
-      // MCP tools are discovered only inside exec, never injected into the Agent.
-      mcpTools: () => this.mcp?.getTools() ?? Promise.resolve({}),
-      loadConfig: async (id) => {
-        const row = await this.database
-          .getRepository(Setting)
-          .findOneBy({ id: `tool:${id}` });
-        return row?.value;
+    const pluginTools = async () =>
+      Object.fromEntries(
+        Object.entries((await this.plugins?.tools(defaults)) ?? {}).filter(
+          ([id]) => !disabledTools.includes(id),
+        ),
+      );
+    const available = await pluginTools();
+    const builtins = await buildTools(
+      ids?.filter((id) => !this.plugins?.ownsTool(id)),
+      defaults,
+      {
+        pluginTools,
+        disabledTools,
+        // MCP tools are discovered only inside exec, never injected into the Agent.
+        mcpTools: () => this.mcp?.getTools() ?? Promise.resolve({}),
+        loadConfig: async (id) => {
+          const row = await this.database
+            .getRepository(Setting)
+            .findOneBy({ id: `tool:${id}` });
+          return row?.value;
+        },
+        searchProvider: (id, timeoutMs) => this.searchProvider(id, timeoutMs),
+        fetchProvider: (id, timeoutMs) => this.fetchProvider(id, timeoutMs),
+        imageModel: (reference) => this.imageModel(reference),
+        speechModel: (reference) => this.speechModel(reference),
+        recordAsset: this.assets
+          ? (input) => this.assets!.record(input)
+          : undefined,
       },
-      searchProvider: (id, timeoutMs) => this.searchProvider(id, timeoutMs),
-      fetchProvider: (id, timeoutMs) => this.fetchProvider(id, timeoutMs),
-      imageModel: (reference) => this.imageModel(reference),
-      speechModel: (reference) => this.speechModel(reference),
-      recordAsset: this.assets
-        ? (input) => this.assets!.record(input)
-        : undefined,
-    });
+    );
+    return {
+      ...builtins,
+      ...Object.fromEntries(
+        Object.entries(available).filter(([id]) => !ids || ids.includes(id)),
+      ),
+    };
   }
 }

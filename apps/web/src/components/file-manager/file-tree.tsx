@@ -176,6 +176,7 @@ function Directory({
             renderRow={(row) => (
               <EntryActions
                 entry={entry}
+                scope={state.scope}
                 onAction={onAction}
                 onUpload={onUpload}
                 dropTarget={dropTarget === entry.path}
@@ -212,6 +213,7 @@ function Directory({
           <EntryActions
             key={entry.path}
             entry={entry}
+            scope={state.scope}
             onAction={onAction}
             onUpload={onUpload}
           >

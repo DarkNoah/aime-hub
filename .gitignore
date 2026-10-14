@@ -18,3 +18,9 @@ coverage/
 # Test scripts
 *.test.*
 *.spec.*
+
+# Generated plugin skill bundles (refreshed before dev/build)
+apps/server/src/modules/plugins/bundled-skills/
+
+!apps/server/src/modules/plugins/*.test.ts
+!scripts/plugins.test.ts

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useContext, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   FilePlus2,
@@ -8,7 +8,9 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import type { FileEntry } from '@aime/shared/files';
+import type { FileEntry, FileScope } from '@aime/shared/files';
+import { WorkspaceDragContext } from './drag-context';
+import { writeWorkspaceFileDrag } from './drag-data';
 import { Button } from '@/components/ui/button';
 import { parentPath } from './state';
 import { cn } from '@/lib/utils';
@@ -30,18 +32,31 @@ export function EntryActions({
   onAction,
   onUpload,
   dropTarget = false,
+  scope,
 }: {
   entry: FileEntry;
   children: ReactNode;
   onAction: (action: EntryAction) => void;
   onUpload?: (directory: string) => void;
   dropTarget?: boolean;
+  scope?: FileScope;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const workspaceId = useContext(WorkspaceDragContext);
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <div
+        draggable={!!workspaceId && !!scope && !!entry.path}
+        onDragStart={(event) => {
+          if (!workspaceId || !scope || !entry.path) return;
+          event.stopPropagation();
+          writeWorkspaceFileDrag(event.dataTransfer, workspaceId, {
+            scope,
+            path: entry.path,
+            kind: entry.kind,
+          });
+        }}
         data-upload-directory={
           entry.kind === 'directory' ? entry.path : parentPath(entry.path)
         }

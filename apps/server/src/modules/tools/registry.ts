@@ -38,6 +38,7 @@ export type ToolDefaultConfigs = Partial<
 type ToolDependencies = {
   disabledTools?: readonly string[];
   mcpTools?: () => Promise<ToolsInput>;
+  pluginTools?: () => Promise<ToolsInput>;
   loadConfig?: (id: string) => Promise<unknown>;
   searchProvider?: (id: string, timeoutMs: number) => Promise<SerpApiProvider>;
   fetchProvider?: (id: string, timeoutMs: number) => Promise<JinaAIProvider>;
@@ -150,15 +151,16 @@ async function buildTool(
       if (id === 'exec')
         return createExecTool({
           getTools: async () => {
-            const [builtIn, mcp] = await Promise.all([
+            const [builtIn, mcp, plugins] = await Promise.all([
               buildTools(
                 registeredToolIds.filter((toolId) => toolId !== 'exec'),
                 defaults,
                 dependencies,
               ),
               dependencies.mcpTools?.() ?? {},
+              dependencies.pluginTools?.() ?? {},
             ]);
-            return { ...mcp, ...builtIn };
+            return { ...mcp, ...plugins, ...builtIn };
           },
         });
       return registry.get(id)!;

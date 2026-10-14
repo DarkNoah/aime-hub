@@ -9,16 +9,19 @@
   "scripts": {
     "providers:catalog": "node --import tsx scripts/update-provider-catalog.ts",
     "preview:product": "node scripts/product-preview.mjs",
-    "dev": "concurrently -k -n server,web \"pnpm --filter @aime/server dev\" \"pnpm --filter @aime/web dev\"",
+    "dev": "pnpm plugins:generate && concurrently -k -n server,web \"pnpm --filter @aime/server exec tsx watch --tsconfig ../../tsconfig.json src/index.ts\" \"pnpm --filter @aime/web exec vite\"",
     "build": "pnpm --filter @aime/server build && pnpm --filter @aime/web build",
     "start": "pnpm --filter @aime/server start",
-    "typecheck": "pnpm -r typecheck && tsc --noEmit -p scripts/tsconfig.json",
+    "typecheck": "pnpm plugins:generate && pnpm -r typecheck && tsc --noEmit -p scripts/tsconfig.json",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "db:migrate": "tsx scripts/migrate.ts",
+    "db:migrate": "pnpm plugins:generate && node --import tsx scripts/migrate.ts",
     "auth:create-admin": "tsx scripts/create-admin.ts",
-    "test": "tsx --test scripts/*.test.ts apps/server/src/modules/agents/*.test.ts apps/server/src/modules/automations/*.test.ts apps/server/src/modules/notifications/*.test.ts apps/server/src/modules/mcp/*.test.ts apps/server/src/modules/tools/*.test.ts apps/server/src/modules/models/*.test.ts apps/server/src/modules/threads/*.test.ts apps/web/src/i18n/*.test.ts apps/web/src/pages/admin/*/*.test.ts"
+    "test": "tsx --test scripts/*.test.ts apps/server/src/modules/agents/*.test.ts apps/server/src/modules/automations/*.test.ts apps/server/src/modules/notifications/*.test.ts apps/server/src/modules/mcp/*.test.ts apps/server/src/modules/tools/*.test.ts apps/server/src/modules/models/*.test.ts apps/server/src/modules/threads/*.test.ts apps/web/src/i18n/*.test.ts apps/web/src/pages/admin/*/*.test.ts apps/server/src/modules/plugins/*.test.ts",
+    "plugins:generate": "node --import tsx scripts/plugins.ts",
+    "test:plugins": "node --import tsx --test scripts/plugins.test.ts apps/server/src/modules/plugins/*.test.ts",
+    "test:plugins:integration": "PLUGIN_INTEGRATION=1 pnpm test:plugins"
   },
   "devDependencies": {
     "@aime/auth": "workspace:*",
@@ -41,6 +44,7 @@
     "typeorm": "0.3.31",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.5",
+    "@app/plugin-sdk": "workspace:*"
   }
 }

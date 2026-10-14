@@ -218,6 +218,10 @@ TEST_DATABASE_URL=postgresql://user:password@127.0.0.1:5432/aime_hub_test pnpm t
 
 测试账号需有创建 schema 的权限。模拟模型测试不等于真实供应商验收；图片、推理与长上下文等能力需按供应商另行验证。VS Code 用户可使用仓库内的[全栈调试配置](.vscode/launch.json)。
 
+## 全栈插件
+
+后台 `/admin/plugins` 可启用或停用同仓库插件。示例 `plugins/notebook` 包含页面、API、数据表、独立依赖和 Agent / Tool / Skill。新增插件自动发现，随构建发布；详见 [插件开发接口与验证流程](plugins/README.md)。
+
 ## 项目结构
 
 ```text

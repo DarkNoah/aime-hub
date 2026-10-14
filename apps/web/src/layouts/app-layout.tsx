@@ -1,3 +1,4 @@
+import { pluginManifests } from '@/features/plugins/generated';
 import { Suspense, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, Outlet, useLocation, useParams } from '@tanstack/react-router';
@@ -48,6 +49,10 @@ function LayoutContent() {
   const isChat =
     location.pathname.startsWith('/threads') ||
     /^\/projects\/[^/]+\/threads(?:\/|$)/.test(location.pathname);
+  const pluginId = location.pathname.match(/^\/(?:admin\/)?p\/([^/]+)/)?.[1];
+  const pluginTitle = pluginManifests.find(
+    (plugin) => plugin.id === pluginId,
+  )?.name;
   const title =
     (location.pathname === '/automations'
       ? 'nav.automations'
@@ -128,12 +133,14 @@ function LayoutContent() {
                   to="/projects"
                   className="shrink-0 rounded-sm font-medium outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  {t(title)}
+                  {pluginTitle ?? t(title)}
                 </Link>
                 <ProjectBreadcrumb projectId={projectId} />
               </>
             ) : (
-              <span className="truncate font-medium">{t(title)}</span>
+              <span className="truncate font-medium">
+                {pluginTitle ?? t(title)}
+              </span>
             )}
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">

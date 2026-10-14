@@ -501,6 +501,8 @@ export type PromptInputProps = Omit<
   maxFiles?: number;
   // bytes
   maxFileSize?: number;
+  /** Delegate raw files to an upload queue without converting them to data URLs. */
+  onFilesAdded?: (files: File[] | FileList) => void;
   onError?: (err: {
     code: 'max_files' | 'max_file_size' | 'accept';
     message: string;
@@ -519,6 +521,7 @@ export const PromptInput = ({
   syncHiddenInput,
   maxFiles,
   maxFileSize,
+  onFilesAdded,
   onError,
   onSubmit,
   children,
@@ -702,7 +705,8 @@ export const PromptInput = ({
     [],
   );
 
-  const add = usingProvider ? addWithProviderValidation : addLocal;
+  const add =
+    onFilesAdded ?? (usingProvider ? addWithProviderValidation : addLocal);
   const remove = usingProvider ? controller.attachments.remove : removeLocal;
   const openFileDialog = usingProvider
     ? controller.attachments.openFileDialog

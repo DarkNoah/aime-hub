@@ -56,6 +56,7 @@ async function skillPackages(root: string): Promise<string[]> {
 export async function syncBuiltinSkills(
   sourceDirectory: string,
   workspaceRoot: string,
+  group: 'builtin' | 'plugins' = BUILTIN_SKILL_GROUP,
 ) {
   const source = resolve(sourceDirectory);
   const sourceInfo = await info(source);
@@ -74,7 +75,7 @@ export async function syncBuiltinSkills(
   }
   if (await info(join(directory, 'SKILL.md')))
     throw new Error('The global skills root must contain skill directories');
-  const target = join(directory, BUILTIN_SKILL_GROUP);
+  const target = join(directory, group);
   const targetInfo = await info(target);
   if (targetInfo && (!targetInfo.isDirectory() || targetInfo.isSymbolicLink()))
     throw new Error(`Invalid built-in skills directory: ${target}`);

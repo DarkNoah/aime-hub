@@ -1,3 +1,4 @@
+import { PluginProvider } from '@/features/plugins/provider';
 import { lazy, Suspense } from 'react';
 import {
   createRootRoute,
@@ -14,6 +15,15 @@ import {
 } from '@/features/auth/route-guards';
 import { AppLayout } from '@/layouts/app-layout';
 import { LoadingState } from '@/components/loading-state';
+
+const AdminPluginsPage = lazy(() =>
+  import('@/pages/admin/plugins/page').then((m) => ({
+    default: m.AdminPluginsPage,
+  })),
+);
+const PluginPage = lazy(() =>
+  import('@/pages/plugins/page').then((m) => ({ default: m.PluginPage })),
+);
 
 const HomePage = lazy(() =>
   import('@/pages/home/page').then((m) => ({ default: m.HomePage })),
@@ -156,7 +166,11 @@ const sessionRoute = createRoute({
 const layoutRoute = createRoute({
   getParentRoute: () => sessionRoute,
   id: 'layout',
-  component: AppLayout,
+  component: () => (
+    <PluginProvider>
+      <AppLayout />
+    </PluginProvider>
+  ),
 });
 const adminRoute = createRoute({
   getParentRoute: () => layoutRoute,
@@ -194,6 +208,11 @@ const routeTree = rootRoute.addChildren([
     ]),
     sessionRoute.addChildren([
       layoutRoute.addChildren([
+        createRoute({
+          getParentRoute: () => layoutRoute,
+          path: '/p/$pluginId/$',
+          component: PluginPage,
+        }),
         createRoute({
           getParentRoute: () => layoutRoute,
           path: '/automations',
@@ -248,6 +267,16 @@ const routeTree = rootRoute.addChildren([
           ]),
         ]),
         adminRoute.addChildren([
+          createRoute({
+            getParentRoute: () => adminRoute,
+            path: '/plugins',
+            component: AdminPluginsPage,
+          }),
+          createRoute({
+            getParentRoute: () => adminRoute,
+            path: '/p/$pluginId/$',
+            component: () => <PluginPage admin />,
+          }),
           createRoute({
             getParentRoute: () => adminRoute,
             path: '/usage',

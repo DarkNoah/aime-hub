@@ -1,3 +1,4 @@
+import { PluginNavigation } from '@/features/plugins/navigation';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { useState } from 'react';
@@ -130,6 +131,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               <Sparkles className="size-4" />
               {t('nav.skills')}
             </Link>
+            <PluginNavigation onNavigate={onNavigate} />
             <ThreadSidebar onNavigate={onNavigate} />
             <ProjectSidebar onNavigate={onNavigate} />
           </div>
@@ -152,6 +154,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   {t(label)}
                 </Link>
               ))}
+              <PluginNavigation admin onNavigate={onNavigate} />
             </div>
           )}
         </nav>

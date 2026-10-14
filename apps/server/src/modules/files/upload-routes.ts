@@ -8,6 +8,7 @@ import type { ThreadService } from '../threads/service.js';
 import { fileError } from './paths.js';
 import { uploadDestination, publishUpload } from './upload-workspace.js';
 import { FileUploads } from './uploads.js';
+import { mutateWorkspaceFile } from './workspace-files.js';
 
 export function uploadRoutes(
   auth: Auth,
@@ -85,6 +86,19 @@ export function uploadRoutes(
       await uploads.cancel(
         { userId: c.get('userId'), threadId: c.req.param('threadId')! },
         c.req.param('uploadId'),
+        c.req.query('discard') === '1'
+          ? (input) =>
+              service.withWorkspaceFiles(
+                c.get('userId'),
+                c.req.param('threadId')!,
+                (root) =>
+                  mutateWorkspaceFile(root, {
+                    operation: 'delete',
+                    path: input.path,
+                  }),
+                input.scope,
+              )
+          : undefined,
       ),
     ),
   );

@@ -1,3 +1,4 @@
+import { assertPluginSkillReadable } from '../plugins/skill-access.js';
 import { basename, resolve } from 'node:path';
 import { LocalSkillSource, type SkillsResolver } from '@mastra/core/workspace';
 import { validateSkillContent } from '@mastra/core/skills';
@@ -17,6 +18,7 @@ class DirectorySkillSource extends LocalSkillSource {
   }
 
   override async readFile(path: string): Promise<string | Buffer> {
+    await assertPluginSkillReadable(path);
     const content = await super.readFile(path);
     const name = this.names.get(resolve(path));
     // Reference files (even references/SKILL.md) are returned unchanged.

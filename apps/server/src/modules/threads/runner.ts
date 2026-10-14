@@ -164,7 +164,7 @@ export function createChatRunner(
               model: resolved.model,
               scope: 'thread',
               observation: {
-                messageTokens: 200_000,
+                messageTokens: 30_000,
                 bufferTokens: false,
               },
             },

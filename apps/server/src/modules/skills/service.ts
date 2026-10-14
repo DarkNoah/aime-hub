@@ -1,3 +1,4 @@
+import { enabledPluginSkills } from '../plugins/skill-access.js';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   lstat,
@@ -145,8 +146,17 @@ export class SkillService {
 
   async list(): Promise<InstalledSkills> {
     const skills: InstalledSkill[] = [];
+    const enabled = await enabledPluginSkills(this.workspaceRoot);
     if (!(await this.directory([]))) return { root: this.root, skills };
     const visit = async (directory: string, path: string) => {
+      const parts = path.split('/');
+      if (
+        !this.userId &&
+        parts[0] === 'plugins' &&
+        parts[1] &&
+        !enabled.has(parts[1])
+      )
+        return;
       const entries = await readdir(directory, { withFileTypes: true });
       const manifest = entries.find(
         (entry) => entry.name === 'SKILL.md' && entry.isFile(),
@@ -374,6 +384,8 @@ export class SkillService {
       });
       if (!selected.length) throw new SkillError('SKILL_INVALID_SELECTION');
       const { owner, repo } = cached.result;
+      if (!this.userId && owner === 'plugins')
+        throw new SkillError('SKILL_UNSAFE_PATH', 403);
       // An existing manifest on an ancestor would hide all installed children at runtime.
       for (const parts of [[], [owner], [owner, repo]]) {
         const parent = await this.directory(parts, true);
@@ -462,6 +474,8 @@ export class SkillService {
 
   updateGroup(group: string, source?: string): Promise<InstalledSkill[]> {
     return this.exclusive(async () => {
+      if (!this.userId && group.split('/')[0] === 'plugins')
+        throw new SkillError('SKILL_UNSAFE_PATH', 403);
       if (!safeRepositoryPath(group))
         throw new SkillError('SKILL_UNSAFE_PATH', 403);
       const directory = await this.directory(group.split('/'));
@@ -572,6 +586,8 @@ export class SkillService {
 
   remove(path: string) {
     return this.exclusive(async () => {
+      if (!this.userId && path.split('/')[0] === 'plugins')
+        throw new SkillError('SKILL_UNSAFE_PATH', 403);
       if (!safeRepositoryPath(path))
         throw new SkillError('SKILL_UNSAFE_PATH', 403);
       const target = await this.directory(path.split('/'));
@@ -591,6 +607,8 @@ export class SkillService {
 
   removeGroup(group: string, expectedPaths: string[]) {
     return this.exclusive(async () => {
+      if (!this.userId && group.split('/')[0] === 'plugins')
+        throw new SkillError('SKILL_UNSAFE_PATH', 403);
       if (!safeRepositoryPath(group))
         throw new SkillError('SKILL_UNSAFE_PATH', 403);
       const groupDirectory = await this.directory(group.split('/'));

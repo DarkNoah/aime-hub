@@ -380,6 +380,7 @@ function FileManagerPane({
                           <div key={path} className="mb-1">
                             <EntryActions
                               entry={matches[0]}
+                              scope={state.scope}
                               onAction={setAction}
                               onUpload={chooseUpload}
                             >

@@ -1,3 +1,5 @@
+import { pluginRoutes } from './modules/plugins/routes.js';
+import type { PluginService } from './modules/plugins/service.js';
 import type { UsageService } from './modules/usage/service.js';
 import { usageRouter } from './modules/usage/rpc.js';
 import { Hono } from 'hono';
@@ -68,6 +70,7 @@ export function createApp(
   mcp?: { service: McpService; webOrigin: WebOrigins },
   systemSettings?: { service: SystemSettingsService; webOrigin: WebOrigins },
   usage?: { service: UsageService; webOrigin: WebOrigins },
+  plugins?: PluginService,
 ) {
   const app = new Hono<HttpEnv>();
   const webOrigins = normalizeWebOrigins(
@@ -93,6 +96,8 @@ export function createApp(
     c.header('Cache-Control', 'no-store');
     await next();
   });
+  if (plugins)
+    app.route('/api/plugins', pluginRoutes(auth, plugins, webOrigins));
   const router = rpc.router({
     usage: usageRouter(usage?.service),
     providers: providerRouter(providers?.service),

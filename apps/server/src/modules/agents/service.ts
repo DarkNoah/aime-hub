@@ -1,3 +1,4 @@
+import type { PluginService } from '../plugins/service.js';
 import { randomUUID } from 'node:crypto';
 import type {
   AgentsStorage,
@@ -48,6 +49,7 @@ export class AgentService {
     private readonly tools: Pick<ToolService, 'list'>,
     private readonly providers: Pick<ProviderService, 'listAvailableModels'>,
     private readonly settings?: AgentSettingsStore,
+    private readonly plugins?: PluginService,
   ) {}
 
   async catalog(): Promise<AgentCatalog> {
@@ -73,7 +75,8 @@ export class AgentService {
   }
 
   private async record(id: string) {
-    if (getAgent(id)) throw new AgentError('AGENT_READ_ONLY', 403);
+    if (getAgent(id) || id.startsWith('plugin:'))
+      throw new AgentError('AGENT_READ_ONLY', 403);
     const row = await this.store.getById(id);
     if (
       !row ||
@@ -128,6 +131,7 @@ export class AgentService {
   }
 
   async get(id: string): Promise<AdminAgent> {
+    if (id.startsWith('plugin:')) return this.getConfig(id);
     return getAgent(id) ?? this.getStored(id);
   }
 
@@ -155,7 +159,7 @@ export class AgentService {
     );
     const agents = pages
       .flatMap((page) => page.agents)
-      .filter((agent) => !getAgent(agent.id))
+      .filter((agent) => !getAgent(agent.id) && !agent.id.startsWith('plugin:'))
       .sort(
         (a, b) =>
           b.createdAt.getTime() - a.createdAt.getTime() ||
@@ -163,6 +167,7 @@ export class AgentService {
       );
     return [
       ...structuredClone(Object.values(agentRegistry)),
+      ...((await this.plugins?.agents()) ?? []),
       ...(await Promise.all(agents.map((agent) => this.getStored(agent.id)))),
     ];
   }
@@ -198,6 +203,13 @@ export class AgentService {
   /** Code IDs take precedence; consult storage only when the code registry has no match. */
   async getConfig(id?: string | null, versionId?: string): Promise<AdminAgent> {
     const selectedId = id ?? (await this.getDefaults()).defaultAgentId;
+    if (selectedId.startsWith('plugin:')) {
+      const plugin = ((await this.plugins?.agents()) ?? []).find(
+        (agent) => agent.id === selectedId,
+      );
+      if (!plugin) throw new AgentError('AGENT_NOT_FOUND', 404);
+      return plugin;
+    }
     return getAgent(selectedId) ?? this.getStored(selectedId, versionId, true);
   }
 

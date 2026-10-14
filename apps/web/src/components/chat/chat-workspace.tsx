@@ -52,8 +52,11 @@ import {
 import { cn } from '@/lib/utils';
 import { useFileManager } from '@/components/file-manager/use-file-manager';
 import { WorkspaceFileContext } from '@/components/file-manager/context';
+import { WorkspaceDragContext } from '@/components/file-manager/drag-context';
 import { filesApi, fileErrorKey } from '@/components/file-manager/api';
 import { FloatingWindow } from '@/components/floating-window';
+import { usePluginRightSidebar } from '@/features/plugins/use-right-sidebar';
+import { PluginRightSidebar } from '@/features/plugins/right-sidebar';
 import {
   ChatWorkspaceMenuContext,
   FloatingChatContext,
@@ -81,6 +84,8 @@ const workspaceViews = [
   { view: 'messages', label: 'chat.inspector.title', icon: Braces },
   { view: 'preview', label: 'chat.preview.title', icon: ScanText },
 ] as const;
+type WorkspaceView =
+  (typeof workspaceViews)[number]['view'] | `plugin:${string}:${string}`;
 
 /** Keep the chat mounted while resizing or switching to the compact drawer. */
 export function ChatWorkspace({
@@ -108,9 +113,11 @@ export function ChatWorkspace({
   const [compact, setCompact] = useState(true);
   const [expanded, setExpanded] = useState(layout.mode !== 'collapsed');
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [view, setView] = useState<'files' | 'messages' | 'preview' | 'assets'>(
-    'files',
-  );
+  const [view, setView] = useState<WorkspaceView>('files');
+  const pluginSidebars = usePluginRightSidebar();
+  const activePlugin = pluginSidebars.find((entry) => entry.view === view);
+  // Drop the selection immediately when disabled or access is revoked. Keep chat mounted.
+  if (view.startsWith('plugin:') && !activePlugin) setView('files');
   // Only completed generation changes refresh the gallery, not every text delta.
   const assetRevision = messages
     .flatMap((message) =>
@@ -270,66 +277,87 @@ export function ChatWorkspace({
             {t(label)}
           </DropdownMenuItem>
         ))}
+        {pluginSidebars.map((entry) => (
+          <DropdownMenuItem
+            key={entry.view}
+            onSelect={() => {
+              setView(entry.view);
+              setDrawerOpen(true);
+            }}
+          >
+            <entry.Icon className="size-4" aria-hidden="true" />
+            {entry.title}
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   ) : null;
-  const title = t(
-    view === 'files'
-      ? 'files.title'
-      : view === 'assets'
-        ? 'assets.title'
-        : view === 'messages'
-          ? 'chat.inspector.title'
-          : 'chat.preview.title',
-  );
-  const content =
-    view === 'files' ? (
-      <Suspense
-        fallback={
-          <p role="status" className="p-4 text-sm text-muted-foreground">
-            {t('files.loading')}
-          </p>
-        }
-      >
-        <FileManager
-          state={files}
-          sharedState={projectId ? undefined : sharedFiles}
-          scope={fileScope}
-          onScopeChange={setFileScope}
-          onClose={close}
-        />
-      </Suspense>
-    ) : view === 'assets' ? (
-      <Suspense
-        fallback={
-          <p role="status" className="p-4 text-sm text-muted-foreground">
-            {t('files.loading')}
-          </p>
-        }
-      >
-        <AssetPanel
-          key={threadId ?? 'new'}
-          threadId={threadId}
-          revision={assetRevision}
-          onClose={close}
-        />
-      </Suspense>
-    ) : view === 'preview' ? (
-      <ChatMessagePreview
-        key={JSON.stringify(selection)}
-        part={resolveMessagePart(messages, selection)}
-        onClose={close}
-      />
-    ) : (
-      <ChatRawMessages
-        messages={messages}
-        loading={loading}
-        hasEarlier={hasEarlier}
-        onClose={close}
-      />
+  const title =
+    activePlugin?.title ??
+    t(
+      view === 'files'
+        ? 'files.title'
+        : view === 'assets'
+          ? 'assets.title'
+          : view === 'messages'
+            ? 'chat.inspector.title'
+            : 'chat.preview.title',
     );
+  const content = activePlugin ? (
+    <PluginRightSidebar
+      key={activePlugin.view}
+      entry={activePlugin}
+      threadId={threadId}
+      projectId={projectId}
+      onClose={close}
+    />
+  ) : view === 'files' ? (
+    <Suspense
+      fallback={
+        <p role="status" className="p-4 text-sm text-muted-foreground">
+          {t('files.loading')}
+        </p>
+      }
+    >
+      <FileManager
+        state={files}
+        sharedState={projectId ? undefined : sharedFiles}
+        scope={fileScope}
+        onScopeChange={setFileScope}
+        onClose={close}
+      />
+    </Suspense>
+  ) : view === 'assets' ? (
+    <Suspense
+      fallback={
+        <p role="status" className="p-4 text-sm text-muted-foreground">
+          {t('files.loading')}
+        </p>
+      }
+    >
+      <AssetPanel
+        key={threadId ?? 'new'}
+        threadId={threadId}
+        revision={assetRevision}
+        onClose={close}
+      />
+    </Suspense>
+  ) : view === 'preview' ? (
+    <ChatMessagePreview
+      key={JSON.stringify(selection)}
+      part={resolveMessagePart(messages, selection)}
+      onClose={close}
+    />
+  ) : (
+    <ChatRawMessages
+      messages={messages}
+      loading={loading}
+      hasEarlier={hasEarlier}
+      onClose={close}
+    />
+  );
 
-  return (
+  const workspace = (
     <AssetAttachmentProvider>
       <MessagePreviewContext.Provider value={openPreview}>
         <WorkspaceFileContext.Provider
@@ -527,6 +555,29 @@ export function ChatWorkspace({
                       >
                         <ScanText className="size-4" aria-hidden="true" />
                       </Button>
+                      {pluginSidebars.map((entry) => (
+                        <Button
+                          key={entry.view}
+                          variant={
+                            expanded && view === entry.view
+                              ? 'secondary'
+                              : 'ghost'
+                          }
+                          size="icon-sm"
+                          aria-label={entry.title}
+                          title={entry.title}
+                          aria-expanded={expanded && view === entry.view}
+                          aria-controls={contentId}
+                          onClick={() => {
+                            setView(entry.view);
+                            if (expanded && view === entry.view)
+                              collapseInspector();
+                            else expandInspector();
+                          }}
+                        >
+                          <entry.Icon className="size-4" aria-hidden="true" />
+                        </Button>
+                      ))}
                     </div>
                     <aside
                       id={contentId}
@@ -552,15 +603,17 @@ export function ChatWorkspace({
                 >
                   <SheetTitle className="sr-only">{title}</SheetTitle>
                   <SheetDescription className="sr-only">
-                    {t(
-                      view === 'files'
-                        ? 'files.previewHint'
-                        : view === 'assets'
-                          ? 'assets.emptyHint'
-                          : view === 'messages'
-                            ? 'chat.inspector.hint'
-                            : 'chat.preview.hint',
-                    )}
+                    {activePlugin
+                      ? activePlugin.title
+                      : t(
+                          view === 'files'
+                            ? 'files.previewHint'
+                            : view === 'assets'
+                              ? 'assets.emptyHint'
+                              : view === 'messages'
+                                ? 'chat.inspector.hint'
+                                : 'chat.preview.hint',
+                        )}
                   </SheetDescription>
                   {content}
                 </SheetContent>
@@ -570,5 +623,12 @@ export function ChatWorkspace({
         </WorkspaceFileContext.Provider>
       </MessagePreviewContext.Provider>
     </AssetAttachmentProvider>
+  );
+  return (
+    <WorkspaceDragContext.Provider
+      value={`${contentId}:${projectId ?? threadId ?? 'new'}`}
+    >
+      {workspace}
+    </WorkspaceDragContext.Provider>
   );
 }

@@ -34,6 +34,7 @@ export default defineConfig(({ mode, command }) => {
       },
     ],
     resolve: {
+      dedupe: ['react', 'react-dom', '@tanstack/react-router'],
       alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
     },
     server: {

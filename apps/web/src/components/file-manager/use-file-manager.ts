@@ -231,6 +231,7 @@ export function useFileManager(
   }
   return {
     client,
+    scope,
     uploads,
     available,
     directories,

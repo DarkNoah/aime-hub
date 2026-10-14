@@ -80,9 +80,12 @@ export async function uploadFile(
   const path = directory ? `${directory}/${file.name}` : file.name;
   const base = `/api/threads/${encodeURIComponent(threadId)}/files/uploads`;
   const { signal, onProgress, onFinishing } = options;
+  signal.throwIfAborted();
   const session = await request<FileUploadSession>(base, {
     method: 'POST',
-    signal,
+    // Receive the session ID even if the user cancels during creation, so
+    // the finally block can release its staging file immediately.
+    signal: AbortSignal.timeout(30000),
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       path,
@@ -91,7 +94,9 @@ export async function uploadFile(
     }),
   });
   const url = `${base}/${encodeURIComponent(session.id)}`;
+  let completed = false;
   try {
+    signal.throwIfAborted();
     let offset = session.offset;
     if (
       !Number.isSafeInteger(session.chunkSize) ||
@@ -127,11 +132,13 @@ export async function uploadFile(
         }),
       signal,
     );
+    signal.throwIfAborted();
+    completed = true;
     onProgress(100);
     return result;
   } finally {
     // Independent of the aborted upload signal; server TTL handles a lost cleanup request.
-    void fetch(url, {
+    await fetch(completed ? url : `${url}?discard=1`, {
       method: 'DELETE',
       credentials: 'same-origin',
       signal: AbortSignal.timeout(5000),

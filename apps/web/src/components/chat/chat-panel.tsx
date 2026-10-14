@@ -126,7 +126,18 @@ function ChatPanelSession({
 }: SessionProps) {
   const { t } = useTranslation();
   const [created, setCreated] = useState<ThreadSummary | null>(null);
-  const draftThread = useRef<ThreadSummary | null>(null);
+  const draftThread = useRef<Promise<ThreadSummary> | null>(null);
+  async function ensureDraftThread(
+    settings: Parameters<typeof chatApi.create>[0],
+  ) {
+    if (!draftThread.current) {
+      draftThread.current = chatApi.create({ ...settings, projectId });
+      void draftThread.current.catch(() => {
+        draftThread.current = null;
+      });
+    }
+    return draftThread.current;
+  }
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -171,17 +182,16 @@ function ChatPanelSession({
       <ChatComposer
         className={chatContentClassName}
         projectId={projectId}
+        ensureUploadThread={async (settings) =>
+          (await ensureDraftThread(settings)).id
+        }
         onSend={async (input) => {
           // Create and accept the first message before navigation or unmount can occur.
-          const thread =
-            draftThread.current ??
-            (await chatApi.create({
-              model: input.model,
-              agentId: input.agentId,
-              reasoningEffort: input.reasoningEffort,
-              projectId,
-            }));
-          draftThread.current = thread;
+          const thread = await ensureDraftThread({
+            model: input.model,
+            agentId: input.agentId,
+            reasoningEffort: input.reasoningEffort,
+          });
           const updated = await chatApi.run(thread.id, input);
           if (mounted.current) {
             setCreated(updated);

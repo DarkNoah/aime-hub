@@ -1,0 +1,23 @@
+{
+  "name": "@app/plugin-sdk",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./server": "./src/server.ts",
+    "./web": "./src/web.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aime/shared": "workspace:*",
+    "@mastra/core": "^1.72.0",
+    "hono": "^4.13.13",
+    "typeorm": "0.3.31",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0"
+  }
+}

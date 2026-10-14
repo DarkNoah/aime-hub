@@ -301,7 +301,7 @@ export const en = {
   'assets.clear': 'Clear selection',
   'assets.addToChat': 'Add to chat',
   'assets.added': 'Added to chat attachments',
-  'assets.limit': 'Attach up to {{count}} files, including uploaded images.',
+  'assets.limit': 'Attach up to {{count}} files, including uploaded files.',
   'assets.composerUnavailable': 'Wait until the chat input is ready.',
   'assets.attachments': 'Generated asset attachments',
   'assets.remove': 'Remove {{name}}',
@@ -794,6 +794,24 @@ export const en = {
   'environmentVariables.empty': 'No environment variables yet',
   'environmentVariables.emptyHint':
     'Add your first variable to manage its name, value and description.',
+  'nav.plugins': 'Plugins',
+  'plugins.sidebarLoading': 'Loading plugin sidebar…',
+  'plugins.sidebarFailed':
+    'Could not load this sidebar. Refresh the page to retry.',
+  'plugins.title': 'Plugins',
+  'plugins.description':
+    'Enable installed plugins to add pages and assistant capabilities. Disabling preserves plugin data.',
+  'plugins.saved': 'Plugin status updated',
+  'plugins.hasDependents': 'Disable dependent plugins first',
+  'plugins.dependencyDisabled': 'Enable required plugins first',
+  'plugins.saveFailed': 'Could not update plugin status',
+  'plugins.refresh': 'Refresh',
+  'plugins.loadFailed': 'Could not load plugins. Please retry.',
+  'plugins.needsMigration': 'Migration required',
+  'plugins.enabled': 'Enabled',
+  'plugins.disabled': 'Disabled',
+  'plugins.toggle': 'Enable plugin',
+  'plugins.empty': 'No plugins installed',
   'nav.skills': 'Skills',
   'admin.skillsDescription':
     'Manage workspace skills shared by personal and project conversations.',
@@ -1297,7 +1315,7 @@ export const en = {
   'chat.new': 'New chat',
   'chat.welcome': 'What would you like to work on?',
   'chat.welcomeHint':
-    'Ask a question, explore an idea, or add an image to start a conversation.',
+    'Ask a question, explore an idea, or attach a file to start a conversation.',
   'chat.model': 'Chat model',
   'chat.defaultModel': 'System default model',
   'chat.reasoning': 'Reasoning',
@@ -1372,7 +1390,13 @@ export const en = {
   'chat.backgroundHint':
     'You can leave this chat. Aime keeps working in the background.',
   'chat.inputHint': 'Enter to send · Shift + Enter for a new line',
-  'chat.attach': 'Attach images',
+  'chat.attach': 'Attach files',
+  'chat.workspaceFiles.title': 'Referenced files and folders',
+  'chat.workspaceFiles.drop': 'Drop to reference a file or folder',
+  'chat.workspaceFiles.invalidDrop':
+    'Drag a file or folder from this chat’s file list.',
+  'chat.fileHint':
+    'Up to 4 files, 1 GiB each. Files upload to /.uploads/. PNG, JPEG, WebP and GIF images up to 2 MiB are also sent as images; other files are referenced by path.',
   'chat.image': 'Image attachment',
   'chat.removeImage': 'Remove image',
   'chat.imageHint':

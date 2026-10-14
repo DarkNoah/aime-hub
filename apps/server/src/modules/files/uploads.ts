@@ -157,8 +157,15 @@ export class FileUploads {
     });
   }
 
-  cancel(owner: Owner, id: string) {
+  cancel(
+    owner: Owner,
+    id: string,
+    discard?: (input: FileUploadInput) => Promise<unknown>,
+  ) {
     return this.run(owner, id, async (session) => {
+      // Serialize with completion so cancellation also removes a file that
+      // finished publishing while the client was aborting the request.
+      if (session.complete && discard) await discard(session);
       await rm(session.directory, { recursive: true, force: true });
       clearTimeout(session.timer);
       this.sessions.delete(id);

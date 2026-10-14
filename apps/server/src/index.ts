@@ -1,3 +1,7 @@
+import { syncPluginSkills } from './modules/plugins/assets.js';
+import { installedPlugins } from './modules/plugins/generated.js';
+import { PluginService } from './modules/plugins/service.js';
+import { registerPluginSkillAccess } from './modules/plugins/skill-access.js';
 import { UsageService } from './modules/usage/service.js';
 import 'reflect-metadata';
 import { Pool } from 'pg';
@@ -46,7 +50,10 @@ await syncBuiltinSkills(
   fileURLToPath(new URL('./mastra/skills/', import.meta.url)),
   workspaceRoot,
 );
-const database = createDataSource(env.DATABASE_URL);
+const database = createDataSource(
+  env.DATABASE_URL,
+  installedPlugins.flatMap((p) => p.database.entities),
+);
 let requestLoggingEnabled: boolean;
 const systemSettings = new SystemSettingsService(database, (settings) => {
   requestLoggingEnabled = settings.requestLoggingEnabled;
@@ -80,6 +87,13 @@ try {
   ]);
   throw error;
 }
+const plugins = new PluginService(database, installedPlugins);
+await syncPluginSkills(workspaceRoot);
+const disposePluginSkills = registerPluginSkillAccess(
+  workspaceRoot,
+  async () =>
+    new Set((await plugins.list()).filter((p) => p.enabled).map((p) => p.id)),
+);
 const providers = new ProviderService(database);
 const assets = new AssetService(database);
 const requestLogs = new RequestLogService(database);
@@ -113,13 +127,14 @@ if (!agentStore) throw new Error('Mastra agents storage is required');
 const mcpStore = await storage.getStore('mcpClients');
 if (!mcpStore) throw new Error('Mastra MCP clients storage is required');
 const mcp = new McpService(mcpStore);
-const tools = new ToolService(database, providers, assets, mcp);
+const tools = new ToolService(database, providers, assets, mcp, plugins);
 const agents = new AgentService(
   agentStore,
   skills,
   tools,
   providers,
   agentSettingsStore(database),
+  plugins,
 );
 const models = new LanguageModelService(database, providers, agents);
 const threads = new ThreadService(
@@ -180,6 +195,7 @@ const app = createApp(
   { service: mcp, webOrigin: env.WEB_ORIGINS },
   { service: systemSettings, webOrigin: env.WEB_ORIGINS },
   { service: usage, webOrigin: env.WEB_ORIGINS },
+  plugins,
 );
 const server = serve(
   { fetch: app.fetch, port: env.SERVER_PORT, hostname: env.SERVER_HOST },
@@ -200,6 +216,7 @@ function shutdown() {
       server.closeAllConnections();
       server.close(() => {
         void Promise.all([
+          plugins.dispose().finally(disposePluginSkills),
           mastra.shutdown(),
           mcp.shutdown(),
           skills.dispose(),

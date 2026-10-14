@@ -1,3 +1,4 @@
+import { enabledPluginSkills } from '../plugins/skill-access.js';
 import { lstat, mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -38,7 +39,10 @@ export async function createProjectWorkspace(root: string, projectId: string) {
   return path;
 }
 
-export async function createPersonalSharedDirectory(root: string, userId: string) {
+export async function createPersonalSharedDirectory(
+  root: string,
+  userId: string,
+) {
   const path = resolve(userDirectory(root, userId), 'shared');
   await mkdir(path, { recursive: true });
   return path;
@@ -211,8 +215,15 @@ export function getWorkspace(
 }
 
 export type DiscoveredSkill = { id: string; group: string; path: string };
-export function discoverInstalledSkills(root: string) {
-  return discover(resolve(root, '.agents', 'skills'));
+export async function discoverInstalledSkills(root: string) {
+  const [skills, enabled] = await Promise.all([
+    discover(resolve(root, '.agents', 'skills')),
+    enabledPluginSkills(root),
+  ]);
+  return skills.filter((skill) => {
+    const parts = skill.group.split(/[\\/]/);
+    return parts[0] !== 'plugins' || enabled.has(parts[1]);
+  });
 }
 async function discover(root: string): Promise<DiscoveredSkill[]> {
   const result: DiscoveredSkill[] = [];
@@ -253,7 +264,7 @@ async function discover(root: string): Promise<DiscoveredSkill[]> {
 
 export async function discoverPersonalSkills(root: string, userId: string) {
   const [global, personal] = await Promise.all([
-    discover(resolve(root, '.agents', 'skills')),
+    discoverInstalledSkills(root),
     discover(resolve(userDirectory(root, userId), '.agents', 'skills')),
   ]);
   return [
@@ -265,7 +276,7 @@ export async function discoverPersonalSkills(root: string, userId: string) {
 
 export async function discoverProjectSkills(root: string, projectId: string) {
   const [global, project] = await Promise.all([
-    discover(resolve(root, '.agents', 'skills')),
+    discoverInstalledSkills(root),
     discover(resolve(projectDirectory(root, projectId), '.agents', 'skills')),
   ]);
   return [
@@ -324,12 +335,14 @@ export function createProjectFilesystem(
   return config.mode === 'simple'
     ? provider(config.provider)
     : new ProjectCompositeFilesystem({
-        mounts: Object.fromEntries(
-          config.mounts.map((mount) => [
+        mounts: Object.fromEntries([
+          // Chat attachments need a writable /.uploads/ in composite projects too.
+          ['/.uploads', provider('local', '.uploads')],
+          ...config.mounts.map((mount) => [
             `/${mount.mountPath}`,
             provider(mount.provider, mount.mountPath),
           ]),
-        ),
+        ]),
       });
 }
 
