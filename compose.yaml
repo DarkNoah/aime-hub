@@ -32,6 +32,7 @@ services:
     environment:
       NODE_ENV: production
       ALLOW_INSECURE_HTTP: ${ALLOW_INSECURE_HTTP:-false}
+      ALLOW_ALL_NETWORKS: ${ALLOW_ALL_NETWORKS:-false}
       DATABASE_URL: postgresql://hub:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/hub
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set a random secret of at least 32 characters}
       WEB_ORIGINS: ${WEB_ORIGINS:?Set comma-separated browser origins, default first}

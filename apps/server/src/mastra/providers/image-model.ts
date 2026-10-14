@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { ProviderConfig } from './base-provider.js';
 import { imageBase64, imageMimeType, maxImageBytes } from './image-data.js';
 import { requestWebResource, webUrl } from '../web/request.js';
+import { allowAllNetworks } from '../../modules/network/policy.js';
 
 const responseSchema = z.object({
   data: z
@@ -20,7 +21,12 @@ export function createImageModel(
   request = requestWebResource,
 ): Exclude<ImageModel, string | { specificationVersion: 'v2' }> {
   const url = webUrl(provider.baseUrl);
-  if (url.protocol !== 'https:' || url.search || url.hash || !modelId.trim())
+  if (
+    (!allowAllNetworks() && url.protocol !== 'https:') ||
+    url.search ||
+    url.hash ||
+    !modelId.trim()
+  )
     throw new Error('Invalid image provider configuration');
   const baseUrl = url.href.replace(/\/+$/, '');
   return {

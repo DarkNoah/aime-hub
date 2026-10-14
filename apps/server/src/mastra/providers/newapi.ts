@@ -8,6 +8,7 @@ import {
 } from './base-provider.js';
 import { requestWebResource, webUrl } from '../web/request.js';
 import { createImageModel } from './image-model.js';
+import { allowAllNetworks } from '../../modules/network/policy.js';
 
 type RequestOptions = {
   body?: unknown;
@@ -51,7 +52,7 @@ export class NewApiProvider extends BaseProvider {
     super({ provider });
     const url = webUrl(provider.baseUrl);
     if (
-      url.protocol !== 'https:' ||
+      (!allowAllNetworks() && url.protocol !== 'https:') ||
       url.search ||
       url.hash ||
       !provider.apiKey?.trim()
@@ -73,7 +74,11 @@ export class NewApiProvider extends BaseProvider {
   }
 
   imageModel(modelId: string) {
-    return createImageModel({ ...this.provider, baseUrl: this.baseUrl }, modelId, this.request);
+    return createImageModel(
+      { ...this.provider, baseUrl: this.baseUrl },
+      modelId,
+      this.request,
+    );
   }
 
   async getLanguageModelList(): Promise<ProviderModelInfo[]> {

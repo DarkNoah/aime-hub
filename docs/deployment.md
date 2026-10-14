@@ -41,6 +41,20 @@ Better Auth 根据配置列表构建动态 `baseURL`，认证链接使用请求�
 
 HTTPS-only 配置使用 Secure Cookie；显式包含 HTTP 来源时使用可在 HTTP 上传输的 Cookie，生产环境还需 `ALLOW_INSECURE_HTTP=true`。不同主机不共享 Cookie，需要分别登录。前端静态镜像构建不需要注入这些运行时来源；更新来源后重启 API 和开发服务。
 
+## 访问内网供应商和网页
+
+默认 `ALLOW_ALL_NETWORKS=false`，供应商请求和网页抓取只允许公网目标，部分供应商还要求 HTTPS。在可信的自托管环境中，可在 `.env` 或 Dokploy 的 Environment 中设置：
+
+```dotenv
+ALLOW_ALL_NETWORKS=true
+```
+
+Compose 会将此值传入 `server` 容器，重新部署后生效。开启后，供应商和网页抓取允许所有可路由的 HTTP(S) 地址，包括私网、回环和链路本地地址，并允许供应商通过 HTTP 发送 API Key。该选项关闭这些请求的 SSRF 网络隔离，Agent 的网页抓取也能访问服务器所在的内网。
+
+例如 Xinference 可填写 `http://192.168.10.4:9997`，它会自动请求 `/v1/models`；OpenAI 兼容供应商则填写完整 API 前缀 `http://192.168.10.4:9997/v1`。URL 格式、TLS 证书校验、请求超时和响应大小限制仍然有效。浏览器 `goto` 原本没有这层私网校验；路由、防火墙和公网 NAT 回流问题仍需在网络侧处理。
+
+此选项与控制应用自身 HTTP 入口的 `ALLOW_INSECURE_HTTP` 独立。需要恢复网络限制时设置 `ALLOW_ALL_NETWORKS=false` 并重新部署。
+
 ## Git 自动更新
 
 ### 暂时通过内网 IP 访问

@@ -1,6 +1,7 @@
 import { lookup } from 'node:dns/promises';
 import { Agent, fetch as fetchRequest } from 'undici';
 import { isPublicAddress } from '../../modules/providers/network.js';
+import { allowAllNetworks } from '../../modules/network/policy.js';
 
 export class WebRequestError extends Error {
   constructor(
@@ -28,6 +29,7 @@ export function webUrl(value: string) {
 
 export async function publicWebAddress(value: string, signal: AbortSignal) {
   const url = webUrl(value);
+  const unrestricted = allowAllNetworks();
   const hostname = url.hostname.replace(/^\[|\]$/g, '');
   signal.throwIfAborted();
   let onAbort: () => void = () => {};
@@ -43,7 +45,8 @@ export async function publicWebAddress(value: string, signal: AbortSignal) {
     signal.throwIfAborted();
     if (
       !addresses.length ||
-      addresses.some(({ address }) => !isPublicAddress(address))
+      (!unrestricted &&
+        addresses.some(({ address }) => !isPublicAddress(address)))
     )
       throw new WebRequestError('INVALID_URL');
     return addresses[0]!;

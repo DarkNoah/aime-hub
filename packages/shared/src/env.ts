@@ -16,6 +16,10 @@ const schema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
+  ALLOW_ALL_NETWORKS: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
   DATABASE_URL: z.url().refine((value) => /^postgres(ql)?:/.test(value)),
   BETTER_AUTH_SECRET: z.string().min(32),
   WEB_ORIGINS: webOriginsEnvSchema,

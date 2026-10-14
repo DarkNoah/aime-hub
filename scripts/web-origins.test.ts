@@ -56,6 +56,7 @@ test('WEB_ORIGINS is required, deduplicates in order and validates every origin'
   const overrides = {
     NODE_ENV: 'development',
     ALLOW_INSECURE_HTTP: 'false',
+    ALLOW_ALL_NETWORKS: 'false',
     DATABASE_URL: 'postgresql://unused:unused@127.0.0.1:1/unused',
     BETTER_AUTH_SECRET: 'origin-test-secret-with-at-least-32-characters',
     BETTER_AUTH_URL: localOrigin,
@@ -72,6 +73,14 @@ test('WEB_ORIGINS is required, deduplicates in order and validates every origin'
     }
   });
   Object.assign(process.env, overrides);
+  delete process.env.ALLOW_ALL_NETWORKS;
+  assert.equal(loadEnv().ALLOW_ALL_NETWORKS, false);
+  process.env.ALLOW_ALL_NETWORKS = 'true';
+  assert.equal(loadEnv().ALLOW_ALL_NETWORKS, true);
+  process.env.ALLOW_ALL_NETWORKS = '1';
+  assert.throws(loadEnv, /ALLOW_ALL_NETWORKS/);
+  process.env.ALLOW_ALL_NETWORKS = 'false';
+  assert.equal(loadEnv().ALLOW_ALL_NETWORKS, false);
   assert.deepEqual(loadEnv().WEB_ORIGINS, origins);
   assert.equal('WEB_ORIGIN' in loadEnv(), false);
   assert.equal('BETTER_AUTH_URL' in loadEnv(), false);

@@ -2,6 +2,7 @@ import { lookup } from 'node:dns/promises';
 import { BlockList, isIP } from 'node:net';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
+import { allowAllNetworks } from '../network/policy.js';
 
 export class ProviderError extends Error {
   constructor(
@@ -57,9 +58,10 @@ export async function requestProviderJson(
   } = {},
 ): Promise<unknown> {
   const url = new URL(urlString);
+  const unrestricted = allowAllNetworks();
   if (
     !['https:', 'http:'].includes(url.protocol) ||
-    (url.protocol !== 'https:' && !!apiKey) ||
+    (!unrestricted && url.protocol !== 'https:' && !!apiKey) ||
     url.username ||
     url.password ||
     url.hash ||
@@ -92,7 +94,8 @@ export async function requestProviderJson(
     ]);
     if (
       !addresses.length ||
-      addresses.some(({ address }) => !isPublicAddress(address))
+      (!unrestricted &&
+        addresses.some(({ address }) => !isPublicAddress(address)))
     )
       throw new ProviderError('INVALID_URL');
     const address = addresses[0]!;

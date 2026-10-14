@@ -1,4 +1,5 @@
 import { requestWebResource, webUrl } from '../web/request.js';
+import { allowAllNetworks } from '../../modules/network/policy.js';
 import {
   BaseProvider,
   type WebFetchOptions,
@@ -26,7 +27,7 @@ export class JinaAIProvider extends BaseProvider {
     webUrl(url);
     const base = webUrl(this.config.baseUrl);
     if (
-      base.protocol !== 'https:' ||
+      (!allowAllNetworks() && base.protocol !== 'https:') ||
       base.search ||
       base.hash ||
       !this.config.apiKey.trim()
