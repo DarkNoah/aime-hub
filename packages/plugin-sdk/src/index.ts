@@ -8,6 +8,8 @@ export const pluginManifestSchema = z.strictObject({
   description: z.string().max(1000),
   version: z.string().regex(/^\d+\.\d+\.\d+$/),
   apiVersion: z.literal(PLUGIN_API_VERSION),
+  /** Build/discovery switch. False excludes all plugin entries; not the admin runtime switch. */
+  enabled: z.boolean().default(true),
   // Dependencies refer to other installed plugin IDs, not npm packages.
   dependencies: z.array(z.string().regex(/^[a-z][a-z0-9-]{0,39}$/)).default([]),
   pages: z
@@ -37,7 +39,8 @@ export const pluginManifestSchema = z.strictObject({
     .default([]),
 });
 export type PluginManifest = z.infer<typeof pluginManifestSchema>;
-export type PluginStatus = PluginManifest & {
+export type PluginStatus = Omit<PluginManifest, 'enabled'> & {
+  /** Runtime activation stored in the database, independent of manifest.enabled. */
   enabled: boolean;
   ready: boolean;
   installedVersion: string | null;

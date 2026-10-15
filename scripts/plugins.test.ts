@@ -1,13 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import {
+  mkdtemp,
+  mkdir,
+  writeFile,
+  readFile,
+  readdir,
+  rm,
+} from 'node:fs/promises';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { discoverPlugins, generatePlugins } from './plugins.js';
 
 async function fixture(
   plugins: {
     id: string;
+    enabled?: unknown;
     dependencies?: string[];
     pages?: unknown[];
     rightSidebar?: unknown[];
@@ -17,6 +26,7 @@ async function fixture(
 ) {
   const root = await mkdtemp(join(tmpdir(), 'plugin-discovery-'));
   try {
+    await writeFile(join(root, 'package.json'), '{"type":"module"}');
     await mkdir(join(root, 'plugins'));
     for (const plugin of plugins) {
       const dir = join(root, 'plugins', plugin.id);
@@ -62,6 +72,98 @@ test('discovery orders dependencies and emits deterministic browser/server entri
 test('empty plugin set remains buildable', () =>
   fixture([], async (root) => {
     assert.equal(await generatePlugins(root), 0);
+  }));
+test('manifest enabled defaults to true without enabling the runtime', () =>
+  fixture([{ id: 'a' }], async (root) => {
+    assert.equal((await discoverPlugins(root))[0].manifest.enabled, true);
+  }));
+test('manifest enabled must be a boolean', () =>
+  fixture([{ id: 'a', enabled: 'false' }], async (root) => {
+    await assert.rejects(discoverPlugins(root));
+  }));
+test('disabled plugins skip entries and dependencies while selected plugins remain discoverable', () =>
+  fixture(
+    [
+      { id: 'excluded', enabled: false, dependencies: ['absent'] },
+      { id: 'selected' },
+    ],
+    async (root) => {
+      await rm(join(root, 'plugins/excluded/server'), { recursive: true });
+      await rm(join(root, 'plugins/excluded/web'), { recursive: true });
+      assert.deepEqual(
+        (await discoverPlugins(root)).map((plugin) => plugin.manifest.id),
+        ['selected'],
+      );
+      await generatePlugins(root);
+      const css = await readFile(
+        join(root, 'apps/web/src/features/plugins/generated.css'),
+        'utf8',
+      );
+      assert.match(css, /plugins\/selected\/web/);
+      assert.doesNotMatch(css, /excluded/);
+    },
+  ));
+test('a selected plugin cannot implicitly load a disabled dependency', () =>
+  fixture(
+    [
+      { id: 'a', dependencies: ['b'] },
+      { id: 'b', enabled: false },
+    ],
+    async (root) => {
+      await assert.rejects(
+        discoverPlugins(root),
+        /Disabled plugin dependency: b/,
+      );
+    },
+  ));
+test('disabling removes generated code, styles and skills without importing excluded entrypoints', () =>
+  fixture([{ id: 'excluded' }], async (root) => {
+    const pluginDir = join(root, 'plugins/excluded');
+    await mkdir(join(pluginDir, 'skills/guide'), { recursive: true });
+    await writeFile(join(pluginDir, 'skills/guide/SKILL.md'), '# Guide');
+    assert.equal(await generatePlugins(root), 1);
+    const serverDir = join(root, 'apps/server/src/modules/plugins');
+    assert.deepEqual(await readdir(join(serverDir, 'bundled-skills')), [
+      'excluded',
+    ]);
+    const manifestPath = join(pluginDir, 'plugin.manifest.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    await writeFile(
+      manifestPath,
+      JSON.stringify({ ...manifest, enabled: false }),
+    );
+    for (const entry of [
+      'server/index.ts',
+      'server/database.ts',
+      'web/index.tsx',
+    ])
+      await writeFile(
+        join(pluginDir, entry),
+        "throw new Error('Excluded plugin must never execute');",
+      );
+    assert.equal(await generatePlugins(root), 0);
+    for (const file of [
+      'apps/server/src/modules/plugins/generated.ts',
+      'apps/server/src/modules/plugins/generated-database.ts',
+      'apps/web/src/features/plugins/generated.ts',
+      'apps/web/src/features/plugins/generated.css',
+    ])
+      assert.doesNotMatch(await readFile(join(root, file), 'utf8'), /excluded/);
+    assert.deepEqual(await readdir(join(serverDir, 'bundled-skills')), []);
+    const server = await import(
+      pathToFileURL(join(serverDir, 'generated.ts')).href
+    );
+    const database = await import(
+      pathToFileURL(join(serverDir, 'generated-database.ts')).href
+    );
+    const web = await import(
+      pathToFileURL(join(root, 'apps/web/src/features/plugins/generated.ts'))
+        .href
+    );
+    assert.deepEqual(server.installedPlugins, []);
+    assert.deepEqual(database.pluginDatabases, []);
+    assert.deepEqual(web.pluginManifests, []);
+    assert.deepEqual(web.pluginLoaders, {});
   }));
 test('one plugin supports multiple pages including parameter routes and access scopes', () =>
   fixture(

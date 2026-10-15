@@ -4,6 +4,8 @@
 
 ## 快速运行 Demo
 
+Demo 默认在 `plugins/notebook/plugin.manifest.json` 中设置了 `"enabled": false`，因此不会加载或出现在插件管理中。要运行 Demo，先改为 `"enabled": true`，再执行：
+
 ```sh
 pnpm install --frozen-lockfile
 pnpm db:migrate
@@ -13,6 +15,28 @@ pnpm dev
 用管理员账号打开 `/admin/plugins`，启用「个人笔记 Demo」，点击「个人笔记」进入 `/p/notebook`，或点击「笔记概览」进入 `/p/notebook/overview`。两个页面均可直接访问和刷新。创建笔记后，聊天的 Agent 选择器中选择「笔记助手」并询问笔记内容。聊天需要宿主已配置可用的语言模型；页面和 API 无需模型供应商。
 
 Demo 包含个人笔记页面、聊天右侧栏的「个人笔记」「笔记概览」两个扩展、受会话保护的 API、`plugin_notebook_notes` 数据表、独立 npm 依赖 `slugify`、Agent、Tool 和 Skill。启用后打开聊天，点击右侧笔记或图表图标；窄屏从聊天菜单打开抽屉。侧栏无需配置模型即可使用，笔记数据与独立页面共用。用户 ID 由宿主会话或 Agent RequestContext 提供，不能通过请求体选择其他用户。
+
+## 保留源码但完全不加载
+
+在插件的 `plugin.manifest.json` 中设置：
+
+```json
+{ "enabled": false }
+```
+
+这是清单的一个字段，保留其余必需字段。省略时默认 `true`；只接受布尔值，不接受字符串 `"false"`。
+
+| 设置                        | 作用                                                                                                                                   |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 清单 `enabled: false`       | 发现阶段排除插件，不生成前后端模块导入、数据库实体/迁移入口、页面/侧栏入口或插件样式扫描入口，也不打包其 Skill；后台列表不会出现该插件 |
+| 清单 `enabled: true` 或省略 | 插件参与构建、迁移和注册；初次安装在后台仍然默认停用                                                                                   |
+| 后台启用/停用               | 控制已加载插件的能力是否可用，状态保存在数据库，与清单的构建开关独立                                                                   |
+
+修改后，开发环境重启 `pnpm dev`；生产环境重新执行 `pnpm build` 并重启服务，前后端使用同一份新产物。仅修改清单或运行 `plugins:generate` 不会改变正在运行的服务或旧的 `dist`。Docker 需重新构建并部署镜像。
+
+排除插件不会执行它的新迁移，也不会删除已有数据表、安装记录或数据；新进程同步 Skill 时会清理上次发布留下的插件 Skill 副本。以后改回 `true` 并重新发布，后台启停状态会沿用数据库中保存的选择。其他已选择插件依赖被排除的插件时，发现命令会报 `Disabled plugin dependency`；不会隐式加载它。
+
+发现阶段仍读取并校验清单，但不检查或导入被排除插件的代码入口。这个开关不裁剪 pnpm workspace 依赖安装或 Docker 中保留的仓库源码；宿主也不应直接导入被排除插件的内部模块。
 
 ## 文件契约
 
@@ -38,6 +62,7 @@ plugins/<id>/
   "description": "保存与查询自己的笔记",
   "version": "1.0.0",
   "apiVersion": 1,
+  "enabled": false,
   "dependencies": [],
   "pages": [
     {
@@ -73,6 +98,7 @@ plugins/<id>/
 - `id`：小写字母开头，允许数字和连字符，最长 40 字符。
 - `version`：`major.minor.patch`；每次发布升级应递增，迁移命令拒绝降级。
 - `apiVersion`：当前为 `1`，不兼容版本在发现阶段失败。
+- `enabled`：源码发现开关，默认 `true`；`false` 完全排除该插件，不进入后台管理。与后台持久化启停状态独立。
 - `dependencies`：其他插件 ID，按依赖顺序发现；缺失、循环依赖构建失败。启用依赖插件后才能启用当前插件；存在已启用依赖者时禁止停用。
 - `pages`：`session` 页面挂到 `/p/<id>/<path>`，`admin` 页面挂到 `/admin/p/<id>/<path>`。`path` 为空表示首页，也支持 `notes/:noteId` 等多级参数。动态参数页面不能直接成为导航链接。
 - `rightSidebar`：可选数组，默认空；一个插件可声明多个聊天右侧栏扩展。`id` 在插件内唯一，不同插件可以使用相同 ID；规则与插件 ID 相同。`access` 默认 `session`，`admin` 仅管理员可见；`icon` 可选 `puzzle`（默认）、`notebook`、`list`、`chart`。入口顺序与数组一致。
@@ -96,7 +122,7 @@ export default function createServer(context: PluginContext): PluginServer {
 - `c.get('userId')`：当前会话用户 ID；`c.get('isAdmin')`：管理员标志。插件必须自行校验记录归属、项目成员关系和业务操作权限。**页面的 `admin` 标志不替代 API 权限检查。**
 - `agents`：宿主 `BaseAgent[]`，ID 使用 `plugin:<id>:<name>`；`source: 'code'`；`model: null` 继承宿主模型配置；`agents: {}` 默认不委派。宿主 AgentService 统一列出和执行，不需要写入 Mastra Agent 数据表。
 - `tools`：Mastra `createTool()` 实例数组，ID 使用 `plugin_<id（连字符转下划线）>_<name>`。宿主包装执行入口，因此已经取出的句柄在停用后也无法执行。工具进入全局配置、Agent 和 `exec` 目录，支持标准启停开关；结果使用现有通用工具展示。本版未增加任意工具配置表单或专用结果渲染器注册接口。
-- `dispose`：可选的异步进程退出清理函数。`createServer` 是构造入口，不是启用回调；即使插件停用也会调用，不能在这里启动定时任务或外部副作用。本版启停控制请求与能力的可用性，不包含后台 worker 生命周期。
+- `dispose`：可选的异步进程退出清理函数。`createServer` 是构造入口，不是启用回调；参与构建的插件即使在后台停用也会调用，不能在这里启动定时任务或外部副作用。清单 `enabled: false` 的插件不会导入或调用此入口。本版后台启停控制请求与能力的可用性，不包含后台 worker 生命周期。
 
 插件使用宿主 DataSource，不能自行关闭、初始化或开启 `synchronize`。普通共享类型可从 `@aime/shared` 导入；插件可在同仓库引用源项目模块，但内部路径不承诺兼容性。稳定入口优先使用 SDK，业务页面与逻辑继续放在插件自己的模块目录。
 
@@ -116,7 +142,7 @@ export default {
 
 `pnpm db:migrate` 先执行认证与宿主迁移，再执行插件迁移。整个迁移命令有 PostgreSQL advisory lock，插件迁移使用事务，并按 `(plugin_id, name)` 记录在 `plugin_migrations`。迁移失败回滚本批插件 DDL 和记录。安装版本和启用状态保存在 `plugin_installations`，新安装默认停用，升级保留管理员选择。
 
-启动时收集所有插件实体，但页面/API/AI 能力仅对版本和迁移就绪的已启用插件开放。代码版本与安装版本不一致时不允许启用。停用不会删除表、笔记或工具配置；本版不提供卸载删表和自动数据库降级。
+启动时收集参与构建的插件实体，但页面/API/AI 能力仅对版本和迁移就绪的已启用插件开放。清单 `enabled: false` 的插件不进入实体或迁移集合。代码版本与安装版本不一致时不允许启用。停用不会删除表、笔记或工具配置；本版不提供卸载删表和自动数据库降级。
 
 ## 前端接口
 
@@ -137,7 +163,7 @@ export default { pages: { '': Page } } satisfies PluginWeb;
 
 `pages` 支持多个页面，键必须对应清单路径，例如 `pages: { '': NotebookPage, overview: OverviewPage, 'notes/:noteId': DetailPage }`（清单也需声明相应路径），动态参数通过 `params.noteId` 传入。每个页面独立指定权限和是否出现在导航；全部随插件统一启停。插件模块通过动态 import 按需加载。页面处于宿主会话、主题和布局中；ErrorBoundary 隔离页面渲染错误。复用 `@app/plugin-ui` 提供的 Dialog、Button、Input、PasswordInput、ScrollArea 等组件，通知使用 `sonner`。
 
-每个插件可以在自己的 `package.json` 声明 npm 依赖和组件库。React 与 React DOM 使用 `peerDependencies`，宿主 Vite 对 React、React DOM、Router 去重。插件样式纳入 Tailwind 扫描，其他组件库样式应在插件入口导入并避免全局 reset。Node 原生扩展及系统库仍需在 Docker 构建阶段提供。本版不支持后台上传源码后即时安装依赖。
+每个插件可以在自己的 `package.json` 声明 npm 依赖和组件库。React 与 React DOM 使用 `peerDependencies`，宿主 Vite 对 React、React DOM、Router 去重。参与构建的插件样式通过 `generated.css` 纳入 Tailwind 扫描，其他组件库样式应在插件入口导入并避免全局 reset。Node 原生扩展及系统库仍需在 Docker 构建阶段提供。本版不支持后台上传源码后即时安装依赖。
 
 ### 多个右侧栏扩展
 
@@ -200,6 +226,6 @@ pnpm test:plugins              # 不访问数据库的发现测试，集成测�
 pnpm test:plugins:integration  # 使用 .env 的 PostgreSQL 凭证创建临时测试库，结束后删除
 ```
 
-集成测试要求数据库用户具有 `CREATEDB` 权限，只在临时数据库中操作。覆盖迁移幂等与回滚、API 权限及用户隔离、持久化启停、依赖关系、Agent 调用真实插件 Tool、`exec` 调用、旧句柄拒绝及 Skill 发现。Agent 流程使用确定性模拟模型，不等于真实供应商推理验收。
+集成测试要求数据库用户具有 `CREATEDB` 权限，只在临时数据库中操作。覆盖迁移幂等与回滚、API 权限及用户隔离、持久化启停、依赖关系、Agent 调用真实插件 Tool、`exec` 调用、旧句柄拒绝及 Skill 发现。发现测试覆盖清单排除、依赖拒绝、注册入口与旧 Skill 清理；集成测试显式加载 Demo 测试夹具，不受 Demo 清单开关影响，也不会修改实际清单。Agent 流程使用确定性模拟模型，不等于真实供应商推理验收。
 
 Dockerfile 已在构建阶段执行 `pnpm build` 并复制完整仓库，插件包、依赖和 Skill 资源会随镜像发布；服务端入口继续执行 `pnpm db:migrate`。前后端应发布同一份提交。插件生成文件可提交，但必须通过生成命令更新，不手工编辑。

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Pool } from 'pg';
@@ -10,11 +10,12 @@ import { createAuthOptions, type Auth } from '@aime/auth';
 import { getMigrations } from '@aime/auth/migrations';
 import { MastraLanguageModelV2Mock } from '@mastra/core/test-utils/llm-mock';
 import { RequestContext } from '@mastra/core/request-context';
-import { installedPlugins } from './generated.js';
+import { pluginManifestSchema } from '@app/plugin-sdk';
+import type { InstalledPlugin } from '@app/plugin-sdk/server';
 import { PluginService } from './service.js';
 import { migratePlugins } from './migrations.js';
 import { pluginRoutes } from './routes.js';
-import { syncPluginSkills } from './assets.js';
+import { syncBuiltinSkills } from '../skills/builtin.js';
 import { registerPluginSkillAccess } from './skill-access.js';
 import { discoverInstalledSkills } from '../threads/workspace.js';
 import { listChatSkills, resolveAgentSkillPaths } from '../threads/skills.js';
@@ -29,6 +30,26 @@ test(
   'full-stack plugin PostgreSQL lifecycle, authorization and AI integration',
   { skip: !enabled },
   async () => {
+    // Test the demo independently of its deployment discovery switch. Variable URLs keep
+    // its disabled source out of the host's static import/typecheck graph.
+    const notebookRoot = new URL(
+      '../../../../../plugins/notebook/',
+      import.meta.url,
+    );
+    const [serverModule, databaseModule, manifest] = await Promise.all([
+      import(new URL('server/index.ts', notebookRoot).href),
+      import(new URL('server/database.ts', notebookRoot).href),
+      readFile(new URL('plugin.manifest.json', notebookRoot), 'utf8').then(
+        JSON.parse,
+      ),
+    ]);
+    const installedPlugins: InstalledPlugin[] = [
+      {
+        manifest: pluginManifestSchema.parse({ ...manifest, enabled: true }),
+        createServer: serverModule.default,
+        database: databaseModule.default,
+      },
+    ];
     config({ quiet: true });
     const source = new URL(process.env.DATABASE_URL!);
     const databaseName = `plugin_test_${process.pid}_${Date.now()}`;
@@ -58,6 +79,19 @@ test(
       );
       await database.initialize();
       await database.runMigrations();
+      assert.equal(await migratePlugins(database, []), 0);
+      assert.equal(
+        (
+          await database.query(
+            "SELECT to_regclass('public.plugin_notebook_notes') AS name",
+          )
+        )[0].name,
+        null,
+      );
+      assert.deepEqual(
+        await database.query('SELECT id FROM plugin_installations'),
+        [],
+      );
       assert.equal(await migratePlugins(database, installedPlugins), 1);
       assert.equal(
         await migratePlugins(database, installedPlugins),
@@ -171,7 +205,14 @@ test(
         (await (await request('/notebook/notes', 'alice')).json()).length,
         1,
       );
-      await syncPluginSkills(root);
+      const skillSource = join(root, 'bundled-skills');
+      await mkdir(skillSource);
+      await cp(
+        new URL('skills/', notebookRoot),
+        join(skillSource, 'notebook'),
+        { recursive: true },
+      );
+      await syncBuiltinSkills(skillSource, root, 'plugins');
       unregister = registerPluginSkillAccess(
         root,
         async () =>
@@ -344,6 +385,65 @@ test(
         'disable preserves data',
       );
       const restarted = new PluginService(database, installedPlugins);
+      // Removing a plugin from discovery hides even an existing enabled installation;
+      // it does not delete that plugin's data or its saved activation choice.
+      const excluded = new PluginService(database, []);
+      assert.deepEqual(await excluded.list(), []);
+      const excludedApi = pluginRoutes(auth, excluded, [
+        'http://localhost:5173',
+      ]);
+      const excludedHeaders = {
+        'x-test-user': 'admin',
+        origin: 'http://localhost:5173',
+        'content-type': 'application/json',
+      };
+      assert.deepEqual(
+        await (
+          await excludedApi.request('/', { headers: excludedHeaders })
+        ).json(),
+        [],
+      );
+      assert.equal(
+        (
+          await excludedApi.request('/notebook/notes', {
+            headers: excludedHeaders,
+          })
+        ).status,
+        404,
+      );
+      assert.equal(
+        (
+          await excludedApi.request('/notebook/enabled', {
+            method: 'PUT',
+            headers: excludedHeaders,
+            body: JSON.stringify({ enabled: true }),
+          })
+        ).status,
+        404,
+      );
+      assert.equal(await migratePlugins(database, []), 0);
+      assert.equal(
+        (
+          await database.query(
+            'SELECT enabled FROM plugin_installations WHERE id = $1',
+            ['notebook'],
+          )
+        )[0].enabled,
+        true,
+      );
+      assert.equal(
+        (
+          await database.query(
+            'SELECT count(*)::int AS count FROM plugin_notebook_notes',
+          )
+        )[0].count,
+        1,
+      );
+      const emptySkills = join(root, 'empty-skills');
+      await mkdir(emptySkills);
+      await syncBuiltinSkills(emptySkills, root, 'plugins');
+      assert.equal((await skills.list()).skills.length, 0);
+      await excluded.dispose();
       assert.equal((await restarted.list())[0].enabled, true);
       const failing = {
         ...installedPlugins[0],

@@ -1,12 +1,12 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'streamdown/styles.css';
+@import './features/plugins/generated.css';
 
 /* Follow the app theme, not the operating system's color preference. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* Support both hoisted and isolated pnpm dependency layouts. */
-@source '../../../plugins/*/web';
 @source '../node_modules/streamdown/dist/*.js';
 @source '../../../node_modules/streamdown/dist/*.js';
 
