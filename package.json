@@ -4,7 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@10.12.1",
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "providers:catalog": "node --import tsx scripts/update-provider-catalog.ts",

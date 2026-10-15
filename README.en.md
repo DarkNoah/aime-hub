@@ -42,7 +42,7 @@ These steps are for **local development**. For Docker Compose / Dokploy, see [De
 
 ### 1. Prepare the environment
 
-- Node.js **≥ 22.12.0** and **pnpm 10.12.1**, as specified in [package.json](package.json).
+- Node.js **≥ 22.13.0** and **pnpm 10.12.1**, as specified in [package.json](package.json).
 - Git and a PostgreSQL application database. Use [compose.local.yaml](compose.local.yaml) for PostgreSQL 16 with pgvector locally; [compose.yaml](compose.yaml) is for the full deployment.
 - Access to a model provider and its credentials, configured in the administration UI after startup.
 
@@ -88,6 +88,8 @@ pnpm dev
 
 Open **[http://127.0.0.1:5173](http://127.0.0.1:5173)**. Vite proxies same-origin `/api` requests to `127.0.0.1:3001`, so the browser only needs the frontend entry point. The API health endpoint is `/api/health`.
 
+In development, open the [Scalar API reference](http://127.0.0.1:5173/api/docs); the OpenAPI JSON is available at `/api/openapi.json`. Documentation is generated from the existing oRPC contracts. Responses declared only as TypeScript types have no field details, and standalone Hono routes (such as SSE, file, and authentication endpoints) are not included. Documentation is enabled only in development. `pnpm build` removes its loading logic, so both URLs return 404 in release builds, even if `NODE_ENV=development` is mistakenly set at runtime.
+
 Configure only `WEB_ORIGINS`: a comma-separated list of full HTTP(S) origins. The first entry is the default browser URL and determines the Vite port; Vite does not switch ports automatically. Better Auth uses a dynamic `baseURL` so authentication links follow the trusted request host and protocol, falling back to the first entry when the request host is missing or unmatched. Browser origins must match the list exactly, including scheme, host, and port; unknown origins are still rejected. Restart after changing `.env`. Add the actual IP for LAN access; `0.0.0.0` is a listen address, not a browser entry point. Each host requires its own login and cookies. To migrate, put the previous default origin first in `WEB_ORIGINS`, then remove `WEB_ORIGIN` and `BETTER_AUTH_URL`.
 
 ### 4. Connect a model and start chatting
@@ -120,6 +122,36 @@ Linux also needs Playwright's system libraries. Projects use the local filesyste
 - **Data and logs**: Provider keys are currently stored in plaintext in the database. Model request logs contain full request and response content; restrict access to the database, logs, and backups.
 
 For detailed procedures, permissions, and runtime behavior, see the [usage and administration reference (Simplified Chinese)](docs/usage.zh-CN.md).
+
+## Knowledge bases
+
+Manage owned bases under “Created by me” at `/knowledge`, and authorized shared bases under “Shared”. Creators can switch between private, all-user and selected-user sharing. All-user sharing has one permission; selected users each have read or edit permission. Readers can view and search. Editors can add, replace, delete and toggle documents, but cannot change base models or sharing settings. Only the creator can delete a base, including when another user is a system administrator. Sharing changes preserve documents and indexes and are blocked during a rebuild.
+
+Shared membership has no count limit. Member lists and user searches are paginated. Sharing scope and individual permissions are saved immediately; each membership change is submitted independently without replacing other members.
+
+Project bases remain at `/projects/:projectId/knowledge`; members can read and project owners/admins can maintain them. Only the base creator can delete them. Personal conversations retrieve owned and authorized shared bases. Project conversations retrieve only all-user bases and the current project, excluding private and individually shared sources. Permissions are checked again before search results are returned.
+
+Import text, webpage URLs, TXT, Markdown, HTML, JSON, CSV, PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP and RTF files (up to 10 MB each). Document extraction uses `officeparser` and feeds the [official Mastra RAG pipeline](https://mastra.ai/reference/rag/chunking-and-embedding): `MDocument.chunk()` → AI SDK `embedMany()` → `PgVector`. Scanned PDFs require OCR first. Original uploads and processing states persist in PostgreSQL; interrupted imports resume after restart and failed imports can be retried. Inspect extracted text and chunks, enable/disable sources, and test retrieval in the UI.
+
+Retrieval runs **vector + BM25 recall → RRF candidate selection → rerank ranking → three-ranking RRF fusion**. BM25 uses the official Mastra `Workspace` with Chinese/English tokenization; vectors use `PgVector`. Recall RRF selects `max(20, topK × 4)` candidates, capped at 400. Mastra `rerankWithScorer()` applies the configured rerank model to these candidates. The final score sums `1 / (60 + rank)` from vector, BM25 and rerank rankings by chunk ID, then selects topK. Finite negative scores and scores above 1 are valid rerank outputs: they determine rank and are never added directly to RRF scores. Vector failures/timeouts retain BM25; rerank failures/timeouts retain recall RRF. The vector stage has a 10-second deadline; reranking has 60 seconds and distinguishes timeouts, invalid responses and request failures. `score` and `scores.rrf` contain the final fused score, `scores.rerank` retains the raw model score, and `scores.rerankRrf` records its rank contribution. Unconfigured models contribute no ranking.
+
+Each request builds the BM25 in-memory index in batches from authorized, enabled database sources. No additional database extension or migration is needed; larger corpora increase indexing latency and memory. Cross-base chat searches use one authorized BM25 corpus, fuse rankings from individual vector indexes, and group reranking by model. Groups reorder within their initial RRF slots to form one global rerank ranking before final RRF fusion. This avoids comparing different models’ raw scores or awarding multiple groups the same first-place contribution. Disabled or failed reranking adds no rerank contribution. Permissions and enabled states are checked again before returning results.
+
+New bases preselect the system default embedding and rerank models, then save independent references; later system-default changes do not alter existing bases. Changing either model rebuilds every chunk vector, including disabled sources. A durable database job and write guards block imports, edits, deletion, toggles and duplicate rebuilds on that base while other bases remain writable. Searches continue using the original model and index. All embeddings are first computed into a temporary file; only then is a separate index written and its count/dimension verified. A transaction publishes both model references and the index pointer together. Failure preserves the previous data and unlocks the base; save the target models again to retry. Interrupted rebuilds resume after restart. Pending document imports must finish before changing models.
+
+Editing a document reprocesses and re-embeds it without incrementing its version. **Update version** preserves the previous original file, parsed text, tags and metadata, then replaces the source and increments the version. History supports text/metadata diffs and original-file downloads. Documents record creator/update timestamps. Deletion archives a document, preserving its history and excluding it from search; restoring reprocesses it with the current model.
+
+Chunks, embeddings and physical custom columns share one per-base table: `knowledge_<nanoid>_<dimension>` (`0` for BM25 only). There is no separate `knowledge_chunks` table. Creation supports text, number, boolean, date, json and blob columns. Metadata filters and multidimensional tags apply to both recall routes and the final access check; tags use OR within a dimension and AND across dimensions.
+
+The aime-chat-compatible toolkit retains existing tool IDs and independent admin toggles:
+
+- `knowledge_create`: embeddingModel, rerankerModel and extendColumns; omitted models use defaults, null/empty string disables them.
+- `knowledge_list`: accessible bases, permissions, models, item counts and custom columns.
+- `knowledge_search`: kb_source IDs/names, top_k, safe parameterized where expressions, tags/metadata and bounded return_full_content.
+- `knowledge_get_document`: item_id, text/json, safe grep pattern, offset/limit, version/history; filtering precedes pagination and preserves original line numbers.
+- `knowledge_save_document`: kb_source, item_id, text/file/folder/web sources and partial extendColumns updates; save/update_version/archive/restore/reprocess actions. Version updates require expectedVersion. Workspace folder imports report per-file results.
+
+Legacy baseId/documentId/topK/source-object inputs remain supported. Tools use trusted conversation identity and the same permissions/rebuild locks as the UI. Run `pnpm db:migrate` before upgrading; the transactional migration copies and verifies chunks/vectors before dropping legacy tables. PostgreSQL must support pgvector.
 
 ## Environment variables
 

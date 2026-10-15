@@ -7,6 +7,7 @@ export default defineConfig({
   format: ['esm'],
   platform: 'node',
   target: 'node22',
+  define: { __API_DOCS_ENABLED__: 'false' },
   noExternal: ['@aime/auth', '@aime/db', '@aime/shared', '@app/plugin-sdk'],
   external: ['typeorm', 'pg', 'reflect-metadata', 'dotenv', 'zod'],
   sourcemap: true,

@@ -17,6 +17,8 @@ import { createWorkspaceTools, createSkillTools } from '@mastra/core/workspace';
 import { z } from 'zod';
 import { ExecOutput, execOutputSchema } from './exec/output.js';
 import { runExec } from './exec/runtime.js';
+import { createExecModules } from './exec/modules.js';
+import { execToolDescription } from './exec/declaration.js';
 
 type Dependencies = {
   getTools: (context: ToolExecutionContext) => Promise<ToolsInput>;
@@ -27,14 +29,14 @@ export function createExecTool({ getTools }: Dependencies) {
   return createTool({
     id: 'exec',
     description: `Run JavaScript to orchestrate tools in a fresh isolated QuickJS/WASM runtime.
-Pass a JavaScript function body in code (no Markdown fences); top-level await is supported.
-ALL_TOOLS is an array of { name, description } for all currently available built-in, workspace and MCP tools. Globally disabled tools and this Agent's excluded tools are unavailable. MCP names start with mcp__.
+Pass JavaScript in code (no Markdown fences); top-level await, static import and await import() are supported.
+ALL_TOOLS is an array of { name, description } for all currently available built-in, workspace and MCP tools. Each description includes an exec tool declaration with TypeScript input/output types and parameter comments. Tools without an input schema are declared without arguments; missing output schemas and unrepresentable schema types use unknown. Filter the catalog before emitting descriptions to stay within the output budget. Globally disabled tools and this Agent's excluded tools are unavailable. MCP names start with mcp__.
 Call await tools.read_file({ path: 'README.md' }) or await tools.mcp__server__tool({...}). Inspect tools[name].inputSchema for its JSON Schema. Names are normalized JavaScript identifiers; use the exact name from ALL_TOOLS.
 text(value) explicitly emits text (non-strings are JSON serialized); image(value) explicitly emits an image from a base64 data URL, { image_url: dataURL }, an MCP image block, or a workspace media result. HTTP URLs are not accepted.
 Only text() and image() output is returned. Return values, bare expressions, console output and nested tool results are not automatically emitted. Await all tool calls you need; unawaited work is cancelled when the script ends, but already-started external side effects cannot be rolled back.
-No Node, process, require, imports, filesystem, network, console or timers are exposed. Access external capabilities through tools only. Runtime limits: 64 MiB memory, 1 second of synchronous CPU execution, at most 256 tool calls and 32 concurrent calls. yield_time_ms is a wall-clock timeout, not a background continuation. max_output_tokens is an approximate text budget (4 UTF-8 bytes/token); image output has a separate 10 MiB budget.
+Available imports: node:fs (promises and callback APIs), node:fs/promises (readFile, writeFile, appendFile, mkdir), node:path (join, resolve, normalize, dirname, basename, extname, relative, isAbsolute, parse, format, posix/win32); names without node: also work. These are limited compatibility modules, not full Node. File operations use the current workspace, including its path, read-only, enabled-tool and approval restrictions. readFile(path, 'utf8') returns text; without encoding it returns Uint8Array. writeFile accepts text or typed arrays; flags w/wx/a and Node encodings are supported. mkdir requires the workspace mkdir tool to be enabled. Sync filesystem APIs, Buffer, process, require, other imports, network, console and timers are unavailable. path.resolve uses the workspace root. Runtime limits: 64 MiB memory, 1 second of synchronous CPU execution, at most 256 async tool/module calls and 32 concurrent calls; file reads are capped at 8 MiB. yield_time_ms is a wall-clock timeout, not a background continuation. max_output_tokens is an approximate text budget (4 UTF-8 bytes/token); image output has a separate 10 MiB budget.
 Disabled tools remain unavailable. Approval and suspension tools must be called directly by the Agent; exec cannot resume their interactions. exec itself is excluded from tools to prevent recursion.
-Examples: text(ALL_TOOLS.filter(t => t.name.startsWith('mcp__'))); text(await tools.read_file({ path: 'README.md' })); image(await tools.read_file({ path: 'photo.png' }));`,
+Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.txt', 'hello', 'utf8'); text('saved'); const fs = await import('node:fs'); text(await fs.promises.readFile('output.txt', 'utf8')); text(ALL_TOOLS.filter(t => t.name.startsWith('mcp__'))); image(await tools.read_file({ path: 'photo.png' }));`,
     inputSchema: z.object({
       code: z
         .string()
@@ -111,13 +113,35 @@ Examples: text(ALL_TOOLS.filter(t => t.name.startsWith('mcp__'))); text(await to
           code,
           signal,
           deadline,
-          catalog: [...catalog].map(([name, tool]) => ({
-            name,
-            description: tool.description ?? '',
-            inputSchema: tool.inputSchema
-              ? standardSchemaToJSONSchema(toStandardSchema(tool.inputSchema))
-              : undefined,
-          })),
+          modules: createExecModules({ ...context, abortSignal: signal }),
+          catalog: [...catalog].map(([name, tool]) => {
+            const inputSchema = tool.inputSchema
+              ? standardSchemaToJSONSchema(toStandardSchema(tool.inputSchema), {
+                  io: 'input',
+                })
+              : undefined;
+            let outputSchema: unknown;
+            try {
+              outputSchema = tool.outputSchema
+                ? standardSchemaToJSONSchema(
+                    toStandardSchema(tool.outputSchema),
+                    { io: 'output' },
+                  )
+                : undefined;
+            } catch {
+              // Discovery must still work for outputs that cannot be represented in JSON Schema.
+            }
+            return {
+              name,
+              description: execToolDescription(
+                name,
+                tool.description ?? '',
+                inputSchema,
+                outputSchema,
+              ),
+              inputSchema,
+            };
+          }),
           emit: (kind, value) =>
             kind === 'text' ? output.text(value) : output.image(value),
           dispatch: async (name, input) => {

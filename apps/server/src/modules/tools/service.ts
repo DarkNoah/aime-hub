@@ -1,3 +1,4 @@
+import type { KnowledgeService } from '../knowledge/service.js';
 import { enabledToolConfigSchema } from '@aime/shared/tools';
 import type { PluginService } from '../plugins/service.js';
 import type { DataSource } from 'typeorm';
@@ -42,6 +43,7 @@ export class ToolService {
     private readonly assets?: Pick<AssetService, 'record'>,
     private readonly mcp?: { getTools(): Promise<ToolsInput> },
     private readonly plugins?: PluginService,
+    private readonly knowledge?: KnowledgeService,
   ) {}
 
   async get(id: ToolId): Promise<ToolConfig> {
@@ -217,6 +219,8 @@ export class ToolService {
       ids?.filter((id) => !this.plugins?.ownsTool(id)),
       defaults,
       {
+        knowledgeSearch: this.knowledge?.searchContext.bind(this.knowledge),
+        knowledge: this.knowledge,
         pluginTools,
         disabledTools,
         // MCP tools are discovered only inside exec, never injected into the Agent.

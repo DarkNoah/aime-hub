@@ -7,6 +7,7 @@ import { Link, useNavigate } from '@tanstack/react-router';
 import {
   ChevronsUpDown,
   Clock3,
+  BookOpen,
   Home,
   LoaderCircle,
   LogOut,
@@ -131,6 +132,16 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               <Sparkles className="size-4" />
               {t('nav.skills')}
             </Link>
+            <Link
+              to="/knowledge"
+              className={linkClass}
+              activeProps={activeProps}
+              inactiveProps={inactiveProps}
+              onClick={onNavigate}
+            >
+              <BookOpen className="size-4" />
+              {t('nav.knowledge')}
+            </Link>
             <PluginNavigation onNavigate={onNavigate} />
             <ThreadSidebar onNavigate={onNavigate} />
             <ProjectSidebar onNavigate={onNavigate} />
@@ -154,6 +165,16 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   {t(label)}
                 </Link>
               ))}
+              <Link
+                to="/knowledge"
+                className={linkClass}
+                activeProps={activeProps}
+                inactiveProps={inactiveProps}
+                onClick={onNavigate}
+              >
+                <BookOpen className="size-4" />
+                {t('nav.knowledge')}
+              </Link>
               <PluginNavigation admin onNavigate={onNavigate} />
             </div>
           )}

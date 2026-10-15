@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useEffectEvent, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Plus, RefreshCw, X } from 'lucide-react';
 import type { ProviderDetail, ProviderModel } from '@aime/shared/providers';
@@ -16,6 +16,7 @@ export function ProviderModelsSection({
   providerId,
   revision,
   busy,
+  onLoaded,
   onAction,
   onSync,
   onToggle,
@@ -24,6 +25,7 @@ export function ProviderModelsSection({
   providerId: string;
   revision: number;
   busy: boolean;
+  onLoaded: (provider: ProviderDetail, modelCount: number) => void;
   onAction: (action: ProviderAction) => void;
   onSync: () => void;
   onToggle: (
@@ -47,6 +49,12 @@ export function ProviderModelsSection({
   );
   const loading = detail.loading || models.loading;
   const error = detail.error || models.error;
+  const notifyLoaded = useEffectEvent(onLoaded);
+  useEffect(() => {
+    if (!busy && !loading && !error && detail.data && models.data) {
+      notifyLoaded(detail.data, models.data.length);
+    }
+  }, [busy, loading, error, detail.data, models.data]);
   const query = search.trim().toLocaleLowerCase();
   const filtered = (models.data ?? []).filter((model) =>
     [model.id, model.name, model.displayName, model.description].some((value) =>
@@ -110,7 +118,13 @@ export function ProviderModelsSection({
           </Button>
           <Button
             disabled={busy || loading || !!error}
-            onClick={() => onAction({ kind: 'model', providerId })}
+            onClick={() =>
+              onAction({
+                kind: 'model',
+                providerId,
+                providerType: detail.data?.type,
+              })
+            }
           >
             <Plus />
             {t('models.create')}
@@ -256,7 +270,12 @@ export function ProviderModelsSection({
                             variant="ghost"
                             disabled={busy}
                             onClick={() =>
-                              onAction({ kind: 'model', providerId, model })
+                              onAction({
+                                kind: 'model',
+                                providerId,
+                                providerType: detail.data?.type,
+                                model,
+                              })
                             }
                           >
                             {t('providers.editAction')}

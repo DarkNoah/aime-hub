@@ -11,6 +11,8 @@ import {
   normalizeModelDefaults,
   type AvailableModels,
   providerGroup,
+  providerSupportsModels,
+  providerModelTypes,
   defaultModelKeys,
   defaultModelTypes,
   modelSupportsType,
@@ -19,6 +21,7 @@ import {
 import { ProviderError, requestProviderJson } from './network.js';
 import { NewApiProvider } from '../../mastra/providers/newapi.js';
 import { OpenAICompatibleProvider } from '../../mastra/providers/openai-compatible.js';
+import { MinerUProvider } from '../../mastra/providers/mineru.js';
 import { XinferenceProvider } from '../../mastra/providers/xinference.js';
 import type { requestWebResource } from '../../mastra/web/request.js';
 
@@ -126,8 +129,8 @@ export class ProviderService {
     if (!provider) throw new ProviderError('NOT_FOUND', 404);
     return provider;
   }
-  private assertLanguageModelProvider(provider: Provider) {
-    if (providerGroup(provider.type) !== 'languageModel')
+  private assertModelProvider(provider: Provider) {
+    if (!providerSupportsModels(provider.type))
       throw new ProviderError('PROVIDER_CONFIG_ONLY');
   }
   private async defaults(manager: EntityManager): Promise<ModelDefaults> {
@@ -212,29 +215,31 @@ export class ProviderService {
         thinkingMode: defaults.thinkingMode,
       },
       providers: providers
-        .filter((provider) => providerGroup(provider.type) === 'languageModel')
+        .filter((provider) => providerSupportsModels(provider.type))
         .map((provider) => ({
           id: provider.id,
           name: provider.name,
           type: provider.type,
           enabled: provider.enabled,
-          models: (
-            provider as Provider & { models: ProviderModel[] }
-          ).models.map((model) => ({
-            providerId: model.providerId,
-            id: model.id,
-            modelType: model.modelType,
-            name: model.name,
-            displayName: model.displayName,
-            description: model.description,
-            enabled: model.enabled,
-            modalitiesInput: model.modalitiesInput,
-            modalitiesOutput: model.modalitiesOutput,
-            reasoning: model.reasoning,
-            toolCall: model.toolCall,
-            limitContext: model.limitContext,
-            limitOutput: model.limitOutput,
-          })),
+          models: (provider as Provider & { models: ProviderModel[] }).models
+            .filter((model) =>
+              providerModelTypes(provider.type).includes(model.modelType),
+            )
+            .map((model) => ({
+              providerId: model.providerId,
+              id: model.id,
+              modelType: model.modelType,
+              name: model.name,
+              displayName: model.displayName,
+              description: model.description,
+              enabled: model.enabled,
+              modalitiesInput: model.modalitiesInput,
+              modalitiesOutput: model.modalitiesOutput,
+              reasoning: model.reasoning,
+              toolCall: model.toolCall,
+              limitContext: model.limitContext,
+              limitOutput: model.limitOutput,
+            })),
         })),
     };
   }
@@ -249,7 +254,9 @@ export class ProviderService {
     return provider;
   }
   private createProviderInstance(provider: Provider) {
-    this.assertLanguageModelProvider(provider);
+    this.assertModelProvider(provider);
+    if (provider.type === 'mineru')
+      return new MinerUProvider(provider, this.requestResource);
     if (provider.type === 'xinference')
       return new XinferenceProvider(provider, this.requestResource);
     return provider.type === 'newapi'
@@ -301,6 +308,14 @@ export class ProviderService {
     );
     return provider.speechModel(modelId, { modelName });
   }
+  async getOcrModel(reference: string) {
+    const model = await this.getModel(reference);
+    if (!model.enabled || !modelSupportsType(model, 'ocr'))
+      throw new ProviderError('INVALID_MODEL');
+    return (await this.getProviderInstance(model.providerId)).ocrModel(
+      model.id,
+    );
+  }
   // Server-only persisted configuration, including credentials, for model clients.
   async getProvider(id: string) {
     const provider = await this.getProviderRecord(id);
@@ -321,14 +336,18 @@ export class ProviderService {
     const slash = reference.indexOf('/');
     if (slash < 1) throw new ProviderError('INVALID_MODEL');
     const providerId = reference.slice(0, slash);
-    this.assertLanguageModelProvider(
-      await this.requireProvider(this.database.manager, providerId),
+    const provider = await this.requireProvider(
+      this.database.manager,
+      providerId,
     );
+    this.assertModelProvider(provider);
     const model = await this.database.manager.findOneBy(ProviderModel, {
       providerId,
       id: reference.slice(slash + 1),
     });
     if (!model) throw new ProviderError('NOT_FOUND', 404);
+    if (!providerModelTypes(provider.type).includes(model.modelType))
+      throw new ProviderError('INVALID_MODEL');
     return {
       ...model,
       supportsImageInput: model.modalitiesInput.includes('image'),
@@ -357,7 +376,10 @@ export class ProviderService {
       if (input.enabled === false) await this.assertUnused(manager, id);
       if (
         input.type &&
-        providerGroup(input.type) !== providerGroup(provider.type)
+        input.type !== provider.type &&
+        (providerGroup(input.type) !== providerGroup(provider.type) ||
+          input.type === 'mineru' ||
+          provider.type === 'mineru')
       ) {
         await this.assertUnused(manager, id);
         if (await manager.countBy(ProviderModel, { providerId: id }))
@@ -383,9 +405,10 @@ export class ProviderService {
   }
   async createModel(providerId: string, input: ModelInput) {
     return this.write(async (manager) => {
-      this.assertLanguageModelProvider(
-        await this.requireProvider(manager, providerId),
-      );
+      const provider = await this.requireProvider(manager, providerId);
+      this.assertModelProvider(provider);
+      if (!providerModelTypes(provider.type).includes(input.modelType))
+        throw new ProviderError('INVALID_MODEL');
       const old = await manager.findOne(ProviderModel, {
         where: { providerId, id: input.id },
         withDeleted: true,
@@ -408,11 +431,16 @@ export class ProviderService {
     input: Partial<ModelInput>,
   ) {
     return this.write(async (manager) => {
-      this.assertLanguageModelProvider(
-        await this.requireProvider(manager, providerId),
-      );
+      const provider = await this.requireProvider(manager, providerId);
+      this.assertModelProvider(provider);
       const model = await manager.findOneBy(ProviderModel, { providerId, id });
       if (!model) throw new ProviderError('NOT_FOUND', 404);
+      if (
+        !providerModelTypes(provider.type).includes(
+          input.modelType ?? model.modelType,
+        )
+      )
+        throw new ProviderError('INVALID_MODEL');
       const nextId = input.id ?? id;
       if (nextId !== id || input.enabled === false)
         await this.assertUnused(manager, providerId, id);
@@ -506,7 +534,7 @@ export class ProviderService {
     let provider: Awaited<ReturnType<ProviderService['getProvider']>>;
     try {
       provider = await this.getProvider(providerId);
-      this.assertLanguageModelProvider(provider);
+      this.assertModelProvider(provider);
     } catch (error) {
       this.syncing.delete(providerId);
       throw error;
@@ -535,12 +563,14 @@ export class ProviderService {
     let catalog: unknown = {};
     let catalogAvailable = false;
     try {
-      catalog = await this.requestJson(
-        'https://models.dev/api.json',
-        undefined,
-        20_000_000,
-      );
-      catalogAvailable = catalogSchema.safeParse(catalog).success;
+      if (provider.type !== 'mineru') {
+        catalog = await this.requestJson(
+          'https://models.dev/api.json',
+          undefined,
+          20_000_000,
+        );
+        catalogAvailable = catalogSchema.safeParse(catalog).success;
+      }
     } catch {
       /* Discovery still succeeds when optional capability enrichment is unavailable. */
     }
@@ -560,7 +590,9 @@ export class ProviderService {
           id,
           name: id,
           ...catalogFields(lookupModel(id)),
-          ...(provider.type === 'xinference' ? discoveredModels.get(id) : {}),
+          ...(['xinference', 'mineru'].includes(provider.type)
+            ? discoveredModels.get(id)
+            : {}),
           deprecated: false,
         });
         const old = await manager.findOne(ProviderModel, {

@@ -51,6 +51,8 @@ import { GOAL_MAX_RUNS, readThreadGoal } from './goals.js';
 import { compactMemory } from './compact-memory.js';
 import { buildTools, type ToolService } from '../tools/service.js';
 import { CommandSandbox } from '../../mastra/tools/command/sandbox.js';
+import { agentEnvironment } from './agent-environment.js';
+import { AgentsMDProcessor } from '../../mastra/processors/agents-md.js';
 
 export function createChatRunner(
   mastra: Mastra,
@@ -211,6 +213,7 @@ export function createChatRunner(
           mastra,
           instructions: config.instructions + projectInstructions,
           model: resolved.model,
+          inputProcessors: [new AgentsMDProcessor(commands.workingDirectory)],
           subagentOptions: (child) => {
             // A null model follows the parent's current selection, including queued changes.
             const childModel = () =>
@@ -222,7 +225,14 @@ export function createChatRunner(
                   )
                 : Promise.resolve(resolved);
             return {
-              instructions: child.instructions + projectInstructions,
+              instructions: async () =>
+                child.instructions +
+                projectInstructions +
+                '\n\n' +
+                agentEnvironment(
+                  commands.workingDirectory,
+                  (await childModel()).reference,
+                ),
               model: async () => (await childModel()).model,
               workspace: async () =>
                 (await childModel()).toolCall ? workspace : undefined,
@@ -385,6 +395,7 @@ export function createChatRunner(
           const abortSignal = runAbort.signal;
           const requestContext = new RequestContext();
           requestContext.set('userId', createdBy ?? userId);
+          requestContext.set('projectId', projectId);
           requestContext.set('chatSettings', {
             agentId: config.id,
             model: next.model,
@@ -404,6 +415,7 @@ export function createChatRunner(
             'X-USER-ID': createdBy ?? userId,
             ...(projectId ? { 'X-PROJECT-ID': projectId } : {}),
           };
+          let environmentPrompt = '';
           return {
             memory: { thread: thread.id, resource: thread.resourceId },
             abortSignal,
@@ -416,6 +428,21 @@ export function createChatRunner(
               headers,
             },
             savePerStep: true,
+            delegation: {
+              // Each child supplies its own model identity in its environment block.
+              messageFilter: ({ messages }) =>
+                messages.filter(
+                  (message) =>
+                    message.role !== 'system' ||
+                    !(typeof message.content === 'string'
+                      ? message.content === environmentPrompt
+                      : message.content.parts.some(
+                          (part) =>
+                            part.type === 'text' &&
+                            part.text === environmentPrompt,
+                        )),
+                ),
+            },
             prepareStep: async ({ messageList, stepNumber }) => {
               // Native signals have already entered the message list at this point.
               // Read their settings; do not drain or inject application-owned input.
@@ -436,6 +463,14 @@ export function createChatRunner(
               currentSettings =
                 chatSettingsSchema.safeParse(fromMessage).data ?? next;
               resolved = await sessionModel(currentSettings);
+              environmentPrompt = agentEnvironment(
+                commands.workingDirectory,
+                resolved.reference,
+              );
+              // Refresh only our environment block; retain workspace, skills and memory prompts.
+              messageList
+                .clearSystemMessages('agent-environment')
+                .addSystem(environmentPrompt, 'agent-environment');
               step = {
                 id: randomUUID(),
                 createdAt: new Date(),

@@ -1,3 +1,6 @@
+import { createKnowledgeSearchTool } from '../../mastra/tools/knowledge_search.js';
+import { createKnowledgeTools } from '../../mastra/tools/knowledge.js';
+import type { KnowledgeService } from '../knowledge/service.js';
 import type { ToolsInput } from '@mastra/core/agent';
 import { z } from 'zod';
 import {
@@ -36,6 +39,8 @@ export type ToolDefaultConfigs = Partial<
   speech?: Partial<SpeechConfig>;
 };
 type ToolDependencies = {
+  knowledgeSearch?: KnowledgeService['searchContext'];
+  knowledge?: KnowledgeService;
   disabledTools?: readonly string[];
   mcpTools?: () => Promise<ToolsInput>;
   pluginTools?: () => Promise<ToolsInput>;
@@ -148,6 +153,15 @@ async function buildTool(
         recordAsset: dependencies.recordAsset,
       });
     case 'builtin':
+      if (id.startsWith('knowledge_') && id !== 'knowledge_search') {
+        const tools = createKnowledgeTools(dependencies.knowledge);
+        if (id in tools) return tools[id as keyof typeof tools];
+      }
+      if (id === 'knowledge_search')
+        return createKnowledgeSearchTool(
+          dependencies.knowledgeSearch,
+          dependencies.knowledge,
+        );
       if (id === 'exec')
         return createExecTool({
           getTools: async () => {

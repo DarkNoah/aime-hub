@@ -8,6 +8,8 @@ import type {
 } from 'ai';
 import type { ModelInput } from '@aime/shared/providers';
 import { z } from 'zod';
+import type { OcrModel } from './ocr-model.js';
+export type { OcrModel, OcrInput, OcrOptions, OcrResult } from './ocr-model.js';
 
 export type WebFetchResult = {
   content: string;
@@ -86,6 +88,10 @@ export abstract class BaseProvider {
     throw new Error(`Image model is not supported: ${this.type}/${modelId}`);
   }
 
+  ocrModel(modelId: string): OcrModel {
+    throw new Error(`OCR model is not supported: ${this.type}/${modelId}`);
+  }
+
   getLanguageModelList(): Promise<ProviderModelInfo[]> {
     return Promise.resolve([]);
   }
@@ -103,6 +109,10 @@ export abstract class BaseProvider {
   }
 
   getRerankModelList(): Promise<ProviderModelInfo[]> {
+    return Promise.resolve([]);
+  }
+
+  getOcrModelList(): Promise<ProviderModelInfo[]> {
     return Promise.resolve([]);
   }
 

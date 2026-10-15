@@ -4,6 +4,7 @@ import {
   type QuickJSDeferredPromise,
   type QuickJSHandle,
 } from 'quickjs-emscripten';
+import { execModuleSource, type ExecModules } from './modules.js';
 
 type Options = {
   code: string;
@@ -12,6 +13,7 @@ type Options = {
   catalog: { name: string; description: string; inputSchema?: unknown }[];
   dispatch: (name: string, input: unknown) => Promise<unknown>;
   emit: (kind: 'text' | 'image', value: unknown) => void;
+  modules: ExecModules;
 };
 
 /** Only JSON strings cross the WASM boundary; no host objects/functions reach guest code. */
@@ -22,6 +24,10 @@ export async function runExec(options: Options) {
   runtime.setMemoryLimit(64 * 1024 * 1024);
   runtime.setMaxStackSize(512 * 1024);
   const vm = runtime.newContext();
+  runtime.setModuleLoader(
+    (name) => options.modules.load(name),
+    (_, name) => name,
+  );
   let closed = false;
   let calls = 0;
   let cpuMs = 0;
@@ -76,61 +82,83 @@ export async function runExec(options: Options) {
       options.emit(type, JSON.parse(vm.getString(json)));
       return vm.undefined;
     });
-    const call = vm.newFunction('_call', (name, args) => {
-      check();
-      if (++calls > 256 || pending.size >= 32)
-        throw new Error('exec tool call limit exceeded');
-      const toolName = vm.getString(name);
-      const input = JSON.parse(vm.getString(args));
-      const deferred = vm.newPromise();
-      pending.add(deferred);
-      const settle = (value: unknown, rejected: boolean) => {
-        if (closed) return;
-        completed.push(() => {
-          try {
-            const handle = rejected
-              ? vm.newError(
-                  value instanceof Error ? value.message : String(value),
-                )
-              : deserialize(value);
-            try {
-              if (rejected) deferred.reject(handle);
-              else deferred.resolve(handle);
-            } finally {
-              handle.dispose();
-            }
-          } catch (error) {
-            const handle = vm.newError(
-              error instanceof Error ? error.message : String(error),
-            );
-            deferred.reject(handle);
-            handle.dispose();
-          } finally {
-            pending.delete(deferred);
-            deferred.dispose();
-          }
-        });
-        notify();
-      };
-      // Start on the next host microtask: synchronous guest completion cancels unawaited calls.
-      void Promise.resolve()
-        .then(() => {
+    const createCall = (dispatch: Options['dispatch']) =>
+      vm.newFunction('_call', (name, args) => {
+        check();
+        if (++calls > 256 || pending.size >= 32)
+          throw new Error('exec tool call limit exceeded');
+        const toolName = vm.getString(name);
+        const json = vm.getString(args);
+        if (Buffer.byteLength(json) > 16 * 1024 * 1024)
+          throw new Error('exec call input exceeds 16 MiB');
+        const input = JSON.parse(json);
+        const deferred = vm.newPromise();
+        pending.add(deferred);
+        const settle = (value: unknown, rejected: boolean) => {
           if (closed) return;
-          return options.dispatch(toolName, input);
-        })
-        .then(
-          (result) => settle(result, false),
-          (error) => settle(error, true),
-        );
-      return deferred.handle;
+          completed.push(() => {
+            try {
+              const handle = rejected
+                ? vm.newError(
+                    value instanceof Error ? value.message : String(value),
+                  )
+                : deserialize(value);
+              try {
+                if (rejected) deferred.reject(handle);
+                else deferred.resolve(handle);
+              } finally {
+                handle.dispose();
+              }
+            } catch (error) {
+              const handle = vm.newError(
+                error instanceof Error ? error.message : String(error),
+              );
+              deferred.reject(handle);
+              handle.dispose();
+            } finally {
+              pending.delete(deferred);
+              deferred.dispose();
+            }
+          });
+          notify();
+        };
+        // Start on the next host microtask: synchronous guest completion cancels unawaited calls.
+        void Promise.resolve()
+          .then(() => {
+            if (closed) return;
+            check();
+            return dispatch(toolName, input);
+          })
+          .then(
+            (result) => settle(result, false),
+            (error) => settle(error, true),
+          );
+        return deferred.handle;
+      });
+    const call = createCall(options.dispatch);
+    const moduleCall = createCall(options.modules.dispatch);
+    const moduleSync = vm.newFunction('_moduleSync', (name, args) => {
+      check();
+      return deserialize(
+        options.modules.sync(
+          vm.getString(name),
+          JSON.parse(vm.getString(args)),
+        ),
+      );
     });
     vm.setProp(vm.global, '_emit', emit);
     vm.setProp(vm.global, '_call', call);
+    vm.setProp(vm.global, '_moduleCall', moduleCall);
+    vm.setProp(vm.global, '_moduleSync', moduleSync);
     emit.dispose();
     call.dispose();
+    moduleCall.dispose();
+    moduleSync.dispose();
     const bootstrap = `(() => {
       const emit = globalThis._emit, call = globalThis._call;
+      const moduleCall = globalThis._moduleCall, moduleSync = globalThis._moduleSync;
       delete globalThis._emit; delete globalThis._call;
+      delete globalThis._moduleCall; delete globalThis._moduleSync;
       const stringify = JSON.stringify;
       const catalog = ${JSON.stringify(options.catalog)};
       const tools = Object.create(null);
@@ -140,6 +168,8 @@ export async function runExec(options: Options) {
         tools[name] = Object.freeze(invoke);
       }
       Object.defineProperties(globalThis, {
+        __execModuleCall: { value: (name, args) => moduleCall(name, stringify(args)) },
+        __execModuleSync: { value: (name, args) => moduleSync(name, stringify(args)) },
         tools: { value: Object.freeze(tools) },
         ALL_TOOLS: { value: Object.freeze(catalog.map(({name, description}) => Object.freeze({name, description}))) },
         text: { value: value => {
@@ -153,11 +183,18 @@ export async function runExec(options: Options) {
     execute(() =>
       vm.unwrapResult(vm.evalCode(bootstrap, 'exec-bootstrap.js')).dispose(),
     );
-    program = execute(() =>
-      vm.unwrapResult(
-        vm.evalCode(`(async () => {\n${options.code}\n})()`, 'exec.js'),
-      ),
-    );
+    program = execute(() => {
+      const exports = vm.unwrapResult(
+        vm.evalCode(execModuleSource(options.code), 'exec.js', {
+          type: 'module',
+        }),
+      );
+      try {
+        return vm.getProp(exports, 'default');
+      } finally {
+        exports.dispose();
+      }
+    });
     while (true) {
       check();
       execute(() => {

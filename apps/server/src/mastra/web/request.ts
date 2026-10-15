@@ -64,7 +64,7 @@ export type WebResource = {
 export type WebRequestOptions = {
   signal: AbortSignal;
   maxBytes?: number;
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'PUT';
   headers?: Record<string, string>;
   body?: string | Buffer;
 };

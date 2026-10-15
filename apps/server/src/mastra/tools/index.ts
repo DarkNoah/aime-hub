@@ -16,3 +16,12 @@ export {
   taskCheckTool,
   submitPlanTool,
 } from '@mastra/core/tools';
+
+export { knowledgeSearch } from './knowledge_search.js';
+import { createKnowledgeTools } from './knowledge.js';
+export const {
+  knowledge_list,
+  knowledge_create,
+  knowledge_get_document,
+  knowledge_save_document,
+} = createKnowledgeTools();

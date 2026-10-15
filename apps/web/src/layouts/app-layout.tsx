@@ -54,18 +54,20 @@ function LayoutContent() {
     (plugin) => plugin.id === pluginId,
   )?.name;
   const title =
-    (location.pathname === '/automations'
-      ? 'nav.automations'
-      : location.pathname === '/skills'
-        ? 'nav.skills'
-        : location.pathname === '/settings'
-          ? 'nav.personalSettings'
-          : isProject
-            ? 'nav.projects'
-            : isChat
-              ? 'nav.chats'
-              : adminNavigation.find((item) => item.to === location.pathname)
-                  ?.label) ?? 'nav.home';
+    (location.pathname === '/knowledge'
+      ? 'nav.knowledge'
+      : location.pathname === '/automations'
+        ? 'nav.automations'
+        : location.pathname === '/skills'
+          ? 'nav.skills'
+          : location.pathname === '/settings'
+            ? 'nav.personalSettings'
+            : isProject
+              ? 'nav.projects'
+              : isChat
+                ? 'nav.chats'
+                : adminNavigation.find((item) => item.to === location.pathname)
+                    ?.label) ?? 'nav.home';
 
   useEffect(() => {
     const desktop = window.matchMedia('(min-width: 768px)');

@@ -12,10 +12,10 @@ import {
 } from 'lucide-react';
 import {
   providerGroup,
+  providerSupportsModels,
   providerGroups,
   type ProviderModel,
   type ProviderSummary,
-  type SyncResult,
 } from '@aime/shared/providers';
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/page-header';
@@ -43,6 +43,7 @@ export function AdminProvidersPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState('');
   const [revision, setRevision] = useState(0);
+  const [modelRevision, setModelRevision] = useState(0);
   const providers = useProviderResource(
     'providers',
     revision,
@@ -53,6 +54,7 @@ export function AdminProvidersPage() {
   const [action, setAction] = useState<ProviderAction | null>(null);
   const [pending, setPending] = useState(false);
   const submitting = useRef(false);
+  const initializedModelProviders = useRef(new Map<string, string>());
   const [defaultsPending, setDefaultsPending] = useState(false);
   const focusTarget = useRef<HTMLElement | null>(null);
   const busy = pending || defaultsPending || !!action;
@@ -72,45 +74,72 @@ export function AdminProvidersPage() {
         : null;
     setAction(next);
   }
+  function initializeModels(provider: ProviderSummary, modelCount: number) {
+    if (
+      !modelsOpen ||
+      busy ||
+      submitting.current ||
+      !providerSupportsModels(provider.type) ||
+      initializedModelProviders.current.get(provider.id) === provider.updatedAt
+    )
+      return;
+    // Check each saved configuration once per page visit, even if sync fails
+    // or returns no models. Reopening the Sheet must not trigger a retry loop.
+    initializedModelProviders.current.set(provider.id, provider.updatedAt);
+    if (modelCount === 0) void syncModels(provider);
+  }
+  async function syncModels(provider: Pick<ProviderSummary, 'id' | 'type'>) {
+    if (submitting.current || defaultsPending) return;
+    submitting.current = true;
+    setPending(true);
+    try {
+      const result = await providerApi.sync(provider.id);
+      toast.success(t('models.synced', result), {
+        description:
+          provider.type !== 'mineru' && !result.catalogAvailable
+            ? t('models.catalogUnavailable')
+            : undefined,
+      });
+      // Sync only adds models or changes availability; keep the provider list
+      // mounted and update this provider's count without losing its position.
+      providers.updateData((items) =>
+        items.map((item) =>
+          item.id === provider.id
+            ? { ...item, modelCount: item.modelCount + result.added }
+            : item,
+        ),
+      );
+      setModelRevision((value) => value + 1);
+    } catch (cause) {
+      toast.error(t(providerErrorKey(cause)));
+    } finally {
+      submitting.current = false;
+      setPending(false);
+    }
+  }
   async function mutate(
     mutation:
       | { kind: 'provider'; id: string; enabled: boolean }
-      | { kind: 'model'; providerId: string; id: string; enabled: boolean }
-      | { kind: 'sync'; id: string },
+      | { kind: 'model'; providerId: string; id: string; enabled: boolean },
   ) {
     if (submitting.current || defaultsPending || action) return;
     submitting.current = true;
     setPending(true);
     try {
-      const sync = mutation.kind === 'sync';
       const result =
         mutation.kind === 'provider'
           ? await providerApi.update(mutation.id, { enabled: mutation.enabled })
-          : mutation.kind === 'model'
-            ? await providerApi.updateModel(mutation.providerId, mutation.id, {
-                enabled: mutation.enabled,
-              })
-            : await providerApi.sync(mutation.id);
-      toast.success(
-        sync
-          ? t('models.synced', result as SyncResult)
-          : t('providers.success'),
-        {
-          description:
-            sync && !(result as SyncResult).catalogAvailable
-              ? t('models.catalogUnavailable')
-              : undefined,
-        },
-      );
+          : await providerApi.updateModel(mutation.providerId, mutation.id, {
+              enabled: mutation.enabled,
+            });
+      toast.success(t('providers.success'));
       if (mutation.kind === 'model') {
         return result as ProviderModel;
-      } else if (mutation.kind === 'provider') {
+      } else {
         const saved = result as ProviderSummary;
         providers.updateData((items) =>
           items.map((item) => (item.id === saved.id ? saved : item)),
         );
-      } else {
-        setRevision((value) => value + 1);
       }
     } catch (cause) {
       toast.error(t(providerErrorKey(cause)));
@@ -274,7 +303,7 @@ export function AdminProvidersPage() {
                               <span className="rounded bg-muted px-1.5 py-0.5">
                                 {provider.type}
                               </span>
-                              {group === 'languageModel' ? (
+                              {providerSupportsModels(provider.type) ? (
                                 <>
                                   <Box
                                     className="ml-1 size-3.5"
@@ -307,7 +336,7 @@ export function AdminProvidersPage() {
                             </p>
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
-                            {group === 'languageModel' && (
+                            {providerSupportsModels(provider.type) && (
                               <Button
                                 variant={
                                   selected === provider.id
@@ -411,11 +440,17 @@ export function AdminProvidersPage() {
             <ProviderModelsSection
               key={selected}
               providerId={selected}
-              revision={revision}
+              revision={revision + modelRevision}
               busy={busy}
+              onLoaded={initializeModels}
               onAction={openAction}
               onClose={() => setModelsOpen(false)}
-              onSync={() => void mutate({ kind: 'sync', id: selected })}
+              onSync={() => {
+                const provider = providers.data?.find(
+                  (item) => item.id === selected,
+                );
+                if (provider) void syncModels(provider);
+              }}
               onToggle={(model, enabled) =>
                 mutate({
                   kind: 'model',
@@ -454,6 +489,9 @@ export function AdminProvidersPage() {
                   ? items.map((item) => (item.id === saved.id ? saved : item))
                   : [saved, ...items],
               );
+              initializedModelProviders.current.set(saved.id, saved.updatedAt);
+              if (saved.modelCount === 0 && providerSupportsModels(saved.type))
+                void syncModels(saved);
             } else if (action.kind === 'deleteProvider') {
               providers.updateData((items) =>
                 items.filter((item) => item.id !== action.provider.id),

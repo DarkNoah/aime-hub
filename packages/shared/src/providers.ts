@@ -16,6 +16,9 @@ export const providerGroups = ['languageModel', 'other'] as const;
 export function providerGroup(type: string) {
   return Object.hasOwn(otherProviders, type) ? 'other' : 'languageModel';
 }
+export function providerSupportsModels(type: string) {
+  return type === 'mineru' || providerGroup(type) === 'languageModel';
+}
 export const providerTypeSchema = z.enum([
   ...(Object.keys(languageModelProviders) as Array<
     keyof typeof languageModelProviders
@@ -75,9 +78,16 @@ export const modelTypes = [
   'rerank',
   'speech',
   'image',
+  'ocr',
 ] as const;
 export const modelTypeSchema = z.enum(modelTypes);
 export type ModelType = z.infer<typeof modelTypeSchema>;
+export function providerModelTypes(type: string): readonly ModelType[] {
+  if (type === 'mineru') return ['ocr'];
+  return providerSupportsModels(type)
+    ? modelTypes.filter((modelType) => modelType !== 'ocr')
+    : [];
+}
 export const defaultModelTypes = {
   defaultModel: 'language',
   fastModel: 'language',

@@ -6,6 +6,7 @@
     ".": "./src/index.ts",
     "./env": "./src/env.ts",
     "./providers": "./src/providers.ts",
+    "./knowledge": "./src/knowledge.ts",
     "./tools": "./src/tools.ts",
     "./agents": "./src/agents.ts",
     "./mcp": "./src/mcp.ts",

@@ -25,6 +25,9 @@ const PluginPage = lazy(() =>
   import('@/pages/plugins/page').then((m) => ({ default: m.PluginPage })),
 );
 
+const KnowledgePage = lazy(() =>
+  import('@/pages/knowledge/page').then((m) => ({ default: m.KnowledgePage })),
+);
 const HomePage = lazy(() =>
   import('@/pages/home/page').then((m) => ({ default: m.HomePage })),
 );
@@ -210,6 +213,11 @@ const routeTree = rootRoute.addChildren([
       layoutRoute.addChildren([
         createRoute({
           getParentRoute: () => layoutRoute,
+          path: '/knowledge',
+          component: KnowledgePage,
+        }),
+        createRoute({
+          getParentRoute: () => layoutRoute,
           path: '/p/$pluginId/$',
           component: PluginPage,
         }),
@@ -254,6 +262,11 @@ const routeTree = rootRoute.addChildren([
           component: ProjectsPage,
         }),
         projectRoute.addChildren([
+          createRoute({
+            getParentRoute: () => projectRoute,
+            path: 'knowledge',
+            component: KnowledgePage,
+          }),
           createRoute({
             getParentRoute: () => projectRoute,
             path: 'automations',

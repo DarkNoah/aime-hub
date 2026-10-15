@@ -1,3 +1,22 @@
+import {
+  KnowledgeBaseRecord,
+  KnowledgeDocumentRecord,
+  KnowledgeBaseMember,
+  KnowledgeDocumentVersion,
+} from './knowledge-entities.js';
+import { CreateKnowledge1780000015000 } from './migrations/1780000015000-create-knowledge.js';
+import { KnowledgeModelRebuild1780000016000 } from './migrations/1780000016000-knowledge-model-rebuild.js';
+import { KnowledgeSharing1780000017000 } from './migrations/1780000017000-knowledge-sharing.js';
+import { KnowledgeDocumentVersions1780000018000 } from './migrations/1780000018000-knowledge-document-versions.js';
+import { KnowledgeUnifiedVectors1780000019000 } from './migrations/1780000019000-knowledge-unified-vectors.js';
+import { KnowledgeDocumentMetadata1780000021000 } from './migrations/1780000021000-knowledge-document-metadata.js';
+export type { KnowledgeRebuildJob } from './knowledge-entities.js';
+export {
+  KnowledgeBaseRecord,
+  KnowledgeDocumentRecord,
+  KnowledgeBaseMember,
+  KnowledgeDocumentVersion,
+};
 import 'reflect-metadata';
 import { DataSource, type EntitySchema } from 'typeorm';
 import { CreatePluginTables1780000014000 } from './migrations/1780000014000-create-plugin-tables.js';
@@ -20,6 +39,7 @@ import { AddGeneratedAssetMetadata1780000011000 } from './migrations/17800000110
 
 import { CreateUsageRecords1780000012000 } from './migrations/1780000012000-create-usage-records.js';
 import { ProviderModelType1780000013000 } from './migrations/1780000013000-provider-model-type.js';
+import { ProviderOcrModel1780000020000 } from './migrations/1780000020000-provider-ocr-model.js';
 
 import { UsageRecord } from './usage-entity.js';
 export { UsageRecord };
@@ -41,6 +61,10 @@ export function createDataSource(
     type: 'postgres',
     url: databaseUrl,
     entities: [
+      KnowledgeBaseRecord,
+      KnowledgeDocumentRecord,
+      KnowledgeBaseMember,
+      KnowledgeDocumentVersion,
       ...pluginEntities,
       Provider,
       ProviderModel,
@@ -53,6 +77,12 @@ export function createDataSource(
       GeneratedAsset,
     ],
     migrations: [
+      KnowledgeDocumentMetadata1780000021000,
+      KnowledgeUnifiedVectors1780000019000,
+      KnowledgeDocumentVersions1780000018000,
+      KnowledgeSharing1780000017000,
+      KnowledgeModelRebuild1780000016000,
+      CreateKnowledge1780000015000,
       CreatePluginTables1780000014000,
       CreateProviderTables1780000001000,
       CreateProjectTables1780000002000,
@@ -67,6 +97,7 @@ export function createDataSource(
       AddGeneratedAssetMetadata1780000011000,
       CreateUsageRecords1780000012000,
       ProviderModelType1780000013000,
+      ProviderOcrModel1780000020000,
     ],
     synchronize: false,
     migrationsRun: false,

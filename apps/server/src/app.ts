@@ -1,3 +1,5 @@
+import { knowledgeRouter } from './modules/knowledge/rpc.js';
+import type { KnowledgeService } from './modules/knowledge/service.js';
 import { pluginRoutes } from './modules/plugins/routes.js';
 import type { PluginService } from './modules/plugins/service.js';
 import type { UsageService } from './modules/usage/service.js';
@@ -8,6 +10,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { ORPCError } from '@orpc/server';
 import { RPCHandler } from '@orpc/server/fetch';
 import { OpenAPIHandler } from '@orpc/openapi/fetch';
+import type { OpenAPIReferencePlugin } from '@orpc/openapi/plugins';
 import type { Auth } from '@aime/auth';
 import { normalizeWebOrigins, type WebOrigins } from '@aime/shared';
 import type { HttpEnv } from './http.js';
@@ -21,7 +24,7 @@ import { threadRouter } from './modules/threads/rpc.js';
 import { projectRouter } from './modules/projects/rpc.js';
 import { skillRouter, personalSkillRouter } from './modules/skills/rpc.js';
 import { fileRouter } from './modules/files/rpc.js';
-import { rpc } from './rpc/context.js';
+import { rpc, type RpcContext } from './rpc/context.js';
 import type { ProviderService } from './modules/providers/service.js';
 import type { ThreadService } from './modules/threads/service.js';
 import type { LanguageModelService } from './modules/models/language-model.js';
@@ -71,6 +74,8 @@ export function createApp(
   systemSettings?: { service: SystemSettingsService; webOrigin: WebOrigins },
   usage?: { service: UsageService; webOrigin: WebOrigins },
   plugins?: PluginService,
+  knowledge?: KnowledgeService,
+  apiDocs?: OpenAPIReferencePlugin<RpcContext>,
 ) {
   const app = new Hono<HttpEnv>();
   const webOrigins = normalizeWebOrigins(
@@ -99,6 +104,7 @@ export function createApp(
   if (plugins)
     app.route('/api/plugins', pluginRoutes(auth, plugins, webOrigins));
   const router = rpc.router({
+    knowledge: knowledgeRouter(knowledge),
     usage: usageRouter(usage?.service),
     providers: providerRouter(providers?.service),
     threads: threadRouter(chat?.threads, chat?.models),
@@ -125,6 +131,7 @@ export function createApp(
     );
   const rpcHandler = new RPCHandler(router);
   const httpHandler = new OpenAPIHandler(router, {
+    plugins: apiDocs ? [apiDocs] : [],
     customErrorResponseBodyEncoder: (error) => ({ code: error.code }),
   });
   if (chat)
@@ -137,11 +144,13 @@ export function createApp(
       path,
     );
     return bodyLimit({
-      maxSize: threadRequest
-        ? 12 * 1024 * 1024
-        : projectRequest
-          ? 32 * 1024
-          : 128 * 1024,
+      maxSize: /^\/api\/rpc\/knowledge\//.test(path)
+        ? 15 * 1024 * 1024
+        : threadRequest
+          ? 12 * 1024 * 1024
+          : projectRequest
+            ? 32 * 1024
+            : 128 * 1024,
       onError: (ctx) => {
         const code = threadRequest ? 'MESSAGE_TOO_LARGE' : 'VALIDATION_ERROR';
         // Boundary errors must use the RPC envelope when the caller uses RPC.

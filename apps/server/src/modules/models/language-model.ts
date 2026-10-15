@@ -11,7 +11,7 @@ type SharedProviderOptions = NonNullable<
   AgentExecutionOptions<undefined>['providerOptions']
 >;
 import type { ModelDefaults } from '@aime/shared/providers';
-import { modelSupportsType } from '@aime/shared/providers';
+import { modelSupportsType, providerModelTypes } from '@aime/shared/providers';
 import type { ProviderService } from '../providers/service.js';
 import { ProviderError } from '../providers/network.js';
 import { ThreadError } from '../threads/errors.js';
@@ -108,7 +108,11 @@ export class LanguageModelService {
         enabled: true,
       }),
     ]);
-    if (!model || !modelSupportsType(model, 'language'))
+    if (
+      !model ||
+      !providerModelTypes(provider.type).includes('language') ||
+      !modelSupportsType(model, 'language')
+    )
       throw new ThreadError('MODEL_UNAVAILABLE');
     return {
       reference,

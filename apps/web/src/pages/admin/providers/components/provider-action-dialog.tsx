@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import type { ProviderModel, ProviderSummary } from '@aime/shared/providers';
-import { modelTypes } from '@aime/shared/providers';
+import { providerModelTypes } from '@aime/shared/providers';
 import {
   Select,
   SelectContent,
@@ -38,7 +38,12 @@ import { ProviderTypeSelector } from './provider-type-selector';
 
 export type ProviderAction =
   | { kind: 'provider'; provider?: ProviderSummary }
-  | { kind: 'model'; providerId: string; model?: ProviderModel }
+  | {
+      kind: 'model';
+      providerId: string;
+      providerType?: string;
+      model?: ProviderModel;
+    }
   | { kind: 'deleteProvider'; provider: ProviderSummary }
   | { kind: 'deleteModel'; model: ProviderModel };
 
@@ -62,6 +67,10 @@ export function ProviderActionDialog({
   const [providerType, setProviderType] = useState(provider?.type ?? 'openai');
   const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? '');
   const model = action.kind === 'model' ? action.model : undefined;
+  const modelTypes = providerModelTypes(
+    action.kind === 'model' ? (action.providerType ?? 'openai') : 'openai',
+  );
+  const isOcr = action.kind === 'model' && action.providerType === 'mineru';
   const [limits, setLimits] = useState({
     limitContext: String(model?.limitContext ?? ''),
     limitOutput: String(model?.limitOutput ?? ''),
@@ -196,16 +205,20 @@ export function ProviderActionDialog({
                       setProviderType(type);
                       if (
                         !baseUrl ||
-                        ['https://serpapi.com', 'https://r.jina.ai'].includes(
-                          baseUrl,
-                        )
+                        [
+                          'https://serpapi.com',
+                          'https://r.jina.ai',
+                          'https://mineru.net',
+                        ].includes(baseUrl)
                       )
                         setBaseUrl(
                           type === 'serpapi'
                             ? 'https://serpapi.com'
                             : type === 'jina-ai'
                               ? 'https://r.jina.ai'
-                              : '',
+                              : type === 'mineru'
+                                ? 'https://mineru.net'
+                                : '',
                         );
                     }}
                     disabled={pending}
@@ -219,7 +232,7 @@ export function ProviderActionDialog({
                           : providerType === 'xinference'
                             ? 'providers.xinferenceHint'
                             : providerType === 'mineru'
-                              ? 'providers.configOnlyHint'
+                              ? 'providers.mineruHint'
                               : 'providers.typeHint',
                     )}
                   </p>
@@ -244,7 +257,7 @@ export function ProviderActionDialog({
                           : providerType === 'xinference'
                             ? 'providers.xinferenceUrlHint'
                             : providerType === 'mineru'
-                              ? 'providers.otherUrlHint'
+                              ? 'providers.mineruUrlHint'
                               : 'providers.urlHint',
                     )}
                   </p>
@@ -300,7 +313,7 @@ export function ProviderActionDialog({
                   <Label htmlFor="model-type">{t('models.type')}</Label>
                   <Select
                     name="modelType"
-                    defaultValue={model?.modelType ?? 'language'}
+                    defaultValue={model?.modelType ?? modelTypes[0]}
                     disabled={pending}
                   >
                     <SelectTrigger id="model-type" className="w-full">
@@ -404,7 +417,10 @@ export function ProviderActionDialog({
                               name={key}
                               value={value}
                               defaultChecked={(
-                                model?.[key] ?? ['text']
+                                model?.[key] ??
+                                (isOcr && key === 'modalitiesInput'
+                                  ? ['pdf', 'image']
+                                  : ['text'])
                               ).includes(value)}
                               disabled={pending}
                             />

@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import {
   ArrowLeft,
   Clock3,
+  BookOpen,
   MessageSquare,
   MoreHorizontal,
   Plus,
@@ -58,7 +59,11 @@ import { SettingsSheet } from './components/settings-sheet';
 export function ProjectPage() {
   const { projectId = '', threadId } = useParams({ strict: false });
   const location = useLocation();
-  if (location.pathname.endsWith('/automations')) return <Outlet />;
+  if (
+    location.pathname.endsWith('/automations') ||
+    location.pathname.endsWith('/knowledge')
+  )
+    return <Outlet />;
   const chat = location.pathname.startsWith(`/projects/${projectId}/threads`);
   return (
     <ProjectSession
@@ -199,6 +204,12 @@ function ProjectSession({
               >
                 <Clock3 />
                 {t('nav.automations')}
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/projects/$projectId/knowledge" params={{ projectId }}>
+                <BookOpen />
+                {t('nav.knowledge')}
               </Link>
             </Button>
             <Button variant="outline" onClick={() => setSheet('members')}>

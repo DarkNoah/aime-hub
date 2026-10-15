@@ -7,11 +7,19 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import { useTheme } from '@/components/theme/context';
 import { fileCodeOptions, fileCodeStyles } from './file-code-options';
 
-const DiffViewer = lazy(() =>
-  import('@pierre/diffs/react').then((module) => ({
-    default: module.MultiFileDiff<undefined, undefined>,
-  })),
-);
+const DiffViewer = lazy(async () => {
+  const [module, { preloadHighlighter }] = await Promise.all([
+    import('@pierre/diffs/react'),
+    import('@pierre/diffs'),
+  ]);
+  // Initialize themes before mounting so StrictMode cannot hydrate an empty
+  // placeholder left behind while the first render loads the highlighter.
+  await preloadHighlighter({
+    themes: ['pierre-light', 'pierre-dark'],
+    langs: ['text'],
+  });
+  return { default: module.MultiFileDiff<undefined, undefined> };
+});
 
 export function FileDiff({
   filename = 'fragment.txt',

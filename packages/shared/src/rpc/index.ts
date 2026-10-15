@@ -1,3 +1,4 @@
+import { knowledgeContract } from './knowledge.js';
 import { usageContract } from './usage.js';
 import { threadsContract } from './threads.js';
 import { projectsContract } from './projects.js';
@@ -15,6 +16,7 @@ import { assetsContract } from './assets.js';
 import { systemSettingsContract } from './system-settings.js';
 
 export const apiContract = {
+  knowledge: knowledgeContract,
   usage: usageContract,
   threads: threadsContract,
   projects: projectsContract,

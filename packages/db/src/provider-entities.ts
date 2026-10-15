@@ -58,7 +58,7 @@ export class Provider extends ProviderTimestamps {
 @Entity('provider_models')
 @Check(
   'provider_models_model_type_check',
-  "model_type IN ('language', 'embedding', 'rerank', 'speech', 'image')",
+  "model_type IN ('language', 'embedding', 'rerank', 'speech', 'image', 'ocr')",
 )
 export class ProviderModel extends ProviderTimestamps {
   @Column({ name: 'model_type', type: 'text', default: 'language' })

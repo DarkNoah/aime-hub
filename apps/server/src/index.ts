@@ -1,3 +1,6 @@
+import { PgVector } from '@mastra/pg';
+import { KnowledgeService } from './modules/knowledge/service.js';
+import { KnowledgeWorker } from './modules/knowledge/worker.js';
 import { syncPluginSkills } from './modules/plugins/assets.js';
 import { installedPlugins } from './modules/plugins/generated.js';
 import { PluginService } from './modules/plugins/service.js';
@@ -12,6 +15,7 @@ import { getMigrations } from '@aime/auth/migrations';
 import { createDataSource } from '@aime/db';
 import { loadEnv } from '@aime/shared/env';
 import { createApp } from './app.js';
+import { createApiDocsPlugin } from './modules/api-docs/plugin.js';
 import { ProviderService } from './modules/providers/service.js';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -127,7 +131,26 @@ if (!agentStore) throw new Error('Mastra agents storage is required');
 const mcpStore = await storage.getStore('mcpClients');
 if (!mcpStore) throw new Error('Mastra MCP clients storage is required');
 const mcp = new McpService(mcpStore);
-const tools = new ToolService(database, providers, assets, mcp, plugins);
+const knowledgeVectors = new PgVector({
+  id: 'knowledge',
+  connectionString: env.DATABASE_URL,
+});
+const knowledge = new KnowledgeService(
+  database,
+  knowledgeVectors,
+  providers,
+  projects,
+);
+const knowledgeWorker = new KnowledgeWorker(knowledge);
+knowledgeWorker.start();
+const tools = new ToolService(
+  database,
+  providers,
+  assets,
+  mcp,
+  plugins,
+  knowledge,
+);
 const agents = new AgentService(
   agentStore,
   skills,
@@ -196,6 +219,8 @@ const app = createApp(
   { service: systemSettings, webOrigin: env.WEB_ORIGINS },
   { service: usage, webOrigin: env.WEB_ORIGINS },
   plugins,
+  knowledge,
+  await createApiDocsPlugin(env.NODE_ENV),
 );
 const server = serve(
   { fetch: app.fetch, port: env.SERVER_PORT, hostname: env.SERVER_HOST },
@@ -210,6 +235,7 @@ function shutdown() {
   stopping = true;
   void automations
     .shutdown()
+    .finally(() => knowledgeWorker.stop())
     .finally(() => threads.shutdown())
     .finally(() => notifications.close())
     .finally(() => {
@@ -218,6 +244,7 @@ function shutdown() {
         void Promise.all([
           plugins.dispose().finally(disposePluginSkills),
           mastra.shutdown(),
+          knowledgeVectors.disconnect(),
           mcp.shutdown(),
           skills.dispose(),
           projectAgentMounts.dispose(),

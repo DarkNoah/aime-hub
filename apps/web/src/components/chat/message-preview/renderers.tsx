@@ -1,3 +1,4 @@
+import { KnowledgePreview, KnowledgeManagementPreview } from './knowledge';
 import type { ComponentType, ReactNode } from 'react';
 import { isToolUIPart } from 'ai';
 import { useTranslation } from 'react-i18next';
@@ -11,6 +12,8 @@ import {
 import { ChatMessageCompression } from '../chat-message-compression';
 import { getMessageCompression } from '../message-compression';
 import { ExecuteCommandPreview } from './execute-command';
+import { ExecPreview } from './exec';
+import { TaskPreview } from './task';
 import { EditFilePreview } from './edit-file';
 import { WriteFilePreview } from './write-file';
 import { GrepPreview } from './grep';
@@ -110,7 +113,16 @@ const previewRenderers: Partial<Record<string, ComponentType<PreviewProps>>> = {
   'tool:write_file': WriteFilePreview,
   'tool:grep': GrepPreview,
   'tool:read_file': ReadFilePreview,
-  'tool:exec': ReadFilePreview,
+  'tool:exec': ExecPreview,
+  'tool:task_write': TaskPreview,
+  'tool:task_update': TaskPreview,
+  'tool:task_complete': TaskPreview,
+  'tool:task_check': TaskPreview,
+  'tool:knowledge_search': KnowledgePreview,
+  'tool:knowledge_list': KnowledgeManagementPreview,
+  'tool:knowledge_create': KnowledgeManagementPreview,
+  'tool:knowledge_get_document': KnowledgeManagementPreview,
+  'tool:knowledge_save_document': KnowledgeManagementPreview,
   'tool:web_search': WebSearchPreview,
   'tool:web_fetch': WebFetchPreview,
   'tool:image_gen': ImageGenPreview,

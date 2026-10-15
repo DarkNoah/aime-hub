@@ -57,7 +57,7 @@ PTY 使用固定版本 `node-pty@1.2.0-beta.15`，该上游版本包含 macOS �
 
 ### 1. 准备环境
 
-- Node.js **≥ 22.12.0**、**pnpm 10.12.1**（以 [package.json](package.json) 为准）。
+- Node.js **≥ 22.13.0**、**pnpm 10.12.1**（以 [package.json](package.json) 为准）。
 - Git，以及 PostgreSQL 应用数据库。可通过 [compose.local.yaml](compose.local.yaml) 启动带 pgvector 的 PostgreSQL 16；[compose.yaml](compose.yaml) 用于完整部署。
 - 可访问的模型供应商与相应凭据，在启动后通过管理后台配置。
 
@@ -103,6 +103,8 @@ pnpm dev
 
 访问 **[http://127.0.0.1:5173](http://127.0.0.1:5173)**。Vite 将同域 `/api` 请求代理到 `127.0.0.1:3001`，浏览器只需访问前端入口。API 健康检查为 `/api/health`。
 
+开发模式下可访问 [Scalar API 文档](http://127.0.0.1:5173/api/docs)，OpenAPI JSON 位于 `/api/openapi.json`。文档由现有 oRPC 契约自动生成；仅声明 TypeScript 类型的响应不会展开字段，独立 Hono 路由（如 SSE、文件和认证接口）不在自动生成范围内。只有开发环境启用文档；`pnpm build` 会移除文档加载逻辑，发布版本的两个地址均返回 404，即使运行时误设 `NODE_ENV=development` 也不会开放。
+
 只需配置 `WEB_ORIGINS`，多个完整 HTTP(S) 来源用逗号分隔，第一项是默认浏览器入口并决定 Vite 端口；端口被占用时不会自动切换。Better Auth 使用动态 `baseURL`，认证链接跟随受信任请求的访问地址；没有请求地址或主机未匹配时回退到第一项。浏览器来源必须精确匹配列表中的协议、主机与端口，未知来源仍会被拒绝。修改 `.env` 后重启服务。需要局域网访问时，将实际 IP 加入列表，不要将监听地址 `0.0.0.0` 当作浏览器入口。不同主机分别登录，不共享 Cookie。旧配置迁移时，把原默认入口放到 `WEB_ORIGINS` 第一项，然后删除 `WEB_ORIGIN` 和 `BETTER_AUTH_URL`。
 
 ### 4. 接入模型，开始对话
@@ -135,6 +137,36 @@ Linux 还需安装 Playwright 所需的系统库。项目默认使用本地文�
 - **数据与日志**：供应商密钥目前以明文保存在数据库，模型请求日志包含完整请求与响应内容；需保护数据库、日志与备份的访问权限。
 
 详细步骤、权限边界及运行行为见[使用与管理参考](docs/usage.zh-CN.md)。
+
+## 知识库
+
+在 `/knowledge` 的“我创建的”中管理个人知识库，并在“共用知识库”中访问获授权的共享库。创建者可在“仅自己／所有用户共用／指定用户共用”间切换：全员共用只设置一个权限，指定用户则逐人设置“只读／可编辑”。只读可查看与检索；可编辑可新增、更新、归档、恢复和启停文档，不能修改知识库模型或共享设置。只有知识库创建者能删库，系统管理员也不能代删。共享方式变化不会移动或复制文档与向量；重建期间也禁止修改共享权限。
+
+共享成员人数不限，成员列表及用户搜索分页加载。共享范围和成员权限修改自动保存并立即生效；单个成员的增删和权限调整独立提交，不覆盖其他成员。
+
+在项目主页进入 `/projects/:projectId/knowledge` 管理项目库。项目成员可读，项目 owner/admin 可维护，删库仍仅限知识库创建者。个人聊天检索自己创建与获授权共享的库；项目聊天仅检索全员共用库与当前项目库，不包含个人私有或指定用户共享资料。检索返回前重新校验共享权限，权限撤销后不再返回内容。
+
+支持文本、网页地址及 TXT、Markdown、HTML、JSON、CSV、PDF、DOCX、XLSX、PPTX、ODT、ODS、ODP、RTF（单文件最多 10 MB）。文档统一由 `officeparser` 提取正文，随后使用 [Mastra 官方 RAG 流程](https://mastra.ai/reference/rag/chunking-and-embedding)：`MDocument.chunk()` → AI SDK `embedMany()` → `PgVector`。扫描 PDF 需先 OCR。原始上传内容和处理状态保存在数据库，重启会继续未完成任务，失败资料可重试；正文与分块均可预览。
+
+检索使用 **向量 + BM25 双路召回 → RRF 筛选候选 → Rerank 排名 → 三路排名 RRF 融合**。BM25 复用 Mastra `Workspace` 官方实现，支持中英文分词；向量使用 `PgVector`。先通过双路 RRF 选取 `max(20, topK × 4)` 个候选（最多 400），再通过 Mastra `rerankWithScorer()` 使用知识库配置的 Rerank 模型对候选排序。最终按分块 ID 累加向量、BM25、重排各路的 `1 / (60 + 排名)`，最后截取 topK。Rerank 原始分数允许负数和大于 1 的有限值，仅用于确定排名，不直接加到融合分数中。向量超时或失败时保留 BM25，重排超时或失败时保留双路 RRF；向量阶段最多等待 10 秒，重排阶段最多等待 60 秒，并区分超时、返回异常和请求失败。`score` 和 `scores.rrf` 是最终融合分数，`scores.rerank` 保留模型原始分数，`scores.rerankRrf` 表示重排排名的贡献。未配置的模型不贡献对应排名。
+
+BM25 在每次请求中按可访问且已启用的资料分批构建内存索引，数据库是唯一内容来源，无需额外数据库扩展或迁移；大型语料会增加索引构建时间与内存。跨库聊天对整个可访问范围统一做 BM25，再融合各向量索引的排名，并按 Rerank 模型分组重排。各模型组在初始 RRF 序列的位置内重新排序，形成一份全局重排排名，再参与最终 RRF 融合，避免直接比较不同模型的原始分数或让各组重复贡献“第一名”。未启用重排或重排失败的候选不增加重排贡献。资料启停和权限在返回前再次校验。
+
+创建时预选系统默认的 Embedding 和 Rerank 模型，保存后独立生效；系统默认值之后的变动不会改变已建库。两种模型均可修改，任一变化都会重算全部分块向量（包括已停用资料）。重建期间以数据库持久化状态和写保护锁定当前库，禁止新增、编辑、删除、启停及重复重建，其他知识库正常使用；检索仍使用旧模型和索引。先将全部向量计算到临时文件，再写入独立索引、校验数量与维度，最后在事务中同时切换模型和索引。失败保留旧数据并解锁，可重新保存目标模型重试；重启后恢复未完成重建。正在解析资料时须等待完成后再切换模型。
+
+文档可直接编辑并重新计算向量，普通编辑保留版本号；“更新版本”会保存旧版原文件、解析正文、标签及元数据，再替换文档并递增版本。版本历史支持正文与元数据 diff，以及原文件下载。每份文档记录创建人和更新时间；删除操作改为归档，保留原件与历史并排除检索。恢复后使用当前模型重新处理。
+
+每个知识库只有一张分块与向量共用表，命名为 `knowledge_<nanoid>_<向量维度>`（仅 BM25 时维度为 `0`）；不再使用独立的 `knowledge_chunks` 表。创建时可定义 text、number、boolean、date、json、blob 类型的实际列。文档元数据写入这些列，可用于检索筛选；多维标签同维度取 OR，跨维度取 AND。两个召回通道及重排后的复核应用相同筛选。
+
+参照 aime-chat 的知识库工具组，保留现有工具 ID 与后台独立启停配置，并同步参数及结果预览：
+
+- `knowledge_create`：支持 `embeddingModel`、`rerankerModel` 和 `extendColumns`；不传模型使用系统默认，null 或空字符串可明确禁用。
+- `knowledge_list`：返回当前会话可访问的库、权限、模型、文档数及扩展字段。
+- `knowledge_search`：支持 `kb_source`（ID 或名称）、`top_k`、`where`、标签／元数据筛选、`return_full_content`。`where` 仅接受白名单字段和比较表达式，值参数化，支持 AND/OR、括号、IN、LIKE、NULL 比较。
+- `knowledge_get_document`：支持 `item_id`、text/json、pattern、offset/limit；pattern 过滤后再分页并保留原始行号；history/version 可读取历史记录及正文。
+- `knowledge_save_document`：支持 `kb_source`、`item_id`、text/file/folder/web、`extendColumns` 部分更新；action 可选 save、update_version、archive、restore、reprocess。更新版本必须提供 expectedVersion。文件与文件夹通过当前 Mastra Workspace 读取，批量导入逐项报告结果。
+
+旧参数 `baseId`、`documentId`、`topK` 和 source 对象继续兼容。工具从可信会话取得身份，沿用相同的权限与重建锁。升级时先运行 `pnpm db:migrate`；迁移在事务内搬迁原有分块及向量，校验后删除旧表。部署数据库须支持 pgvector。
 
 ## 环境变量
 
