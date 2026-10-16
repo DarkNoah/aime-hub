@@ -74,13 +74,19 @@ export function matchCatalogModel(
   id: string,
   catalog: unknown,
 ): Partial<ModelInput> {
-  return catalogFields(catalogLookup(catalog)(id));
+  return catalogFields(id, catalogLookup(catalog)(id));
 }
 
 function catalogFields(
+  id: string,
   raw: Record<string, unknown> | undefined,
 ): Partial<ModelInput> {
-  if (!raw) return {};
+  const result: Record<string, unknown> = {};
+  const normalizedId = id.toLowerCase();
+  if (normalizedId.includes('embedding')) result.modelType = 'embedding';
+  else if (normalizedId.includes('rerank')) result.modelType = 'rerank';
+  else if (normalizedId.includes('asr')) result.modelType = 'asr';
+  if (!raw) return result as Partial<ModelInput>;
   const modalities = raw.modalities as
     { input?: unknown; output?: unknown } | undefined;
   const limit = raw.limit as
@@ -95,7 +101,7 @@ function catalogFields(
     limitContext: limit?.context,
     limitOutput: limit?.output,
   };
-  const result: Record<string, unknown> = { metadata: raw };
+  result.metadata = raw;
   for (const [key, value] of Object.entries(fields)) {
     if (value === undefined) continue;
     const schema =
@@ -107,7 +113,6 @@ function catalogFields(
 }
 
 export class ProviderService {
-  private syncing = new Map<string, number>();
   private activeSyncs = new Set<string>();
   constructor(
     private database: DataSource,
@@ -260,8 +265,12 @@ export class ProviderService {
     if (provider.type === 'xinference')
       return new XinferenceProvider(provider, this.requestResource);
     return provider.type === 'newapi'
-      ? new NewApiProvider(provider)
-      : new OpenAICompatibleProvider(provider, this.requestJson);
+      ? new NewApiProvider(provider, this.requestResource)
+      : new OpenAICompatibleProvider(
+          provider,
+          this.requestJson,
+          this.requestResource,
+        );
   }
   async getProviderInstance(id: string) {
     const provider = await this.getProviderRecord(id);
@@ -270,7 +279,7 @@ export class ProviderService {
   }
 
   private async resolveDefaultModel(
-    key: 'embeddingModel' | 'rerankModel' | 'speechModel',
+    key: 'embeddingModel' | 'rerankModel' | 'speechModel' | 'asrModel',
     reference?: string,
   ) {
     const ref = reference ?? (await this.getDefaults())[key];
@@ -307,6 +316,14 @@ export class ProviderService {
       reference,
     );
     return provider.speechModel(modelId, { modelName });
+  }
+
+  async getTranscriptionModel(reference?: string) {
+    const { provider, modelId } = await this.resolveDefaultModel(
+      'asrModel',
+      reference,
+    );
+    return provider.transcriptionModel(modelId);
   }
   async getOcrModel(reference: string) {
     const model = await this.getModel(reference);
@@ -479,7 +496,7 @@ export class ProviderService {
       if (!(await manager.findOneBy(ProviderModel, { providerId, id })))
         throw new ProviderError('NOT_FOUND', 404);
       await this.assertUnused(manager, providerId, id);
-      await manager.softDelete(ProviderModel, { providerId, id });
+      await manager.delete(ProviderModel, { providerId, id });
     });
   }
   getDefaults() {
@@ -525,20 +542,8 @@ export class ProviderService {
     }
   }
   private async performSync(providerId: string) {
-    const now = Date.now();
-    for (const [id, until] of this.syncing)
-      if (until <= now) this.syncing.delete(id);
-    if (this.syncing.has(providerId))
-      throw new ProviderError('RATE_LIMITED', 429);
-    this.syncing.set(providerId, now + 60000);
-    let provider: Awaited<ReturnType<ProviderService['getProvider']>>;
-    try {
-      provider = await this.getProvider(providerId);
-      this.assertModelProvider(provider);
-    } catch (error) {
-      this.syncing.delete(providerId);
-      throw error;
-    }
+    const provider = await this.getProvider(providerId);
+    this.assertModelProvider(provider);
     let discovered: unknown;
     try {
       discovered = {
@@ -589,7 +594,7 @@ export class ProviderService {
         const input = modelInputSchema.parse({
           id,
           name: id,
-          ...catalogFields(lookupModel(id)),
+          ...catalogFields(id, lookupModel(id)),
           ...(['xinference', 'mineru'].includes(provider.type)
             ? discoveredModels.get(id)
             : {}),
@@ -599,7 +604,6 @@ export class ProviderService {
           where: { providerId, id },
           withDeleted: true,
         });
-        if (old?.deletedAt) continue;
         await manager.save(
           ProviderModel,
           manager.create(ProviderModel, {

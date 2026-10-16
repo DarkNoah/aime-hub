@@ -41,6 +41,7 @@ import { AddGeneratedAssetMetadata1780000011000 } from './migrations/17800000110
 import { CreateUsageRecords1780000012000 } from './migrations/1780000012000-create-usage-records.js';
 import { ProviderModelType1780000013000 } from './migrations/1780000013000-provider-model-type.js';
 import { ProviderOcrModel1780000020000 } from './migrations/1780000020000-provider-ocr-model.js';
+import { ProviderAsrModel1780000023000 } from './migrations/1780000023000-provider-asr-model.js';
 
 import { UsageRecord } from './usage-entity.js';
 export { UsageRecord };
@@ -78,6 +79,7 @@ export function createDataSource(
       GeneratedAsset,
     ],
     migrations: [
+      ProviderAsrModel1780000023000,
       PluginConfiguration1780000022000,
       KnowledgeDocumentMetadata1780000021000,
       KnowledgeUnifiedVectors1780000019000,

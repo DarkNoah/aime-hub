@@ -95,31 +95,39 @@ export class XinferenceProvider extends BaseProvider {
       const modelType =
         rawType === 'llm'
           ? 'language'
-          : rawType === 'embedding' || rawType === 'rerank'
+          : rawType === 'embedding' || rawType === 'rerank' || rawType === 'asr'
             ? rawType
             : rawType === 'audio' &&
                 model.model_ability.some((ability) =>
                   ability.startsWith('text2audio'),
                 )
               ? 'speech'
-              : undefined;
-      // Do not expose transcription or other unsupported models as chat models.
+              : rawType === 'audio' &&
+                  model.model_ability.some((ability) =>
+                    ability.startsWith('audio2text'),
+                  )
+                ? 'asr'
+                : undefined;
+      // Do not expose unrecognized model types as chat models.
       if (!modelType) return [];
       return [
         {
           id: model.id,
           name: model.model_name || model.id,
           modelType,
-          modalitiesInput: [
-            'text',
-            ...(model.model_ability.includes('vision')
-              ? ['image' as const]
-              : []),
-          ],
+          modalitiesInput:
+            modelType === 'asr'
+              ? ['audio']
+              : [
+                  'text',
+                  ...(model.model_ability.includes('vision')
+                    ? ['image' as const]
+                    : []),
+                ],
           modalitiesOutput:
             modelType === 'speech'
               ? ['audio']
-              : modelType === 'language'
+              : modelType === 'language' || modelType === 'asr'
                 ? ['text']
                 : [],
           limitContext: model.max_tokens ?? null,

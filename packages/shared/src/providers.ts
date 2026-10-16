@@ -77,6 +77,7 @@ export const modelTypes = [
   'embedding',
   'rerank',
   'speech',
+  'asr',
   'image',
   'ocr',
 ] as const;
@@ -95,6 +96,7 @@ export const defaultModelTypes = {
   embeddingModel: 'embedding',
   rerankModel: 'rerank',
   speechModel: 'speech',
+  asrModel: 'asr',
 } as const;
 export const defaultModelKeys = Object.keys(defaultModelTypes) as Array<
   keyof typeof defaultModelTypes
@@ -180,6 +182,7 @@ export const modelDefaultsSchema = z
     embeddingModel: z.string().min(3).max(512).nullable().default(null),
     rerankModel: z.string().min(3).max(512).nullable().default(null),
     speechModel: z.string().min(3).max(512).nullable().default(null),
+    asrModel: z.string().min(3).max(512).nullable().default(null),
     thinkingMode: z.enum(thinkingLevels),
   })
   .strict();
@@ -240,6 +243,7 @@ export const emptyModelDefaults: ModelDefaults = {
   embeddingModel: null,
   rerankModel: null,
   speechModel: null,
+  asrModel: null,
   thinkingMode: 'medium',
 };
 export function modelReference(providerId: string, id: string) {

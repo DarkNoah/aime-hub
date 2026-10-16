@@ -170,9 +170,7 @@ export const pluginManifests: PluginManifest[] = [
       },
     ],
     workspace: true,
-    pages: [
-      { path: '', title: '量化行情', access: 'session', navigation: true },
-    ],
+    pages: [{ path: '', title: '行情', access: 'session', navigation: true }],
     rightSidebar: [],
   },
 ];

@@ -6,6 +6,7 @@ import type {
   LanguageModel,
   RerankingModel,
   SpeechModel,
+  TranscriptionModel,
 } from 'ai';
 import type { ModelInput } from '@aime/shared/providers';
 import { z } from 'zod';
@@ -81,6 +82,10 @@ export abstract class BaseProvider {
   speechModel(modelId: string, options?: { modelName?: string }): SpeechModel {
     void options;
     throw new Error(`Speech model is not supported: ${this.type}/${modelId}`);
+  }
+
+  transcriptionModel(modelId: string): TranscriptionModel {
+    throw new NoSuchModelError({ modelId, modelType: 'transcriptionModel' });
   }
 
   imageModel(modelId: string): ImageModel {

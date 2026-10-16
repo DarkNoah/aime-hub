@@ -31,3 +31,4 @@ plugins/vibe-quant/**/__pycache__/
 !apps/server/src/modules/automations/tools.test.ts
 !scripts/chat-automation-preview.test.ts
 !apps/server/src/modules/threads/browser.test.ts
+!apps/server/src/modules/threads/context-compaction.test.ts

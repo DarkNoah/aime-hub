@@ -2,6 +2,12 @@ import type { OpenAICompatibleConfig } from '@mastra/core/llm';
 import { z } from 'zod';
 import { requestProviderJson } from '../../modules/providers/network.js';
 import { createImageModel } from './image-model.js';
+import { createTranscriptionModel } from './openai-compatible-transcription.js';
+import {
+  createEmbeddingModel,
+  createRerankModel,
+} from './openai-compatible-retrieval.js';
+import { requestWebResource } from '../web/request.js';
 import {
   BaseProvider,
   type ProviderConfig,
@@ -19,6 +25,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
   constructor(
     provider: ProviderConfig & { type: string },
     private readonly request = requestProviderJson,
+    private readonly requestResource = requestWebResource,
   ) {
     super({ provider });
     this.name = provider.type;
@@ -36,7 +43,31 @@ export class OpenAICompatibleProvider extends BaseProvider {
   }
 
   imageModel(modelId: string) {
-    return createImageModel(this.provider, modelId);
+    return createImageModel(this.provider, modelId, this.requestResource);
+  }
+
+  textEmbeddingModel(modelId: string) {
+    return createEmbeddingModel(
+      { ...this.provider, type: this.type },
+      modelId,
+      this.requestResource,
+    );
+  }
+
+  rerankModel(modelId: string) {
+    return createRerankModel(
+      { ...this.provider, type: this.type },
+      modelId,
+      this.requestResource,
+    );
+  }
+
+  transcriptionModel(modelId: string) {
+    return createTranscriptionModel(
+      { ...this.provider, type: this.type },
+      modelId,
+      this.requestResource,
+    );
   }
 
   async getLanguageModelList(): Promise<ProviderModelInfo[]> {

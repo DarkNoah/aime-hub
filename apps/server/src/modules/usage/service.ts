@@ -61,6 +61,17 @@ export class UsageService {
     }
   }
 
+  /** Recover the actor's last valid measurement when an older failed run erased UI usage. */
+  async latestThreadUsage(threadId: string, agentId: string) {
+    const rows: { totalTokens: number }[] = await this.database.query(
+      `SELECT total_tokens::float8 AS "totalTokens" FROM usage_records
+       WHERE thread_id = $1 AND agent_id = $2 AND total_tokens IS NOT NULL
+       ORDER BY finished_at DESC, created_at DESC, id DESC LIMIT 1`,
+      [threadId, agentId],
+    );
+    return rows[0];
+  }
+
   async summary(input: UsageQuery): Promise<UsageSummary> {
     const { where, params } = filters(input);
     return this.database.transaction('REPEATABLE READ', async (manager) => {

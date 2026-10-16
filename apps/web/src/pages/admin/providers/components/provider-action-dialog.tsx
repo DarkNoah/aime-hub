@@ -83,6 +83,9 @@ export function ProviderActionDialog({
       : action.kind === 'deleteModel'
         ? action.model.id
         : '';
+  const confirmationRequired = action.kind === 'deleteProvider';
+  const confirmationMissing =
+    confirmationRequired && confirmation !== deleteName;
   const title =
     action.kind === 'provider'
       ? provider
@@ -98,7 +101,7 @@ export function ProviderActionDialog({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (submitting.current || (deleting && confirmation !== deleteName)) return;
+    if (submitting.current || confirmationMissing) return;
     const form = new FormData(event.currentTarget);
     setError(null);
     let providerBody: ReturnType<typeof providerFormInput> | undefined;
@@ -159,11 +162,13 @@ export function ProviderActionDialog({
           <DialogTitle>{t(title)}</DialogTitle>
           <DialogDescription>
             {t(
-              deleting
-                ? 'providers.deleteHint'
-                : action.kind === 'provider'
-                  ? 'providers.formHint'
-                  : 'models.formHint',
+              action.kind === 'deleteModel'
+                ? 'models.deleteHint'
+                : deleting
+                  ? 'providers.deleteHint'
+                  : action.kind === 'provider'
+                    ? 'providers.formHint'
+                    : 'models.formHint',
             )}
           </DialogDescription>
         </DialogHeader>
@@ -174,16 +179,20 @@ export function ProviderActionDialog({
                 <p className="break-all rounded-lg bg-muted p-3 text-sm">
                   {deleteName}
                 </p>
-                <Label htmlFor="delete-confirm">
-                  {t('providers.deleteConfirm')}
-                </Label>
-                <Input
-                  id="delete-confirm"
-                  required
-                  autoComplete="off"
-                  value={confirmation}
-                  onChange={(event) => setConfirmation(event.target.value)}
-                />
+                {confirmationRequired && (
+                  <>
+                    <Label htmlFor="delete-confirm">
+                      {t('providers.deleteConfirm')}
+                    </Label>
+                    <Input
+                      id="delete-confirm"
+                      required
+                      autoComplete="off"
+                      value={confirmation}
+                      onChange={(event) => setConfirmation(event.target.value)}
+                    />
+                  </>
+                )}
               </>
             ) : action.kind === 'provider' ? (
               <>
@@ -519,12 +528,17 @@ export function ProviderActionDialog({
             </p>
           )}
           <DialogFooter>
-            <Button variant="outline" disabled={pending} onClick={onClose}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending}
+              onClick={onClose}
+            >
               {t('providers.cancel')}
             </Button>
             <Button
               type="submit"
-              disabled={pending || (deleting && confirmation !== deleteName)}
+              disabled={pending || confirmationMissing}
               className={
                 deleting
                   ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'

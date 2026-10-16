@@ -13,6 +13,7 @@ import { AgentError } from '../agents/errors.js';
 import type {
   AgentExecutionOptions,
   AgentMessageInput,
+  MessageList,
 } from '@mastra/core/agent';
 import type { MastraModelOutput } from '@mastra/core/stream';
 import { RequestContext } from '@mastra/core/request-context';
@@ -55,6 +56,22 @@ import { buildTools, type ToolService } from '../tools/service.js';
 import { CommandSandbox } from '../../mastra/tools/command/sandbox.js';
 import { agentEnvironment } from './agent-environment.js';
 import { AgentsMDProcessor } from '../../mastra/processors/agents-md.js';
+import {
+  ContextBudget,
+  ContextCompactionProcessor,
+} from './context-compaction.js';
+import type { ObservationalMemoryConfig } from '@mastra/memory/processors';
+
+function latestInputMetadata(messageList: MessageList) {
+  const latest = [...messageList.get.all.db()]
+    .reverse()
+    .find(
+      (message) =>
+        message.role === 'signal' &&
+        mastraDBMessageToSignal(message).type === 'user',
+    );
+  return latest && mastraDBMessageToSignal(latest).metadata;
+}
 
 export function createChatRunner(
   mastra: Mastra,
@@ -63,7 +80,8 @@ export function createChatRunner(
   projects?: Pick<ProjectService, 'get'>,
   tools?: Pick<ToolService, 'buildTools'>,
   agents?: Pick<AgentService, 'getConfig' | 'getAgent'>,
-  usage?: Pick<UsageService, 'record'>,
+  usage?: Pick<UsageService, 'record'> &
+    Partial<Pick<UsageService, 'latestThreadUsage'>>,
   environmentVariables?: Pick<EnvironmentVariableService, 'getEnv'>,
   getMemoryConfig?: ResolveMemoryConfig,
 ): ChatRunner {
@@ -163,6 +181,15 @@ export function createChatRunner(
       let runAbort = new AbortController();
       let resolved = await sessionModel(settings);
       const memoryConfig = await getMemoryConfig?.();
+      const observationConfig = {
+        model: resolved.model,
+        scope: 'thread',
+        observation: {
+          messageTokens: 30_000,
+          bufferTokens: false,
+          failurePolicy: 'abort',
+        },
+      } satisfies Omit<ObservationalMemoryConfig, 'storage'>;
       const memory = new ThreadMessageMemory(
         {
           ...memoryConfig,
@@ -172,20 +199,46 @@ export function createChatRunner(
             ...memoryConfig?.options,
             // ThreadService generates and publishes the first title independently.
             generateTitle: false,
-            observationalMemory: {
-              model: resolved.model,
-              scope: 'thread',
-              observation: {
-                messageTokens: 30_000,
-                bufferTokens: false,
-              },
-            },
+            observationalMemory: observationConfig,
           },
         },
         target,
         (message) => {
           onEvent({ type: 'message', message, active: false });
         },
+      );
+      const budget = await ContextBudget.load(
+        await storage.getStore('threadState'),
+        thread.id,
+        thread.metadata?.usage,
+        async () => usage?.latestThreadUsage?.(thread.id, config.id),
+      );
+      const nativeEngine = await memory.omEngine;
+      if (!nativeEngine) throw new Error('Observational memory is not enabled');
+      const compaction = new ContextCompactionProcessor(
+        {
+          ...observationConfig,
+          storage: nativeEngine.getStorage(),
+          memory,
+          mastra,
+        },
+        memory,
+        budget,
+        async ({ messageList, requestContext }) => {
+          const metadata =
+            latestInputMetadata(messageList) ??
+            (requestContext?.get('chatInputMetadata') as ReturnType<
+              typeof latestInputMetadata
+            >);
+          if (metadata) requestContext?.set('chatInputMetadata', metadata);
+          const selected =
+            chatSettingsSchema.safeParse(metadata?.chatSettings).data ??
+            chatSettingsSchema.safeParse(requestContext?.get('chatSettings'))
+              .data ??
+            currentSettings;
+          return (await sessionModel(selected)).maxContextTokens;
+        },
+        (error) => onEvent({ type: 'error', error }),
       );
       const filesystem = projectId
         ? await projectFilesystem(userId, projectId)
@@ -223,7 +276,14 @@ export function createChatRunner(
           mastra,
           instructions: config.instructions + projectInstructions,
           model: resolved.model,
-          inputProcessors: [new AgentsMDProcessor(commands.workingDirectory)],
+          // Matching native processor IDs suppress Memory's default OM processors.
+          // Keep the same processor for input and output so native turn cleanup,
+          // response ID rotation and observation context injection remain intact.
+          inputProcessors: [
+            compaction,
+            new AgentsMDProcessor(commands.workingDirectory),
+          ],
+          outputProcessors: [compaction],
           subagentOptions: (child) => {
             // A null model follows the parent's current selection, including queued changes.
             const childModel = () =>
@@ -463,14 +523,12 @@ export function createChatRunner(
             prepareStep: async ({ messageList, stepNumber }) => {
               // Native signals have already entered the message list at this point.
               // Read their settings; do not drain or inject application-owned input.
-              const latest = [...messageList.get.all.db()]
-                .reverse()
-                .find((message) => {
-                  if (message.role !== 'signal') return false;
-                  return mastraDBMessageToSignal(message).type === 'user';
-                });
+              // OM may have just compacted the signal that carried these settings.
               const metadata =
-                latest && mastraDBMessageToSignal(latest).metadata;
+                latestInputMetadata(messageList) ??
+                (requestContext.get('chatInputMetadata') as ReturnType<
+                  typeof latestInputMetadata
+                >);
               const fromMessage = metadata?.chatSettings;
               // Queued project messages can have different authors in one stream.
               requestContext.set(
@@ -512,6 +570,8 @@ export function createChatRunner(
               };
             },
             onStepFinish: async (event) => {
+              const chatUsage = getChatUsage(event.usage, step.model);
+              await budget.record(chatUsage);
               if (usage) {
                 const slash = step.model.reference.indexOf('/');
                 await usage.record({
@@ -541,7 +601,7 @@ export function createChatRunner(
               }
               onEvent({
                 type: 'usage',
-                usage: getChatUsage(event.usage, resolved),
+                usage: chatUsage,
               });
             },
             onError: ({ error }) => {
@@ -621,7 +681,13 @@ export function createChatRunner(
             if (streams.size) throw new ThreadError('COMPACTION_BUSY', 409);
             const selection = await sessionModel(currentSettings);
             try {
-              return await compactMemory(memory, target, selection.model);
+              const result = await compactMemory(
+                memory,
+                target,
+                selection.model,
+              );
+              if (result.observed) await budget.consume();
+              return result;
             } finally {
               await refreshMessages();
             }
@@ -741,6 +807,7 @@ export function createChatRunner(
             unsubscribeQueue();
             await observing;
             await Promise.allSettled([...streams]);
+            await compaction.engine.settled();
             await memory.settled();
             await workspace?.destroy();
             await browsers.releaseInactive(thread.id);

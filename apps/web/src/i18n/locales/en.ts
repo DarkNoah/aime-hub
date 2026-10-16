@@ -2208,12 +2208,14 @@ export const en = {
   'providers.deleteHint':
     'This cannot be undone. Deleting a provider also deletes its models. Change any default model references before deleting.',
   'providers.deleteConfirm':
-    'Enter the exact name or model ID shown above to confirm',
+    'Enter the exact provider name shown above to confirm',
   'models.title': 'Models · {{name}}',
   'models.close': 'Close model details',
   'models.create': 'Add model',
   'models.edit': 'Edit model',
   'models.delete': 'Delete model',
+  'models.deleteHint':
+    'Delete this model? You can import it again by syncing if the provider still offers it.',
   'models.formHint':
     'Configure the model ID and capabilities. IDs may contain slashes. Blank limits use model defaults; change default references before disabling or renaming an in-use model.',
   'models.id': 'Model ID',
@@ -2287,11 +2289,13 @@ export const en = {
   'defaults.embeddingModel': 'Embedding model',
   'defaults.rerankModel': 'Rerank model',
   'defaults.speechModel': 'Speech model',
+  'defaults.asrModel': 'Speech recognition model (ASR)',
   'models.type': 'Model type',
   'models.type.language': 'Chat',
   'models.type.embedding': 'Embedding',
   'models.type.rerank': 'Rerank',
   'models.type.speech': 'Speech synthesis',
+  'models.type.asr': 'Speech recognition (ASR)',
   'models.type.ocr': 'OCR / Document parsing',
   'models.type.image': 'Image generation',
   'defaults.thinkingMode': 'Default reasoning effort',
