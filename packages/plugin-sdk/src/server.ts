@@ -8,8 +8,23 @@ export type PluginTool = Tool<any, any>;
 import type { PluginConfig, PluginManifest } from './index.js';
 
 export type PluginHttpEnv = { Variables: { userId: string; isAdmin: boolean } };
+export interface PluginRuntimeContext {
+  readonly platform: NodeJS.Platform;
+  readonly arch: string;
+  readonly nodeVersion: string;
+  readonly paths: {
+    readonly applicationRoot: string;
+    readonly workspaceRoot: string;
+    /** Installed source/assets, separate from persistent plugin data. */
+    readonly pluginRoot: string;
+    readonly pluginWorkspace: string | null;
+  };
+  /** Lazily creates the declared workspace. Throws if workspace was not declared. */
+  ensureWorkspace(): Promise<string>;
+}
 export interface PluginContext {
   readonly id: string;
+  readonly runtime: PluginRuntimeContext;
   /** Shared, initialized host connection. Do not initialize or destroy it. */
   readonly database: DataSource;
   /** Checks persisted state and local readiness. Not available until onEnable completes. */

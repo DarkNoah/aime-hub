@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid';
+import type { TLEditorSnapshot } from 'tldraw';
 import {
   MAX_CHAT_FILES,
   MAX_IMAGE_BYTES,
@@ -14,6 +15,9 @@ export type ChatUpload = {
   preview: string;
   status: 'queued' | 'uploading' | 'finishing' | 'done' | 'error';
   progress: number;
+  /** Locally created images are message parts only, never workspace uploads. */
+  inlineOnly?: boolean;
+  drawing?: TLEditorSnapshot;
   path?: string;
   image?: Extract<RunInput['parts'][number], { type: 'file' }>;
   error?: unknown;
@@ -49,16 +53,22 @@ export function isInlineChatImage(file: File) {
 export function chatUploadParts(
   items: readonly ChatUpload[],
 ): RunInput['parts'] {
-  if (items.some((item) => item.status !== 'done' || !item.path))
+  if (
+    items.some(
+      (item) =>
+        item.status !== 'done' || (item.inlineOnly ? !item.image : !item.path),
+    )
+  )
     throw new Error('Uploads are not ready');
   const parts: RunInput['parts'] = items.flatMap((item) =>
     item.image ? [item.image] : [],
   );
-  if (items.length)
+  const uploaded = items.filter((item) => !item.inlineOnly);
+  if (uploaded.length)
     parts.push({
       type: 'text',
       text: serializeAttachments(
-        items.map((item) => ({
+        uploaded.map((item) => ({
           id: item.id,
           path: `/${item.path}`,
           name: item.file.name,
@@ -93,6 +103,59 @@ export class ChatUploadQueue {
     };
   };
   getSnapshot = () => this.snapshot;
+  private inlineEntry(
+    file: File,
+    drawing?: TLEditorSnapshot,
+    id = nanoid(),
+  ): Entry {
+    if (!isInlineChatImage(file)) throw new Error('Invalid inline image');
+    return {
+      id,
+      file,
+      drawing,
+      preview: URL.createObjectURL(file),
+      inlineOnly: true,
+      directory: '',
+      controller: new AbortController(),
+      status: 'queued',
+      progress: 0,
+    };
+  }
+  addInlineImage(
+    file: File,
+    reserved = 0,
+    drawing?: TLEditorSnapshot,
+  ): boolean {
+    if (this.disposed) return false;
+    if (!isInlineChatImage(file)) throw new Error('Invalid inline image');
+    if (this.entries.length + reserved >= MAX_CHAT_FILES) {
+      this.deps.onError({ code: 'CHAT_ATTACHMENT_LIMIT' }, file);
+      return false;
+    }
+    this.entries.push(this.inlineEntry(file, drawing));
+    this.emit();
+    this.pump();
+    return true;
+  }
+  replaceInlineImage(
+    id: string,
+    file: File,
+    drawing: TLEditorSnapshot,
+  ): boolean {
+    if (this.disposed) return false;
+    const index = this.entries.findIndex(
+      (item) => item.id === id && item.inlineOnly,
+    );
+    if (index < 0) return false;
+    const previous = this.entries[index];
+    const replacement = this.inlineEntry(file, drawing, id);
+    previous.controller.abort();
+    if (previous.preview) URL.revokeObjectURL(previous.preview);
+    this.entries[index] = replacement;
+    this.emit();
+    this.pump();
+    return true;
+  }
   private emit() {
     this.snapshot = this.entries.map((entry) => ({ ...entry }));
     this.listeners.forEach((listener) => listener());
@@ -144,6 +207,21 @@ export class ChatUploadQueue {
   private async run(entry: Entry) {
     const { signal } = entry.controller;
     try {
+      if (entry.inlineOnly) {
+        entry.image = {
+          type: 'file',
+          filename: entry.file.name,
+          mediaType: entry.file.type as NonNullable<
+            ChatUpload['image']
+          >['mediaType'],
+          url: await this.deps.image(entry.file),
+        };
+        signal.throwIfAborted();
+        entry.status = 'done';
+        entry.progress = 100;
+        this.emit();
+        return;
+      }
       entry.threadId = await this.deps.ensureThread();
       signal.throwIfAborted();
       if (isInlineChatImage(entry.file))

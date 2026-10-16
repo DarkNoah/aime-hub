@@ -1,4 +1,5 @@
 import type { KnowledgeService } from '../knowledge/service.js';
+import type { ResolveAutomations } from '../../mastra/tools/automations.js';
 import { enabledToolConfigSchema } from '@aime/shared/tools';
 import type { PluginService } from '../plugins/service.js';
 import type { DataSource } from 'typeorm';
@@ -44,6 +45,7 @@ export class ToolService {
     private readonly mcp?: { getTools(): Promise<ToolsInput> },
     private readonly plugins?: PluginService,
     private readonly knowledge?: KnowledgeService,
+    private readonly automations?: ResolveAutomations,
   ) {}
 
   async get(id: ToolId): Promise<ToolConfig> {
@@ -219,6 +221,7 @@ export class ToolService {
       ids?.filter((id) => !this.plugins?.ownsTool(id)),
       defaults,
       {
+        automations: this.automations,
         knowledgeSearch: this.knowledge?.searchContext.bind(this.knowledge),
         knowledge: this.knowledge,
         pluginTools,

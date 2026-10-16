@@ -26,3 +26,12 @@ export const {
   knowledge_save_document,
   knowledge_archive_document,
 } = createKnowledgeTools();
+import { createAutomationTools } from './automations.js';
+export const {
+  automation_list,
+  automation_get,
+  automation_save,
+  automation_delete,
+  automation_run,
+  automation_history,
+} = createAutomationTools();

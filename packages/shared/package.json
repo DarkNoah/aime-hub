@@ -13,6 +13,7 @@
     "./automations": "./src/automations.ts",
     "./notifications": "./src/notifications.ts",
     "./threads": "./src/threads.ts",
+    "./browser": "./src/browser.ts",
     "./thread-messages": "./src/thread-messages.ts",
     "./projects": "./src/projects.ts",
     "./files": "./src/files.ts",

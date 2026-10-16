@@ -1,0 +1,4 @@
+/* tldraw's unlayered styles take precedence over Tailwind utilities. */
+.chat-drawing-canvas .tlui-layout__top__right {
+  padding-top: 3rem;
+}

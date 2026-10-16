@@ -61,20 +61,25 @@ export const Context = ({
   );
 };
 
-const ContextIcon = () => {
+export const ContextIcon = (props: ComponentProps<'svg'>) => {
   const { usedTokens, maxTokens } = useContextValue();
   const circumference = 2 * Math.PI * ICON_RADIUS;
-  const usedPercent = usedTokens / maxTokens;
+  const usedPercent =
+    maxTokens > 0 ? Math.min(1, Math.max(0, usedTokens / maxTokens)) : 0;
   const dashOffset = circumference * (1 - usedPercent);
 
   return (
     <svg
-      aria-label="Model context usage"
+      aria-label="Context usage"
       height="20"
-      role="img"
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(usedPercent * 100)}
       style={{ color: 'currentcolor' }}
       viewBox={`0 0 ${ICON_VIEWBOX} ${ICON_VIEWBOX}`}
       width="20"
+      {...props}
     >
       <circle
         cx={ICON_CENTER}

@@ -17,12 +17,8 @@ import {
 import { pluginRequest, PluginRequestError } from '@app/plugin-sdk/web';
 import { usePlugins } from '@/features/plugins/context';
 import { LoadingState } from '@/components/loading-state';
-import { PasswordInput } from '@/components/password-input';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Switch } from '@/components/ui/switch';
+import { PluginConfigFields } from './config-fields';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Dialog,
@@ -51,6 +47,16 @@ export function PluginConfigDialog({
   const [loadFailed, setLoadFailed] = useState(false);
   const [pending, setPending] = useState(false);
   const [issues, setIssues] = useState<PluginConfigIssue[]>([]);
+  const [activeGroup, setActiveGroup] = useState(
+    plugin.configFields[0]?.group ?? '',
+  );
+  const showIssues = (next: PluginConfigIssue[]) => {
+    setIssues(next);
+    const field = plugin.configFields.find((item) =>
+      next.some((issue) => issue.field === item.key),
+    );
+    if (field) setActiveGroup(field.group ?? '');
+  };
   const [error, setError] = useState('');
   const [conflict, setConflict] = useState(false);
   const submitting = useRef(false);
@@ -108,7 +114,7 @@ export function PluginConfigDialog({
       ),
     );
     const parsed = parsePluginConfig(plugin.configFields, input);
-    setIssues(parsed.success ? [] : parsed.issues);
+    showIssues(parsed.success ? [] : parsed.issues);
     setError('');
     if (!parsed.success) return;
     submitting.current = true;
@@ -134,7 +140,7 @@ export function PluginConfigDialog({
       );
       setError(message);
       setConflict(stale);
-      if (cause instanceof PluginRequestError) setIssues(cause.issues ?? []);
+      if (cause instanceof PluginRequestError) showIssues(cause.issues ?? []);
       toast.error(message);
     } finally {
       submitting.current = false;
@@ -198,102 +204,19 @@ export function PluginConfigDialog({
               </div>
             ) : (
               <fieldset disabled={pending} className="min-w-0 space-y-5 p-1">
-                {plugin.configFields.map((field) => {
-                  const id = `plugin-config-${plugin.id}-${field.key}`;
-                  const invalid = issues.some(
-                    (issue) => issue.field === field.key,
-                  );
-                  const props = {
-                    id,
-                    disabled: pending,
-                    'aria-invalid': invalid,
-                    'aria-required': field.required,
-                    'aria-describedby': `${id}-hint`,
-                  };
-                  const setValue = (value: string | boolean) =>
-                    setValues((current) => ({
-                      ...current,
-                      [field.key]: value,
-                    }));
-                  const stringValue = String(values[field.key] ?? '');
-                  return (
-                    <div key={field.key} className="space-y-2">
-                      <div className="flex items-center justify-between gap-4">
-                        <Label htmlFor={id}>
-                          {field.label}
-                          {field.required && (
-                            <span
-                              className="text-destructive"
-                              aria-hidden="true"
-                            >
-                              {' '}
-                              *
-                            </span>
-                          )}
-                        </Label>
-                        {field.type === 'boolean' && (
-                          <Switch
-                            {...props}
-                            checked={values[field.key] === true}
-                            onCheckedChange={setValue}
-                          />
-                        )}
-                      </div>
-                      {field.type === 'password' ? (
-                        <PasswordInput
-                          {...props}
-                          value={stringValue}
-                          onChange={(event) => setValue(event.target.value)}
-                          placeholder={field.placeholder}
-                          maxLength={16384}
-                          autoComplete="new-password"
-                          spellCheck={false}
-                        />
-                      ) : field.type === 'text' ? (
-                        field.multiline ? (
-                          <Textarea
-                            {...props}
-                            value={stringValue}
-                            onChange={(event) => setValue(event.target.value)}
-                            placeholder={field.placeholder}
-                            maxLength={16384}
-                            rows={4}
-                          />
-                        ) : (
-                          <Input
-                            {...props}
-                            value={stringValue}
-                            onChange={(event) => setValue(event.target.value)}
-                            placeholder={field.placeholder}
-                            maxLength={16384}
-                          />
-                        )
-                      ) : field.type === 'number' ? (
-                        <Input
-                          {...props}
-                          type="number"
-                          value={stringValue}
-                          min={field.min}
-                          max={field.max}
-                          step={field.integer ? 1 : 'any'}
-                          onChange={(event) => setValue(event.target.value)}
-                        />
-                      ) : null}
-                      <div id={`${id}-hint`} className="space-y-1 text-xs">
-                        {field.description && (
-                          <p className="text-muted-foreground">
-                            {field.description}
-                          </p>
-                        )}
-                        {invalid && (
-                          <p className="text-destructive">
-                            {t('plugins.configInvalidField')}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                <PluginConfigFields
+                  pluginId={plugin.id}
+                  fields={plugin.configFields}
+                  values={values}
+                  issues={issues}
+                  disabled={pending}
+                  activeGroup={activeGroup}
+                  onGroupChange={setActiveGroup}
+                  onChange={(key, value) => {
+                    setValues((current) => ({ ...current, [key]: value }));
+                    setIssues([]);
+                  }}
+                />
                 {issues.some((issue) => !issue.field) && (
                   <p role="alert" className="text-sm text-destructive">
                     {t('plugins.configInvalid')}

@@ -153,7 +153,10 @@ export function AdminToolsPage() {
           {data.tools.map((tool) => {
             const definition =
               tool.kind === 'builtin' ? undefined : toolDefinitions[tool.kind];
-            const titleKey = `agents.tool.${tool.id}` as TranslationKey;
+            const titleKey = `agents.tool.${tool.id}` as Extract<
+              TranslationKey,
+              `agents.tool.${string}`
+            >;
             const title = definition
               ? t(definition.title)
               : i18n.exists(titleKey)

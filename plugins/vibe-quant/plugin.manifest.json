@@ -1,0 +1,185 @@
+{
+  "id": "vibe-quant",
+  "name": "Vibe Quant",
+  "description": "多引擎实时行情、自选自动同步与 ClickHouse 时序存储。",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "enabled": true,
+  "dependencies": [],
+  "configFields": [
+    {
+      "key": "engine",
+      "label": "数据引擎",
+      "type": "select",
+      "required": true,
+      "default": "tqsdk",
+      "description": "TqSdk 支持股票、期货、期权、主连；Tushare 和通达信支持股票、指数。",
+      "group": "数据引擎",
+      "options": [
+        {
+          "value": "tqsdk",
+          "label": "天勤 TqSdk"
+        },
+        {
+          "value": "tushare",
+          "label": "Tushare"
+        },
+        {
+          "value": "tdx",
+          "label": "通达信"
+        }
+      ]
+    },
+    {
+      "key": "tqUser",
+      "label": "天勤账号",
+      "type": "text",
+      "description": "需开通对应市场的行情权限。",
+      "group": "行情连接",
+      "visibleWhen": {
+        "field": "engine",
+        "equals": "tqsdk"
+      },
+      "required": true
+    },
+    {
+      "key": "tqPassword",
+      "label": "天勤密码",
+      "type": "password",
+      "group": "行情连接",
+      "visibleWhen": {
+        "field": "engine",
+        "equals": "tqsdk"
+      },
+      "required": true
+    },
+    {
+      "key": "tushareToken",
+      "label": "Tushare Token",
+      "type": "password",
+      "description": "需 rt_k、rt_min 及对应指数接口权限。",
+      "group": "行情连接",
+      "visibleWhen": {
+        "field": "engine",
+        "equals": "tushare"
+      },
+      "required": true
+    },
+    {
+      "key": "tdxServers",
+      "label": "行情服务器列表",
+      "type": "text",
+      "multiline": true,
+      "required": true,
+      "default": "110.41.147.114:7709\n8.129.13.54:7709\n124.70.176.52:7709\n47.100.236.28:7709\n121.36.54.217:7709\n124.71.85.110:7709\n106.14.201.131:7709\n123.60.70.228:7709",
+      "placeholder": "110.41.147.114:7709\n8.129.13.54:7709",
+      "description": "每行一个 IPv4:端口，按顺序连接；连接或请求失败自动切换下一项。最多 32 个节点，重复地址自动合并。",
+      "group": "行情连接",
+      "visibleWhen": {
+        "field": "engine",
+        "equals": "tdx"
+      }
+    },
+    {
+      "key": "clickhouseUrl",
+      "label": "ClickHouse HTTP 地址",
+      "type": "text",
+      "required": true,
+      "default": "http://127.0.0.1:8123",
+      "group": "ClickHouse"
+    },
+    {
+      "key": "clickhouseDatabase",
+      "label": "ClickHouse 数据库",
+      "type": "text",
+      "required": true,
+      "default": "vibe_quant",
+      "group": "ClickHouse"
+    },
+    {
+      "key": "clickhouseUser",
+      "label": "ClickHouse 用户名",
+      "type": "text",
+      "required": true,
+      "default": "vibe_quant",
+      "group": "ClickHouse"
+    },
+    {
+      "key": "clickhousePassword",
+      "label": "ClickHouse 密码",
+      "type": "password",
+      "required": true,
+      "group": "ClickHouse"
+    },
+    {
+      "key": "beforeOpenMinutes",
+      "label": "开市前提前同步（分钟）",
+      "type": "number",
+      "integer": true,
+      "min": 0,
+      "max": 120,
+      "default": 5,
+      "group": "同步策略"
+    },
+    {
+      "key": "afterCloseMinutes",
+      "label": "休市后延后同步（分钟）",
+      "type": "number",
+      "integer": true,
+      "min": 0,
+      "max": 120,
+      "default": 10,
+      "group": "同步策略"
+    },
+    {
+      "key": "flushSeconds",
+      "label": "批量写入间隔（秒）",
+      "type": "number",
+      "integer": true,
+      "min": 1,
+      "max": 60,
+      "default": 2,
+      "group": "同步策略"
+    },
+    {
+      "key": "pollSeconds",
+      "label": "轮询引擎间隔（秒）",
+      "type": "number",
+      "integer": true,
+      "min": 2,
+      "max": 300,
+      "default": 15,
+      "description": "Tushare/通达信适用；TqSdk 使用实时推送。",
+      "group": "同步策略"
+    },
+    {
+      "key": "historyBars",
+      "label": "首次订阅回补 K 线数量",
+      "type": "number",
+      "integer": true,
+      "min": 100,
+      "max": 8000,
+      "default": 1000,
+      "group": "同步策略"
+    },
+    {
+      "key": "maxSubscriptions",
+      "label": "最大合并订阅数量",
+      "type": "number",
+      "integer": true,
+      "min": 1,
+      "max": 500,
+      "default": 100,
+      "group": "同步策略"
+    }
+  ],
+  "pages": [
+    {
+      "path": "",
+      "title": "行情",
+      "access": "session",
+      "navigation": true
+    }
+  ],
+  "workspace": true
+}

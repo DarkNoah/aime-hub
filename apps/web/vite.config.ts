@@ -37,6 +37,9 @@ export default defineConfig(({ mode, command }) => {
       dedupe: ['react', 'react-dom', '@tanstack/react-router'],
       alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
     },
+    // Keep Vite's ?url handling for tldraw JSON translations and bundled assets.
+    // Dependency prebundling otherwise turns translations into JSON objects.
+    optimizeDeps: { exclude: ['@tldraw/assets'] },
     server: {
       host: rootEnv.WEB_HOST ?? '0.0.0.0',
       port: Number(webUrl.port || (webUrl.protocol === 'https:' ? 443 : 80)),

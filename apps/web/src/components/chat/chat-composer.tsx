@@ -35,7 +35,12 @@ import { ChatContextUsage } from './chat-context-usage';
 import { ChatCommandTextarea } from './chat-command-textarea';
 import { useChatSkills } from './use-chat-skills';
 import { skillCommandGroup } from './skill-commands';
-import { consumeCompactCommand, consumeGoalCommand } from './slash-command';
+import {
+  consumeCompactCommand,
+  consumeDrawCommand,
+  consumeGoalCommand,
+} from './slash-command';
+import { DrawingDialog } from './drawing-dialog';
 import { ChatGoal } from './chat-goal';
 import type { GeneratedAsset } from '@aime/shared/assets';
 import type { WorkspaceFileReference } from '@aime/shared/files';
@@ -46,7 +51,7 @@ import { fileErrorKey, filesApi } from '@/components/file-manager/api';
 import { useAuthSession } from '@/features/auth/session-context';
 import { useChatDraft } from './use-chat-draft';
 import { useChatUploads } from './use-chat-uploads';
-import { chatUploadParts } from './chat-uploads';
+import { chatUploadParts, type ChatUpload } from './chat-uploads';
 import { ComposerAttachments } from './composer-attachments';
 import { ComposerAttachmentMenu } from './composer-attachment-menu';
 import {
@@ -200,6 +205,9 @@ export function ChatComposer({
   const [goalDraft, setGoalDraft] = useState(false);
   const [closingGoal, setClosingGoal] = useState(false);
   const [commandsOpen, setCommandsOpen] = useState(false);
+  const [drawingOpen, setDrawingOpen] = useState(false);
+  const [editingDrawing, setEditingDrawing] = useState<ChatUpload | null>(null);
+  const composer = useRef<HTMLDivElement>(null);
   const skillCatalog = useChatSkills(commandsOpen, threadId, projectId);
   const commandGroups = [
     {
@@ -208,6 +216,12 @@ export function ChatComposer({
         {
           id: 'builtin',
           items: [
+            {
+              id: 'command:draw',
+              name: 'draw',
+              description: t('chat.drawing.command'),
+              action: 'draw' as const,
+            },
             {
               id: 'command:compact',
               name: 'compact',
@@ -226,7 +240,8 @@ export function ChatComposer({
     },
     skillCommandGroup(
       skillCatalog.skills.filter(
-        (skill) => !['goal', 'compact'].includes(skill.name.toLowerCase()),
+        (skill) =>
+          !['goal', 'compact', 'draw'].includes(skill.name.toLowerCase()),
       ),
       t('chat.commands.skills'),
     ),
@@ -252,6 +267,22 @@ export function ChatComposer({
   const submitLabel = showStop
     ? t(stopping ? 'chat.stopping' : 'chat.stop')
     : t(running && !goalDraft ? 'chat.queueSend' : 'chat.send');
+
+  function openDrawing() {
+    if (pendingRef.current || disabled || stopping || capturingRef.current)
+      return;
+    if (
+      uploads.queue.getSnapshot().length +
+        assetAttachments.length +
+        workspaceAttachments.length >=
+      MAX_CHAT_FILES
+    ) {
+      toast.error(t('assets.limit', { count: MAX_CHAT_FILES }));
+      return;
+    }
+    setEditingDrawing(null);
+    setDrawingOpen(true);
+  }
 
   async function compact() {
     if (pendingRef.current) return;
@@ -281,6 +312,7 @@ export function ChatComposer({
   }
   return (
     <div
+      ref={composer}
       data-chat-composer
       className={cn(
         'pointer-events-none shrink-0 space-y-2 bg-transparent p-3 @lg/chat:p-5',
@@ -326,7 +358,16 @@ export function ChatComposer({
               );
             }}
             onSubmitCapture={(event) => {
+              const drawingText = consumeDrawCommand(text);
+              if (drawingText !== null) {
+                event.preventDefault();
+                event.stopPropagation();
+                setText(drawingText);
+                openDrawing();
+                return;
+              }
               if (
+                drawingOpen ||
                 capturingRef.current ||
                 uploads.queue
                   .getSnapshot()
@@ -352,6 +393,7 @@ export function ChatComposer({
                 stopping ||
                 pendingRef.current ||
                 capturingRef.current ||
+                drawingOpen ||
                 attached.some((item) => item.status !== 'done')
               )
                 throw new Error('Unavailable');
@@ -445,6 +487,17 @@ export function ChatComposer({
               items={uploads.items}
               queue={uploads.queue}
               disabled={pending}
+              onEditDrawing={(item) => {
+                if (
+                  pendingRef.current ||
+                  disabled ||
+                  stopping ||
+                  capturingRef.current
+                )
+                  return;
+                setEditingDrawing(item);
+                setDrawingOpen(true);
+              }}
             />
             <GeneratedAttachments
               uploadedCount={uploads.items.length + workspaceAttachments.length}
@@ -471,7 +524,9 @@ export function ChatComposer({
                 onRetry={skillCatalog.retry}
                 onOpenChange={setCommandsOpen}
                 onCommand={(item) => {
-                  if (item.action === 'compact') {
+                  if (item.action === 'draw') {
+                    openDrawing();
+                  } else if (item.action === 'compact') {
                     void compact();
                   } else if (item.action === 'goal') {
                     setGoalDraft(goal?.status !== 'active');
@@ -501,6 +556,7 @@ export function ChatComposer({
               <div className="flex shrink-0 items-center gap-1">
                 <ComposerAttachmentMenu
                   disabled={pending || !!unavailable || !!stopping}
+                  onDraw={openDrawing}
                   capturing={capturing}
                   onCapturingChange={(value) => {
                     capturingRef.current = value;
@@ -580,6 +636,7 @@ export function ChatComposer({
                       ? stopping
                       : pending ||
                         capturing ||
+                        drawingOpen ||
                         unavailable ||
                         stopping ||
                         uploads.blocked
@@ -606,6 +663,48 @@ export function ChatComposer({
           </PromptInput>
         </WorkspaceFileDropZone>
       </div>
+      {drawingOpen && (
+        <DrawingDialog
+          initialSnapshot={editingDrawing?.drawing}
+          onCancel={() => {
+            setDrawingOpen(false);
+            setEditingDrawing(null);
+          }}
+          onRestoreFocus={() =>
+            composer.current?.querySelector('textarea')?.focus()
+          }
+          onComplete={(file, snapshot) => {
+            if (pendingRef.current || unavailable || stopping) {
+              toast.error(t('assets.composerUnavailable'));
+              return false;
+            }
+            const added = editingDrawing
+              ? uploads.queue.replaceInlineImage(
+                  editingDrawing.id,
+                  file,
+                  snapshot,
+                )
+              : uploads.queue.addInlineImage(
+                  file,
+                  assetAttachments.length + workspaceAttachments.length,
+                  snapshot,
+                );
+            if (added) {
+              retryId.current = null;
+              setDrawingOpen(false);
+              setEditingDrawing(null);
+              toast.success(
+                t(
+                  editingDrawing
+                    ? 'chat.drawing.updated'
+                    : 'chat.drawing.added',
+                ),
+              );
+            }
+            return added;
+          }}
+        />
+      )}
       {settingsError && (
         <div
           role="alert"

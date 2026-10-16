@@ -26,7 +26,7 @@ import {
   useState,
 } from 'react';
 import { defaultRehypePlugins, Streamdown } from 'streamdown';
-import { HtmlCodeBlock } from './html-code-block';
+import { MarkupCodeBlock } from './markup-code-block';
 import { MarkdownLink } from './markdown-link';
 import { rehypeWorkspaceFileLinks } from './markdown-file-link';
 
@@ -329,7 +329,10 @@ const streamdownPlugins = {
   math,
   mermaid,
   renderers: [
-    { language: ['html', 'htm', 'HTML', 'HTM'], component: HtmlCodeBlock },
+    {
+      language: ['html', 'htm', 'HTML', 'HTM', 'svg', 'SVG'],
+      component: MarkupCodeBlock,
+    },
   ],
 };
 const streamdownComponents = { a: MarkdownLink };

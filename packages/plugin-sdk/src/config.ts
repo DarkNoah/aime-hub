@@ -7,6 +7,14 @@ const common = {
     .refine((key) => !['constructor', 'prototype', '__proto__'].includes(key)),
   label: z.string().trim().min(1).max(100),
   description: z.string().max(1000).optional(),
+  group: z.string().trim().min(1).max(100).optional(),
+  /** Presentation and conditional-required rule; hidden values are retained. */
+  visibleWhen: z
+    .strictObject({
+      field: z.string().min(1).max(64),
+      equals: z.union([z.string().max(200), z.boolean()]),
+    })
+    .optional(),
   required: z.boolean().default(false),
 };
 
@@ -37,8 +45,34 @@ export const pluginConfigFieldSchema = z
       type: z.literal('boolean'),
       default: z.boolean().default(false),
     }),
+    z.strictObject({
+      ...common,
+      type: z.literal('select'),
+      options: z
+        .array(
+          z.strictObject({
+            value: z.string().min(1).max(200),
+            label: z.string().trim().min(1).max(100),
+          }),
+        )
+        .min(1)
+        .max(100),
+      default: z.string().max(200).optional(),
+      placeholder: z.string().max(200).optional(),
+    }),
   ])
   .superRefine((field, ctx) => {
+    if (
+      field.type === 'select' &&
+      (new Set(field.options.map((option) => option.value)).size !==
+        field.options.length ||
+        (field.default !== undefined &&
+          !field.options.some((option) => option.value === field.default)))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Invalid select options or default',
+      });
     if (
       field.type === 'number' &&
       ((field.min !== undefined &&
@@ -79,6 +113,26 @@ export const pluginConfigFieldsSchema = z
           message: 'Duplicate configuration key',
         });
       keys.add(field.key);
+      if (field.visibleWhen) {
+        const controller = fields.find(
+          (item) => item.key === field.visibleWhen!.field,
+        );
+        const equals = field.visibleWhen.equals;
+        if (
+          !controller ||
+          controller === field ||
+          controller.visibleWhen ||
+          !['text', 'select', 'boolean'].includes(controller.type) ||
+          (controller.type === 'boolean') !== (typeof equals === 'boolean') ||
+          (controller.type === 'select' &&
+            !controller.options.some((option) => option.value === equals))
+        )
+          ctx.addIssue({
+            code: 'custom',
+            path: [index, 'visibleWhen'],
+            message: 'Invalid visibility condition',
+          });
+      }
     }
   });
 
@@ -89,6 +143,16 @@ export interface PluginConfiguration {
   config: PluginConfig;
   /** Optimistic concurrency token; changes on configuration or activation updates. */
   revision: string;
+}
+
+export function isPluginConfigFieldVisible(
+  field: PluginConfigField,
+  values: Readonly<Record<string, unknown>>,
+) {
+  return (
+    !field.visibleWhen ||
+    values[field.visibleWhen.field] === field.visibleWhen.equals
+  );
 }
 
 export function pluginConfigDefaults(
@@ -108,7 +172,13 @@ export function parsePluginConfig(
   input: unknown,
 ) {
   const shape: Record<string, z.ZodType> = {};
+  const values = {
+    ...pluginConfigDefaults(fields),
+    ...(input && typeof input === 'object' ? input : {}),
+  };
   for (const field of fields) {
+    const required =
+      field.required && isPluginConfigFieldVisible(field, values);
     let schema: z.ZodType;
     if (field.type === 'number') {
       let number = z.number();
@@ -118,13 +188,16 @@ export function parsePluginConfig(
       schema = number;
     } else if (field.type === 'boolean') {
       schema = z.boolean();
+    } else if (field.type === 'select') {
+      const options = z.enum(field.options.map((option) => option.value));
+      schema = required ? options : options.or(z.literal(''));
     } else {
       const text = z.string().max(16384);
-      schema = field.required
+      schema = required
         ? text.refine((value) => value.trim().length > 0)
         : text;
     }
-    if (!field.required) schema = schema.optional();
+    if (!required) schema = schema.optional();
     if ('default' in field && field.default !== undefined)
       schema = schema.default(field.default);
     shape[field.key] = schema;

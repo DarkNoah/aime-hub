@@ -43,7 +43,8 @@ import {
 import { threadScope } from './scope.js';
 import { listChatSkills, resolveAgentSkillPaths } from './skills.js';
 import { getChatUsage } from './usage.js';
-import { getBrowser } from './browser.js';
+import { ThreadBrowsers } from './browser/registry.js';
+import { resolve } from 'node:path';
 import { threadMessages } from './message-conversion.js';
 import { consumeSessionStream } from './session-stream.js';
 import { PendingInputs } from './pending-inputs.js';
@@ -90,6 +91,9 @@ export function createChatRunner(
   };
   const storage = mastra.getStorage();
   if (!storage) throw new Error('Mastra storage is required for chat');
+  const browsers = new ThreadBrowsers(
+    resolve(workspaceRoot, '.browser-profiles'),
+  );
   const projectFilesystem = async (userId: string, projectId: string) => {
     const config = projects
       ? (await projects.get(userId, projectId)).workspace
@@ -98,6 +102,7 @@ export function createChatRunner(
     return createProjectFilesystem(directory, config);
   };
   return {
+    browsers,
     resolveSettings: async (settings) => ({
       ...settings,
       agentId: (await getConfig(settings.agentId)).id,
@@ -301,7 +306,7 @@ export function createChatRunner(
             judge: () => resolved.model,
             maxRuns: GOAL_MAX_RUNS,
           },
-          browser: getBrowser(),
+          browser: browsers.forThread(thread.id, userId),
           buildTools: (ids, defaults, disabledTools) =>
             tools
               ? tools.buildTools(ids, defaults, disabledTools)
@@ -400,6 +405,13 @@ export function createChatRunner(
           const abortSignal = runAbort.signal;
           const requestContext = new RequestContext();
           requestContext.set('userId', createdBy ?? userId);
+          // Resolve against the current message author, including queued project messages.
+          requestContext.set(
+            'browser',
+            browsers.agentContext(thread.id, () =>
+              String(requestContext.get('userId') ?? userId),
+            ),
+          );
           requestContext.set('projectId', projectId);
           requestContext.set('chatSettings', {
             agentId: config.id,
@@ -731,10 +743,12 @@ export function createChatRunner(
             await Promise.allSettled([...streams]);
             await memory.settled();
             await workspace?.destroy();
+            await browsers.releaseInactive(thread.id);
           },
         };
       } catch (error) {
         unsubscribeCommands?.();
+        await browsers.releaseInactive(thread.id);
         if (workspace) await workspace.destroy();
         else await filesystem?.destroy?.();
         throw error;

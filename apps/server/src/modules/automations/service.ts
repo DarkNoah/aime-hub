@@ -6,6 +6,11 @@ import type {
   AutomationInput,
   AutomationScope,
   AutomationRun,
+  AutomationPatch,
+} from '@aime/shared/automations';
+import {
+  automationInputSchema,
+  automationPatchSchema,
 } from '@aime/shared/automations';
 import type { Mastra } from '@mastra/core/mastra';
 import type { AnySchedule } from '@mastra/core/schedules';
@@ -115,13 +120,31 @@ export class AutomationService {
     };
   }
 
-  private async authorized(userId: string, id: string, write = false) {
+  private async authorized(
+    userId: string,
+    id: string,
+    write = false,
+    scope?: AutomationScope,
+  ) {
     const row = await this.mastra.schedules.get(id);
     const meta = this.metadata(row);
+    if (
+      scope &&
+      (scope.scope !== meta.scope.scope ||
+        (scope.scope === 'project' &&
+          meta.scope.scope === 'project' &&
+          scope.projectId !== meta.scope.projectId))
+    )
+      throw new ThreadError('AUTOMATION_NOT_FOUND', 404);
     if (meta.scope.scope === 'personal' && meta.ownerId !== userId)
       throw new ThreadError('AUTOMATION_NOT_FOUND', 404);
     await this.permission(userId, meta.scope, write);
     return { row: row!, meta };
+  }
+
+  async get(userId: string, id: string, scope?: AutomationScope) {
+    const { row } = await this.authorized(userId, id, false, scope);
+    return this.view(row);
   }
 
   async notificationTask(id: string) {
@@ -198,8 +221,47 @@ export class AutomationService {
   }
 
   async update(userId: string, id: string, data: AutomationInput) {
+    return this.change(userId, id, () => data);
+  }
+
+  async patch(
+    userId: string,
+    id: string,
+    input: AutomationPatch,
+    scope?: AutomationScope,
+  ) {
+    const patch = automationPatchSchema.parse(input);
+    return this.change(
+      userId,
+      id,
+      (current, meta) =>
+        automationInputSchema.parse({
+          ...meta.data,
+          enabled: current.status === 'active',
+          ...patch,
+          settings: { ...meta.data.settings, ...patch.settings },
+        }),
+      scope,
+    );
+  }
+
+  private async change(
+    userId: string,
+    id: string,
+    dataFor: (
+      current: AnySchedule,
+      meta: AutomationMetadata,
+    ) => AutomationInput,
+    scope?: AutomationScope,
+  ) {
     return this.locked(id, async () => {
-      const { meta } = await this.authorized(userId, id, true);
+      const { row: current, meta } = await this.authorized(
+        userId,
+        id,
+        true,
+        scope,
+      );
+      const data = dataFor(current, meta);
       const next = { ...meta, data };
       await this.validate(next);
       await this.threads.assert(
@@ -219,29 +281,36 @@ export class AutomationService {
     });
   }
 
-  async setEnabled(userId: string, id: string, enabled: boolean) {
-    const { row, meta } = await this.authorized(userId, id, true);
-    if (enabled) {
-      await this.validate(meta);
-      await this.threads.assert(this.view(row));
-    }
-    return this.view(
-      await (enabled
-        ? this.mastra.schedules.resume(id)
-        : this.mastra.schedules.pause(id)),
-    );
+  async setEnabled(
+    userId: string,
+    id: string,
+    enabled: boolean,
+    scope?: AutomationScope,
+  ) {
+    return this.locked(id, async () => {
+      const { row, meta } = await this.authorized(userId, id, true, scope);
+      if (enabled) {
+        await this.validate(meta);
+        await this.threads.assert(this.view(row));
+      }
+      return this.view(
+        await (enabled
+          ? this.mastra.schedules.resume(id)
+          : this.mastra.schedules.pause(id)),
+      );
+    });
   }
 
-  async remove(userId: string, id: string) {
+  async remove(userId: string, id: string, scope?: AutomationScope) {
     return this.locked(id, async () => {
-      await this.authorized(userId, id, true);
+      await this.authorized(userId, id, true, scope);
       // Keep the conversation and its messages after removing the schedule.
       await this.mastra.schedules.delete(id);
     });
   }
 
-  async run(userId: string, id: string) {
-    const { meta } = await this.authorized(userId, id, true);
+  async run(userId: string, id: string, scope?: AutomationScope) {
+    const { meta } = await this.authorized(userId, id, true, scope);
     await this.validate(meta);
     const task = await this.prepare(id);
     await this.mastra.schedules.run(id);
@@ -315,8 +384,12 @@ export class AutomationService {
     }
   }
 
-  async history(userId: string, id: string): Promise<AutomationRun[]> {
-    const { meta } = await this.authorized(userId, id);
+  async history(
+    userId: string,
+    id: string,
+    scope?: AutomationScope,
+  ): Promise<AutomationRun[]> {
+    const { meta } = await this.authorized(userId, id, false, scope);
     const storage = this.mastra.getStorage()!;
     const [schedules, states, workflows] = await Promise.all([
       storage.getStore('schedules'),

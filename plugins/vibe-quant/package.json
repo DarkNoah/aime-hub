@@ -1,0 +1,27 @@
+{
+  "name": "@plugins/vibe-quant",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --import tsx --test tests/*.test.ts && python3 -m unittest discover -s tests -p 'test_*.py'"
+  },
+  "dependencies": {
+    "@app/plugin-sdk": "workspace:*",
+    "@app/plugin-ui": "workspace:*",
+    "hono": "^4.13.13",
+    "lightweight-charts": "^5.2.0",
+    "lucide-react": "^1.49.0",
+    "sonner": "^2.0.7",
+    "typeorm": "0.3.31",
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0"
+  }
+}

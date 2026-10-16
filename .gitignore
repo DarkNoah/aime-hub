@@ -24,3 +24,10 @@ apps/server/src/modules/plugins/bundled-skills/
 
 !apps/server/src/modules/plugins/*.test.ts
 !scripts/plugins.test.ts
+!scripts/chat-drawing.test.ts
+!plugins/vibe-quant/tests/*.test.ts
+plugins/vibe-quant/**/__pycache__/
+
+!apps/server/src/modules/automations/tools.test.ts
+!scripts/chat-automation-preview.test.ts
+!apps/server/src/modules/threads/browser.test.ts

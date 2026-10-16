@@ -421,8 +421,10 @@ export function AgentSheet({
                     </Button>
                     <div className="divide-y rounded-lg border">
                       {catalog?.tools.map((tool) => {
-                        const titleKey =
-                          `agents.tool.${tool.id}` as TranslationKey;
+                        const titleKey = `agents.tool.${tool.id}` as Extract<
+                          TranslationKey,
+                          `agents.tool.${string}`
+                        >;
                         const title = i18n.exists(titleKey)
                           ? String(t(titleKey))
                           : tool.id;

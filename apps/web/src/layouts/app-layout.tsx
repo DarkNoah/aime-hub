@@ -1,5 +1,5 @@
 import { pluginManifests } from '@/features/plugins/generated';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, Outlet, useLocation, useParams } from '@tanstack/react-router';
 import { ChevronRight, Menu } from 'lucide-react';
@@ -23,16 +23,36 @@ import { ThreadNavigationProvider } from '@/components/chat/thread-navigation-pr
 import { Sidebar } from './sidebar';
 import { adminNavigation } from './navigation';
 import { NotificationProvider } from '@/features/notifications/notification-provider';
+import { BrowserDock } from '@/components/browser/dock';
+import { BrowserPanelOpenContext } from '@/components/browser/layout-context';
+import type { FloatingPreviewStackHandle } from '@/components/floating-preview-stack';
 
 export function AppLayout() {
   const { data } = useAuthSession();
+  const browserDock = useRef<FloatingPreviewStackHandle>(null);
+  const minimizeBrowserDock = useCallback(
+    () => browserDock.current?.minimize(),
+    [],
+  );
   return (
     <PersonalChatSettingsProvider>
       <ThreadListProvider key={data?.session.id}>
         <ProjectNavigationProvider>
           <ThreadNavigationProvider>
             <NotificationProvider />
-            <LayoutContent />
+            <BrowserPanelOpenContext.Provider value={minimizeBrowserDock}>
+              {data?.user.id ? (
+                <BrowserDock
+                  ref={browserDock}
+                  key={data.user.id}
+                  userId={data.user.id}
+                >
+                  <LayoutContent />
+                </BrowserDock>
+              ) : (
+                <LayoutContent />
+              )}
+            </BrowserPanelOpenContext.Provider>
           </ThreadNavigationProvider>
         </ProjectNavigationProvider>
       </ThreadListProvider>
@@ -162,7 +182,7 @@ function LayoutContent() {
           className={
             isChat
               ? 'h-[calc(100dvh-4rem)] min-h-0 w-full outline-none'
-              : 'mx-auto w-full max-w-[1440px] px-5 py-7 outline-none sm:px-8 lg:px-10 lg:py-9'
+              : 'mx-auto w-full max-w-[1440px] px-5 py-7 outline-none has-[[data-page-width=full]]:max-w-none sm:px-8 lg:px-10 lg:py-9'
           }
         >
           <Suspense fallback={<LoadingState />}>

@@ -1,5 +1,6 @@
 import type { DataSource, QueryRunner } from 'typeorm';
 import { isDeepStrictEqual } from 'node:util';
+import { resolve } from 'node:path';
 import type { BaseAgent } from '@aime/shared/agents';
 import { agentInputSchema, agentIdSchema } from '@aime/shared/agents';
 import { toolIdSchema, type ToolConfig } from '@aime/shared/tools';
@@ -15,6 +16,7 @@ import {
 } from '@app/plugin-sdk';
 import type { InstalledPlugin, PluginServer } from '@app/plugin-sdk/server';
 import { PluginLifecycle } from './lifecycle.js';
+import { createPluginRuntime, type PluginRuntimeOptions } from './runtime.js';
 
 export class PluginError extends Error {
   constructor(
@@ -53,6 +55,10 @@ export class PluginService {
     private readonly database: DataSource,
     readonly definitions: readonly InstalledPlugin[],
     private readonly pollIntervalMs = 2000,
+    runtimeOptions: PluginRuntimeOptions = {
+      applicationRoot: process.cwd(),
+      workspaceRoot: resolve(process.cwd(), 'workspaces'),
+    },
   ) {
     const ids = new Set<string>();
     for (const definition of definitions) {
@@ -62,6 +68,7 @@ export class PluginService {
       const server = definition.createServer({
         id,
         database,
+        runtime: createPluginRuntime(definition.manifest, runtimeOptions),
         assertEnabled: () => this.assertEnabled(id),
       });
       const agents = new Set<string>();

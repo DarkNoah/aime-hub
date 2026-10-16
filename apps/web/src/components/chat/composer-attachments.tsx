@@ -20,10 +20,12 @@ export function ComposerAttachments({
   items,
   queue,
   disabled,
+  onEditDrawing,
 }: {
   items: ChatUpload[];
   queue: ChatUploadQueue;
   disabled: boolean;
+  onEditDrawing?: (item: ChatUpload) => void;
 }) {
   const { t } = useTranslation();
   if (!items.length) return null;
@@ -48,16 +50,36 @@ export function ComposerAttachments({
               className="max-w-full min-w-0"
               tabIndex={0}
             >
-              <AttachmentPreview />
-              <AttachmentInfo className="max-w-32 @xl/chat:max-w-48" />
-              <Badge
-                variant={item.status === 'error' ? 'destructive' : 'secondary'}
-                className="shrink-0 px-1.5 py-0 text-[10px]"
-              >
-                {item.status === 'uploading'
-                  ? `${item.progress}%`
-                  : t(`files.uploadStatus.${item.status}`)}
-              </Badge>
+              {item.drawing && onEditDrawing ? (
+                <button
+                  type="button"
+                  className="flex min-w-0 items-center gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
+                  disabled={disabled || item.status !== 'done'}
+                  aria-label={t('chat.drawing.edit', { name: item.file.name })}
+                  title={t('chat.drawing.edit', { name: item.file.name })}
+                  onClick={() => onEditDrawing(item)}
+                >
+                  <AttachmentPreview />
+                  <AttachmentInfo className="max-w-32 @xl/chat:max-w-48" />
+                </button>
+              ) : (
+                <>
+                  <AttachmentPreview />
+                  <AttachmentInfo className="max-w-32 @xl/chat:max-w-48" />
+                </>
+              )}
+              {(!item.inlineOnly || item.status !== 'done') && (
+                <Badge
+                  variant={
+                    item.status === 'error' ? 'destructive' : 'secondary'
+                  }
+                  className="shrink-0 px-1.5 py-0 text-[10px]"
+                >
+                  {item.status === 'uploading'
+                    ? `${item.progress}%`
+                    : t(`files.uploadStatus.${item.status}`)}
+                </Badge>
+              )}
               {item.status === 'error' && (
                 <Button
                   type="button"
@@ -95,11 +117,13 @@ export function ComposerAttachments({
               />
             )}
             <p className="break-all text-sm">{item.file.name}</p>
-            <p className="break-all text-xs text-muted-foreground">
-              {item.path
-                ? `/${item.path}`
-                : t(`files.uploadStatus.${item.status}`)}
-            </p>
+            {!item.inlineOnly && (
+              <p className="break-all text-xs text-muted-foreground">
+                {item.path
+                  ? `/${item.path}`
+                  : t(`files.uploadStatus.${item.status}`)}
+              </p>
+            )}
             {['uploading', 'finishing'].includes(item.status) && (
               <Progress
                 value={item.progress}

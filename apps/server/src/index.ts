@@ -92,7 +92,10 @@ try {
   ]);
   throw error;
 }
-const plugins = new PluginService(database, installedPlugins);
+const plugins = new PluginService(database, installedPlugins, 2000, {
+  applicationRoot: fileURLToPath(new URL('../../../', import.meta.url)),
+  workspaceRoot,
+});
 await syncPluginSkills(workspaceRoot);
 const disposePluginSkills = registerPluginSkillAccess(
   workspaceRoot,
@@ -151,13 +154,14 @@ const knowledge = new KnowledgeService(
 );
 const knowledgeWorker = new KnowledgeWorker(knowledge);
 knowledgeWorker.start();
-const tools = new ToolService(
+const tools: ToolService = new ToolService(
   database,
   providers,
   assets,
   mcp,
   plugins,
   knowledge,
+  () => automations.service,
 );
 const agents = new AgentService(
   agentStore,

@@ -9,8 +9,17 @@ export function canCaptureScreenshot() {
 export async function captureScreenshot({
   signal,
   maxBytes = Infinity,
-}: { signal?: AbortSignal; maxBytes?: number } = {}): Promise<File | null> {
+  delayMs = 0,
+  onCountdown,
+}: {
+  signal?: AbortSignal;
+  maxBytes?: number;
+  delayMs?: number;
+  onCountdown?: (seconds: number) => void;
+} = {}): Promise<File | null> {
   signal?.throwIfAborted();
+  if (!Number.isFinite(delayMs) || delayMs < 0)
+    throw new Error('Screen capture delay must be a non-negative duration');
   if (!canCaptureScreenshot())
     throw new Error('Screen capture is unavailable in this browser or context');
 
@@ -39,6 +48,41 @@ export async function captureScreenshot({
     const track = stream.getVideoTracks()[0];
     if (!track || track.readyState === 'ended')
       throw new Error('Screen capture ended before a frame was available');
+    if (delayMs > 0) {
+      // Start only after the picker resolves. Attach the video afterwards so
+      // loadeddata is a fresh frame of the screen after the countdown.
+      await new Promise<void>((resolve, reject) => {
+        const deadline = performance.now() + delayMs;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let settled = false;
+        const finish = (error?: unknown) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          signal?.removeEventListener('abort', aborted);
+          track.removeEventListener('ended', ended);
+          onCountdown?.(0);
+          if (error) reject(error);
+          else resolve();
+        };
+        const aborted = () => finish(signal?.reason);
+        const ended = () =>
+          finish(new Error('Screen capture ended during countdown'));
+        const tick = () => {
+          const remaining = deadline - performance.now();
+          if (remaining <= 0) {
+            finish();
+            return;
+          }
+          onCountdown?.(Math.ceil(remaining / 1000));
+          if (!settled) timer = setTimeout(tick, Math.min(1000, remaining));
+        };
+        signal?.addEventListener('abort', aborted, { once: true });
+        track.addEventListener('ended', ended, { once: true });
+        tick();
+      });
+    }
+    signal?.throwIfAborted();
     await new Promise<void>((resolve, reject) => {
       const finish = (error?: unknown) => {
         clearTimeout(timeout);

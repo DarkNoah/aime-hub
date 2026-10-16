@@ -1,5 +1,9 @@
 import { createKnowledgeSearchTool } from '../../mastra/tools/knowledge_search.js';
 import { createKnowledgeTools } from '../../mastra/tools/knowledge.js';
+import {
+  createAutomationTools,
+  type ResolveAutomations,
+} from '../../mastra/tools/automations.js';
 import type { KnowledgeService } from '../knowledge/service.js';
 import type { ToolsInput } from '@mastra/core/agent';
 import { z } from 'zod';
@@ -39,6 +43,7 @@ export type ToolDefaultConfigs = Partial<
   speech?: Partial<SpeechConfig>;
 };
 type ToolDependencies = {
+  automations?: ResolveAutomations;
   knowledgeSearch?: KnowledgeService['searchContext'];
   knowledge?: KnowledgeService;
   disabledTools?: readonly string[];
@@ -153,6 +158,10 @@ async function buildTool(
         recordAsset: dependencies.recordAsset,
       });
     case 'builtin':
+      if (id.startsWith('automation_')) {
+        const tools = createAutomationTools(dependencies.automations);
+        if (id in tools) return tools[id as keyof typeof tools];
+      }
       if (id.startsWith('knowledge_') && id !== 'knowledge_search') {
         const tools = createKnowledgeTools(dependencies.knowledge);
         if (id in tools) return tools[id as keyof typeof tools];

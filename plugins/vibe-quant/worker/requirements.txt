@@ -1,0 +1,3 @@
+tqsdk==3.10.2
+pytdx==1.72
+chinese-calendar==1.11.0

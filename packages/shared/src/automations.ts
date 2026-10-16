@@ -28,24 +28,70 @@ export const automationInputSchema = z
   })
   .strict();
 export type AutomationInput = z.infer<typeof automationInputSchema>;
-export type Automation = AutomationInput & {
-  id: string;
-  timezone: string;
-  threadId: string;
-  threadCreated: boolean;
-  resourceId: string;
-  scope: AutomationScope;
-  createdBy: string;
-  createdAt: string;
-  updatedAt: string;
-  nextFireAt: string | null;
-  lastFireAt: string | null;
-};
+export const automationSchema = automationInputSchema.extend({
+  id: z.string(),
+  timezone: z.string(),
+  threadId: z.string(),
+  threadCreated: z.boolean(),
+  resourceId: z.string(),
+  scope: automationScopeSchema,
+  createdBy: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  nextFireAt: z.string().nullable(),
+  lastFireAt: z.string().nullable(),
+});
+export type Automation = z.infer<typeof automationSchema>;
 export type AutomationList = { items: Automation[]; canManage: boolean };
-export type AutomationRun = {
-  id: string;
-  firedAt: string;
-  status: 'running' | 'succeeded' | 'failed' | 'skipped';
-  text: string;
-  error: string | null;
-};
+export const automationRunSchema = z.object({
+  id: z.string(),
+  firedAt: z.string(),
+  status: z.enum(['running', 'succeeded', 'failed', 'skipped']),
+  text: z.string(),
+  error: z.string().nullable(),
+});
+export type AutomationRun = z.infer<typeof automationRunSchema>;
+
+// Remove defaults before making fields optional: patches must preserve omitted values.
+export const automationSettingsPatchSchema = chatSettingsSchema
+  .partial()
+  .extend({
+    model: chatSettingsSchema.shape.model.removeDefault().optional(),
+    reasoningEffort: chatSettingsSchema.shape.reasoningEffort
+      .removeDefault()
+      .optional(),
+  });
+export const automationPatchSchema = automationInputSchema.partial().extend({
+  maxSteps: automationInputSchema.shape.maxSteps.removeDefault().optional(),
+  separateThread: automationInputSchema.shape.separateThread
+    .removeDefault()
+    .optional(),
+  desktopNotification: automationInputSchema.shape.desktopNotification
+    .removeDefault()
+    .optional(),
+  settings: automationSettingsPatchSchema.optional(),
+});
+export type AutomationPatch = z.infer<typeof automationPatchSchema>;
+
+export const automationToolNames = [
+  'automation_list',
+  'automation_get',
+  'automation_save',
+  'automation_delete',
+  'automation_run',
+  'automation_history',
+] as const;
+
+export const automationToolResultSchema = z.union([
+  z.object({
+    items: z.array(automationSchema),
+    canManage: z.boolean(),
+    timezone: z.string(),
+  }),
+  z.object({
+    automation: automationSchema,
+    requested: z.literal(true).optional(),
+    runs: z.array(automationRunSchema).optional(),
+  }),
+  z.object({ id: z.string(), deleted: z.literal(true) }),
+]);

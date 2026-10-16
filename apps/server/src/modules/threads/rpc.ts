@@ -9,6 +9,21 @@ export function threadRouter(
   const p = rpc.threads;
   const threads = () => required(service);
   return p.router({
+    browser: p.browser.router({
+      list: p.browser.list.handler(({ context }) =>
+        threads().listBrowsers(context.userId),
+      ),
+      state: p.browser.state.handler(({ context, input }) =>
+        threads().getBrowserState(context.userId, input.params.threadId),
+      ),
+      action: p.browser.action.handler(({ context, input }) =>
+        threads().browserAction(
+          context.userId,
+          input.params.threadId,
+          input.body,
+        ),
+      ),
+    }),
     archived: p.archived.handler(({ context }) =>
       threads().listArchivedThreads(context.userId),
     ),

@@ -19,6 +19,8 @@ export const pluginManifestSchema = z.strictObject({
   dependencies: z.array(z.string().regex(/^[a-z][a-z0-9-]{0,39}$/)).default([]),
   /** Administrator form; values are stored separately and never included in public manifests. */
   configFields: pluginConfigFieldsSchema,
+  /** Request persistent storage at <WORKSPACE_ROOT>/plugins/<id>. */
+  workspace: z.boolean().optional(),
   pages: z
     .array(
       z.strictObject({

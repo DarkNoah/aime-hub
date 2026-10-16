@@ -1,4 +1,6 @@
 import { KnowledgePreview, KnowledgeManagementPreview } from './knowledge';
+import { automationToolNames } from '@aime/shared/automations';
+import { AutomationsPreview } from './automations';
 import type { ComponentType, ReactNode } from 'react';
 import { isToolUIPart } from 'ai';
 import { useTranslation } from 'react-i18next';
@@ -23,6 +25,7 @@ import { WebFetchPreview } from './web-fetch';
 import { ImageGenPreview } from './generated-media';
 import { SpeechPreview } from './speech';
 import { LspPreview } from './lsp';
+import { BrowserPreview } from './browser';
 import type { PreviewPart } from './selection';
 import { getToolName } from '../tool-renderers/registry';
 
@@ -106,6 +109,9 @@ function ObservationPreview({ part }: PreviewProps) {
 
 // Add a data part type or `tool:<toolName>` here to give it a dedicated preview.
 const previewRenderers: Partial<Record<string, ComponentType<PreviewProps>>> = {
+  ...Object.fromEntries(
+    automationToolNames.map((name) => [`tool:${name}`, AutomationsPreview]),
+  ),
   'tool:execute_command': ExecuteCommandPreview,
   'tool:exec_command': ExecuteCommandPreview,
   'tool:write_stdin': ExecuteCommandPreview,
@@ -139,6 +145,7 @@ export function MessagePartPreview({ part }: PreviewProps) {
   const toolName = isToolUIPart(part) ? getToolName(part) : undefined;
   const Renderer =
     (toolName ? previewRenderers[`tool:${toolName}`] : undefined) ??
+    (toolName?.startsWith('browser_') ? BrowserPreview : undefined) ??
     previewRenderers[part.type] ??
     (isToolUIPart(part) ? ToolPreview : RawPreview);
   return <Renderer part={part} />;

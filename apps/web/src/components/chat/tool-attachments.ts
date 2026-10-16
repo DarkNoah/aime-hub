@@ -1,5 +1,7 @@
 import type { DynamicToolUIPart, FileUIPart, ToolUIPart } from 'ai';
 import { readFileBlocks } from './message-preview/read-file-output.js';
+import { browserScreenshotOutput } from './message-preview/browser-data.js';
+import { getToolName } from './tool-renderers/registry.js';
 
 export type ToolAttachment = FileUIPart & {
   id: string;
@@ -23,6 +25,8 @@ export function getToolAttachments(
       output && typeof output === 'object'
         ? (output as Record<string, unknown>)
         : undefined;
+    if (getToolName(tool) === 'browser_screenshot')
+      output = browserScreenshotOutput(output);
     const input =
       tool.input && typeof tool.input === 'object'
         ? (tool.input as Record<string, unknown>)

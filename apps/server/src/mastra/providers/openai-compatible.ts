@@ -31,7 +31,7 @@ export class OpenAICompatibleProvider extends BaseProvider {
       modelId,
       url: this.provider.baseUrl,
       apiKey: this.provider.apiKey ?? '',
-      api: 'chat',
+      api: 'responses',
     };
   }
 

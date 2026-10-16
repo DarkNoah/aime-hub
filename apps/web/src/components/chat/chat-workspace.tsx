@@ -11,11 +11,14 @@ import {
 } from 'react';
 import type { UIMessage } from 'ai';
 import type { FileScope } from '@aime/shared/files';
+import { useLocation } from '@tanstack/react-router';
+import './workspace-navigation';
 import {
   Braces,
   ChevronDown,
   Columns2,
   Files,
+  Globe2,
   Images,
   ScanText,
 } from 'lucide-react';
@@ -55,6 +58,7 @@ import { WorkspaceFileContext } from '@/components/file-manager/context';
 import { WorkspaceDragContext } from '@/components/file-manager/drag-context';
 import { filesApi, fileErrorKey } from '@/components/file-manager/api';
 import { FloatingWindow } from '@/components/floating-window';
+import { BrowserStatusIcon } from '@/components/browser/status-icon';
 import { usePluginRightSidebar } from '@/features/plugins/use-right-sidebar';
 import { PluginRightSidebar } from '@/features/plugins/right-sidebar';
 import {
@@ -75,6 +79,7 @@ const AssetPanel = lazy(
 const FileManager = lazy(
   () => import('@/components/file-manager/file-manager'),
 );
+const BrowserPanel = lazy(() => import('@/components/browser/panel'));
 
 const EMPTY_MESSAGES: UIMessage[] = [];
 
@@ -83,6 +88,7 @@ const workspaceViews = [
   { view: 'assets', label: 'assets.title', icon: Images },
   { view: 'messages', label: 'chat.inspector.title', icon: Braces },
   { view: 'preview', label: 'chat.preview.title', icon: ScanText },
+  { view: 'browser', label: 'browser.title', icon: Globe2 },
 ] as const;
 type WorkspaceView =
   (typeof workspaceViews)[number]['view'] | `plugin:${string}:${string}`;
@@ -114,6 +120,10 @@ export function ChatWorkspace({
   const [expanded, setExpanded] = useState(layout.mode !== 'collapsed');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [view, setView] = useState<WorkspaceView>('files');
+  const requestedPanel = useLocation({
+    select: (location) => location.state.chatWorkspace,
+  });
+  const handledPanelRequest = useRef<string | null>(null);
   const pluginSidebars = usePluginRightSidebar();
   const activePlugin = pluginSidebars.find((entry) => entry.view === view);
   // Drop the selection immediately when disabled or access is revoked. Keep chat mounted.
@@ -142,6 +152,24 @@ export function ChatWorkspace({
     setLayout((previous) => ({ ...previous, mode: 'docked' }));
     panelRef.current.resize(`${layout.inspectorSize}%`);
   }, [layout.inspectorSize, panelRef]);
+  useEffect(() => {
+    if (
+      !requestedPanel ||
+      requestedPanel.threadId !== threadId ||
+      handledPanelRequest.current === requestedPanel.requestId
+    )
+      return;
+    // Wait for the existing responsive layout to mount its panel or drawer.
+    const measuredCompact = (containerRef.current?.clientWidth ?? 0) < 760;
+    if (measuredCompact !== compact) return;
+    const frame = requestAnimationFrame(() => {
+      handledPanelRequest.current = requestedPanel.requestId;
+      setView(requestedPanel.view);
+      if (compact) setDrawerOpen(true);
+      else expandInspector();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [requestedPanel, threadId, compact, expandInspector]);
   const openPreview = useCallback(
     (part: PreviewPart) => {
       const next = selectMessagePart(messages, part);
@@ -273,7 +301,11 @@ export function ChatWorkspace({
               setDrawerOpen(true);
             }}
           >
-            <Icon className="size-4" aria-hidden="true" />
+            {nextView === 'browser' ? (
+              <BrowserStatusIcon threadId={threadId} />
+            ) : (
+              <Icon className="size-4" aria-hidden="true" />
+            )}
             {t(label)}
           </DropdownMenuItem>
         ))}
@@ -301,7 +333,9 @@ export function ChatWorkspace({
           ? 'assets.title'
           : view === 'messages'
             ? 'chat.inspector.title'
-            : 'chat.preview.title',
+            : view === 'browser'
+              ? 'browser.title'
+              : 'chat.preview.title',
     );
   const content = activePlugin ? (
     <PluginRightSidebar
@@ -341,6 +375,16 @@ export function ChatWorkspace({
         revision={assetRevision}
         onClose={close}
       />
+    </Suspense>
+  ) : view === 'browser' ? (
+    <Suspense
+      fallback={
+        <p role="status" className="p-4 text-sm text-muted-foreground">
+          {t('browser.loading')}
+        </p>
+      }
+    >
+      <BrowserPanel threadId={threadId} onClose={close} />
     </Suspense>
   ) : view === 'preview' ? (
     <ChatMessagePreview
@@ -555,6 +599,24 @@ export function ChatWorkspace({
                       >
                         <ScanText className="size-4" aria-hidden="true" />
                       </Button>
+                      <Button
+                        variant={
+                          expanded && view === 'browser' ? 'secondary' : 'ghost'
+                        }
+                        size="icon-sm"
+                        aria-label={t('browser.title')}
+                        title={t('browser.title')}
+                        aria-expanded={expanded && view === 'browser'}
+                        aria-controls={contentId}
+                        onClick={() => {
+                          setView('browser');
+                          if (expanded && view === 'browser')
+                            collapseInspector();
+                          else expandInspector();
+                        }}
+                      >
+                        <BrowserStatusIcon threadId={threadId} />
+                      </Button>
                       {pluginSidebars.map((entry) => (
                         <Button
                           key={entry.view}
@@ -612,7 +674,9 @@ export function ChatWorkspace({
                               ? 'assets.emptyHint'
                               : view === 'messages'
                                 ? 'chat.inspector.hint'
-                                : 'chat.preview.hint',
+                                : view === 'browser'
+                                  ? 'browser.watchHint'
+                                  : 'chat.preview.hint',
                         )}
                   </SheetDescription>
                   {content}

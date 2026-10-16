@@ -84,6 +84,8 @@ export function ChatCommandTextarea({
     if (item.action) onCommand?.(item);
     onValueChange(next.text);
     setDismissed(true);
+    // The drawing dialog takes focus; leave its canvas keyboard shortcuts active.
+    if (item.action === 'draw') return;
     requestAnimationFrame(() => {
       textarea.current?.focus();
       textarea.current?.setSelectionRange(next.caret, next.caret);

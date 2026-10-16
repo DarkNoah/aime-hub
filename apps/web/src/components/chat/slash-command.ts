@@ -2,7 +2,7 @@ export type SlashCommandItem = {
   id: string;
   name: string;
   description: string;
-  action?: 'goal' | 'compact';
+  action?: 'goal' | 'compact' | 'draw';
 };
 
 export type SlashCommandSection = {
@@ -67,5 +67,11 @@ export function consumeGoalCommand(text: string): string | null {
 export function consumeCompactCommand(text: string): string | null {
   return /^\/compact(?:\s|$)/i.test(text)
     ? text.replace(/^\/compact(?:\s+|$)/i, '')
+    : null;
+}
+
+export function consumeDrawCommand(text: string): string | null {
+  return /^\/draw(?:\s|$)/i.test(text)
+    ? text.replace(/^\/draw(?:\s+|$)/i, '')
     : null;
 }

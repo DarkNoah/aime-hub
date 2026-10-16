@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Automation, AutomationRun } from '@aime/shared/automations';
 import { api } from '@/lib/rpc';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -13,6 +12,7 @@ import {
 } from '@/components/ui/sheet';
 import { LoadingState } from '@/components/loading-state';
 import { automationErrorKey } from './errors';
+import { AutomationRunList } from './run-list';
 
 export function AutomationHistory({
   task,
@@ -23,7 +23,7 @@ export function AutomationHistory({
   onClose: () => void;
   restoreFocus: () => void;
 }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const [runs, setRuns] = useState<AutomationRun[]>();
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
@@ -91,39 +91,7 @@ export function AutomationHistory({
               </div>
             )}
             {!runs && !error && <LoadingState />}
-            {runs?.length === 0 && (
-              <p className="py-16 text-center text-sm text-muted-foreground">
-                {t('automations.noRuns')}
-              </p>
-            )}
-            {runs?.map((run) => (
-              <article key={run.id} className="space-y-3 rounded-lg border p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <time className="text-sm" dateTime={run.firedAt}>
-                    {new Date(run.firedAt).toLocaleString(i18n.language, {
-                      timeZone: task.timezone,
-                    })}
-                  </time>
-                  <Badge
-                    variant={
-                      run.status === 'failed' ? 'destructive' : 'secondary'
-                    }
-                  >
-                    {t(`automations.status.${run.status}`)}
-                  </Badge>
-                </div>
-                {run.error && (
-                  <p className="text-sm text-muted-foreground">
-                    {t(automationErrorKey(run.error))}
-                  </p>
-                )}
-                {run.text && (
-                  <div className="whitespace-pre-wrap break-words text-sm leading-7">
-                    {run.text}
-                  </div>
-                )}
-              </article>
-            ))}
+            {runs && <AutomationRunList runs={runs} timezone={task.timezone} />}
           </div>
         </ScrollArea>
       </SheetContent>

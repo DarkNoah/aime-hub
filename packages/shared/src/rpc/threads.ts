@@ -18,8 +18,10 @@ import {
   type MessagePage,
 } from '../threads.js';
 import type { UIMessage } from 'ai';
+import { browserContract } from './browser.js';
 
 export const threadsContract = {
+  browser: browserContract,
   archived: procedure
     .route({
       method: 'GET',

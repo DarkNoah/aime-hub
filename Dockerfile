@@ -60,6 +60,9 @@ RUN node apps/server/node_modules/playwright-core/cli.js install-deps chromium \
 COPY --from=browser-cache /opt/playwright /opt/playwright
 RUN node apps/server/node_modules/playwright-core/cli.js install chromium
 COPY --from=build /app /app
+RUN if node -e "process.exit(require('./plugins/vibe-quant/plugin.manifest.json').enabled === false ? 1 : 0)"; then \
+      /opt/python/bin/pip wheel --no-cache-dir --wheel-dir /opt/plugin-wheels/vibe-quant -r plugins/vibe-quant/worker/requirements.txt; \
+    fi
 ENV PATH="/opt/python/bin:${PATH}"
 EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \

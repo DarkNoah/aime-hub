@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   parsePluginConfig,
   pluginConfigFieldsSchema,
+  isPluginConfigFieldVisible,
   type PluginConfig,
 } from '@app/plugin-sdk';
 import { PluginLifecycle } from './lifecycle.js';
@@ -60,6 +61,71 @@ test('configuration schema validates defaults, required values, limits and unkno
     ]).success,
     false,
   );
+});
+
+test('grouped select fields validate choices and conditional requirements without dropping hidden values', () => {
+  const fields = pluginConfigFieldsSchema.parse([
+    {
+      key: 'engine',
+      label: 'Engine',
+      type: 'select',
+      group: 'Source',
+      default: 'tdx',
+      options: [
+        { value: 'tdx', label: 'TDX' },
+        { value: 'tq', label: 'TQ' },
+      ],
+    },
+    {
+      key: 'token',
+      label: 'Token',
+      type: 'password',
+      group: 'Account',
+      required: true,
+      visibleWhen: { field: 'engine', equals: 'tq' },
+    },
+  ]);
+  assert.equal(fields[0].group, 'Source');
+  assert.equal(isPluginConfigFieldVisible(fields[1], { engine: 'tdx' }), false);
+  assert.deepEqual(parsePluginConfig(fields, {}), {
+    success: true,
+    data: { engine: 'tdx' },
+  });
+  assert.equal(parsePluginConfig(fields, { engine: 'unknown' }).success, false);
+  assert.equal(
+    parsePluginConfig(fields, { engine: 'tq', token: '' }).success,
+    false,
+  );
+  assert.deepEqual(
+    parsePluginConfig(fields, { engine: 'tdx', token: 'keep' }),
+    { success: true, data: { engine: 'tdx', token: 'keep' } },
+  );
+  for (const change of [
+    {
+      options: [
+        { value: 'a', label: 'A' },
+        { value: 'a', label: 'Duplicate' },
+      ],
+    },
+    { default: 'unknown' },
+  ])
+    assert.equal(
+      pluginConfigFieldsSchema.safeParse([{ ...fields[0], ...change }]).success,
+      false,
+    );
+  for (const condition of [
+    { field: 'missing', equals: 'tq' },
+    { field: 'engine', equals: true },
+    { field: 'engine', equals: 'invalid' },
+    { field: 'token', equals: 'secret' },
+  ])
+    assert.equal(
+      pluginConfigFieldsSchema.safeParse([
+        fields[0],
+        { ...fields[1], visibleWhen: condition },
+      ]).success,
+      false,
+    );
 });
 
 test('failed activation and retried cleanup receive the original immutable configuration', async () => {

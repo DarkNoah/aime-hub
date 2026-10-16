@@ -204,7 +204,22 @@ export default function createServer(context: PluginContext): PluginServer {
 }
 ```
 
-字段支持 `text`（可用 `multiline: true`）、`password`、`number`、`boolean`，最多 50 个。`key` 必须唯一，以英文字母开头，只包含字母、数字、下划线。公共选项有 `description`、`required`；文本/密码支持 `placeholder`；数字支持 `min`、`max`、`integer`。密码使用宿主 `PasswordInput`，禁止在清单中设置密码默认值。其他类型可设 `default`，布尔值默认 `false`。前后端均校验类型、必填项和数值范围，拒绝未知字段。
+字段支持 `text`（可用 `multiline: true`）、`password`、`number`、`boolean`、`select`，最多 50 个。`key` 必须唯一，以英文字母开头，只包含字母、数字、下划线。公共选项有 `description`、`required`、`group`；文本/密码支持 `placeholder`；数字支持 `min`、`max`、`integer`。密码使用宿主 `PasswordInput`，禁止在清单中设置密码默认值。其他类型可设 `default`，布尔值默认 `false`。前后端均校验类型、必填项和数值范围，拒绝未知字段。
+
+`group` 是表单 Tab 标题，按首次出现的顺序展示，未设置时兼容原平铺表单。切换 Tab 保留草稿，提交时校验全部参数并切换到首个错误所在 Tab。`select` 必须声明 `options: [{ "value": "tdx", "label": "通达信" }]`，默认值必须在选项内。字段可声明 `visibleWhen: { "field": "engine", "equals": "tdx" }`，控制字段须为无条件的 text/select/boolean；隐藏时暂不要求必填，已有值仍保留，切换选项不会清空账号。
+
+### 运行环境与专属空间
+
+服务端 `createServer(context)` 可读取 `context.runtime.platform`、`arch`、`nodeVersion` 和 `paths`：
+
+- `applicationRoot`：宿主安装根目录。
+- `workspaceRoot`：宿主实际解析的 `WORKSPACE_ROOT`，不依赖插件当前工作目录。
+- `pluginRoot`：插件安装目录 `<applicationRoot>/plugins/<pluginId>`，用于读取随包资源。
+- `pluginWorkspace`：插件声明 `"workspace": true` 时为 `<workspaceRoot>/plugins/<pluginId>`；未声明则为 `null`。
+
+在插件清单中设置 `"workspace": true`，然后在需要写入时调用 `await context.runtime.ensureWorkspace()`。该方法幂等创建并返回专属目录，拒绝逃逸目录的符号链接；构造插件时不自动写磁盘。停用或构建排除保留数据，其他插件使用各自目录。这是可信插件的路径约定，不是进程安全沙箱。
+
+Vibe Quant 使用此目录的 `.venv` 管理 Python 依赖，不再将机器路径作为用户参数。资源路径来自 `pluginRoot`，持久化路径来自 `pluginWorkspace`。
 
 生命周期通过第一个参数的 `config` 接收验证过的配置，类型为 `Readonly<Record<string, string | number | boolean>>`：
 

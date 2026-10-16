@@ -1,6 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ImagePlus, LoaderCircle, Monitor, Plus } from 'lucide-react';
+import {
+  ImagePlus,
+  LoaderCircle,
+  Monitor,
+  PencilRuler,
+  Plus,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { MAX_IMAGE_BYTES } from '@aime/shared/threads';
 import { usePromptInputAttachments } from '@/components/ai-elements/prompt-input';
@@ -18,14 +24,17 @@ export function ComposerAttachmentMenu({
   disabled,
   capturing,
   onCapturingChange,
+  onDraw,
 }: {
   disabled: boolean;
   capturing: boolean;
   onCapturingChange: (capturing: boolean) => void;
+  onDraw: () => void;
 }) {
   const { t } = useTranslation();
   const attachments = usePromptInputAttachments();
   const [screenshot, setScreenshot] = useState<File | null>(null);
+  const [countdown, setCountdown] = useState(0);
   const active = useRef<AbortController | null>(null);
   const current = useRef({ add: attachments.add, disabled });
   useLayoutEffect(() => {
@@ -51,6 +60,10 @@ export function ComposerAttachmentMenu({
     try {
       const file = await captureScreenshot({
         signal: controller.signal,
+        delayMs: 1000,
+        onCountdown: (seconds) => {
+          if (!controller.signal.aborted) setCountdown(seconds);
+        },
       });
       if (file && !controller.signal.aborted && !current.current.disabled) {
         editing = true;
@@ -64,7 +77,10 @@ export function ComposerAttachmentMenu({
     }
   }
 
-  const label = t(capturing ? 'chat.screenshot.capturing' : 'chat.attachMenu');
+  const label =
+    countdown > 0
+      ? t('chat.screenshot.countdown', { count: countdown })
+      : t(capturing ? 'chat.screenshot.capturing' : 'chat.attachMenu');
   return (
     <>
       <DropdownMenu>
@@ -79,10 +95,22 @@ export function ComposerAttachmentMenu({
             aria-busy={capturing}
             title={label}
           >
-            {capturing ? <LoaderCircle className="animate-spin" /> : <Plus />}
+            {countdown > 0 ? (
+              <span className="text-xs font-medium tabular-nums">
+                {countdown}
+              </span>
+            ) : capturing ? (
+              <LoaderCircle className="animate-spin" />
+            ) : (
+              <Plus />
+            )}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" side="top">
+          <DropdownMenuItem disabled={disabled || capturing} onSelect={onDraw}>
+            <PencilRuler />
+            {t('chat.drawing.title')}
+          </DropdownMenuItem>
           <DropdownMenuItem
             disabled={disabled}
             onSelect={attachments.openFileDialog}

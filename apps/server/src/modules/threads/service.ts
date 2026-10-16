@@ -1,4 +1,12 @@
 import { nanoid } from 'nanoid';
+import {
+  emptyBrowserState,
+  type BrowserAction,
+  type BrowserEvent,
+  type BrowserState,
+  type BrowserSummary,
+} from '@aime/shared/browser';
+import type { ThreadBrowsers } from './browser/registry.js';
 import type {
   ChatSession,
   ChatSessionContext,
@@ -94,6 +102,7 @@ type Runtime = {
 };
 
 export interface ChatRunner {
+  browsers?: ThreadBrowsers;
   resolveSettings?(settings: ChatSettings): Promise<ChatSettings>;
   sessionKey?(settings: ChatSettings): Promise<string>;
   getGoal?(threadId: string): Promise<ThreadGoal | null>;
@@ -832,6 +841,92 @@ export class ThreadService {
     );
   }
 
+  private browserBusy(id: string) {
+    const runtime = this.runtimes.get(id);
+    return (
+      !!runtime &&
+      (this.busy(runtime) ||
+        runtime.backgroundTasks.some(isBackgroundTaskActive))
+    );
+  }
+
+  async listBrowsers(userId: string): Promise<BrowserSummary[]> {
+    const result: BrowserSummary[] = [];
+    for (const [threadId, browser] of this.runner.browsers?.entries(userId) ??
+      []) {
+      if (!browser.isRunning()) continue;
+      try {
+        const thread = await this.accessible(userId, threadId);
+        const state = await browser.state();
+        if (state.status !== 'ready') continue;
+        result.push({
+          threadId,
+          tabCount: state.tabs.length,
+          title: thread.title ?? '',
+          projectId: threadScope(thread.resourceId).projectId ?? null,
+          url: state.url,
+          busy: this.browserBusy(threadId),
+        });
+      } catch (error) {
+        if (
+          !(error instanceof ThreadError) ||
+          ![403, 404].includes(error.status)
+        )
+          throw error;
+      }
+    }
+    return result;
+  }
+
+  async getBrowserState(userId: string, id: string): Promise<BrowserState> {
+    await this.accessible(userId, id);
+    return {
+      ...((await this.runner.browsers?.get(id, userId)?.state()) ??
+        emptyBrowserState),
+      busy: this.browserBusy(id),
+    };
+  }
+
+  async subscribeBrowser(
+    userId: string,
+    id: string,
+    send: (event: BrowserEvent) => void,
+  ) {
+    await this.accessible(userId, id);
+    if (!this.runner.browsers) {
+      send({ type: 'state', state: emptyBrowserState });
+      return () => {};
+    }
+    return this.runner.browsers.subscribe(id, userId, (event) =>
+      send(
+        event.type === 'state'
+          ? { ...event, state: { ...event.state, busy: this.browserBusy(id) } }
+          : event,
+      ),
+    );
+  }
+
+  browserAction(userId: string, id: string, action: BrowserAction) {
+    return this.scopeLocked(userId, id, async () => {
+      const browser = this.runner.browsers?.get(id, userId);
+      if (!browser) throw new ThreadError('BROWSER_NOT_RUNNING', 409);
+      // Closing is always explicit; all other user input waits until Agent work is idle.
+      const releasing =
+        (action.kind === 'mouse' && action.event.type === 'mouseReleased') ||
+        (action.kind === 'keyboard' && action.event.type === 'keyUp');
+      if (action.kind !== 'close' && !releasing && this.browserBusy(id))
+        throw new ThreadError('BROWSER_BUSY', 409);
+      try {
+        await browser.action(action);
+        if (action.kind === 'close' && !this.runtimes.get(id)?.session)
+          await this.runner.browsers?.releaseInactive(id);
+      } catch (error) {
+        if (error instanceof ThreadError) throw error;
+        throw new ThreadError('BROWSER_ACTION_FAILED', 502);
+      }
+    });
+  }
+
   async listArchivedThreads(userId: string) {
     const threads = await this.listChatThreads(`user:${userId}`, true);
     if (await this.isSystemAdmin(userId))
@@ -1488,6 +1583,7 @@ export class ThreadService {
         await runtime.backgroundObserver?.stop();
         await runtime.session?.close();
         runtime.session = undefined;
+        await this.runner.browsers?.remove(id);
         const { projectId } = threadScope(thread.resourceId);
         if (projectId) await this.memory.deleteThread(id);
         else
@@ -1559,12 +1655,14 @@ export class ThreadService {
       });
       if (activeTasks?.tasks.length) throw new ThreadError('PROJECT_BUSY', 409);
       let page = 0;
+      const threadIds: string[] = [];
       while (true) {
         const result = await this.memory.listThreads({
           filter: { resourceId: `project:${projectId}` },
           page,
           perPage: 100,
         });
+        threadIds.push(...result.threads.map((thread) => thread.id));
         if (
           result.threads.some(
             (thread) =>
@@ -1579,6 +1677,9 @@ export class ThreadService {
       }
       const result = await remove();
       this.invalidateProject(projectId);
+      await Promise.allSettled(
+        threadIds.map((id) => this.runner.browsers?.remove(id)),
+      );
       return result;
     });
   }
@@ -1597,6 +1698,7 @@ export class ThreadService {
       ]),
     );
     await Promise.allSettled([...this.locks.values()]);
+    await this.runner.browsers?.dispose();
     this.runtimes.clear();
   }
 }
