@@ -6,6 +6,18 @@
   "apiVersion": 1,
   "enabled": false,
   "dependencies": [],
+  "configFields": [
+    {
+      "key": "maxNotes",
+      "label": "单次返回笔记数量",
+      "description": "页面列表和笔记工具每次最多返回的条数（1–50）。",
+      "type": "number",
+      "integer": true,
+      "min": 1,
+      "max": 50,
+      "default": 50
+    }
+  ],
   "pages": [
     {
       "path": "",

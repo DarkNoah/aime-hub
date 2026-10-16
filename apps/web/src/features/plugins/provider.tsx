@@ -6,8 +6,12 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { PluginStatus } from '@app/plugin-sdk';
-import { pluginRequest } from '@app/plugin-sdk/web';
+import type {
+  PluginStatus,
+  PluginConfiguration,
+  PluginConfigSaveResult,
+} from '@app/plugin-sdk';
+import { pluginRequest, PluginRequestError } from '@app/plugin-sdk/web';
 import { invalidateAvailableAgents } from '@/features/agents/use-available-agents';
 import { PluginContext } from './context';
 
@@ -57,21 +61,55 @@ export function PluginProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('focus', check);
     };
   }, [refresh]);
-  const setEnabled = useCallback(async (id: string, enabled: boolean) => {
-    const value = await pluginRequest<PluginStatus>(id, '/enabled', {
-      method: 'PUT',
-      body: JSON.stringify({ enabled }),
-    });
+  const update = useCallback((value: PluginStatus) => {
     ++generation.current;
     controller.current?.abort();
     setPlugins((current) =>
-      current.map((item) => (item.id === id ? value : item)),
+      current.map((item) => (item.id === value.id ? value : item)),
     );
     invalidateAvailableAgents();
   }, []);
+  const setEnabled = useCallback(
+    async (id: string, enabled: boolean) => {
+      try {
+        update(
+          await pluginRequest<PluginStatus>(id, '/enabled', {
+            method: 'PUT',
+            body: JSON.stringify({ enabled }),
+          }),
+        );
+      } catch (error) {
+        if (error instanceof PluginRequestError && error.plugin?.id === id)
+          update(error.plugin);
+        throw error;
+      }
+    },
+    [update],
+  );
+  const saveConfig = useCallback(
+    async (id: string, configuration: PluginConfiguration) => {
+      try {
+        const result = await pluginRequest<PluginConfigSaveResult>(
+          id,
+          '/config',
+          {
+            method: 'PUT',
+            body: JSON.stringify(configuration),
+          },
+        );
+        update(result.plugin);
+        return result;
+      } catch (error) {
+        if (error instanceof PluginRequestError && error.plugin?.id === id)
+          update(error.plugin);
+        throw error;
+      }
+    },
+    [update],
+  );
   const value = useMemo(
-    () => ({ plugins, loading, error, refresh, setEnabled }),
-    [plugins, loading, error, refresh, setEnabled],
+    () => ({ plugins, loading, error, refresh, setEnabled, saveConfig }),
+    [plugins, loading, error, refresh, setEnabled, saveConfig],
   );
   return (
     <PluginContext.Provider value={value}>{children}</PluginContext.Provider>

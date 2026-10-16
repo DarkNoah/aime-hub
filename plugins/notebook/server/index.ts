@@ -17,12 +17,13 @@ const noteInput = z.strictObject({
   content: z.string().trim().min(1).max(10000),
 });
 export default function createServer(context: PluginContext): PluginServer {
+  let maxNotes = 50;
   const notes = context.database.getRepository(NoteEntity);
   const list = (userId: string) =>
     notes.find({
       where: { userId },
       order: { createdAt: 'DESC', id: 'ASC' },
-      take: 50,
+      take: maxNotes,
     });
   const api = new Hono<PluginHttpEnv>();
   api.get('/notes', async (c) => c.json(await list(c.get('userId'))));
@@ -75,6 +76,9 @@ export default function createServer(context: PluginContext): PluginServer {
     },
   });
   return {
+    onEnable({ config }) {
+      maxNotes = config.maxNotes as number;
+    },
     api,
     tools: [tool],
     agents: [

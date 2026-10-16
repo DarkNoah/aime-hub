@@ -39,6 +39,27 @@ export function pluginRoutes(
       await plugins.setEnabled(c.req.param('id'), body.data.enabled),
     );
   });
+  app.get('/:id/config', async (c) => {
+    if (!c.get('isAdmin')) return c.json({ code: 'FORBIDDEN' }, 403);
+    return c.json(await plugins.getConfig(c.req.param('id')));
+  });
+  app.put('/:id/config', async (c) => {
+    if (!c.get('isAdmin')) return c.json({ code: 'FORBIDDEN' }, 403);
+    const body = z
+      .strictObject({
+        config: z.record(z.string(), z.unknown()),
+        revision: z.string().min(1).max(100),
+      })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ code: 'VALIDATION_ERROR' }, 400);
+    return c.json(
+      await plugins.setConfig(
+        c.req.param('id'),
+        body.data.config,
+        body.data.revision,
+      ),
+    );
+  });
   for (const { manifest } of plugins.definitions) {
     app.use(`/${manifest.id}/*`, async (_c, next) => {
       await plugins.assertEnabled(manifest.id);
@@ -47,14 +68,28 @@ export function pluginRoutes(
     const api = plugins.api(manifest.id);
     if (api) app.route(`/${manifest.id}`, api);
   }
-  app.onError((error, c) => {
+  app.onError(async (error, c) => {
+    // A failed stop can still persist enabled=false. Return the actual
+    // status so the admin switch never stays on after a cleanup failure.
+    const isToggle =
+      c.get('isAdmin') &&
+      c.req.method === 'PUT' &&
+      (c.req.path.endsWith('/enabled') || c.req.path.endsWith('/config'));
+    const plugin = isToggle
+      ? (await plugins.list().catch(() => [])).find(
+          (p) => p.id === c.req.param('id'),
+        )
+      : undefined;
     if (error instanceof PluginError)
-      return c.json({ code: error.code }, error.status as 404 | 409);
+      return c.json(
+        { code: error.code, plugin, issues: error.issues },
+        error.status as 400 | 404 | 409 | 503,
+      );
     console.error(
       'Plugin request failed',
       error instanceof Error ? error.name : 'UnknownError',
     );
-    return c.json({ code: 'INTERNAL_ERROR' }, 500);
+    return c.json({ code: 'INTERNAL_ERROR', plugin }, 500);
   });
   return app;
 }

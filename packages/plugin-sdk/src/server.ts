@@ -5,14 +5,14 @@ import type { Tool } from '@mastra/core/tools';
 // Mastra registries accept heterogeneous input/output schemas.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type PluginTool = Tool<any, any>;
-import type { PluginManifest } from './index.js';
+import type { PluginConfig, PluginManifest } from './index.js';
 
 export type PluginHttpEnv = { Variables: { userId: string; isAdmin: boolean } };
 export interface PluginContext {
   readonly id: string;
   /** Shared, initialized host connection. Do not initialize or destroy it. */
   readonly database: DataSource;
-  /** Rechecks persisted state; use at execution boundaries, never trust a cached flag. */
+  /** Checks persisted state and local readiness. Not available until onEnable completes. */
   assertEnabled(): Promise<void>;
 }
 export interface PluginServer {
@@ -22,8 +22,16 @@ export interface PluginServer {
   agents?: BaseAgent[];
   /** IDs must start with plugin_{id with hyphens replaced by underscores}_. */
   tools?: PluginTool[];
-  /** Called at server shutdown; setup must not start background work. */
+  /** Starts this process's resources on activation/restart. Must be retry-safe. */
+  onEnable?: (context: PluginLifecycleContext) => void | Promise<void>;
+  /** Stops and drains resources, including partial onEnable failures. Must be retry-safe. */
+  onDisable?: (context: PluginLifecycleContext) => void | Promise<void>;
+  /** Final process cleanup, after onDisable (even if it fails). Setup must be side-effect free. */
   dispose?: () => Promise<void>;
+}
+export interface PluginLifecycleContext {
+  /** Validated activation snapshot. onDisable receives the same values as its onEnable. */
+  readonly config: PluginConfig;
 }
 export interface PluginDatabase {
   entities: EntitySchema[];

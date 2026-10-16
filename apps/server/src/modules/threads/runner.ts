@@ -18,6 +18,7 @@ import type { MastraModelOutput } from '@mastra/core/stream';
 import { RequestContext } from '@mastra/core/request-context';
 import { createObservabilityContext } from '@mastra/core/observability';
 import { ThreadMessageMemory } from './message-memory.js';
+import type { ResolveMemoryConfig } from '../../mastra/memory.js';
 import { chatSettingsSchema, type ChatSettings } from '@aime/shared/threads';
 import {
   reconcileThreadMessages,
@@ -63,6 +64,7 @@ export function createChatRunner(
   agents?: Pick<AgentService, 'getConfig' | 'getAgent'>,
   usage?: Pick<UsageService, 'record'>,
   environmentVariables?: Pick<EnvironmentVariableService, 'getEnv'>,
+  getMemoryConfig?: ResolveMemoryConfig,
 ): ChatRunner {
   const getConfig = async (id?: string | null) => {
     if (agents) return agents.getConfig(id);
@@ -155,11 +157,14 @@ export function createChatRunner(
       let currentSettings = settings;
       let runAbort = new AbortController();
       let resolved = await sessionModel(settings);
+      const memoryConfig = await getMemoryConfig?.();
       const memory = new ThreadMessageMemory(
         {
+          ...memoryConfig,
           storage,
           options: {
             semanticRecall: false,
+            ...memoryConfig?.options,
             // ThreadService generates and publishes the first title independently.
             generateTitle: false,
             observationalMemory: {

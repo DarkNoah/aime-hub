@@ -1,5 +1,9 @@
 import { createContext, useContext } from 'react';
-import type { PluginStatus } from '@app/plugin-sdk';
+import type {
+  PluginStatus,
+  PluginConfigSaveResult,
+  PluginConfiguration,
+} from '@app/plugin-sdk';
 
 export const PluginContext = createContext<{
   plugins: PluginStatus[];
@@ -7,6 +11,10 @@ export const PluginContext = createContext<{
   error: boolean;
   refresh(): Promise<void>;
   setEnabled(id: string, enabled: boolean): Promise<void>;
+  saveConfig(
+    id: string,
+    configuration: PluginConfiguration,
+  ): Promise<PluginConfigSaveResult>;
 } | null>(null);
 export function usePlugins() {
   const context = useContext(PluginContext);

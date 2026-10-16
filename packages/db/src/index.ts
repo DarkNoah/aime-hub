@@ -20,6 +20,7 @@ export {
 import 'reflect-metadata';
 import { DataSource, type EntitySchema } from 'typeorm';
 import { CreatePluginTables1780000014000 } from './migrations/1780000014000-create-plugin-tables.js';
+import { PluginConfiguration1780000022000 } from './migrations/1780000022000-plugin-configuration.js';
 import { CreateProviderTables1780000001000 } from './migrations/1780000001000-create-provider-tables.js';
 import { Provider, ProviderModel, Setting } from './provider-entities.js';
 import { Project, ProjectMember } from './project-entities.js';
@@ -77,6 +78,7 @@ export function createDataSource(
       GeneratedAsset,
     ],
     migrations: [
+      PluginConfiguration1780000022000,
       KnowledgeDocumentMetadata1780000021000,
       KnowledgeUnifiedVectors1780000019000,
       KnowledgeDocumentVersions1780000018000,

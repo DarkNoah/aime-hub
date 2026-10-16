@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import {
+  pluginConfigFieldsSchema,
+  type PluginConfiguration,
+} from './config.js';
+export * from './config.js';
 
 /** Increment this when the host breaks the plugin contract. */
 export const PLUGIN_API_VERSION = 1;
@@ -12,6 +17,8 @@ export const pluginManifestSchema = z.strictObject({
   enabled: z.boolean().default(true),
   // Dependencies refer to other installed plugin IDs, not npm packages.
   dependencies: z.array(z.string().regex(/^[a-z][a-z0-9-]{0,39}$/)).default([]),
+  /** Administrator form; values are stored separately and never included in public manifests. */
+  configFields: pluginConfigFieldsSchema,
   pages: z
     .array(
       z.strictObject({
@@ -40,9 +47,18 @@ export const pluginManifestSchema = z.strictObject({
 });
 export type PluginManifest = z.infer<typeof pluginManifestSchema>;
 export type PluginStatus = Omit<PluginManifest, 'enabled'> & {
-  /** Runtime activation stored in the database, independent of manifest.enabled. */
+  /** Available in this process only after onEnable succeeds and dependencies are ready. */
   enabled: boolean;
+  /** Administrator's persisted choice, preserved across process shutdown/restart. */
+  desiredEnabled: boolean;
   ready: boolean;
   installedVersion: string | null;
   reason: string | null;
 };
+
+export interface PluginConfigSaveResult {
+  plugin: PluginStatus;
+  configuration: PluginConfiguration;
+  /** False means saved successfully but runtime restoration/cleanup needs attention. */
+  applied: boolean;
+}

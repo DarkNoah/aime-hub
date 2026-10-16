@@ -123,6 +123,7 @@ const previewRenderers: Partial<Record<string, ComponentType<PreviewProps>>> = {
   'tool:knowledge_create': KnowledgeManagementPreview,
   'tool:knowledge_get_document': KnowledgeManagementPreview,
   'tool:knowledge_save_document': KnowledgeManagementPreview,
+  'tool:knowledge_archive_document': KnowledgeManagementPreview,
   'tool:web_search': WebSearchPreview,
   'tool:web_fetch': WebFetchPreview,
   'tool:image_gen': ImageGenPreview,

@@ -1,13 +1,29 @@
 import { isToolUIPart } from 'ai';
 import { z } from 'zod';
 import { useTranslation } from 'react-i18next';
-import { knowledgeHitSchema } from '@aime/shared/knowledge';
+import {
+  knowledgeHitSchema,
+  knowledgeSearchResultSchema,
+} from '@aime/shared/knowledge';
 import { Badge } from '@/components/ui/badge';
 import { KnowledgeHitBadges } from '@/components/knowledge/hit-badges';
 import { ToolInput, ToolOutput } from '@/components/ai-elements/tool';
 import type { PreviewPart } from './selection';
 
-const outputSchema = z.object({ results: z.array(knowledgeHitSchema) });
+const outputSchema = z.object({
+  results: z.array(
+    z.union([
+      knowledgeSearchResultSchema.transform((hit) => ({
+        ...hit,
+        documentId: hit.item_id,
+        text: hit.content,
+        metadata: hit.extendValues,
+      })),
+      // Previously saved messages may use the internal hit shape.
+      knowledgeHitSchema,
+    ]),
+  ),
+});
 const baseSchema = z.object({
   id: z.string(),
   name: z.string(),

@@ -44,6 +44,7 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-i18next": "^17.0.15",
+    "react-image-crop": "^11.1.2",
     "react-jsx-parser": "^2.4.1",
     "react-resizable-panels": "^4.14.1",
     "react-responsive-masonry": "^2.9.0",

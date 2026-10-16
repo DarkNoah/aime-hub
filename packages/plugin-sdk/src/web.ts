@@ -1,4 +1,16 @@
 import type { ComponentType } from 'react';
+import type { PluginStatus, PluginConfigIssue } from './index.js';
+
+export class PluginRequestError extends Error {
+  constructor(
+    code: string,
+    public readonly plugin?: PluginStatus,
+    public readonly issues?: PluginConfigIssue[],
+  ) {
+    super(code);
+    this.name = 'PluginRequestError';
+  }
+}
 
 export interface PluginPageProps {
   pluginId: string;
@@ -44,8 +56,14 @@ export async function pluginRequest<T>(
   if (!response.ok) {
     const error = (await response.json().catch(() => ({}))) as {
       code?: string;
+      plugin?: PluginStatus;
+      issues?: PluginConfigIssue[];
     };
-    throw new Error(error.code ?? `HTTP ${response.status}`);
+    throw new PluginRequestError(
+      error.code ?? `HTTP ${response.status}`,
+      error.plugin,
+      error.issues,
+    );
   }
   return response.json() as Promise<T>;
 }

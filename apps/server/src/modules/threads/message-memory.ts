@@ -1,6 +1,6 @@
 import { convertMessages } from '@mastra/core/agent';
 import type { MastraCompositeStore, MemoryStorage } from '@mastra/core/storage';
-import { Memory } from '@mastra/memory';
+import { ChatMemory, type ChatMemoryConfig } from '../../mastra/memory.js';
 import type { UIMessage } from 'ai';
 
 type SaveMessages = MemoryStorage['saveMessages'];
@@ -48,11 +48,11 @@ function observeMessageWrites(
 }
 
 /** Observe native saves, including late tool results after a stream was aborted. */
-export class ThreadMessageMemory extends Memory {
+export class ThreadMessageMemory extends ChatMemory {
   private readonly writes: { pending: Promise<unknown> };
 
   constructor(
-    options: NonNullable<ConstructorParameters<typeof Memory>[0]> & {
+    options: ChatMemoryConfig & {
       storage: MastraCompositeStore;
     },
     scope: { threadId: string; resourceId?: string },

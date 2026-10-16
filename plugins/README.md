@@ -113,7 +113,7 @@ import type { PluginContext, PluginServer } from '@app/plugin-sdk/server';
 export default function createServer(context: PluginContext): PluginServer {
   // context.id             插件 ID
   // context.database       已初始化的宿主 TypeORM DataSource
-  // context.assertEnabled  异步检查持久化启用状态
+  // context.assertEnabled  异步检查持久化选择、当前实例及依赖是否就绪
   return { api, agents, tools };
 }
 ```
@@ -122,9 +122,118 @@ export default function createServer(context: PluginContext): PluginServer {
 - `c.get('userId')`：当前会话用户 ID；`c.get('isAdmin')`：管理员标志。插件必须自行校验记录归属、项目成员关系和业务操作权限。**页面的 `admin` 标志不替代 API 权限检查。**
 - `agents`：宿主 `BaseAgent[]`，ID 使用 `plugin:<id>:<name>`；`source: 'code'`；`model: null` 继承宿主模型配置；`agents: {}` 默认不委派。宿主 AgentService 统一列出和执行，不需要写入 Mastra Agent 数据表。
 - `tools`：Mastra `createTool()` 实例数组，ID 使用 `plugin_<id（连字符转下划线）>_<name>`。宿主包装执行入口，因此已经取出的句柄在停用后也无法执行。工具进入全局配置、Agent 和 `exec` 目录，支持标准启停开关；结果使用现有通用工具展示。本版未增加任意工具配置表单或专用结果渲染器注册接口。
-- `dispose`：可选的异步进程退出清理函数。`createServer` 是构造入口，不是启用回调；参与构建的插件即使在后台停用也会调用，不能在这里启动定时任务或外部副作用。清单 `enabled: false` 的插件不会导入或调用此入口。本版后台启停控制请求与能力的可用性，不包含后台 worker 生命周期。
+- `onEnable`：可选的同步或异步启用回调，用于启动定时任务、订阅和连接。后台开启、服务启动恢复，以及其他实例开启后的状态同步都会触发；宿主等待成功后才开放当前实例的能力。
+- `onDisable`：可选的同步或异步停用回调，用于停止并等待后台任务结束、取消订阅、关闭插件自己的连接。后台关闭、其他实例关闭后的状态同步、服务退出以及 `onEnable` 部分失败后的补偿清理都会触发。
+- `dispose`：可选的异步进程退出清理函数。在 `onDisable` 之后执行；即使前面的清理失败，宿主仍会尝试所有插件的 `dispose`，等待全部结束后再关闭共享数据库。
+
+`createServer` 只构造接口，不能启动后台任务或外部副作用。参与构建的插件即使在后台停用也会调用它；清单 `enabled: false` 的插件不会导入或调用此入口。生命周期函数可以直接闭包使用 `context`，不需要重新创建插件实例：
+
+```ts
+export default function createServer(context: PluginContext): PluginServer {
+  let controller: AbortController | undefined;
+  let task: Promise<void> | undefined;
+  return {
+    async onEnable() {
+      if (task) return;
+      controller = new AbortController();
+      // 初始化失败时抛错；后台循环内部处理错误，并在每次业务执行前调用
+      // context.assertEnabled()。runWorker 应响应 signal，取消后正常结束。
+      await prepareResources();
+      task = runWorker(context, controller.signal);
+    },
+    async onDisable() {
+      controller?.abort();
+      try {
+        await task;
+      } finally {
+        task = undefined;
+        controller = undefined;
+        // 也必须能清理 prepareResources 部分成功后留下的资源。
+        await releaseResources();
+      }
+    },
+  };
+}
+```
+
+上述 `prepareResources`、`runWorker`、`releaseResources` 由具体插件实现。后台循环必须处理自身的异常，不能留下未处理的 Promise rejection；`context.assertEnabled()` 在 `onEnable` 完成且启用选择写入数据库前不会通过，不要在初始化回调中依赖它。
+
+### 生命周期与失败语义
+
+- 开启时先执行 `onEnable`，成功后才保存开启状态；失败会调用 `onDisable` 回收部分资源，原先关闭的数据库状态保持关闭。数据库写入失败也会清理本次启动的资源。
+- 关闭时先保存关闭状态，使所有实例的新请求立即被拒绝，再执行当前实例的 `onDisable`。清理失败返回 `PLUGIN_DISABLE_FAILED`，但保持关闭，不会把已部分清理的插件重新标为启用。宿主保留清理标记，后续同步和退出时重试；旧资源清理成功前不会再次调用 `onEnable`。
+- 服务启动时按依赖顺序恢复数据库中已开启的插件。某插件恢复失败时保留开启选择，当前实例的插件及其依赖者不可用；其他插件仍可运行，后续同步会重试恢复。
+- 服务正常退出时按依赖的逆序执行各插件的 `onDisable`、`dispose`，不修改数据库中的启用选择。重复启动、关闭请求不会重复分配资源；退出会等待正在进行的生命周期操作，并拒绝后续开启操作。
+- 多实例共享数据库选择，每个进程维护自己的资源，默认每 2 秒同步一次。同步耗时还取决于回调时间及锁等待；关闭后新请求立即拒绝，其他实例的后台资源在同步时释放。`updated_at` 用于识别两次同步之间的关闭再开启，届时会重建资源和依赖者。生命周期不是集群单例任务调度器；只允许执行一次的业务需自行使用分布式锁。
+- 所有回调必须可重试，并在有限时间内完成；`onDisable` 必须能处理未完全初始化的资源。资源清理失败后，宿主只能阻止新访问并继续尝试清理，无法替代插件撤销任意外部副作用。强制终止进程时无法保证执行回调。
+
+`PluginStatus.desiredEnabled` 是保存的启用选择，后台 Switch 使用该字段；`enabled` 表示当前实例及其依赖实际可用，控制 Badge、入口和权限检查。恢复中或恢复失败时两者可能不同，`reason` 显示原因。开关请求失败时响应也包含可读取到的最新 `plugin` 状态，前端只更新对应条目。
 
 插件使用宿主 DataSource，不能自行关闭、初始化或开启 `synchronize`。普通共享类型可从 `@aime/shared` 导入；插件可在同仓库引用源项目模块，但内部路径不承诺兼容性。稳定入口优先使用 SDK，业务页面与逻辑继续放在插件自己的模块目录。
+
+### 界面参数与生命周期参数
+
+在 `plugin.manifest.json` 中声明 `configFields`，后台会出现「参数配置」按钮。省略时默认为空数组：
+
+```json
+{
+  "configFields": [
+    {
+      "key": "endpoint",
+      "label": "服务地址",
+      "type": "text",
+      "required": true
+    },
+    {
+      "key": "token",
+      "label": "访问密钥",
+      "type": "password",
+      "required": true
+    },
+    {
+      "key": "intervalSeconds",
+      "label": "同步间隔（秒）",
+      "type": "number",
+      "integer": true,
+      "min": 1,
+      "max": 3600,
+      "default": 60
+    },
+    { "key": "debug", "label": "调试模式", "type": "boolean", "default": false }
+  ]
+}
+```
+
+字段支持 `text`（可用 `multiline: true`）、`password`、`number`、`boolean`，最多 50 个。`key` 必须唯一，以英文字母开头，只包含字母、数字、下划线。公共选项有 `description`、`required`；文本/密码支持 `placeholder`；数字支持 `min`、`max`、`integer`。密码使用宿主 `PasswordInput`，禁止在清单中设置密码默认值。其他类型可设 `default`，布尔值默认 `false`。前后端均校验类型、必填项和数值范围，拒绝未知字段。
+
+生命周期通过第一个参数的 `config` 接收验证过的配置，类型为 `Readonly<Record<string, string | number | boolean>>`：
+
+```ts
+export default function createServer(context: PluginContext): PluginServer {
+  return {
+    async onEnable({ config }) {
+      await startSync({
+        endpoint: config.endpoint as string,
+        token: config.token as string,
+        intervalSeconds: config.intervalSeconds as number,
+        debug: config.debug as boolean,
+      });
+    },
+    async onDisable({ config }) {
+      // 对应本次启动的旧参数，而不是后台刚保存的新参数。
+      await stopSync(config.endpoint as string);
+    },
+  };
+}
+```
+
+`startSync`、`stopSync` 由插件实现。每次激活都有独立、不可修改的参数快照；停用、启动失败补偿、清理重试和退出都使用对应激活的原始快照。未声明参数的插件收到 `{ config: {} }`，原来的无参数回调仍兼容。
+
+参数保存到 `plugin_installations.config`，重启和其他实例恢复时使用保存值。停用插件保存参数不会启动插件；运行中保存参数会先逆序停止插件及依赖者，再按依赖顺序启动，`onDisable` 收到旧值，`onEnable` 收到新值。相同已保存参数不会重复启动。保存成功但回调失败时返回 `applied: false`，新参数仍保留，界面提示并允许修正，宿主继续重试恢复。
+
+只有管理员可以读取、修改参数值；公共插件列表不含参数值。读取时取得 `revision`，保存时必须带回；参数或启用状态已被其他操作修改时返回 `PLUGIN_CONFIG_CONFLICT`，避免覆盖更新。新增/修改字段定义需重新生成、构建及重启；已有参数不满足新定义时不会启动，管理员可在弹窗中修正。首次发布此功能需运行 `pnpm db:migrate`。
+
+Demo 的 `maxNotes` 参数控制单次返回笔记数（1–50）；其构建排除开关保持不变。
 
 ## 数据库接口
 
@@ -199,11 +308,13 @@ export default {
 
 技能随构建复制，并在启动时同步到 `WORKSPACE_ROOT/.agents/skills/plugins/<id>/...`，由宿主管理，不能通过通用 Skill 管理接口更新或删除。已启用插件的技能参与自动发现和自定义 Skill 选择。停用后新发现、列表及后续文件读取均被拒绝；已进入模型上下文的文字无法撤回。
 
-启停写入数据库后，新 API 请求、新 Agent 解析和每次插件 Tool 执行立即重新检查；多个服务实例共享状态。已开始执行的请求允许结束。页面开关立即更新当前导航，其他浏览器在窗口聚焦或最多约 15 秒的可见页面轮询后同步；前端检查不作为权限边界。停用不卸载已经加载的 JavaScript。
+启停写入数据库后，新 API 请求、新 Agent 解析和每次插件 Tool 执行立即重新检查；启用还要求当前实例的生命周期已就绪。已开始执行的请求不会被宿主主动取消，插件的 `onDisable` 应协调正在使用其资源的操作并等待它们结束。页面开关立即更新当前导航，其他浏览器在窗口聚焦或最多约 15 秒的可见页面轮询后同步；前端检查不作为权限边界。停用不卸载已经加载的 JavaScript。
 
 可信插件可以执行任意宿主进程代码；这是一套扩展接口，不是第三方代码沙箱。
 
 ## API 一览
+
+参数 API：管理员使用 `GET /api/plugins/:id/config` 读取 `{ config, revision }`，使用同源 `PUT /api/plugins/:id/config` 提交同样结构，返回 `{ plugin, configuration, applied }`。停用时仍可读写。参数无效返回 `PLUGIN_CONFIG_INVALID`（400，含字段 `issues`）；版本冲突返回 `PLUGIN_CONFIG_CONFLICT`（409）。这两个配置路径由宿主保留。
 
 | 方法   | 路径                              | 权限 / 行为                                                           |
 | ------ | --------------------------------- | --------------------------------------------------------------------- |
@@ -213,7 +324,7 @@ export default {
 | POST   | `/api/plugins/notebook/notes`     | 登录且插件启用；`{ "title": "...", "content": "..." }`                |
 | DELETE | `/api/plugins/notebook/notes/:id` | 登录且插件启用；只能删除自己的笔记                                    |
 
-宿主保留插件 API 下的 `PUT /enabled`。常见错误码：`UNAUTHORIZED`（401）、`FORBIDDEN`（403）、`PLUGIN_DISABLED`（404）、`PLUGIN_NOT_FOUND`（404）、`PLUGIN_MIGRATION_REQUIRED`、`PLUGIN_DEPENDENCY_DISABLED`、`PLUGIN_HAS_DEPENDENTS`（409）。
+宿主保留插件 API 下的 `PUT /enabled`。常见错误码：`UNAUTHORIZED`（401）、`FORBIDDEN`（403）、`PLUGIN_DISABLED`（404）、`PLUGIN_NOT_FOUND`（404）、`PLUGIN_MIGRATION_REQUIRED`、`PLUGIN_DEPENDENCY_DISABLED`、`PLUGIN_HAS_DEPENDENTS`、`PLUGIN_ENABLE_FAILED`、`PLUGIN_DISABLE_FAILED`（409）、`PLUGIN_SERVICE_STOPPING`（503）。
 
 ## 构建、发布与验证
 
@@ -222,10 +333,12 @@ pnpm plugins:generate          # 校验清单，生成前后端注册入口及 S
 pnpm build                     # 自动发现 + 服务端产物 + 前端插件异步 chunk
 pnpm db:migrate                # 迁移到本次发布版本
 pnpm start                     # 加载已经发布的插件代码
-pnpm test:plugins              # 不访问数据库的发现测试，集成测试默认跳过
+pnpm test:plugins              # 不访问数据库的发现和生命周期单元测试，集成测试默认跳过
 pnpm test:plugins:integration  # 使用 .env 的 PostgreSQL 凭证创建临时测试库，结束后删除
 ```
 
 集成测试要求数据库用户具有 `CREATEDB` 权限，只在临时数据库中操作。覆盖迁移幂等与回滚、API 权限及用户隔离、持久化启停、依赖关系、Agent 调用真实插件 Tool、`exec` 调用、旧句柄拒绝及 Skill 发现。发现测试覆盖清单排除、依赖拒绝、注册入口与旧 Skill 清理；集成测试显式加载 Demo 测试夹具，不受 Demo 清单开关影响，也不会修改实际清单。Agent 流程使用确定性模拟模型，不等于真实供应商推理验收。
+
+生命周期测试还覆盖部分启动失败的补偿、清理失败重试、并发幂等、数据库写入失败、多实例同步与资源重建、重启恢复，以及退出与正在执行的回调之间的竞态。
 
 Dockerfile 已在构建阶段执行 `pnpm build` 并复制完整仓库，插件包、依赖和 Skill 资源会随镜像发布；服务端入口继续执行 `pnpm db:migrate`。前后端应发布同一份提交。插件生成文件可提交，但必须通过生成命令更新，不手工编辑。

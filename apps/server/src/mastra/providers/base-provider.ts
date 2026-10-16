@@ -1,4 +1,5 @@
 import type { OpenAICompatibleConfig } from '@mastra/core/llm';
+import { NoSuchModelError } from 'ai';
 import type {
   EmbeddingModel,
   ImageModel,
@@ -62,9 +63,7 @@ export abstract class BaseProvider {
   }
 
   textEmbeddingModel(modelId: string): EmbeddingModel {
-    throw new Error(
-      `Embedding model is not supported: ${this.type}/${modelId}`,
-    );
+    throw new NoSuchModelError({ modelId, modelType: 'embeddingModel' });
   }
 
   rerankModel(modelId: string): RerankingModel {

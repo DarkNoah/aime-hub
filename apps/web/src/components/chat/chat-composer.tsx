@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowUp, Paperclip, RotateCw, Square } from 'lucide-react';
+import { ArrowUp, RotateCw, Square } from 'lucide-react';
 import { nanoid } from 'nanoid';
 import { toast } from 'sonner';
 import {
@@ -23,7 +23,6 @@ import {
   PromptInputBody,
   PromptInputFooter,
   PromptInputSubmit,
-  usePromptInputAttachments,
 } from '@/components/ai-elements/prompt-input';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -49,6 +48,7 @@ import { useChatDraft } from './use-chat-draft';
 import { useChatUploads } from './use-chat-uploads';
 import { chatUploadParts } from './chat-uploads';
 import { ComposerAttachments } from './composer-attachments';
+import { ComposerAttachmentMenu } from './composer-attachment-menu';
 import {
   WorkspaceAttachments,
   WorkspaceFileDropZone,
@@ -121,25 +121,6 @@ function GeneratedAttachments({
         </Attachment>
       ))}
     </Attachments>
-  );
-}
-
-function AttachButton({ disabled }: { disabled: boolean }) {
-  const { t } = useTranslation();
-  const attachments = usePromptInputAttachments();
-  return (
-    <Button
-      type="button"
-      size="icon-sm"
-      variant="ghost"
-      className="size-7 @xl/chat:size-8"
-      disabled={disabled}
-      aria-label={t('chat.attach')}
-      title={t('chat.fileHint')}
-      onClick={attachments.openFileDialog}
-    >
-      <Paperclip />
-    </Button>
   );
 }
 
@@ -251,6 +232,8 @@ export function ChatComposer({
     ),
   ];
   const [pending, setPending] = useState(false);
+  const [capturing, setCapturing] = useState(false);
+  const capturingRef = useRef(false);
   const pendingRef = useRef(false);
   const retryId = useRef<string | null>(null);
   const unavailable =
@@ -344,6 +327,7 @@ export function ChatComposer({
             }}
             onSubmitCapture={(event) => {
               if (
+                capturingRef.current ||
                 uploads.queue
                   .getSnapshot()
                   .some((item) => item.status !== 'done')
@@ -367,6 +351,7 @@ export function ChatComposer({
                 unavailable ||
                 stopping ||
                 pendingRef.current ||
+                capturingRef.current ||
                 attached.some((item) => item.status !== 'done')
               )
                 throw new Error('Unavailable');
@@ -514,8 +499,13 @@ export function ChatComposer({
             </PromptInputBody>
             <PromptInputFooter className="flex min-w-0 flex-nowrap items-center gap-1">
               <div className="flex shrink-0 items-center gap-1">
-                <AttachButton
+                <ComposerAttachmentMenu
                   disabled={pending || !!unavailable || !!stopping}
+                  capturing={capturing}
+                  onCapturingChange={(value) => {
+                    capturingRef.current = value;
+                    setCapturing(value);
+                  }}
                 />
                 {(goalDraft || goal) && (
                   <ChatGoal
@@ -588,7 +578,11 @@ export function ChatComposer({
                   disabled={
                     showStop
                       ? stopping
-                      : pending || unavailable || stopping || uploads.blocked
+                      : pending ||
+                        capturing ||
+                        unavailable ||
+                        stopping ||
+                        uploads.blocked
                   }
                   status={
                     pending ? 'submitted' : showStop ? 'streaming' : 'ready'

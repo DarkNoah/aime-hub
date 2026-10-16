@@ -162,11 +162,12 @@ BM25 在每次请求中按可访问且已启用的资料分批构建内存索引
 
 - `knowledge_create`：支持 `embeddingModel`、`rerankerModel` 和 `extendColumns`；不传模型使用系统默认，null 或空字符串可明确禁用。
 - `knowledge_list`：返回当前会话可访问的库、权限、模型、文档数及扩展字段。
-- `knowledge_search`：支持 `kb_source`（ID 或名称）、`top_k`、`where`、标签／元数据筛选、`return_full_content`。`where` 仅接受白名单字段和比较表达式，值参数化，支持 AND/OR、括号、IN、LIKE、NULL 比较。
-- `knowledge_get_document`：支持 `item_id`、text/json、pattern、offset/limit；pattern 过滤后再分页并保留原始行号；history/version 可读取历史记录及正文。
-- `knowledge_save_document`：支持 `kb_source`、`item_id`、text/file/folder/web、`extendColumns` 部分更新；action 可选 save、update_version、archive、restore、reprocess。更新版本必须提供 expectedVersion。文件与文件夹通过当前 Mastra Workspace 读取，批量导入逐项报告结果。
+- `knowledge_search`：使用文本 `query`，支持 `kb_source`（ID 或名称列表）、`top_k`（默认 10）、`where`、`tags`、`return_full_content`。扩展列统一通过 `where` 筛选，仅接受白名单字段和比较表达式，值参数化，支持 AND/OR、括号、IN、LIKE、NULL 比较。结果以 `item_id` 标识文档、`id` 标识分块，正文使用 `content`，扩展列值使用 `extendValues`。
+- `knowledge_get_document`：只读取当前文档，支持 `item_id`、text/json、pattern、offset/limit；pattern 过滤后再分页并保留原始行号。
+- `knowledge_archive_document`：仅接收 `item_id`，将文档软删除归档并排除检索，保留原件与历史；校验编辑权限、当前会话范围及重算锁，返回包含 `deletedAt` 的文档状态。
+- `knowledge_save_document`：支持 `kb_source`、`item_id`、text/file/folder/web；文档元数据就是扩展列的值，统一通过 `extendColumns: [{ column, value }]` 部分更新，未提供的列保持原值，null 清空值。action 可选 save、update_version、archive、restore、reprocess。更新版本必须提供 expectedVersion。文件与文件夹通过当前 Mastra Workspace 读取，批量导入逐项报告结果。
 
-旧参数 `baseId`、`documentId`、`topK` 和 source 对象继续兼容。工具从可信会话取得身份，沿用相同的权限与重建锁。升级时先运行 `pnpm db:migrate`；迁移在事务内搬迁原有分块及向量，校验后删除旧表。部署数据库须支持 pgvector。
+读取与保存工具统一使用 `item_id` 作为文档标识，保存工具使用 `kb_source` 指定知识库；保存工具支持 source 对象，搜索工具仅使用 `top_k` 指定数量。工具从可信会话取得身份，沿用相同的权限与重建锁。升级时先运行 `pnpm db:migrate`；迁移在事务内搬迁原有分块及向量，校验后删除旧表。部署数据库须支持 pgvector。
 
 ## 环境变量
 

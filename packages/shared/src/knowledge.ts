@@ -225,10 +225,10 @@ export type KnowledgeVersion = {
 };
 export type KnowledgeVersionDetail = KnowledgeVersion & { content: string };
 export const knowledgeSearchSchema = z.object({
-  where: z.string().trim().min(1).max(2000).optional(),
+  where: z.string().trim().optional(),
   tags: knowledgeTagsSchema.optional(),
   metadata: knowledgeMetadataSchema.optional(),
-  query: z.string().trim().min(1).max(2000),
+  query: z.string().trim(),
   topK: z.number().int().min(1).max(100).default(6),
 });
 export const knowledgeHitSchema = z.object({
@@ -261,6 +261,19 @@ export const knowledgeHitSchema = z.object({
     .optional(),
 });
 export type KnowledgeHit = z.infer<typeof knowledgeHitSchema>;
+
+export const knowledgeSearchResultSchema = knowledgeHitSchema
+  .omit({ documentId: true, text: true, metadata: true })
+  .extend({
+    id: knowledgeHitSchema.shape.id.describe('Matched chunk ID.'),
+    item_id: z
+      .string()
+      .describe('Document ID for reading, updating or archiving this item.'),
+    content: z.string(),
+    extendValues: knowledgeMetadataSchema,
+    fullContent: z.string().optional(),
+    nextOffset: z.number().nullable().optional(),
+  });
 
 export const knowledgeCursorSchema = z.object({
   createdAt: z.string().datetime(),

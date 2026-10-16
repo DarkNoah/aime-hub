@@ -753,6 +753,7 @@ export const en = {
   'agents.tool.knowledge_create': 'Create knowledge base',
   'agents.tool.knowledge_get_document': 'Read knowledge source',
   'agents.tool.knowledge_save_document': 'Save knowledge source',
+  'agents.tool.knowledge_archive_document': 'Archive knowledge source',
   'agents.tool.web_search': 'Web search',
   'agents.tool.speech': 'Speech generation',
   'tools.speech': 'Speech generation',
@@ -1017,6 +1018,10 @@ export const en = {
   'plugins.hasDependents': 'Disable dependent plugins first',
   'plugins.dependencyDisabled': 'Enable required plugins first',
   'plugins.saveFailed': 'Could not update plugin status',
+  'plugins.enableFailed':
+    'Plugin startup failed. Check its status before retrying.',
+  'plugins.disableFailed':
+    'Plugin disabled, but cleanup failed. Cleanup will be retried.',
   'plugins.refresh': 'Refresh',
   'plugins.loadFailed': 'Could not load plugins. Please retry.',
   'plugins.needsMigration': 'Migration required',
@@ -1024,6 +1029,28 @@ export const en = {
   'plugins.disabled': 'Disabled',
   'plugins.toggle': 'Enable plugin',
   'plugins.empty': 'No plugins installed',
+  'plugins.configure': 'Configure',
+  'plugins.configTitle': '{{name}} · Configuration',
+  'plugins.configHint':
+    'Saved parameters will be used the next time this plugin starts.',
+  'plugins.configActiveHint':
+    'Saving restarts this plugin and its dependents to apply the new parameters.',
+  'plugins.configSaved': 'Plugin parameters saved',
+  'plugins.configApplyFailed':
+    'Parameters saved, but the runtime has not recovered. The system will retry. Check the plugin status.',
+  'plugins.configSaveFailed': 'Could not save plugin parameters. Please retry.',
+  'plugins.configLoadFailed': 'Could not load plugin parameters. Please retry.',
+  'plugins.configConflict':
+    'Plugin status or parameters have changed. Reload the latest parameters before editing.',
+  'plugins.configReload': 'Reload',
+  'plugins.configReloadConflict':
+    'Load latest parameters and replace current input',
+  'plugins.configCancel': 'Cancel',
+  'plugins.configSave': 'Save parameters',
+  'plugins.configSaveApply': 'Save and apply',
+  'plugins.configSaving': 'Saving…',
+  'plugins.configInvalid': 'Check and complete the plugin configuration first',
+  'plugins.configInvalidField': 'Enter a value that meets the requirements',
   'nav.skills': 'Skills',
   'admin.skillsDescription':
     'Manage workspace skills shared by personal and project conversations.',
@@ -1630,7 +1657,35 @@ export const en = {
   'chat.backgroundHint':
     'You can leave this chat. Aime keeps working in the background.',
   'chat.inputHint': 'Enter to send · Shift + Enter for a new line',
-  'chat.attach': 'Attach files',
+  'chat.attach': 'Upload images or files',
+  'chat.attachMenu': 'Add attachments',
+  'chat.screenshot.action': 'Take screenshot',
+  'chat.screenshot.hint':
+    'Choose a tab, window, or screen to capture and attach as an image',
+  'chat.screenshot.capturing': 'Taking screenshot…',
+  'chat.screenshot.unsupported':
+    'Screen capture is unavailable. Use a desktop browser with screen sharing support over HTTPS or localhost.',
+  'chat.screenshot.failed':
+    'Could not capture a screenshot. Check your screen recording permissions and try again.',
+  'imageCrop.title': 'Crop screenshot',
+  'imageCrop.hint':
+    'Drag to select the area to keep. Drag an edge or corner to resize.',
+  'imageCrop.keyboardHint':
+    'Focus the selection or an edge to adjust it with the arrow keys.',
+  'imageCrop.image': 'Screenshot to crop',
+  'imageCrop.selection': 'Crop selection',
+  'imageCrop.cancel': 'Cancel',
+  'imageCrop.original': 'Use original',
+  'imageCrop.confirm': 'Crop and attach',
+  'imageCrop.failed': 'Could not process the screenshot. Please try again.',
+  'imageCrop.resize.nw': 'Resize top left corner',
+  'imageCrop.resize.n': 'Resize top edge',
+  'imageCrop.resize.ne': 'Resize top right corner',
+  'imageCrop.resize.e': 'Resize right edge',
+  'imageCrop.resize.se': 'Resize bottom right corner',
+  'imageCrop.resize.s': 'Resize bottom edge',
+  'imageCrop.resize.sw': 'Resize bottom left corner',
+  'imageCrop.resize.w': 'Resize left edge',
   'chat.workspaceFiles.title': 'Referenced files and folders',
   'chat.workspaceFiles.drop': 'Drop to reference a file or folder',
   'chat.workspaceFiles.invalidDrop':

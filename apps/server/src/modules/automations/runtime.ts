@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { Agent, type AgentExecutionOptions } from '@mastra/core/agent';
 import { Memory } from '@mastra/memory';
+import { ChatMemory, type ResolveMemoryConfig } from '../../mastra/memory.js';
 import type { RequestContext } from '@mastra/core/request-context';
 import type { ScheduleHooks } from '@mastra/core/schedules';
 import { createObservabilityContext } from '@mastra/core/observability';
@@ -43,6 +44,7 @@ export function createAutomationRuntime({
   threads,
   notifications,
   environmentVariables,
+  getMemoryConfig,
 }: {
   mastra: Mastra;
   pool: Pick<Pool, 'query'>;
@@ -58,6 +60,7 @@ export function createAutomationRuntime({
   >;
   notifications?: Pick<NotificationService, 'publish'>;
   environmentVariables?: Pick<EnvironmentVariableService, 'getEnv'>;
+  getMemoryConfig?: ResolveMemoryConfig;
 }) {
   const storage = mastra.getStorage()!;
   const memory = new Memory({
@@ -183,6 +186,16 @@ export function createAutomationRuntime({
     const { config, model } = await resolveModel(task);
     const thread = await assertThread(task);
     if (!thread) throw new ThreadError('AUTOMATION_THREAD_UNAVAILABLE', 409);
+    const memoryConfig = await getMemoryConfig?.();
+    const executionMemory = new ChatMemory({
+      ...memoryConfig,
+      storage,
+      options: {
+        lastMessages: 40,
+        ...memoryConfig?.options,
+        generateTitle: false,
+      },
+    });
     const projectId =
       task.scope.scope === 'project' ? task.scope.projectId : undefined;
     const userId = task.scope.scope === 'system' ? 'system' : task.createdBy;
@@ -263,7 +276,7 @@ export function createAutomationRuntime({
       finalResult = result;
       return (terminal = (async () => {
         try {
-          await memory.settled();
+          await executionMemory.settled();
           await publish();
         } finally {
           try {
@@ -330,7 +343,17 @@ export function createAutomationRuntime({
         await finish({ status: 'failed', text: '', error: 'RUN_INTERRUPTED' });
       },
     };
-    return { task, config, model, workspace, options, finish, started, done };
+    return {
+      task,
+      config,
+      model,
+      workspace,
+      memory: executionMemory,
+      options,
+      finish,
+      started,
+      done,
+    };
   };
   const execution = (requestContext: RequestContext) => {
     let pending = byContext.get(requestContext);
@@ -354,7 +377,11 @@ export function createAutomationRuntime({
   const agent = new Agent({
     id: automationAgentId,
     name: 'Scheduled task',
-    memory,
+    memory: async ({ requestContext }) =>
+      // The scheduler also reads thread metadata before it creates a run context.
+      typeof requestContext.get('automationExecutionId') === 'string'
+        ? (await execution(requestContext)).memory
+        : memory,
     model: async ({ requestContext }) =>
       (await execution(requestContext)).model.model,
     instructions: async ({ requestContext }) =>

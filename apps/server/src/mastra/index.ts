@@ -2,14 +2,16 @@ import { Mastra } from '@mastra/core/mastra';
 import type { Pool } from 'pg';
 import { createChatStorage } from './storage.js';
 import type { ScheduleHooks } from '@mastra/core/schedules';
+import type { ChatMemoryConfig } from './memory.js';
 
 // One runtime per server. Injection also lets integration tests use isolated schemas.
 export function createMastraRuntime(
   pool: Pool,
   schemaName = 'mastra',
   schedules?: ScheduleHooks<Mastra>,
+  memoryConfig?: ChatMemoryConfig,
 ) {
-  const { storage, memory } = createChatStorage(pool, schemaName);
+  const { storage, memory } = createChatStorage(pool, schemaName, memoryConfig);
   const mastra = new Mastra({
     // Code and stored configurations are resolved by AgentService; runtime instances belong to each thread.
     agents: {},

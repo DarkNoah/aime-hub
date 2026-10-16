@@ -6,6 +6,7 @@ import {
 } from '@aime/shared/threads';
 import { FILE_UPLOAD_MAX_SIZE } from '@aime/shared/files';
 import type { UploadOptions } from '../file-manager/upload.js';
+import { serializeAttachments } from './message-attachments.js';
 
 export type ChatUpload = {
   id: string;
@@ -56,7 +57,15 @@ export function chatUploadParts(
   if (items.length)
     parts.push({
       type: 'text',
-      text: `Uploaded files (workspace paths):\n${items.map((item) => `- ${JSON.stringify(`/${item.path}`)}`).join('\n')}`,
+      text: serializeAttachments(
+        items.map((item) => ({
+          id: item.id,
+          path: `/${item.path}`,
+          name: item.file.name,
+          size: item.file.size,
+          mimeType: item.file.type || 'application/octet-stream',
+        })),
+      ),
     });
   return parts;
 }

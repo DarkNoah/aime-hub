@@ -102,8 +102,9 @@ test(
       ('admin', 'Admin', 'admin@plugin.test', true, now(), now(), 'admin'),
       ('alice', 'Alice', 'alice@plugin.test', true, now(), now(), 'user'),
       ('bob', 'Bob', 'bob@plugin.test', true, now(), now(), 'user')`);
-      const service = new PluginService(database, installedPlugins);
-      const otherProcess = new PluginService(database, installedPlugins);
+      const service = new PluginService(database, installedPlugins, 0);
+      const otherProcess = new PluginService(database, installedPlugins, 0);
+      await Promise.all([service.start(), otherProcess.start()]);
       const auth = {
         api: {
           getSession: async ({ headers }: { headers: Headers }) => {
@@ -158,6 +159,7 @@ test(
           .status,
         200,
       );
+      await otherProcess.synchronize();
       assert.equal(
         (await otherProcess.list())[0].enabled,
         true,
@@ -384,7 +386,8 @@ test(
         1,
         'disable preserves data',
       );
-      const restarted = new PluginService(database, installedPlugins);
+      const restarted = new PluginService(database, installedPlugins, 0);
+      await restarted.start();
       // Removing a plugin from discovery hides even an existing enabled installation;
       // it does not delete that plugin's data or its saved activation choice.
       const excluded = new PluginService(database, []);
@@ -491,10 +494,12 @@ test(
         createServer: () => ({}),
       };
       await migratePlugins(database, [dependent]);
-      const withDependency = new PluginService(database, [
-        ...installedPlugins,
-        dependent,
-      ]);
+      const withDependency = new PluginService(
+        database,
+        [...installedPlugins, dependent],
+        0,
+      );
+      await withDependency.start();
       await withDependency.setEnabled('dependent', true);
       await assert.rejects(
         withDependency.setEnabled('notebook', false),

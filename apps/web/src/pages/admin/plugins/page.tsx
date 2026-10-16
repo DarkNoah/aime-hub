@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from '@tanstack/react-router';
-import { Puzzle, RefreshCw } from 'lucide-react';
+import { Puzzle, RefreshCw, Settings2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePlugins } from '@/features/plugins/context';
 import { PageHeader } from '@/components/page-header';
@@ -9,6 +9,7 @@ import { LoadingState } from '@/components/loading-state';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { PluginConfigDialog } from './components/config-dialog';
 import {
   Item,
   ItemActions,
@@ -24,6 +25,9 @@ export function AdminPluginsPage() {
   const { plugins, loading, error, refresh, setEnabled } = usePlugins();
   const [pending, setPending] = useState<Set<string>>(new Set());
   const changing = useRef(new Set<string>());
+  const [configId, setConfigId] = useState<string | null>(null);
+  const configTrigger = useRef<HTMLButtonElement | null>(null);
+  const configuredPlugin = plugins.find((plugin) => plugin.id === configId);
   async function toggle(id: string, enabled: boolean) {
     if (changing.current.has(id)) return;
     changing.current.add(id);
@@ -38,7 +42,13 @@ export function AdminPluginsPage() {
           ? t('plugins.hasDependents')
           : code === 'PLUGIN_DEPENDENCY_DISABLED'
             ? t('plugins.dependencyDisabled')
-            : t('plugins.saveFailed'),
+            : code === 'PLUGIN_ENABLE_FAILED'
+              ? t('plugins.enableFailed')
+              : code === 'PLUGIN_DISABLE_FAILED'
+                ? t('plugins.disableFailed')
+                : code === 'PLUGIN_CONFIG_INVALID'
+                  ? t('plugins.configInvalid')
+                  : t('plugins.saveFailed'),
       );
     } finally {
       changing.current.delete(id);
@@ -94,6 +104,20 @@ export function AdminPluginsPage() {
                 )}
               </ItemContent>
               <ItemActions>
+                {plugin.configFields.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!plugin.ready || pending.has(plugin.id)}
+                    onClick={(event) => {
+                      configTrigger.current = event.currentTarget;
+                      setConfigId(plugin.id);
+                    }}
+                  >
+                    <Settings2 />
+                    {t('plugins.configure')}
+                  </Button>
+                )}
                 {plugin.enabled &&
                   plugin.pages
                     .filter((p) => p.navigation)
@@ -117,7 +141,7 @@ export function AdminPluginsPage() {
                       </Button>
                     ))}
                 <Switch
-                  checked={plugin.enabled}
+                  checked={plugin.desiredEnabled}
                   disabled={!plugin.ready || pending.has(plugin.id)}
                   aria-label={`${t('plugins.toggle')} ${plugin.name}`}
                   onCheckedChange={(enabled) => void toggle(plugin.id, enabled)}
@@ -131,6 +155,14 @@ export function AdminPluginsPage() {
             </p>
           )}
         </ItemGroup>
+      )}
+      {configuredPlugin && (
+        <PluginConfigDialog
+          key={configuredPlugin.id}
+          plugin={configuredPlugin}
+          onClose={() => setConfigId(null)}
+          restoreFocus={() => configTrigger.current?.focus()}
+        />
       )}
     </div>
   );

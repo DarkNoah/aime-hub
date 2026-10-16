@@ -438,6 +438,7 @@ function ExistingChat({
         )}
         <ChatMessages
           messages={chat.messages}
+          threadId={chat.thread?.id}
           running={running}
           activeMessageId={chat.activeMessageId}
           toolInteractions={chat.toolInteractions}

@@ -24,4 +24,5 @@ export const {
   knowledge_create,
   knowledge_get_document,
   knowledge_save_document,
+  knowledge_archive_document,
 } = createKnowledgeTools();

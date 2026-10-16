@@ -1,4 +1,5 @@
 import { PgVector } from '@mastra/pg';
+import { resolveMemoryConfig } from './mastra/memory.js';
 import { KnowledgeService } from './modules/knowledge/service.js';
 import { KnowledgeWorker } from './modules/knowledge/worker.js';
 import { syncPluginSkills } from './modules/plugins/assets.js';
@@ -119,10 +120,17 @@ const notifications = new NotificationService(
   }),
 );
 const scheduleHooks: ScheduleHooks<Mastra> = {};
+const memoryVectors = new PgVector({
+  id: 'chat-memory',
+  connectionString: env.DATABASE_URL,
+  schemaName: 'mastra',
+});
+const getMemoryConfig = () => resolveMemoryConfig(providers, memoryVectors);
 const { mastra, storage, memory } = createMastraRuntime(
   pool,
   'mastra',
   scheduleHooks,
+  await getMemoryConfig(),
 );
 await storage.init();
 const skills = new SkillService(workspaceRoot);
@@ -171,6 +179,7 @@ const threads = new ThreadService(
     agents,
     usage,
     environmentVariables,
+    getMemoryConfig,
   ),
   projects,
   mastra.backgroundTaskManager,
@@ -194,10 +203,8 @@ const automations = createAutomationRuntime({
   tools,
   workspaceRoot,
   environmentVariables,
+  getMemoryConfig,
 });
-await automations.initialize();
-// Restore persisted schedules on every boot, even before the first API request.
-await mastra.startWorkers();
 const app = createApp(
   auth,
   {
@@ -222,54 +229,97 @@ const app = createApp(
   knowledge,
   await createApiDocsPlugin(env.NODE_ENV),
 );
-const server = serve(
-  { fetch: app.fetch, port: env.SERVER_PORT, hostname: env.SERVER_HOST },
-  () => {
-    console.log(`Aime Hub API: http://${env.SERVER_HOST}:${env.SERVER_PORT}`);
-  },
-) as Server;
-initializeMcpAfterListen(server, mcp);
+
+async function disposeResources() {
+  // Wait for every cleanup before closing the shared database, even on failure.
+  const results = await Promise.allSettled([
+    plugins.dispose().finally(disposePluginSkills),
+    mastra.shutdown(),
+    knowledgeVectors.disconnect(),
+    memory.settled().then(() => memoryVectors.disconnect()),
+    mcp.shutdown(),
+    skills.dispose(),
+    projectAgentMounts.dispose(),
+  ]);
+  for (const cleanup of [
+    () => disposeChatRequestLogging(),
+    () => requestLogs.settled(),
+    () => database.destroy(),
+    () => pool.end(),
+  ]) {
+    results.push(
+      ...(await Promise.allSettled([Promise.resolve().then(cleanup)])),
+    );
+  }
+  const errors = results.filter((result) => result.status === 'rejected');
+  if (errors.length)
+    throw new AggregateError(
+      errors.map((result) => result.reason),
+      'Server cleanup failed',
+    );
+}
+
+let server: Server | undefined;
+let shutdownTask: Promise<void> | undefined;
 let stopping = false;
 function shutdown() {
-  if (stopping) return;
+  if (shutdownTask) return shutdownTask;
   stopping = true;
-  void automations
-    .shutdown()
-    .finally(() => knowledgeWorker.stop())
-    .finally(() => threads.shutdown())
-    .finally(() => notifications.close())
-    .finally(() => {
-      server.closeAllConnections();
-      server.close(() => {
-        void Promise.all([
-          plugins.dispose().finally(disposePluginSkills),
-          mastra.shutdown(),
-          knowledgeVectors.disconnect(),
-          mcp.shutdown(),
-          skills.dispose(),
-          projectAgentMounts.dispose(),
-        ])
-          .finally(async () => {
-            await disposeChatRequestLogging();
-            await requestLogs.settled();
-            await database.destroy();
-          })
-          .finally(() => pool.end())
-          .catch(() => {
-            process.exitCode = 1;
-          });
-      });
-    });
-  server.closeIdleConnections();
+  plugins.beginShutdown();
+  server?.closeIdleConnections();
+  return (shutdownTask = (async () => {
+    // Signals during restoration must wait for the callback before releasing resources.
+    await startup.catch(() => {});
+    for (const cleanup of [
+      () => automations.shutdown(),
+      () => knowledgeWorker.stop(),
+      () => threads.shutdown(),
+      () => notifications.close(),
+      async () => {
+        if (!server) return;
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server!.close(() => resolve()));
+      },
+      () => disposeResources(),
+    ]) {
+      await Promise.resolve()
+        .then(cleanup)
+        .catch(() => {
+          console.error('Server shutdown cleanup failed');
+          process.exitCode = 1;
+        });
+    }
+  })());
 }
 process.once('SIGINT', shutdown);
 process.once('SIGTERM', shutdown);
-server.once('error', (error: NodeJS.ErrnoException) => {
-  console.error(
-    error.code === 'EADDRINUSE'
-      ? `API startup failed: ${env.SERVER_HOST}:${env.SERVER_PORT} is already in use`
-      : 'API server failed to listen',
-  );
-  process.exitCode = 1;
-  shutdown();
-});
+const startup = (async () => {
+  await plugins.start();
+  if (stopping) return;
+  await automations.initialize();
+  if (stopping) return;
+  // Restore plugin resources before schedules can execute plugin tools.
+  await mastra.startWorkers();
+  if (stopping) return;
+  server = serve(
+    { fetch: app.fetch, port: env.SERVER_PORT, hostname: env.SERVER_HOST },
+    () =>
+      console.log(`Aime Hub API: http://${env.SERVER_HOST}:${env.SERVER_PORT}`),
+  ) as Server;
+  initializeMcpAfterListen(server, mcp);
+  server.once('error', (error: NodeJS.ErrnoException) => {
+    console.error(
+      error.code === 'EADDRINUSE'
+        ? `API startup failed: ${env.SERVER_HOST}:${env.SERVER_PORT} is already in use`
+        : 'API server failed to listen',
+    );
+    process.exitCode = 1;
+    void shutdown();
+  });
+})();
+try {
+  await startup;
+} catch (error) {
+  await shutdown();
+  throw error;
+}
