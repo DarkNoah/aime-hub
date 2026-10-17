@@ -19,7 +19,7 @@ import { TaskPreview } from './task';
 import { EditFilePreview } from './edit-file';
 import { WriteFilePreview } from './write-file';
 import { GrepPreview } from './grep';
-import { ReadFilePreview } from './read-file';
+import { ReadFileToolPreview } from './read-file';
 import { ViewFilePreview } from './view-file';
 import { WebSearchPreview } from './web-search';
 import { WebFetchPreview } from './web-fetch';
@@ -120,7 +120,7 @@ const previewRenderers: Partial<Record<string, ComponentType<PreviewProps>>> = {
   'tool:edit_file': EditFilePreview,
   'tool:write_file': WriteFilePreview,
   'tool:grep': GrepPreview,
-  'tool:read_file': ReadFilePreview,
+  'tool:read_file': ReadFileToolPreview,
   'tool:view_file': ViewFilePreview,
   'tool:exec': ExecPreview,
   'tool:task_write': TaskPreview,

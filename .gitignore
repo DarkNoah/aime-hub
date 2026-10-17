@@ -42,7 +42,8 @@ plugins/vibe-quant/**/__pycache__/
 !scripts/chat-voice-input.test.ts
 !scripts/paddleocr.test.ts
 !scripts/paddleocr-settings.test.ts
-!apps/server/src/modules/tools/view-file.test.ts
+!apps/server/src/modules/tools/read-file.test.ts
 !scripts/tool-config.test.ts
 !scripts/file-preview.test.ts
 !scripts/chat-workspace-attachments.test.ts
+!scripts/e2b-desktop-settings.test.ts

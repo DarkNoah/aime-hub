@@ -26,6 +26,7 @@
     "./request-logs": "./src/request-logs.ts",
     "./log-json": "./src/log-json.ts",
     "./system-settings": "./src/system-settings.ts",
+    "./e2b-desktop": "./src/e2b-desktop.ts",
     "./rpc": "./src/rpc/index.ts"
   },
   "scripts": {

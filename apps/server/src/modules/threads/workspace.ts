@@ -183,7 +183,8 @@ export function getWorkspace(
         name: 'write_file',
       },
       [WORKSPACE_TOOLS.FILESYSTEM.READ_FILE]: {
-        // enabled: false,
+        // The application read_file combines native text reads with OCR.
+        enabled: false,
         name: 'read_file',
       },
       [WORKSPACE_TOOLS.FILESYSTEM.EDIT_FILE]: {

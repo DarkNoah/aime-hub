@@ -187,13 +187,31 @@ Use **Docker Compose / Dokploy**, or host the build artifacts yourself. The reco
 
 ### Docker Compose / Dokploy
 
-The [Dockerfile](Dockerfile) builds API and Nginx images; [compose.yaml](compose.yaml) defines `server`, `web`, and `postgres` services.
+The [Dockerfile](Dockerfile) builds API and Nginx images; [compose.yaml](compose.yaml) starts only three application services by default: `server`, `web`, and `app-postgres`. It loads no E2B services and requires no E2B configuration.
 
-- Set `WEB_ORIGINS`, `POSTGRES_PASSWORD`, and `BETTER_AUTH_SECRET`, and route an HTTPS entry point to `web:80`. The base Compose file exposes container ports without publishing host ports.
+- Set `WEB_ORIGINS`, `POSTGRES_PASSWORD`, and `BETTER_AUTH_SECRET`, and route an HTTPS entry point to `web:80`. Application ports are container-only.
 - The API container runs `pnpm db:migrate` on startup. Then run `pnpm auth:create-admin` inside the `server` container.
 - PostgreSQL and workspaces use the `postgres-data` and `workspace-data` named volumes. Back up both.
 - The `server` FUSE configuration requires `/dev/fuse` on the Linux host and the configured privileges, including `SYS_ADMIN`.
 - For temporary direct access on a private network, use the [compose.ip.yaml](compose.ip.yaml) override. Full configuration and Dokploy instructions are in the [deployment guide (Simplified Chinese)](docs/deployment.md).
+
+### Optional self-hosted E2B Desktop
+
+Explicitly load [compose.e2b.yaml](compose.e2b.yaml) to deploy the official E2B Embed management API, Firecracker orchestrator, proxy, dashboard, databases, and initialization services. It automatically builds the `desktop` template from a pinned official desktop image. Use a **dedicated x86-64 Linux/KVM host**; Ubuntu 24.04, at least 12 GiB RAM and 20 GiB free disk, Docker ≥ 27, and Compose ≥ 2.24 are recommended/required as detailed in the [E2B deployment guide](docker/e2b/README.md). This desktop image cannot run as a Firecracker guest on an ARM Docker host. Setup configures host KVM, networking, and hugepages.
+
+Set `E2B_API_KEY` in `.env` or Dokploy to `e2b_` followed by at least 32 random hexadecimal characters (generate with `printf 'e2b_'; openssl rand -hex 32`), then run:
+
+```sh
+docker compose -f compose.yaml -f compose.e2b.yaml up -d --build --wait
+```
+
+The first start downloads runtime artifacts and builds the desktop template. The backend automatically connects to `http://host.docker.internal:3000` using the same key as E2B's seed service. **Administration → Settings → E2B Desktop** shows “Deployment configuration”; connection testing and instance management work without entering the URL or key again. Deployment environment variables own the connection settings, and the key is never returned to the browser.
+
+Create instances, edit their lifetime, and delete them from the manager. Only sandboxes tagged `managedBy=desktop-admin` are managed. Editing resets expiry from submission time; templates and creation names cannot be changed in place. Desktops start XFCE at 1280×720. Agent control is not connected yet. Restrict E2B's internal host ports, especially unauthenticated `5008`, to the trusted host; see the deployment guide's port table.
+
+Application data keeps using `postgres-data` and `workspace-data`; E2B has separate database volumes and host directories. Keep the Compose project name unchanged during upgrades and do not use `down -v`. The previous standalone desktop's data is not migrated into sandboxes.
+
+With the default Compose deployment, configure an existing E2B management API in the admin UI without loading any self-hosted E2B services. For local development or separately hosted applications, `E2B_API_URL` and `E2B_API_KEY` can also inject the connection configuration. Required endpoints are `GET/POST /v2/sandboxes`, `GET/DELETE /sandboxes/{id}`, and `POST /sandboxes/{id}/timeout`.
 
 ### Self-managed hosting
 

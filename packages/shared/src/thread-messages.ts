@@ -224,11 +224,29 @@ function mergePart(current: Part, incoming: Part): Part {
     (current.type === 'text' && incoming.type === 'text') ||
     (current.type === 'reasoning' && incoming.type === 'reasoning')
   ) {
-    if (
+    const part =
       current.text.length > incoming.text.length &&
       current.text.startsWith(incoming.text)
+        ? current
+        : incoming;
+    const createdAt =
+      part.providerMetadata?.mastra?.createdAt ??
+      current.providerMetadata?.mastra?.createdAt ??
+      incoming.providerMetadata?.mastra?.createdAt;
+    // Live snapshots may omit the native part timestamp stored in history.
+    // Retain it even when the longer text comes from the other snapshot.
+    if (
+      createdAt !== undefined &&
+      part.providerMetadata?.mastra?.createdAt === undefined
     )
-      return current;
+      return {
+        ...part,
+        providerMetadata: {
+          ...part.providerMetadata,
+          mastra: { ...part.providerMetadata?.mastra, createdAt },
+        },
+      };
+    return part;
   }
   return incoming;
 }

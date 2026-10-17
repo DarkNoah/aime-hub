@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { procedure } from './base.js';
+import { desktopContract } from './e2b-desktop.js';
 import {
   systemSettingsSchema,
   systemSettingsUpdateSchema,
@@ -8,6 +9,7 @@ import {
 const path = '/admin/settings';
 
 export const systemSettingsContract = {
+  desktop: desktopContract,
   get: procedure
     .route({ method: 'GET', path, inputStructure: 'detailed' })
     .output(systemSettingsSchema),

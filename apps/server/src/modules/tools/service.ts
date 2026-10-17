@@ -12,9 +12,9 @@ import {
   providerSupportsWebTool,
 } from '@aime/shared/providers';
 import {
-  ViewFileError,
+  ReadFileError,
   type ResolvedOcrModel,
-} from '../../mastra/tools/view_file.js';
+} from '../../mastra/tools/read_file.js';
 import type { ToolsInput } from '@mastra/core/agent';
 import type { AssetService } from '../assets/service.js';
 import type { ProviderService } from '../providers/service.js';
@@ -63,10 +63,18 @@ export class ToolService {
     if (this.plugins?.ownsTool(id))
       return (await this.plugins.toolConfigs()).find((tool) => tool.id === id)!;
     this.requireTool(id);
-    const row = await this.database
-      .getRepository(Setting)
-      .findOneBy({ id: `tool:${id}` });
-    return parseToolConfig(id, row?.value ?? {});
+    return parseToolConfig(id, (await this.loadConfig(id)) ?? {});
+  }
+
+  private async loadConfig(id: ToolId) {
+    const settings = this.database.getRepository(Setting);
+    const row = await settings.findOneBy({ id: `tool:${id}` });
+    // Preserve the saved OCR model, timeout and enabled state after renaming.
+    const legacy =
+      !row && id === 'read_file'
+        ? await settings.findOneBy({ id: 'tool:view_file' })
+        : undefined;
+    return (row ?? legacy)?.value;
   }
 
   async list(): Promise<ToolConfig[]> {
@@ -118,8 +126,8 @@ export class ToolService {
           throw new ProviderError('INVALID_TRANSCRIPTION_MODEL');
         }
       }
-    } else if (tool.kind === 'view_file') {
-      if (tool.config.enabled) {
+    } else if (tool.kind === 'read_file') {
+      if (tool.config.enabled && tool.config.model) {
         try {
           await this.ocrModel(tool.config.model);
         } catch {
@@ -194,9 +202,9 @@ export class ToolService {
 
   private async ocrModel(reference: string | null): Promise<ResolvedOcrModel> {
     if (!reference)
-      throw new ViewFileError(
+      throw new ReadFileError(
         'OCR_NOT_CONFIGURED',
-        'Select a MinerU or PaddleOCR model in the view_file tool settings.',
+        'Select a MinerU or PaddleOCR model in the read_file tool settings.',
       );
     try {
       const model = await this.providers.getModel(reference);
@@ -209,9 +217,9 @@ export class ToolService {
         throw new Error('Invalid OCR provider');
       return { reference, model: provider.ocrModel(model.id) };
     } catch {
-      throw new ViewFileError(
+      throw new ReadFileError(
         'OCR_UNAVAILABLE',
-        'The OCR model is unavailable. Select an enabled MinerU or PaddleOCR model in the view_file tool settings.',
+        'The OCR model is unavailable. Select an enabled MinerU or PaddleOCR model in the read_file tool settings.',
       );
     }
   }
@@ -295,12 +303,7 @@ export class ToolService {
         disabledTools,
         // MCP tools are discovered only inside exec, never injected into the Agent.
         mcpTools: () => this.mcp?.getTools() ?? Promise.resolve({}),
-        loadConfig: async (id) => {
-          const row = await this.database
-            .getRepository(Setting)
-            .findOneBy({ id: `tool:${id}` });
-          return row?.value;
-        },
+        loadConfig: (id) => this.loadConfig(id),
         searchProvider: (id, timeoutMs) => this.searchProvider(id, timeoutMs),
         fetchProvider: (id, timeoutMs) => this.fetchProvider(id, timeoutMs),
         imageModel: (reference) => this.imageModel(reference),

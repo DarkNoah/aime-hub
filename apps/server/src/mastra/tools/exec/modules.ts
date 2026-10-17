@@ -1,11 +1,11 @@
 import path from 'node:path';
-import { lstat, realpath } from 'node:fs/promises';
 import type { ToolExecutionContext } from '@mastra/core/tools';
 import {
   LocalFilesystem,
   resolveToolConfig,
   WORKSPACE_TOOLS,
 } from '@mastra/core/workspace';
+import { assertLocalPath } from '../../../modules/files/workspace-access.js';
 import ts from 'typescript';
 import { z } from 'zod';
 
@@ -55,50 +55,11 @@ const pathMethods = [
 
 export type ExecModules = ReturnType<typeof createExecModules>;
 
-async function canonicalPath(filename: string): Promise<string> {
-  try {
-    return await realpath(filename);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    const entry = await lstat(filename).catch(
-      (error: NodeJS.ErrnoException) => {
-        if (error.code === 'ENOENT') return undefined;
-        throw error;
-      },
-    );
-    if (entry?.isSymbolicLink())
-      throw new Error('Cannot access a dangling workspace symlink');
-    const parent = path.dirname(filename);
-    if (parent === filename) throw error;
-    return path.join(await canonicalPath(parent), path.basename(filename));
-  }
-}
-
-async function assertLocalPath(filesystem: LocalFilesystem, filename: string) {
-  if (!filesystem.contained) return;
-  const absolute = filesystem.resolveAbsolutePath(filename);
-  if (!absolute) throw new Error('File path is outside the workspace');
-  // Some LocalFilesystem versions skip symlink checks under allowedPaths.
-  // Check canonical targets, including parents of files that do not exist yet.
-  const target = await canonicalPath(absolute);
-  const roots = await Promise.all(
-    [filesystem.basePath, ...filesystem.allowedPaths].map(canonicalPath),
-  );
-  if (
-    !roots.some((root) => {
-      const relative = path.relative(root, target);
-      return (
-        relative !== '..' &&
-        !relative.startsWith(`..${path.sep}`) &&
-        !path.isAbsolute(relative)
-      );
-    })
-  )
-    throw new Error('File path is outside the workspace');
-}
-
 /** Expose a small Node-compatible API through the same JSON-only VM boundary. */
-export function createExecModules(context: ToolExecutionContext) {
+export function createExecModules(
+  context: ToolExecutionContext,
+  options: { readFileEnabled?: boolean } = {},
+) {
   return {
     load(name: string): string {
       switch (name) {
@@ -240,7 +201,11 @@ export function createExecModules(context: ToolExecutionContext) {
           requestContext: context.requestContext?.all ?? {},
         },
       );
-      if (!config.enabled || (writing && filesystem.readOnly))
+      const enabled =
+        operation === 'readFile' && options.readFileEnabled !== undefined
+          ? options.readFileEnabled
+          : config.enabled;
+      if (!enabled || (writing && filesystem.readOnly))
         throw new Error(
           `Filesystem operation unavailable: ${operation} (disabled or read-only)`,
         );

@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { E2BDesktopSettings } from './components/e2b-desktop-settings';
 
 export function AdminSettingsPage() {
   const { t } = useTranslation();
@@ -47,12 +48,13 @@ export function AdminSettingsPage() {
   }, [revision]);
 
   async function updateSettings(body: SystemSettingsUpdate) {
-    if (!settings || changing.current) return;
+    if (!settings || changing.current) return false;
     changing.current = true;
     setSaving(true);
     try {
       setSettings(await api.systemSettings.update({ body }));
       toast.success(t('settings.saved'));
+      return true;
     } catch (cause) {
       const code = apiErrorCode(cause);
       toast.error(
@@ -61,9 +63,14 @@ export function AdminSettingsPage() {
             ? 'errors.sessionExpired'
             : code === 'FORBIDDEN'
               ? 'errors.forbidden'
-              : 'errors.request',
+              : code === 'VALIDATION_ERROR'
+                ? 'settings.desktopInvalid'
+                : code === 'E2B_MANAGED_CONFIG'
+                  ? 'settings.desktopManagedError'
+                  : 'errors.request',
         ),
       );
+      return false;
     } finally {
       changing.current = false;
       setSaving(false);
@@ -193,6 +200,13 @@ export function AdminSettingsPage() {
           )}
         </CardContent>
       </Card>
+      {settings && (
+        <E2BDesktopSettings
+          settings={settings}
+          saving={saving || loadError}
+          onSave={updateSettings}
+        />
+      )}
       <Card>
         <CardHeader>
           <CardTitle>{t('admin.settingsTitle')}</CardTitle>

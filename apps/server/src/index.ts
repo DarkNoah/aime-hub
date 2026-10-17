@@ -61,9 +61,20 @@ const database = createDataSource(
   installedPlugins.flatMap((p) => p.database.entities),
 );
 let requestLoggingEnabled: boolean;
-const systemSettings = new SystemSettingsService(database, (settings) => {
-  requestLoggingEnabled = settings.requestLoggingEnabled;
-});
+const systemSettings = new SystemSettingsService(
+  database,
+  (settings) => {
+    requestLoggingEnabled = settings.requestLoggingEnabled;
+  },
+  env.E2B_API_URL
+    ? {
+        apiUrl: env.E2B_API_URL,
+        apiKey: env.E2B_API_KEY,
+        template: env.E2B_DESKTOP_TEMPLATE,
+        timeoutSeconds: env.E2B_DESKTOP_TIMEOUT_SECONDS,
+      }
+    : undefined,
+);
 const pool = new Pool({ connectionString: env.DATABASE_URL });
 const auth = createAuth({
   pool,

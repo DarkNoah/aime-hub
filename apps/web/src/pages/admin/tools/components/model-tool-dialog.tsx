@@ -29,7 +29,7 @@ export function ModelToolDialog({
 }: {
   tool: Extract<
     ToolConfig,
-    { kind: 'image_gen' | 'speech' | 'transcribe' | 'view_file' }
+    { kind: 'image_gen' | 'speech' | 'transcribe' | 'read_file' }
   >;
   onSaved: (tool: ToolConfig) => void;
   onClose: () => void;
@@ -38,7 +38,7 @@ export function ModelToolDialog({
   const { t } = useTranslation();
   const speech = tool.kind === 'speech';
   const transcription = tool.kind === 'transcribe';
-  const ocr = tool.kind === 'view_file';
+  const ocr = tool.kind === 'read_file';
   const labels = ocr
     ? ({
         configure: 'tools.configureViewFile',
@@ -97,10 +97,6 @@ export function ModelToolDialog({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (submitting.current) return;
-    if (ocr && enabled && !model) {
-      setErrors({ model: labels.invalidModel });
-      return;
-    }
     const parsed = toolConfigSchemas[tool.kind].safeParse({
       enabled,
       model,

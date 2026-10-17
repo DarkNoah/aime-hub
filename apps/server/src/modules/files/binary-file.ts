@@ -1,18 +1,10 @@
-import { constants } from 'node:fs';
-import { open } from 'node:fs/promises';
-import { basename, extname } from 'node:path';
+import { basename, extname, posix } from 'node:path';
 import {
   LocalFilesystem,
   type WorkspaceFilesystem,
 } from '@mastra/core/workspace';
 import { imageSize } from 'image-size';
 import { ThreadError } from '../threads/errors.js';
-import { resolveFileReference } from './reference.js';
-import { filePath } from './paths.js';
-import {
-  resolveWorkspaceTarget,
-  streamWorkspaceFile,
-} from './workspace-files.js';
 
 export const maxBinaryFileBytes = 200 * 1024 * 1024;
 const imageFormats: Record<string, [string, string]> = {
@@ -31,22 +23,23 @@ function checkSize(size: number) {
     throw new ThreadError('FILE_TOO_LARGE', 413);
 }
 
-/** Bounded reads through the same roots and symlink checks as the file manager. */
+/** Use the same filesystem permissions as the native read tool. */
 export async function readBinaryWorkspaceFile(
   filesystem: WorkspaceFilesystem,
   reference: string,
   signal: AbortSignal,
 ) {
   signal.throwIfAborted();
-  const source = await resolveFileReference(
-    filesystem,
-    reference.replace(/^\/(?=\.uploads\/)/, ''),
-    filesystem instanceof LocalFilesystem ? filesystem.basePath : '/',
-    'thread',
-  );
-  if (!source) throw new ThreadError('FILE_FORBIDDEN', 403);
-  if (source.kind !== 'file') throw new ThreadError('FILE_NOT_FILE');
-  const path = source.path;
+  // Uploaded links use a workspace-root prefix even on local filesystems.
+  const inputPath = reference.replace(/^\/(?=\.uploads\/)/, '');
+  if (!inputPath || inputPath.includes('\0'))
+    throw new ThreadError('FILE_INVALID_PATH');
+  const before = await filesystem.stat(inputPath);
+  if (before.type !== 'file') throw new ThreadError('FILE_NOT_FILE');
+  const path =
+    filesystem instanceof LocalFilesystem
+      ? before.path
+      : posix.normalize(inputPath).replace(/^\//, '');
   const extension = extname(path).toLowerCase();
   if (
     ![
@@ -63,64 +56,21 @@ export async function readBinaryWorkspaceFile(
     ].includes(extension)
   )
     throw new ThreadError('FILE_TYPE_UNSUPPORTED');
-  const leaf = resolveWorkspaceTarget(filesystem, path);
-  let data: Buffer;
-  if (typeof leaf.root === 'string') {
-    const handle = await open(
-      await filePath(leaf.root, leaf.path),
-      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-    );
-    try {
-      const before = await handle.stat();
-      if (!before.isFile()) throw new ThreadError('FILE_NOT_FILE');
-      checkSize(before.size);
-      data = Buffer.alloc(before.size);
-      let offset = 0;
-      while (offset < data.length) {
-        signal.throwIfAborted();
-        const { bytesRead } = await handle.read(
-          data,
-          offset,
-          Math.min(64 * 1024, data.length - offset),
-          offset,
-        );
-        if (!bytesRead) throw new ThreadError('FILE_CHANGED');
-        offset += bytesRead;
-      }
-      const after = await handle.stat();
-      if (after.size !== before.size || after.mtimeMs !== before.mtimeMs)
-        throw new ThreadError('FILE_CHANGED');
-    } finally {
-      await handle.close();
-    }
-  } else {
-    const before = await leaf.root.stat(leaf.path);
-    checkSize(before.size);
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    await streamWorkspaceFile(
-      filesystem,
-      path,
-      async (chunk) => {
-        signal.throwIfAborted();
-        size += chunk.length;
-        if (size > before.size) throw new ThreadError('FILE_CHANGED');
-        chunks.push(chunk);
-      },
-      () => signal.aborted,
-      0,
-      before.size,
-    );
-    signal.throwIfAborted();
-    const after = await leaf.root.stat(leaf.path);
-    if (
-      size !== before.size ||
-      after.size !== before.size ||
-      after.modifiedAt.getTime() !== before.modifiedAt.getTime()
-    )
-      throw new ThreadError('FILE_CHANGED');
-    data = Buffer.concat(chunks);
-  }
+  checkSize(before.size);
+  signal.throwIfAborted();
+  // Let the provider enforce contained/allowedPaths and resolve symlinks/mounts.
+  // File-manager roots deliberately have a narrower scope than Agent reads.
+  const contents = await filesystem.readFile(inputPath);
+  const data = Buffer.isBuffer(contents) ? contents : Buffer.from(contents);
+  checkSize(data.length);
+  signal.throwIfAborted();
+  const after = await filesystem.stat(inputPath);
+  if (
+    data.length !== before.size ||
+    after.size !== before.size ||
+    after.modifiedAt.getTime() !== before.modifiedAt.getTime()
+  )
+    throw new ThreadError('FILE_CHANGED');
   signal.throwIfAborted();
   if (extension === '.pdf') {
     if (!data.subarray(0, 1024).includes(Buffer.from('%PDF-')))

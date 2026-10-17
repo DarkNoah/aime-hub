@@ -174,7 +174,7 @@ export function AdminToolsPage() {
                 <ItemMedia variant="icon">
                   {tool.kind === 'image_gen' ? (
                     <ImagePlus />
-                  ) : tool.kind === 'view_file' ? (
+                  ) : tool.kind === 'read_file' ? (
                     <FileScan />
                   ) : tool.kind === 'speech' || tool.kind === 'transcribe' ? (
                     <AudioLines />
@@ -204,13 +204,13 @@ export function AdminToolsPage() {
                     {tool.id}
                   </code>
                   {tool.kind === 'image_gen' ||
-                  tool.kind === 'view_file' ||
+                  tool.kind === 'read_file' ||
                   tool.kind === 'speech' ||
                   tool.kind === 'transcribe' ? (
                     <p className="mt-2 text-xs text-muted-foreground">
                       {tool.config.model ??
                         t(
-                          tool.kind === 'view_file'
+                          tool.kind === 'read_file'
                             ? 'tools.selectOcrModel'
                             : tool.kind === 'transcribe'
                               ? 'tools.defaultTranscribeModel'
@@ -281,7 +281,7 @@ export function AdminToolsPage() {
         </ItemGroup>
       ) : null}
       {selected?.kind === 'image_gen' ||
-      selected?.kind === 'view_file' ||
+      selected?.kind === 'read_file' ||
       selected?.kind === 'speech' ||
       selected?.kind === 'transcribe' ? (
         <ModelToolDialog

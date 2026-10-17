@@ -45,6 +45,15 @@ export const zhCN = {
   'knowledge.addTag': '添加维度',
   'knowledge.removeTag': '移除维度',
   'knowledge.errorTags': '请填写不重复的维度及至少一个标签值。',
+  'knowledge.tagFilters': '标签筛选',
+  'knowledge.clearTagFilters': '清除标签',
+  'knowledge.moreFilters': '更多筛选',
+  'knowledge.metadataFilterHint': '按自定义字段筛选资料列表和检索结果。',
+  'knowledge.clearFilters': '清除筛选',
+  'knowledge.applyFilters': '应用筛选',
+  'knowledge.searchResults': '检索结果',
+  'knowledge.searchResultsHint':
+    '仅检索已启用且解析完成的未归档资料，并应用当前标签和筛选条件。',
   'knowledge.filters': '筛选文档与检索结果',
   'knowledge.filterHint':
     '同维度标签满足任一值，跨维度同时满足；自定义字段按值筛选。检索仅包含未归档文档。',
@@ -778,17 +787,17 @@ export const zhCN = {
   'agents.tool.transcribe': '语音识别',
   'agents.tool.list_voices': '列出音色',
   'tools.transcribe': '语音识别',
-  'agents.tool.view_file': '读取二进制文件',
-  'tools.viewFile': '读取二进制文件',
+  'agents.tool.read_file': '读取文件',
+  'tools.viewFile': '读取文件',
   'tools.viewFileDescription':
-    '使用 OCR 将工作区中的图片和 PDF 解析为 Markdown。',
+    '读取文本和代码文件，或使用 OCR 将图片和 PDF 解析为 Markdown。',
   'tools.configureViewFile': '配置文件读取',
   'tools.enableViewFile': '启用文件读取',
   'tools.ocrModel': 'OCR 模型',
-  'tools.selectOcrModel': '请选择 OCR 模型',
-  'tools.ocrModelHint': '选择已启用的 MinerU 或 PaddleOCR 模型。',
+  'tools.selectOcrModel': '不配置 OCR（仅读取文本）',
+  'tools.ocrModelHint': '可选配已启用的 MinerU 或 PaddleOCR 模型，用于图片和 PDF；读取文本无需模型。',
   'tools.ocrProviderHint':
-    '当前支持图片和 PDF；音频、视频和 GLB 等格式暂不支持。PDF 页码选择取决于供应商接口能力。',
+    '文本支持按行读取，图片和 PDF 使用 OCR，其他二进制文件返回媒体或元数据。PDF 页码选择取决于供应商接口能力。',
   'tools.invalidOcrModel':
     '请选择已启用供应商中的可用 MinerU 或 PaddleOCR 模型。',
   'chat.viewFile.loading': '正在解析文件…',
@@ -1843,7 +1852,7 @@ export const zhCN = {
   'chat.copy': '复制',
   'chat.copied': '已复制消息。',
   'chat.copyFailed': '复制失败，请检查剪贴板权限。',
-  'chat.messageElapsed': '距上一条用户消息的耗时',
+  'chat.messageElapsed': '最后一条助手文本距最近一条用户消息的耗时',
   'chat.toolRunning': '执行中',
   'chat.toolDone': '已完成',
   'chat.toolFailed': '失败',
@@ -2013,6 +2022,81 @@ export const zhCN = {
     '记录模型请求与响应。关闭后停止采集新请求的日志和控制台输出，已开始的请求会完成记录，历史日志仍可查看。',
   'settings.requestLoggingEnabled': '已启用',
   'settings.requestLoggingDisabled': '已禁用',
+  'settings.desktopDescription': '连接 E2B 管理 API，动态管理桌面沙箱。',
+  'settings.desktopManaged': '部署配置',
+  'settings.desktopManagedHint':
+    '已连接部署内的 E2B 服务，默认模板为 {{template}}，存活时间 {{seconds}} 秒。连接配置由部署环境管理，可直接测试连接和管理实例。',
+  'settings.desktopManagedError':
+    'E2B 连接配置由部署环境管理，请修改 Compose 环境变量后重新创建应用服务。',
+  'settings.desktopEnabled': '启用 E2B Desktop 管理',
+  'settings.desktopNotConfigured': '尚未配置管理 API',
+  'settings.desktopConfigure': '配置 E2B Desktop',
+  'settings.desktopConfigHint':
+    '填写已有 E2B 自托管服务的管理 API。保存后立即生效。',
+  'settings.desktopUrl': '管理 API 地址',
+  'settings.desktopUrlHint':
+    '填写后端可访问的 API 基础地址，例如 http://e2b.internal:3000。此处不是 VNC 地址。',
+  'settings.desktopApiKey': 'API Key',
+  'settings.desktopApiKeyConfigured': '已配置',
+  'settings.desktopApiKeyKeep': '留空保留已保存的 API Key',
+  'settings.desktopApiKeyHint':
+    '使用 E2B 团队的 API Key。密钥仅用于服务端请求，保存后不回显。',
+  'settings.desktopClearApiKey': '清除已保存的 API Key（需同时关闭管理）',
+  'settings.desktopTemplate': '桌面模板',
+  'settings.desktopTemplateHint':
+    '填写自托管服务中已构建的桌面模板 ID 或别名，例如 desktop。',
+  'settings.desktopTimeout': '默认存活时间（秒）',
+  'settings.desktopInvalid':
+    '请检查 API 地址和存活时间。启用时必须配置 API Key 和桌面模板。',
+  'settings.desktopTest': '测试连接',
+  'settings.desktopConnected': 'E2B 管理 API 连接成功。',
+  'settings.desktopManage': '管理桌面实例',
+  'settings.desktopManageHint':
+    '仅显示通过此管理功能创建的实例。状态来自 E2B 服务，点击刷新获取最新状态。',
+  'settings.desktopRefresh': '刷新',
+  'settings.desktopCreate': '创建实例',
+  'settings.desktopCreateHint':
+    '使用指定桌面模板创建沙箱，超过存活时间后由 E2B 自动结束。',
+  'settings.desktopEdit': '编辑实例存活时间',
+  'settings.desktopEditHint':
+    '从提交时刻重新计算到期时间。运行中的实例不支持直接修改模板或创建时的名称。',
+  'settings.desktopRemaining': '从现在起存活（秒）',
+  'settings.desktopName': '实例名称（可选）',
+  'settings.desktopInstance': '实例',
+  'settings.desktopState': '状态',
+  'settings.desktopExpires': '到期时间',
+  'settings.desktopActions': '操作',
+  'settings.desktopRunning': '运行中',
+  'settings.desktopPaused': '已暂停',
+  'settings.desktopLoading': '正在加载实例…',
+  'settings.desktopLoadFailed': '实例加载失败，请重试刷新。',
+  'settings.desktopEmpty': '暂无桌面实例',
+  'settings.desktopLoadMore': '加载更多',
+  'settings.desktopEditLabel': '编辑 {{name}}',
+  'settings.desktopDeleteLabel': '删除 {{name}}',
+  'settings.desktopDelete': '删除实例',
+  'settings.desktopDeleteHint':
+    '将结束该沙箱并删除其实例。未保存到外部存储的数据将丢失，此操作无法撤销。',
+  'settings.desktopCreated': '实例已创建：{{id}}',
+  'settings.desktopUpdated': '实例存活时间已更新。',
+  'settings.desktopDeleted': '实例已删除。',
+  'settings.desktopRefreshNeeded':
+    '操作已完成，但无法读取 {{id}} 的最新状态，请刷新列表。',
+  'settings.desktopInstanceInvalid':
+    '请填写桌面模板，并使用正整数设置存活秒数。',
+  'settings.desktopAuthFailed': 'E2B 鉴权失败，请检查 API Key 和权限。',
+  'settings.desktopUnavailableConfig': '请先配置并启用 E2B Desktop 管理。',
+  'settings.desktopNotFound':
+    'E2B 未找到该实例、模板或接口，请检查配置并刷新列表。',
+  'settings.desktopRateLimited': 'E2B 请求过于频繁，请稍后重试。',
+  'settings.desktopRequestFailed':
+    'E2B 拒绝了请求，请检查模板、存活时间和服务端限额。',
+  'settings.desktopInvalidResponse':
+    '接口返回格式不符合 E2B 管理 API，请检查 API 地址与服务版本。',
+  'settings.desktopUnavailable':
+    '无法连接 E2B 服务或请求超时。创建失败时请先刷新列表，确认是否已创建后再重试。',
+  'settings.save': '保存配置',
+  'settings.cancel': '取消',
   'settings.saved': '系统设置已更新。',
   'settings.retry': '重试',
 

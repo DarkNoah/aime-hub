@@ -5,3 +5,6 @@ pnpm-lock.yaml
 workspaces
 memory
 docs
+docker/e2b/compose.upstream.yaml
+docker/e2b/images.env
+docker/e2b/LICENSE.upstream

@@ -10,7 +10,7 @@ import {
   type MessageCompression,
 } from './message-compression.js';
 import { getToolName, isSpecialTool } from './tool-renderers/registry.js';
-import { messageDate } from './message-time.js';
+import { lastTextDate, messageDate } from './message-time.js';
 import {
   mergeThreadMessages,
   threadMessageSourceIds,
@@ -79,6 +79,7 @@ export function groupChatMessages(
     elapsedMs?: number;
   }[] = [];
   let previousUserMessageTime: number | undefined;
+  let lastAssistantTextRow: (typeof rows)[number] | undefined;
   for (const message of mergeThreadMessages([], messages)) {
     const hasAssistantText =
       message.role === 'assistant' &&
@@ -87,8 +88,12 @@ export function groupChatMessages(
     if (message.role === 'user') {
       // An undated user message must not fall back to an older user turn.
       previousUserMessageTime = messageDate(message.metadata)?.getTime();
+      lastAssistantTextRow = undefined;
     } else if (hasAssistantText) {
-      const time = messageDate(message.metadata)?.getTime();
+      // Only the last assistant text in each user turn gets a duration.
+      // Tool, reasoning and task events never replace that text endpoint.
+      if (lastAssistantTextRow) lastAssistantTextRow.elapsedMs = undefined;
+      const time = lastTextDate(message)?.getTime();
       if (
         time !== undefined &&
         previousUserMessageTime !== undefined &&
@@ -123,6 +128,7 @@ export function groupChatMessages(
         sourceIds: threadMessageSourceIds(message),
         elapsedMs,
       });
+    if (hasAssistantText) lastAssistantTextRow = rows.at(-1);
   }
   return rows.map((row) => ({
     ...row,

@@ -16,7 +16,7 @@ type ToolDefinition = {
 };
 
 export const toolDefinitions = {
-  view_file: {
+  read_file: {
     title: 'tools.viewFile',
     description: 'tools.viewFileDescription',
     configure: 'tools.configureViewFile',
@@ -65,11 +65,11 @@ export const toolDefinitions = {
 } satisfies Record<
   Exclude<
     ConfigurableToolId,
-    'image_gen' | 'speech' | 'transcribe' | 'view_file'
+    'image_gen' | 'speech' | 'transcribe' | 'read_file'
   >,
   ToolDefinition
 > &
   Record<
-    'image_gen' | 'speech' | 'transcribe' | 'view_file',
+    'image_gen' | 'speech' | 'transcribe' | 'read_file',
     Pick<ToolDefinition, 'title' | 'description' | 'configure'>
   >;

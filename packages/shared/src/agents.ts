@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { InstalledSkill } from './skills.js';
 
-import { toolIdSchema } from './tools.js';
+import { normalizeToolId, toolIdSchema } from './tools.js';
 
 export type AgentToolId = string;
 
@@ -42,7 +42,8 @@ export const agentInputSchema = z.strictObject({
     .array(toolIdSchema)
     .max(128)
     .refine((values) => new Set(values).size === values.length)
-    .default([]),
+    .default([])
+    .transform((ids) => [...new Set(ids.map(normalizeToolId))]),
   skillsMode: z.enum(['auto', 'custom']).default('auto'),
   // Only main Agents load these references; every child receives an empty map.
   agents: z.record(subagentNameSchema, agentIdSchema).default({}),

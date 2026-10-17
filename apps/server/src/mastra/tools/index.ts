@@ -9,7 +9,7 @@ export { webFetch } from './web_fetch.js';
 export { imageGen } from './image_gen.js';
 export { speech } from './speech.js';
 export { transcribe } from './transcribe.js';
-export { viewFile } from './view_file.js';
+export { readFile } from './read_file.js';
 export { listVoices } from './list_voices.js';
 export {
   askUserTool,

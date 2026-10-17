@@ -14,6 +14,17 @@ export function messageDate(metadata: UIMessage['metadata']) {
   return Number.isFinite(date.getTime()) ? date : undefined;
 }
 
+export function lastTextDate(message: UIMessage) {
+  const part = message.parts.findLast(
+    (part) => part.type === 'text' && part.text.trim(),
+  );
+  // Mastra keeps the whole message's createdAt from its first step. The final
+  // text can arrive much later, after tools or background tasks have finished.
+  return part?.type === 'text'
+    ? messageDate(part.providerMetadata?.mastra)
+    : undefined;
+}
+
 export function formatMessageElapsedTime(elapsedMs: number | undefined) {
   if (elapsedMs === undefined || !Number.isFinite(elapsedMs) || elapsedMs < 0)
     return;

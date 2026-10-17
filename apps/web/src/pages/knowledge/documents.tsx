@@ -10,7 +10,6 @@ import {
   Pencil,
   Plus,
   RotateCw,
-  Search,
   Trash2,
 } from 'lucide-react';
 import type {
@@ -18,15 +17,12 @@ import type {
   KnowledgeTags,
   KnowledgeMetadata,
   KnowledgeDocument,
-  KnowledgeHit,
   KnowledgeCursor,
 } from '@aime/shared/knowledge';
 import { knowledgeLocked } from '@aime/shared/knowledge';
 import { api } from '@/lib/rpc';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { KnowledgeHitBadges } from '@/components/knowledge/hit-badges';
-import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -43,7 +39,7 @@ import { EditDocumentDialog } from './edit-document-dialog';
 import { DocumentSheet } from './document-sheet';
 import { VersionSheet } from './version-sheet';
 import { TagsDisplay } from './tags-editor';
-import { MetadataEditor } from './metadata-editor';
+import { KnowledgeSearch } from './search';
 import { knowledgeError } from './errors';
 
 export function KnowledgeDocuments({ base }: { base: KnowledgeBase }) {
@@ -61,27 +57,17 @@ export function KnowledgeDocuments({ base }: { base: KnowledgeBase }) {
   const [history, setHistory] = useState<KnowledgeDocument>();
   const [archived, setArchived] = useState(false);
   const [filterTags, setFilterTags] = useState<KnowledgeTags>({});
-  const [filterMetadata, setFilterMetadata] = useState<
-    KnowledgeMetadata | undefined
-  >({});
+  const [filterMetadata, setFilterMetadata] = useState<KnowledgeMetadata>({});
   const [facets, setFacets] = useState<KnowledgeTags>({});
   const [revision, setRevision] = useState(0);
   const [preview, setPreview] = useState<string>();
   const [deleting, setDeleting] = useState<KnowledgeDocument>();
   const [busy, setBusy] = useState<string>();
-  const [query, setQuery] = useState('');
-  const [hits, setHits] = useState<KnowledgeHit[] | null>(null);
-  const [searching, setSearching] = useState(false);
   const alive = useRef(true);
   const requestRevision = useRef(0);
   useEffect(() => {
     alive.current = true;
     const c = new AbortController();
-    if (!filterMetadata)
-      return () => {
-        alive.current = false;
-        c.abort();
-      };
     void api.knowledge
       .documents(
         { id: base.id, archived, tags: filterTags, metadata: filterMetadata },
@@ -120,7 +106,6 @@ export function KnowledgeDocuments({ base }: { base: KnowledgeBase }) {
     setCursor(undefined);
     setMore(false);
     setLoading(true);
-    setHits(null);
   }
   const pendingIds = docs
     .filter(
@@ -220,28 +205,6 @@ export function KnowledgeDocuments({ base }: { base: KnowledgeBase }) {
         setLoading(false);
     }
   }
-  async function search() {
-    if (!query.trim() || searching || !filterMetadata) return;
-    const revision = requestRevision.current;
-    setSearching(true);
-    setHits(null);
-    try {
-      const result = await api.knowledge.search({
-        id: base.id,
-        query,
-        topK: 8,
-        tags: filterTags,
-        metadata: filterMetadata,
-      });
-      if (alive.current && requestRevision.current === revision)
-        setHits(result);
-    } catch (e) {
-      toast.error(t(knowledgeError(e)));
-    } finally {
-      if (alive.current && requestRevision.current === revision)
-        setSearching(false);
-    }
-  }
   return (
     <div className="min-w-0 space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -299,54 +262,6 @@ export function KnowledgeDocuments({ base }: { base: KnowledgeBase }) {
           </p>
         </div>
       )}
-      <details className="space-y-3 rounded-lg border p-4">
-        <summary className="cursor-pointer text-sm font-medium">
-          {t('knowledge.filters')}
-        </summary>
-        <p className="text-xs text-muted-foreground">
-          {t('knowledge.filterHint')}
-        </p>
-        {Object.entries(facets).map(([dimension, values]) => (
-          <div key={dimension} className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium">{dimension}</span>
-            {values.map((value) => (
-              <Button
-                key={value}
-                size="sm"
-                variant={
-                  filterTags[dimension]?.includes(value)
-                    ? 'secondary'
-                    : 'outline'
-                }
-                aria-pressed={!!filterTags[dimension]?.includes(value)}
-                onClick={() => {
-                  resetList();
-                  setFilterTags((current) => {
-                    const next = { ...current };
-                    const values = next[dimension] ?? [];
-                    const selected = values.includes(value)
-                      ? values.filter((v) => v !== value)
-                      : [...values, value];
-                    if (selected.length) next[dimension] = selected;
-                    else delete next[dimension];
-                    return next;
-                  });
-                }}
-              >
-                {value}
-              </Button>
-            ))}
-          </div>
-        ))}
-        <MetadataEditor
-          fields={base.fields}
-          filtering
-          onChange={(value) => {
-            resetList();
-            setFilterMetadata(value);
-          }}
-        />
-      </details>
       <Tabs
         defaultValue="documents"
         onValueChange={(value) => {
@@ -359,17 +274,95 @@ export function KnowledgeDocuments({ base }: { base: KnowledgeBase }) {
           }
         }}
       >
-        <TabsList>
-          <TabsTrigger value="documents">
-            {t('knowledge.documents')}
-          </TabsTrigger>
-          <TabsTrigger value="archived">{t('knowledge.archived')}</TabsTrigger>
-          <TabsTrigger value="search">{t('knowledge.searchTest')}</TabsTrigger>
-        </TabsList>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <TabsList className="shrink-0">
+            <TabsTrigger value="documents">
+              {t('knowledge.documents')}
+            </TabsTrigger>
+            <TabsTrigger value="archived">
+              {t('knowledge.archived')}
+            </TabsTrigger>
+          </TabsList>
+          <KnowledgeSearch
+            base={base}
+            tags={filterTags}
+            metadata={filterMetadata}
+            onMetadataChange={(value) => {
+              resetList();
+              setFilterMetadata(value);
+            }}
+            onPreview={setPreview}
+          />
+        </div>
         <TabsContent
           value={archived ? 'archived' : 'documents'}
           className="space-y-3"
         >
+          {Object.keys(facets).length > 0 && (
+            <div
+              className="space-y-3 border-b pb-4"
+              role="group"
+              aria-label={t('knowledge.tagFilters')}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium">
+                  {t('knowledge.tagFilters')}
+                </span>
+                {Object.keys(filterTags).length > 0 && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      resetList();
+                      setFilterTags({});
+                    }}
+                  >
+                    {t('knowledge.clearTagFilters')}
+                  </Button>
+                )}
+              </div>
+              {Object.entries(facets).map(([dimension, values]) => (
+                <div
+                  key={dimension}
+                  className="flex flex-wrap items-center gap-2"
+                >
+                  <span className="mr-1 text-sm text-muted-foreground">
+                    {dimension}
+                  </span>
+                  {values.map((value) => (
+                    <Button
+                      key={value}
+                      type="button"
+                      size="sm"
+                      className="h-7 rounded-full px-3 text-xs"
+                      variant={
+                        filterTags[dimension]?.includes(value)
+                          ? 'secondary'
+                          : 'outline'
+                      }
+                      aria-pressed={!!filterTags[dimension]?.includes(value)}
+                      onClick={() => {
+                        resetList();
+                        setFilterTags((current) => {
+                          const next = { ...current };
+                          const values = next[dimension] ?? [];
+                          const selected = values.includes(value)
+                            ? values.filter((v) => v !== value)
+                            : [...values, value];
+                          if (selected.length) next[dimension] = selected;
+                          else delete next[dimension];
+                          return next;
+                        });
+                      }}
+                    >
+                      {value}
+                    </Button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
           {!!error && (
             <div
               role="alert"
@@ -602,59 +595,6 @@ export function KnowledgeDocuments({ base }: { base: KnowledgeBase }) {
               </div>
             </ScrollArea>
           )}
-        </TabsContent>
-        <TabsContent value="search" className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            {t('knowledge.searchHint')}
-          </p>
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void search();
-            }}
-          >
-            <Input
-              aria-label={t('knowledge.query')}
-              placeholder={t('knowledge.query')}
-              value={query}
-              maxLength={2000}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <Button
-              disabled={
-                !query.trim() || searching || !base.enabled || !filterMetadata
-              }
-            >
-              <Search />
-              {t(searching ? 'knowledge.searching' : 'knowledge.search')}
-            </Button>
-          </form>
-          <ScrollArea className="h-[min(55vh,600px)]">
-            <div className="space-y-3 pr-3">
-              {hits?.map((h) => (
-                <div key={h.id} className="space-y-2 rounded-lg border p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <button
-                      className="text-left text-sm font-medium hover:underline"
-                      onClick={() => setPreview(h.documentId)}
-                    >
-                      {h.name}
-                    </button>
-                  </div>
-                  <KnowledgeHitBadges hit={h} />
-                  <p className="whitespace-pre-wrap text-sm leading-6 [overflow-wrap:anywhere]">
-                    {h.text}
-                  </p>
-                </div>
-              ))}
-              {hits?.length === 0 && (
-                <p className="py-12 text-center text-muted-foreground">
-                  {t('knowledge.noResults')}
-                </p>
-              )}
-            </div>
-          </ScrollArea>
         </TabsContent>
       </Tabs>
       {importing && (

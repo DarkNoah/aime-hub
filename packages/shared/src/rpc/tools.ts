@@ -7,7 +7,7 @@ import {
   imageGenConfigSchema,
   speechConfigSchema,
   transcribeConfigSchema,
-  viewFileConfigSchema,
+  readFileConfigSchema,
   enabledToolConfigSchema,
   toolIdSchema,
   type ToolConfig,
@@ -46,8 +46,8 @@ export const toolsContract = {
           body: transcribeConfigSchema,
         }),
         z.object({
-          params: z.object({ toolId: z.literal('view_file') }),
-          body: viewFileConfigSchema,
+          params: z.object({ toolId: z.literal('read_file') }),
+          body: readFileConfigSchema,
         }),
         z.object({
           params: z.object({ toolId: toolIdSchema }),

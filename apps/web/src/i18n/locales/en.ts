@@ -44,6 +44,16 @@ export const en = {
   'knowledge.addTag': 'Add dimension',
   'knowledge.removeTag': 'Remove dimension',
   'knowledge.errorTags': 'Use unique dimensions with at least one tag value.',
+  'knowledge.tagFilters': 'Filter by tags',
+  'knowledge.clearTagFilters': 'Clear tags',
+  'knowledge.moreFilters': 'More filters',
+  'knowledge.metadataFilterHint':
+    'Filter sources and search results by custom fields.',
+  'knowledge.clearFilters': 'Clear filters',
+  'knowledge.applyFilters': 'Apply filters',
+  'knowledge.searchResults': 'Search results',
+  'knowledge.searchResultsHint':
+    'Search enabled, ready, unarchived sources using the current tags and filters.',
   'knowledge.filters': 'Filter documents and search results',
   'knowledge.filterHint':
     'Match any tag within a dimension and all selected dimensions. Custom fields match by value. Search excludes archived documents.',
@@ -846,17 +856,17 @@ export const en = {
   'agents.tool.transcribe': 'Speech recognition',
   'agents.tool.list_voices': 'List voices',
   'tools.transcribe': 'Speech recognition',
-  'agents.tool.view_file': 'Read binary file',
-  'tools.viewFile': 'Read binary file',
+  'agents.tool.read_file': 'Read file',
+  'tools.viewFile': 'Read file',
   'tools.viewFileDescription':
-    'Parse workspace images and PDFs into Markdown using OCR.',
+    'Read text and code files, or parse images and PDFs into Markdown using OCR.',
   'tools.configureViewFile': 'Configure file reading',
   'tools.enableViewFile': 'Enable file reading',
   'tools.ocrModel': 'OCR model',
-  'tools.selectOcrModel': 'Select an OCR model',
-  'tools.ocrModelHint': 'Select an enabled MinerU or PaddleOCR model.',
+  'tools.selectOcrModel': 'No OCR model (text reading only)',
+  'tools.ocrModelHint': 'Optionally select an enabled MinerU or PaddleOCR model for images and PDFs. Text reading needs no model.',
   'tools.ocrProviderHint':
-    'Currently supports images and PDFs. Audio, video and GLB are not supported yet. PDF page selection depends on the provider endpoint.',
+    'Text supports line ranges; images and PDFs use OCR. Other binary files return media or metadata. PDF page selection depends on the provider endpoint.',
   'tools.invalidOcrModel':
     'Select an available MinerU or PaddleOCR model from an enabled provider.',
   'chat.viewFile.loading': 'Parsing file…',
@@ -2018,7 +2028,8 @@ export const en = {
   'chat.copy': 'Copy',
   'chat.copied': 'Message copied.',
   'chat.copyFailed': 'Copy failed. Check clipboard permissions.',
-  'chat.messageElapsed': 'Time since the previous user message',
+  'chat.messageElapsed':
+    'Time from the latest user message to the last assistant text message',
   'chat.toolRunning': 'Running',
   'chat.toolDone': 'Completed',
   'chat.toolFailed': 'Failed',
@@ -2209,6 +2220,85 @@ export const en = {
     'Record model requests and responses. Disabling stops log capture and console output for new requests. In-flight requests finish logging, and existing logs remain available.',
   'settings.requestLoggingEnabled': 'Enabled',
   'settings.requestLoggingDisabled': 'Disabled',
+  'settings.desktopDescription':
+    'Connect to the E2B management API to manage desktop sandboxes.',
+  'settings.desktopManaged': 'Deployment configuration',
+  'settings.desktopManagedHint':
+    'Connected to the deployed E2B service. Default template: {{template}}, lifetime: {{seconds}} seconds. Connection settings are managed by the deployment; test the connection or manage instances directly.',
+  'settings.desktopManagedError':
+    'E2B connection settings are managed by the deployment. Update Compose environment variables and recreate the application service.',
+  'settings.desktopEnabled': 'Enable E2B Desktop management',
+  'settings.desktopNotConfigured': 'No management API configured',
+  'settings.desktopConfigure': 'Configure E2B Desktop',
+  'settings.desktopConfigHint':
+    'Connect to an existing self-hosted E2B management API. Changes take effect immediately.',
+  'settings.desktopUrl': 'Management API URL',
+  'settings.desktopUrlHint':
+    'Use an API base URL reachable from the server, such as http://e2b.internal:3000. This is not a VNC URL.',
+  'settings.desktopApiKey': 'API key',
+  'settings.desktopApiKeyConfigured': 'Configured',
+  'settings.desktopApiKeyKeep': 'Leave blank to keep the saved API key',
+  'settings.desktopApiKeyHint':
+    'Use your E2B team API key. It is used only by the server and is never returned after saving.',
+  'settings.desktopClearApiKey':
+    'Clear saved API key (disable management first)',
+  'settings.desktopTemplate': 'Desktop template',
+  'settings.desktopTemplateHint':
+    'Use a desktop template ID or alias already built in your self-hosted service, such as desktop.',
+  'settings.desktopTimeout': 'Default lifetime (seconds)',
+  'settings.desktopInvalid':
+    'Check the API URL and lifetime. An API key and desktop template are required when enabled.',
+  'settings.desktopTest': 'Test connection',
+  'settings.desktopConnected': 'Connected to the E2B management API.',
+  'settings.desktopManage': 'Manage desktop instances',
+  'settings.desktopManageHint':
+    'Shows instances created through this manager. Refresh to get the latest state from E2B.',
+  'settings.desktopRefresh': 'Refresh',
+  'settings.desktopCreate': 'Create instance',
+  'settings.desktopCreateHint':
+    'Create a sandbox from a desktop template. E2B terminates it when its lifetime expires.',
+  'settings.desktopEdit': 'Edit instance lifetime',
+  'settings.desktopEditHint':
+    'Reset the expiry from the time of submission. The template and creation name cannot be changed on a running instance.',
+  'settings.desktopRemaining': 'Lifetime from now (seconds)',
+  'settings.desktopName': 'Instance name (optional)',
+  'settings.desktopInstance': 'Instance',
+  'settings.desktopState': 'Status',
+  'settings.desktopExpires': 'Expires',
+  'settings.desktopActions': 'Actions',
+  'settings.desktopRunning': 'Running',
+  'settings.desktopPaused': 'Paused',
+  'settings.desktopLoading': 'Loading instances…',
+  'settings.desktopLoadFailed': 'Could not load instances. Refresh to retry.',
+  'settings.desktopEmpty': 'No desktop instances yet',
+  'settings.desktopLoadMore': 'Load more',
+  'settings.desktopEditLabel': 'Edit {{name}}',
+  'settings.desktopDeleteLabel': 'Delete {{name}}',
+  'settings.desktopDelete': 'Delete instance',
+  'settings.desktopDeleteHint':
+    'Terminate this sandbox and delete the instance. Data not saved to external storage will be lost. This cannot be undone.',
+  'settings.desktopCreated': 'Instance created: {{id}}',
+  'settings.desktopUpdated': 'Instance lifetime updated.',
+  'settings.desktopDeleted': 'Instance deleted.',
+  'settings.desktopRefreshNeeded':
+    'Operation completed, but the latest state of {{id}} could not be read. Refresh the list.',
+  'settings.desktopInstanceInvalid':
+    'Enter a desktop template and a positive whole number of seconds.',
+  'settings.desktopAuthFailed':
+    'E2B authentication failed. Check the API key and permissions.',
+  'settings.desktopUnavailableConfig':
+    'Configure and enable E2B Desktop management first.',
+  'settings.desktopNotFound':
+    'E2B could not find the instance, template or endpoint. Check the configuration and refresh.',
+  'settings.desktopRateLimited': 'E2B rate limit reached. Try again shortly.',
+  'settings.desktopRequestFailed':
+    'E2B rejected the request. Check the template, lifetime and service limits.',
+  'settings.desktopInvalidResponse':
+    'The response does not match the E2B management API. Check the URL and service version.',
+  'settings.desktopUnavailable':
+    'E2B is unreachable or the request timed out. After a failed creation, refresh the list before retrying to check whether it was created.',
+  'settings.save': 'Save configuration',
+  'settings.cancel': 'Cancel',
   'settings.saved': 'System settings updated.',
   'settings.retry': 'Retry',
 

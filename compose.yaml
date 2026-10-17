@@ -1,5 +1,6 @@
+# Application services only. Add -f compose.e2b.yaml to opt into self-hosted E2B.
 services:
-  postgres:
+  app-postgres:
     image: ${POSTGRES_IMAGE:-pgvector/pgvector:0.8.7-pg16-bookworm}
     restart: unless-stopped
     environment:
@@ -27,13 +28,13 @@ services:
     init: true
     stop_grace_period: 60s
     depends_on:
-      postgres:
+      app-postgres:
         condition: service_healthy
     environment:
       NODE_ENV: production
       ALLOW_INSECURE_HTTP: ${ALLOW_INSECURE_HTTP:-false}
       ALLOW_ALL_NETWORKS: ${ALLOW_ALL_NETWORKS:-false}
-      DATABASE_URL: postgresql://hub:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/hub
+      DATABASE_URL: postgresql://hub:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@app-postgres:5432/hub
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set a random secret of at least 32 characters}
       WEB_ORIGINS: ${WEB_ORIGINS:?Set comma-separated browser origins, default first}
       SERVER_HOST: 0.0.0.0

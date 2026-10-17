@@ -1,0 +1,62 @@
+# Merged with compose.upstream.yaml by the optional compose.e2b.yaml include.
+# The application and E2B seed use the same team key; no dashboard copy/paste.
+services:
+  # The pinned desktop image is amd64. Fail before any privileged host setup.
+  desktop-host-check:
+    image: ${E2B_TOOLS_IMAGE:?Missing pinned E2B tools image}
+    restart: 'no'
+    command:
+      [
+        sh,
+        -c,
+        'test "$$(uname -m)" = x86_64 || { echo "E2B Desktop requires an x86-64 Linux/KVM host for the pinned desktop image" >&2; exit 1; }',
+      ]
+
+  host-setup:
+    depends_on:
+      desktop-host-check:
+        condition: service_completed_successfully
+
+  seed:
+    environment:
+      SEED_TEAM_API_KEY: ${E2B_API_KEY:?Set E2B_API_KEY to e2b_ followed by at least 32 random hex characters}
+
+  # Upstream ready prints the team key into container logs. This application
+  # receives it directly from Compose, so retain readiness without logging keys.
+  ready:
+    depends_on:
+      desktop-template:
+        condition: service_completed_successfully
+    command:
+      [
+        sh,
+        -c,
+        'echo "E2B Runtime and desktop template are ready"; exec sleep infinity',
+      ]
+
+  desktop-template:
+    image: ${E2B_NODE_E2B_IMAGE:?Missing pinned E2B SDK image}
+    restart: 'no'
+    network_mode: host
+    environment:
+      E2B_API_URL: http://127.0.0.1:3000
+      E2B_API_KEY: ${E2B_API_KEY:?Set E2B_API_KEY}
+      E2B_DESKTOP_TEMPLATE: ${E2B_DESKTOP_TEMPLATE:-desktop}
+      E2B_DESKTOP_IMAGE: ${E2B_DESKTOP_IMAGE:-e2bdev/desktop@sha256:c4702cd57888de9a3a4ae29976ef4ca1b72e8b8ec76c94c7bbcd3e2958e13604}
+      E2B_DESKTOP_CPU_COUNT: ${E2B_DESKTOP_CPU_COUNT:-2}
+      E2B_DESKTOP_MEMORY_MB: ${E2B_DESKTOP_MEMORY_MB:-2048}
+      E2B_DESKTOP_FORCE_REBUILD: ${E2B_DESKTOP_FORCE_REBUILD:-0}
+    volumes:
+      - ./build-desktop-template.mjs:/app/build-desktop-template.mjs:ro
+      - ./desktop-start.sh:/app/desktop-start.sh:ro
+    depends_on:
+      base-template:
+        condition: service_completed_successfully
+      seed:
+        condition: service_completed_successfully
+    command: [node, /app/build-desktop-template.mjs]
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'

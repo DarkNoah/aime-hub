@@ -203,13 +203,31 @@ Compose 还需要 `POSTGRES_PASSWORD`，并在容器内生成 `DATABASE_URL`，�
 
 ### Docker Compose / Dokploy
 
-[Dockerfile](Dockerfile) 构建 API 与 Nginx 镜像；[compose.yaml](compose.yaml) 提供 `server`、`web` 和 `postgres` 服务。
+[Dockerfile](Dockerfile) 构建 API 与 Nginx 镜像；[compose.yaml](compose.yaml) 默认仅提供 `server`、`web`、`app-postgres` 三个应用服务，不加载 E2B 服务，也不要求 E2B 配置。
 
-- 配置 `WEB_ORIGINS`、`POSTGRES_PASSWORD`、`BETTER_AUTH_SECRET`，并将 HTTPS 入口路由至 `web:80`。基础 Compose 仅暴露容器端口，不映射宿主机端口。
+- 配置 `WEB_ORIGINS`、`POSTGRES_PASSWORD`、`BETTER_AUTH_SECRET`，并将 HTTPS 入口路由至 `web:80`。应用服务只暴露容器端口。
 - API 容器启动时执行 `pnpm db:migrate`；启动后在 `server` 容器中执行 `pnpm auth:create-admin`。
 - PostgreSQL 与工作区分别使用 `postgres-data`、`workspace-data` 命名卷，应一起备份。
 - `server` 的 FUSE 配置需要 Linux 宿主机提供 `/dev/fuse`，并使用配置中的 `SYS_ADMIN` 等权限。
 - 临时内网直连使用 [compose.ip.yaml](compose.ip.yaml) 覆盖文件；完整配置与 Dokploy 操作见[部署说明](docs/deployment.md)。
+
+### 可选 E2B 自托管桌面
+
+需要同时部署 E2B 时，显式加载 [compose.e2b.yaml](compose.e2b.yaml)。它包含官方 E2B Embed 的管理 API、Firecracker 编排器、代理、Dashboard、数据库和初始化服务，并自动从固定版本的官方桌面镜像构建 `desktop` 模板。需要 **x86-64 Linux/KVM 专用宿主机**，推荐 Ubuntu 24.04、12 GiB 以上内存、20 GiB 以上空闲磁盘，Docker ≥ 27、Compose ≥ 2.24；本机 ARM Docker 不能运行此桌面模板。部署会配置宿主机 KVM、网络和 hugepages，完整要求见 [E2B 部署说明](docker/e2b/README.md)。
+
+在 `.env` 或 Dokploy 环境中设置 `E2B_API_KEY`，值为 `e2b_` 加至少 32 位随机十六进制字符（可用 `printf 'e2b_'; openssl rand -hex 32` 生成），然后执行：
+
+```sh
+docker compose -f compose.yaml -f compose.e2b.yaml up -d --build --wait
+```
+
+首次启动会下载运行时并构建桌面模板。后台自动连接 `http://host.docker.internal:3000`，与 E2B 初始化使用同一密钥。**管理后台 → 系统设置 → E2B Desktop** 显示“部署配置”，可直接测试连接和管理实例，无需重复填写地址或密钥。连接信息由部署环境维护，密钥不回传浏览器。
+
+实例列表支持创建、编辑存活时间和删除；仅管理带有 `managedBy=desktop-admin` 标记的实例。编辑从提交时刻重设到期时间，模板和创建名称不能原地修改。桌面默认运行 XFCE、1280×720；Agent 自动控制尚未接入。E2B 宿主机内部端口（特别是未鉴权的 `5008`）必须限制在可信主机内部，详见部署说明中的端口表。
+
+应用仍使用原有 `postgres-data`、`workspace-data` 卷；E2B 使用独立数据库卷及宿主机目录。升级时保持 Compose 项目名不变，不要用 `down -v`。原单桌面容器的数据不会自动迁移为沙箱。
+
+默认 Compose 部署可直接在后台配置已有 E2B 管理 API，无需加载自托管服务。本地开发或自行托管应用时，也可以用 `E2B_API_URL`、`E2B_API_KEY` 注入连接配置。支持的接口为 `GET/POST /v2/sandboxes`、`GET/DELETE /sandboxes/{id}` 和 `POST /sandboxes/{id}/timeout`。
 
 ### 自行托管
 

@@ -13,7 +13,11 @@ import {
   type NeedsApprovalFn,
   type ValidationError,
 } from '@mastra/core/tools';
-import { createWorkspaceTools, createSkillTools } from '@mastra/core/workspace';
+import {
+  createWorkspaceTools,
+  createSkillTools,
+  WORKSPACE_TOOLS,
+} from '@mastra/core/workspace';
 import { z } from 'zod';
 import { ExecOutput, execOutputSchema } from './exec/output.js';
 import { runExec } from './exec/runtime.js';
@@ -36,7 +40,7 @@ text(value) explicitly emits text (non-strings are JSON serialized); image(value
 Only text() and image() output is returned. Return values, bare expressions, console output and nested tool results are not automatically emitted. Await all tool calls you need; unawaited work is cancelled when the script ends, but already-started external side effects cannot be rolled back.
 Available imports: node:fs (promises and callback APIs), node:fs/promises (readFile, writeFile, appendFile, mkdir), node:path (join, resolve, normalize, dirname, basename, extname, relative, isAbsolute, parse, format, posix/win32); names without node: also work. These are limited compatibility modules, not full Node. File operations use the current workspace, including its path, read-only, enabled-tool and approval restrictions. readFile(path, 'utf8') returns text; without encoding it returns Uint8Array. writeFile accepts text or typed arrays; flags w/wx/a and Node encodings are supported. mkdir requires the workspace mkdir tool to be enabled. Sync filesystem APIs, Buffer, process, require, other imports, network, console and timers are unavailable. path.resolve uses the workspace root. Runtime limits: 64 MiB memory, 1 second of synchronous CPU execution, at most 256 async tool/module calls and 32 concurrent calls; file reads are capped at 8 MiB. yield_time_ms is a wall-clock timeout, not a background continuation. max_output_tokens is an approximate text budget (4 UTF-8 bytes/token); image output has a separate 10 MiB budget.
 Disabled tools remain unavailable. Approval and suspension tools must be called directly by the Agent; exec cannot resume their interactions. exec itself is excluded from tools to prevent recursion.
-Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.txt', 'hello', 'utf8'); text('saved'); const fs = await import('node:fs'); text(await fs.promises.readFile('output.txt', 'utf8')); text(ALL_TOOLS.filter(t => t.name.startsWith('mcp__'))); image(await tools.read_file({ path: 'photo.png' }));`,
+Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.txt', 'hello', 'utf8'); text('saved'); const fs = await import('node:fs'); text(await fs.promises.readFile('output.txt', 'utf8')); text(ALL_TOOLS.filter(t => t.name.startsWith('mcp__'))); text(await tools.read_file({ path: 'document.pdf' })); image(await tools.read_file({ path: 'photo.png', encoding: 'base64' }));`,
     inputSchema: z.object({
       code: z
         .string()
@@ -113,7 +117,18 @@ Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.
           code,
           signal,
           deadline,
-          modules: createExecModules({ ...context, abortSignal: signal }),
+          modules: createExecModules(
+            { ...context, abortSignal: signal },
+            // The native read tool is hidden when the application owns read_file.
+            context.workspace?.getToolsConfig()?.[
+              WORKSPACE_TOOLS.FILESYSTEM.READ_FILE
+            ]?.name === 'read_file' &&
+              context.workspace.getToolsConfig()?.[
+                WORKSPACE_TOOLS.FILESYSTEM.READ_FILE
+              ]?.enabled === false
+              ? { readFileEnabled: !!application.read_file }
+              : {},
+          ),
           catalog: [...catalog].map(([name, tool]) => {
             const inputSchema = tool.inputSchema
               ? standardSchemaToJSONSchema(toStandardSchema(tool.inputSchema), {

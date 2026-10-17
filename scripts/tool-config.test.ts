@@ -11,7 +11,7 @@ import {
   defaultImageGenConfig,
   defaultSpeechConfig,
   defaultTranscribeConfig,
-  defaultViewFileConfig,
+  defaultReadFileConfig,
   webFetchConfigSchema,
   webSearchConfigSchema,
 } from '@aime/shared/tools';
@@ -27,6 +27,7 @@ import { LocalProvider } from '../apps/server/src/mastra/providers/local.js';
 import { PaddleOCRProvider } from '../apps/server/src/mastra/providers/paddleocr.js';
 import { createApp } from '../apps/server/src/app.js';
 import { createApiClient } from '../apps/web/src/lib/rpc.js';
+import { agentInputSchema } from '@aime/shared/agents';
 
 const provider = {
   id: 'search-provider',
@@ -222,10 +223,43 @@ test('web search configuration validates limits, unknown properties and defaults
   }
 });
 
+test('renamed OCR settings and Agent exclusions preserve legacy state', async () => {
+  const f = fixture();
+  const config = {
+    ...defaultReadFileConfig,
+    model: 'ocr/PaddleOCR-VL',
+    enabled: false,
+    timeoutMs: 12345,
+  };
+  f.rows.set('tool:view_file', { id: 'tool:view_file', value: config });
+  assert.deepEqual((await f.service.get('read_file')).config, config);
+  assert.deepEqual(await f.service.buildTools(['read_file']), {});
+  await f.service.setEnabled('read_file', true);
+  assert.deepEqual((await f.service.get('read_file')).config, {
+    ...config,
+    enabled: true,
+  });
+  assert.deepEqual(Object.keys(await f.service.buildTools(['view_file'])), [
+    'read_file',
+  ]);
+  assert.deepEqual(
+    await f.service.buildTools(['read_file'], {}, ['view_file']),
+    {},
+  );
+  assert.deepEqual(
+    await buildTools(['read_file'], { view_file: { enabled: false } }),
+    {},
+  );
+  assert.deepEqual(
+    agentInputSchema.shape.disabledTools.parse(['view_file', 'read_file']),
+    ['read_file'],
+  );
+});
+
 test('all built-in switches persist independently and preserve configured parameters', async () => {
   const f = fixture();
-  await f.service.update('view_file', {
-    ...defaultViewFileConfig,
+  await f.service.update('read_file', {
+    ...defaultReadFileConfig,
     model: 'ocr/PaddleOCR-VL',
   });
   await f.service.update('web_search', {
@@ -271,7 +305,7 @@ test('persisted configuration controls new tool instances, without credentials i
       { id: 'image_gen', config: defaultImageGenConfig },
       { id: 'speech', config: defaultSpeechConfig },
       { id: 'transcribe', config: defaultTranscribeConfig },
-      { id: 'view_file', config: defaultViewFileConfig },
+      { id: 'read_file', config: defaultReadFileConfig },
     ],
   );
   const saved = {

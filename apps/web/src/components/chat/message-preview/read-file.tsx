@@ -13,6 +13,18 @@ import { getToolName } from '../tool-renderers/registry';
 import { readFileBlocks, splitReadFileText } from './read-file-output';
 import { ToolMedia } from './tool-media';
 import type { PreviewPart } from './selection';
+import { ViewFilePreview } from './view-file';
+import { parseViewFileOutput } from './view-file-output';
+
+// The wrapped tool can return native text/media or structured OCR results.
+export function ReadFileToolPreview({ part }: { part: PreviewPart }) {
+  if (!isToolUIPart(part)) return null;
+  return parseViewFileOutput(part.output) ? (
+    <ViewFilePreview part={part} />
+  ) : (
+    <ReadFilePreview part={part} />
+  );
+}
 
 export function ReadFilePreview({ part }: { part: PreviewPart }) {
   const { t } = useTranslation();

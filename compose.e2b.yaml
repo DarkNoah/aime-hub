@@ -1,0 +1,23 @@
+# Optional full E2B Embed runtime; requires a dedicated x86-64 Linux/KVM host.
+# Usage: docker compose -f compose.yaml -f compose.e2b.yaml up -d --build --wait
+# Keep upstream deployment files unchanged; local integration lives in the override.
+include:
+  - path:
+      - ./docker/e2b/compose.upstream.yaml
+      - ./docker/e2b/compose.integration.yaml
+    env_file: ./docker/e2b/images.env
+
+services:
+  server:
+    depends_on:
+      desktop-template:
+        condition: service_completed_successfully
+      client-proxy:
+        condition: service_healthy
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    environment:
+      E2B_API_URL: http://host.docker.internal:3000
+      E2B_API_KEY: ${E2B_API_KEY:?Set E2B_API_KEY to e2b_ followed by at least 32 random hex characters}
+      E2B_DESKTOP_TEMPLATE: ${E2B_DESKTOP_TEMPLATE:-desktop}
+      E2B_DESKTOP_TIMEOUT_SECONDS: ${E2B_DESKTOP_TIMEOUT_SECONDS:-300}

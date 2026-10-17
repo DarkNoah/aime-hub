@@ -8,14 +8,15 @@ import type { KnowledgeService } from '../knowledge/service.js';
 import type { AudioService } from '../audio/service.js';
 import { createTranscribeTool } from '../../mastra/tools/transcribe.js';
 import {
-  createViewFileTool,
+  createReadFileTool,
   type ResolvedOcrModel,
-} from '../../mastra/tools/view_file.js';
+} from '../../mastra/tools/read_file.js';
 import { createListVoicesTool } from '../../mastra/tools/list_voices.js';
 import type { ToolsInput } from '@mastra/core/agent';
 import { z } from 'zod';
 import {
   enabledToolConfigSchema,
+  normalizeToolId,
   toolIdSchema,
   toolConfigSchemas,
   type ToolConfig,
@@ -23,7 +24,7 @@ import {
   type WebFetchConfig,
   type ImageGenConfig,
   type SpeechConfig,
-  type ViewFileConfig,
+  type ReadFileConfig,
 } from '@aime/shared/tools';
 import * as applicationTools from '../../mastra/tools/index.js';
 import { createExecTool } from '../../mastra/tools/exec.js';
@@ -48,7 +49,7 @@ export type ToolDefaultConfigs = Partial<
   web_fetch?: Partial<WebFetchConfig>;
   image_gen?: Partial<ImageGenConfig>;
   speech?: Partial<SpeechConfig>;
-  view_file?: Partial<ViewFileConfig>;
+  read_file?: Partial<ReadFileConfig>;
 };
 type ToolDependencies = {
   audio?: AudioService;
@@ -134,12 +135,12 @@ export function parseToolConfig(id: string, input: unknown): ToolConfig {
         description,
         config: toolConfigSchemas.transcribe.parse(input),
       };
-    case 'view_file':
+    case 'read_file':
       return {
         id,
         kind: id,
         description,
-        config: toolConfigSchemas.view_file.parse(input),
+        config: toolConfigSchemas.read_file.parse(input),
       };
     default:
       return {
@@ -158,6 +159,7 @@ async function buildTool(
 ) {
   const saved = await dependencies.loadConfig?.(id);
   const tool = parseToolConfig(id, {
+    ...(id === 'read_file' ? defaults.view_file : undefined),
     ...defaults[id],
     ...z.looseObject({}).parse(saved ?? {}),
   });
@@ -190,8 +192,8 @@ async function buildTool(
       });
     case 'transcribe':
       return createTranscribeTool(tool.config, dependencies.audio);
-    case 'view_file':
-      return createViewFileTool(tool.config, {
+    case 'read_file':
+      return createReadFileTool(tool.config, {
         resolveModel: dependencies.ocrModel,
       });
     case 'builtin':
@@ -235,13 +237,14 @@ export async function buildTools(
   defaults: ToolDefaultConfigs = {},
   dependencies: ToolDependencies = {},
 ): Promise<ToolsInput> {
-  const selected = [...new Set(ids)];
+  const selected = [...new Set(ids.map(normalizeToolId))];
+  const disabled = new Set(dependencies.disabledTools?.map(normalizeToolId));
   for (const id of selected) {
     if (!registry.has(id)) throw new Error(`Unknown tool ID: ${id}`);
   }
   const entries = await Promise.all(
     selected
-      .filter((id) => !dependencies.disabledTools?.includes(id))
+      .filter((id) => !disabled.has(id))
       .map(async (id) => {
         const tool = await buildTool(id, defaults, dependencies);
         return tool ? [[id, tool] as const] : [];
