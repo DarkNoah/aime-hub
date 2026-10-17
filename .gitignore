@@ -45,3 +45,4 @@ plugins/vibe-quant/**/__pycache__/
 !apps/server/src/modules/tools/view-file.test.ts
 !scripts/tool-config.test.ts
 !scripts/file-preview.test.ts
+!scripts/chat-workspace-attachments.test.ts

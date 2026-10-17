@@ -10,7 +10,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { cjk } from '@streamdown/cjk';
 import { code } from '@streamdown/code';
-import { math } from '@streamdown/math';
 import { mermaid } from '@streamdown/mermaid';
 import { BrainIcon, ChevronDownIcon } from 'lucide-react';
 import type { ComponentProps, CSSProperties, ReactNode } from 'react';
@@ -27,6 +26,7 @@ import {
 } from 'react';
 import { Streamdown } from 'streamdown';
 
+import { math } from './math-plugin';
 import { Shimmer } from './shimmer';
 
 interface ReasoningContextValue {

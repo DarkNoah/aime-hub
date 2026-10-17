@@ -1,5 +1,7 @@
 import { lazy, Suspense, useState } from 'react';
-import { Expand } from 'lucide-react';
+import { Expand, Folder } from 'lucide-react';
+import { attachmentFileReference } from '@aime/shared/chat-attachments';
+import { workspaceReferencePath } from '@aime/shared/files';
 import { useTranslation } from 'react-i18next';
 import {
   Attachment,
@@ -36,15 +38,20 @@ export function ChatMessageAttachments({
       data-chat-message-attachments
     >
       {attachments.map((attachment, index) => {
-        // Attachment paths are rooted in the workspace, not the host filesystem.
-        const path = attachment.workspacePath?.replace(/^\//, '');
+        const target = attachment.workspacePath
+          ? attachmentFileReference(attachment.workspacePath)
+          : undefined;
+        const path = target && workspaceReferencePath(target);
+        const directory = target?.kind === 'directory';
         const url =
           attachment.url ||
-          (threadId && path ? filesApi.raw(threadId, path) : '');
+          (threadId && target && !directory
+            ? filesApi.raw(threadId, target.path, false, target.scope)
+            : '');
         const name = attachment.filename || t('chat.readFile.attachment');
         const canOpenFile = !!(path && openFile);
         const canPreviewImage =
-          attachment.mediaType.startsWith('image/') && !!url;
+          !directory && attachment.mediaType.startsWith('image/') && !!url;
         const previewLabel = canPreviewImage
           ? t('imagePreview.open', { name })
           : t('files.openPreview', { path: name });
@@ -62,7 +69,11 @@ export function ChatMessageAttachments({
               aria-label={t('files.openPreview', { path: name })}
               className="block size-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-default"
             >
-              <AttachmentPreview />
+              <AttachmentPreview
+                fallbackIcon={
+                  directory ? <Folder className="size-8" /> : undefined
+                }
+              />
             </button>
             <Button
               type="button"

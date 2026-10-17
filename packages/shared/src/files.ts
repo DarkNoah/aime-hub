@@ -24,6 +24,35 @@ export type FilePreview = {
   text?: string;
   truncated?: boolean;
 };
+
+export const fileMediaTypes: Record<string, [FilePreview['kind'], string]> = {
+  '.pdf': ['pdf', 'application/pdf'],
+  '.glb': ['model', 'model/gltf-binary'],
+  '.png': ['image', 'image/png'],
+  '.jpg': ['image', 'image/jpeg'],
+  '.jpeg': ['image', 'image/jpeg'],
+  '.gif': ['image', 'image/gif'],
+  '.webp': ['image', 'image/webp'],
+  '.avif': ['image', 'image/avif'],
+  '.svg': ['image', 'image/svg+xml'],
+  '.bmp': ['image', 'image/bmp'],
+  '.mp3': ['audio', 'audio/mpeg'],
+  '.wav': ['audio', 'audio/wav'],
+  '.ogg': ['audio', 'audio/ogg'],
+  '.m4a': ['audio', 'audio/mp4'],
+  '.flac': ['audio', 'audio/flac'],
+  '.aac': ['audio', 'audio/aac'],
+  '.opus': ['audio', 'audio/ogg'],
+  '.mp4': ['video', 'video/mp4'],
+  '.webm': ['video', 'video/webm'],
+  '.mov': ['video', 'video/quicktime'],
+  '.ogv': ['video', 'video/ogg'],
+};
+
+export function workspaceReferencePath(reference: WorkspaceFileReference) {
+  return `${reference.scope === 'shared' ? '../shared/' : './'}${reference.path}${reference.kind === 'directory' ? '/' : ''}`;
+}
+
 export type FileSearch = {
   matches: (FileEntry & { line?: number; text?: string })[];
   truncated: boolean;

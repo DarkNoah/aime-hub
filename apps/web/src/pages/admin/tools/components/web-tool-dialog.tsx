@@ -7,7 +7,10 @@ import {
   webFetchConfigSchema,
   type ToolConfig,
 } from '@aime/shared/tools';
-import type { ProviderSummary } from '@aime/shared/providers';
+import {
+  providerSupportsWebTool,
+  type ProviderSummary,
+} from '@aime/shared/providers';
 import type { TranslationKey } from '@/i18n/config';
 import { api } from '@/lib/rpc';
 import { Button } from '@/components/ui/button';
@@ -66,8 +69,8 @@ export function WebToolDialog({
     >
   >({});
   const submitting = useRef(false);
-  const choices = providers.filter(
-    (provider) => provider.type === definition.providerType,
+  const choices = providers.filter((provider) =>
+    providerSupportsWebTool(provider.type, tool.id),
   );
   const missing =
     providerId !== definition.localId &&

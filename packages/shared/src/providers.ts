@@ -23,6 +23,15 @@ export function providerSupportsModels(type: string) {
 export function isOcrProvider(type: string) {
   return type === 'mineru' || type === 'paddleocr';
 }
+export function providerSupportsWebTool(
+  type: string,
+  tool: 'web_search' | 'web_fetch',
+) {
+  return (
+    type === 'deepseek' ||
+    type === (tool === 'web_search' ? 'serpapi' : 'jina-ai')
+  );
+}
 export const providerTypeSchema = z.enum([
   ...(Object.keys(languageModelProviders) as Array<
     keyof typeof languageModelProviders

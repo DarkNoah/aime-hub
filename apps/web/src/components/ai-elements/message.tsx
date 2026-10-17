@@ -11,7 +11,6 @@ import {
 import { cn } from '@/lib/utils';
 import { cjk } from '@streamdown/cjk';
 import { code } from '@streamdown/code';
-import { math } from '@streamdown/math';
 import { mermaid } from '@streamdown/mermaid';
 import type { UIMessage } from 'ai';
 import { ChevronLeftIcon, ChevronRightIcon } from 'lucide-react';
@@ -29,6 +28,7 @@ import { defaultRehypePlugins, Streamdown } from 'streamdown';
 import { MarkupCodeBlock } from './markup-code-block';
 import { MarkdownLink } from './markdown-link';
 import { rehypeWorkspaceFileLinks } from './markdown-file-link';
+import { math } from './math-plugin';
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage['role'];

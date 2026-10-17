@@ -1,10 +1,8 @@
 import type { WorkspaceFileReference } from '@aime/shared/files';
+import { workspaceReferencePath } from '@aime/shared/files';
+export { workspaceReferencePath } from '@aime/shared/files';
 
 export const WORKSPACE_FILE_DRAG_TYPE = 'application/x-workspace-file';
-
-export function workspaceReferencePath(reference: WorkspaceFileReference) {
-  return `${reference.scope === 'shared' ? '../shared/' : './'}${reference.path}${reference.kind === 'directory' ? '/' : ''}`;
-}
 
 export function writeWorkspaceFileDrag(
   transfer: DataTransfer,

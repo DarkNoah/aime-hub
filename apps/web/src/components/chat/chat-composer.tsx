@@ -46,7 +46,7 @@ import { VoiceLibrary } from '@/components/audio/voice-library';
 import { ChatGoal } from './chat-goal';
 import type { GeneratedAsset } from '@aime/shared/assets';
 import type { WorkspaceFileReference } from '@aime/shared/files';
-import { workspaceReferencePath } from '@/components/file-manager/drag-data';
+import { workspaceAttachmentParts } from '@aime/shared/chat-attachments';
 import { useAssetAttachments } from '@/components/generated-assets/context';
 import { assetsApi } from '@/components/generated-assets/api';
 import { fileErrorKey, filesApi } from '@/components/file-manager/api';
@@ -491,14 +491,7 @@ export function ChatComposer({
                     ...(body ? [{ type: 'text', text: body }] : []),
                     ...chatUploadParts(attached),
                     ...generated.parts,
-                    ...(workspaceAttachments.length
-                      ? [
-                          {
-                            type: 'text',
-                            text: `Referenced workspace files and folders (paths relative to the workspace):\n${workspaceAttachments.map((reference) => `- ${JSON.stringify(workspaceReferencePath(reference))}`).join('\n')}`,
-                          },
-                        ]
-                      : []),
+                    ...workspaceAttachmentParts(workspaceAttachments),
                   ],
                 });
                 if (!result.success) {

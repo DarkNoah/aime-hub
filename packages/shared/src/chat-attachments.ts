@@ -1,5 +1,10 @@
 import type { FileUIPart, UIMessage } from 'ai';
 import { MAX_IMAGE_BYTES } from './threads.js';
+import {
+  fileMediaTypes,
+  workspaceReferencePath,
+  type WorkspaceFileReference,
+} from './files.js';
 
 export type MessageAttachment = FileUIPart & {
   id: string;
@@ -56,31 +61,65 @@ export function attachmentAttributes(item: Partial<AttachmentMetadata>) {
 
 /** Storage/UI metadata; the server inserts supported media inside paired tags. */
 export function serializeAttachments(items: AttachmentMetadata[]) {
-  return `<attachments>\n${items
-    .map((item) => `<attachment ${attachmentAttributes(item)} />`)
-    .join('\n')}\n</attachments>`;
+  return items
+    .map((item) => `<attachment ${attachmentAttributes(item)}></attachment>`)
+    .join('\n');
 }
 
-function isAttachmentPath(path: string) {
-  return (
-    !!path &&
-    !path.includes(':') &&
-    !path.includes('\\') &&
-    !Array.from(path).some((character) => character.charCodeAt(0) < 32) &&
-    path
-      .replace(/^\//, '')
+/** Resolve only workspace paths and the explicit personal shared-folder prefix. */
+export function attachmentFileReference(
+  path: string,
+): WorkspaceFileReference | undefined {
+  const scope = path.startsWith('../shared/') ? 'shared' : 'thread';
+  const kind = path.endsWith('/') ? 'directory' : 'file';
+  const relative = (
+    scope === 'shared'
+      ? path.slice('../shared/'.length)
+      : path.replace(/^(?:\.\/|\/)/, '')
+  ).replace(/\/$/, '');
+  if (
+    !relative ||
+    path.length > 2048 ||
+    path.includes(':') ||
+    path.includes('\\') ||
+    Array.from(path).some(
+      (character) =>
+        character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+    ) ||
+    relative
       .split('/')
-      .every((segment) => segment && segment !== '.' && segment !== '..')
+      .some((segment) => !segment || segment === '.' || segment === '..')
+  )
+    return;
+  return { scope, kind, path: relative };
+}
+
+function attachmentMimeType(path: string) {
+  if (path.endsWith('/')) return 'inode/directory';
+  const extension = /\.[^./]+$/.exec(path)?.[0].toLowerCase();
+  return (
+    (extension && fileMediaTypes[extension]?.[1]) || 'application/octet-stream'
   );
 }
 
-const imageTypes: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  webp: 'image/webp',
-  gif: 'image/gif',
-};
+export function workspaceAttachmentParts(references: WorkspaceFileReference[]) {
+  return references.length
+    ? [
+        {
+          type: 'text' as const,
+          text: serializeAttachments(
+            references.map((reference) => {
+              const path = workspaceReferencePath(reference);
+              return { path, mimeType: attachmentMimeType(path) };
+            }),
+          ),
+        },
+      ]
+    : [];
+}
+
+const workspaceReferencesHeader =
+  'Referenced workspace files and folders (paths relative to the workspace):';
 
 function parseAttachmentText(text: string): MessageAttachment[] | null {
   const trimmed = text.trim();
@@ -97,7 +136,7 @@ function parseAttachmentText(text: string): MessageAttachment[] | null {
       try {
         const filename = JSON.parse(match[1]) as string;
         const path = JSON.parse(match[3]) as string;
-        if (!isAttachmentPath(path)) return null;
+        if (!attachmentFileReference(path)) return null;
         attachments.push({
           id: path,
           type: 'file',
@@ -112,7 +151,8 @@ function parseAttachmentText(text: string): MessageAttachment[] | null {
     }
     return attachments.length ? attachments : null;
   }
-  if (trimmed.startsWith('Uploaded files (workspace paths):\n')) {
+  const uploaded = trimmed.startsWith('Uploaded files (workspace paths):\n');
+  if (uploaded || trimmed.startsWith(`${workspaceReferencesHeader}\n`)) {
     const attachments: MessageAttachment[] = [];
     for (const line of trimmed.split('\n').slice(1)) {
       if (!line.startsWith('- ')) return null;
@@ -124,19 +164,17 @@ function parseAttachmentText(text: string): MessageAttachment[] | null {
       }
       if (
         typeof path !== 'string' ||
-        !path.startsWith('/.uploads/') ||
-        !isAttachmentPath(path)
+        (uploaded && !path.startsWith('/.uploads/')) ||
+        !attachmentFileReference(path)
       )
         return null;
-      const filename = path.split('/').at(-1)!;
+      const filename = path.replace(/\/$/, '').split('/').at(-1)!;
       attachments.push({
         id: path,
         type: 'file',
         filename,
         workspacePath: path,
-        mediaType:
-          imageTypes[filename.split('.').at(-1)!.toLowerCase()] ??
-          'application/octet-stream',
+        mediaType: attachmentMimeType(path),
         url: '',
       });
     }
@@ -144,12 +182,13 @@ function parseAttachmentText(text: string): MessageAttachment[] | null {
   }
 
   const block = /^<attachments>\s*([\s\S]*?)\s*<\/attachments>$/.exec(trimmed);
-  if (!block) return null;
+  const content = block?.[1] ?? trimmed;
   const attachments: MessageAttachment[] = [];
-  const entries = /<attachment((?:\s+[a-zA-Z]+="[^"<>]*")*)\s*\/>/g;
+  const entries =
+    /<attachment((?:\s+[a-zA-Z]+="[^"<>]*")*)\s*(?:\/>|>\s*<\/attachment>)/g;
   let end = 0;
-  for (const match of block[1].matchAll(entries)) {
-    if (block[1].slice(end, match.index).trim()) return null;
+  for (const match of content.matchAll(entries)) {
+    if (content.slice(end, match.index).trim()) return null;
     end = match.index + match[0].length;
     const attributes: Record<string, string> = {};
     for (const [, key, value] of match[1].matchAll(/([a-zA-Z]+)="([^"]*)"/g)) {
@@ -160,23 +199,22 @@ function parseAttachmentText(text: string): MessageAttachment[] | null {
     const { path, name, size, mimeType } = attributes;
     if (
       !path ||
-      !isAttachmentPath(path) ||
+      !attachmentFileReference(path) ||
       (size !== undefined &&
-        (!/^\d+$/.test(size) || !Number.isSafeInteger(Number(size)))) ||
-      !mimeType
+        (!/^\d+$/.test(size) || !Number.isSafeInteger(Number(size))))
     )
       return null;
     attachments.push({
       id: path,
       type: 'file',
-      filename: name || path.split('/').at(-1),
+      filename: name || path.replace(/\/$/, '').split('/').at(-1),
       workspacePath: path,
       ...(size === undefined ? {} : { size: Number(size) }),
-      mediaType: mimeType,
+      mediaType: mimeType || attachmentMimeType(path),
       url: '',
     });
   }
-  return attachments.length && !block[1].slice(end).trim() ? attachments : null;
+  return attachments.length && !content.slice(end).trim() ? attachments : null;
 }
 
 // Queue edits and history conversions can join the body and metadata into one text part.
@@ -198,23 +236,31 @@ export function splitAttachmentText(text: string) {
     let end = index;
     if (!fence && line === '<attachments>') {
       const close = lines.indexOf('</attachments>', index + 1);
-      if (close >= 0) end = close;
+      if (close < 0) {
+        body.push(...lines.slice(index));
+        break;
+      }
+      end = close;
     } else if (
       !fence &&
       (line === 'Uploaded files (workspace paths):' ||
+        line === workspaceReferencesHeader ||
         line ===
           'Attached generated assets (paths relative to this conversation workspace):')
     ) {
       while (lines[end + 1]?.startsWith('- ')) end++;
     }
     const parsed =
-      end > index
+      !fence && (end > index || line.startsWith('<attachment '))
         ? parseAttachmentText(lines.slice(index, end + 1).join('\n'))
         : null;
     if (parsed) {
       attachments.push(...parsed);
       index = end;
-    } else body.push(line);
+    } else {
+      body.push(...lines.slice(index, end + 1));
+      index = end;
+    }
   }
   return {
     text: attachments.length ? body.join('\n').trim() : text,

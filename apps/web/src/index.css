@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'streamdown/styles.css';
+@import 'katex/dist/katex.min.css';
 @import './features/plugins/generated.css';
 
 /* Follow the app theme, not the operating system's color preference. */

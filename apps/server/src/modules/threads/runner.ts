@@ -272,6 +272,9 @@ export function createChatRunner(
           : '';
         const attachmentMedia = new AttachmentMediaReader(
           workspace.filesystem!,
+          projectId
+            ? undefined
+            : await createPersonalSharedDirectory(workspaceRoot, userId),
         );
         const inputModalities = (selection: typeof resolved) =>
           selection.modalitiesInput ??

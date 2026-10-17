@@ -2,7 +2,10 @@ import { mkdtemp, open, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { imageSize } from 'image-size';
-import type { AttachmentMetadata } from '@aime/shared/chat-attachments';
+import {
+  attachmentFileReference,
+  type AttachmentMetadata,
+} from '@aime/shared/chat-attachments';
 import { FILE_UPLOAD_MAX_SIZE } from '@aime/shared/files';
 import {
   localWorkspaceFile,
@@ -46,7 +49,10 @@ export async function inspectAttachmentMedia(
 export class AttachmentMediaReader {
   private readonly metadata = new Map<string, MediaMetadata>();
 
-  constructor(private readonly root: Root) {}
+  constructor(
+    private readonly root: Root,
+    private readonly sharedRoot?: Root,
+  ) {}
 
   async read(
     attachment: AttachmentMetadata,
@@ -54,14 +60,20 @@ export class AttachmentMediaReader {
     signal?: AbortSignal,
   ): Promise<{ attributes: AttachmentMetadata; data?: Uint8Array }> {
     signal?.throwIfAborted();
-    const path = attachment.path!.replace(/^\//, '');
-    const info = await previewWorkspaceFile(this.root, path);
+    const target = attachment.path && attachmentFileReference(attachment.path);
+    if (!target) throw new Error('Invalid attachment path');
+    if (target.kind === 'directory') return { attributes: attachment };
+    const root = target.scope === 'shared' ? this.sharedRoot : this.root;
+    if (!root) throw new Error('Shared workspace is unavailable');
+    const path = target.path;
+    const info = await previewWorkspaceFile(root, path);
     const attributes = { ...attachment, size: info.size };
     if (info.size > FILE_UPLOAD_MAX_SIZE) return { attributes };
     if (!includeData && !attachment.mimeType.startsWith('image/'))
       return { attributes };
-    const local = await localWorkspaceFile(this.root, path);
+    const local = await localWorkspaceFile(root, path);
     const key = JSON.stringify([
+      target.scope,
       path,
       info.modifiedAt,
       info.size,
@@ -86,7 +98,7 @@ export class AttachmentMediaReader {
         let size = 0;
         try {
           await streamWorkspaceFile(
-            this.root,
+            root,
             path,
             async (chunk) => {
               signal?.throwIfAborted();

@@ -33,8 +33,7 @@ import {
   createImageGenTool,
   type ResolvedImageModel,
 } from '../../mastra/tools/image_gen.js';
-import type { SerpApiProvider } from '../../mastra/providers/serpapi.js';
-import type { JinaAIProvider } from '../../mastra/providers/jina-ai.js';
+import type { BaseProvider } from '../../mastra/providers/base-provider.js';
 import type { AssetService } from '../assets/service.js';
 import {
   createSpeechTool,
@@ -60,8 +59,14 @@ type ToolDependencies = {
   mcpTools?: () => Promise<ToolsInput>;
   pluginTools?: () => Promise<ToolsInput>;
   loadConfig?: (id: string) => Promise<unknown>;
-  searchProvider?: (id: string, timeoutMs: number) => Promise<SerpApiProvider>;
-  fetchProvider?: (id: string, timeoutMs: number) => Promise<JinaAIProvider>;
+  searchProvider?: (
+    id: string,
+    timeoutMs: number,
+  ) => Promise<Pick<BaseProvider, 'id' | 'webSearch'>>;
+  fetchProvider?: (
+    id: string,
+    timeoutMs: number,
+  ) => Promise<Pick<BaseProvider, 'id' | 'webFetch'>>;
   imageModel?: (reference: string | null) => Promise<ResolvedImageModel>;
   speechModel?: (reference: string | null) => Promise<ResolvedSpeechModel>;
   ocrModel?: (reference: string | null) => Promise<ResolvedOcrModel>;

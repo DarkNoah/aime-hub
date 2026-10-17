@@ -22,6 +22,7 @@ import {
   type RegisteredToolId,
 } from '../apps/server/src/modules/tools/service.js';
 import { SerpApiProvider } from '../apps/server/src/mastra/providers/serpapi.js';
+import { DeepSeekProvider } from '../apps/server/src/mastra/providers/deepseek.js';
 import { LocalProvider } from '../apps/server/src/mastra/providers/local.js';
 import { PaddleOCRProvider } from '../apps/server/src/mastra/providers/paddleocr.js';
 import { createApp } from '../apps/server/src/app.js';
@@ -308,7 +309,7 @@ test('persisted configuration controls new tool instances, without credentials i
   assert.notEqual(next, first);
 });
 
-test('only enabled SerpAPI credentials can be selected; later disable/removal triggers fallback at execution', async (t) => {
+test('search credentials must be supported and enabled; later disable/removal triggers fallback at execution', async (t) => {
   const f = fixture();
   const config = { ...defaultWebSearchConfig, providerId: provider.id };
   for (const patch of [
@@ -491,7 +492,7 @@ test('tool settings HTTP and RPC enforce admin, origin and schema validation', a
   assert.doesNotMatch(await response.text(), /synthetic-secret|apiKey/);
 });
 
-test('web fetch settings select only Jina AI credentials, persist limits and independently disable the tool', async () => {
+test('web fetch settings validate Jina AI credentials, persist limits and independently disable the tool', async () => {
   const f = fixture();
   for (const patch of [
     { maxChars: 999 },
@@ -533,6 +534,71 @@ test('web fetch settings select only Jina AI credentials, persist limits and ind
   assert.deepEqual(
     Object.keys(await f.service.buildTools(toolIds)),
     toolIds.filter((id) => id !== 'web_fetch'),
+  );
+});
+
+test('DeepSeek can be selected for both web tools and is resolved with each configured timeout', async (t) => {
+  const f = fixture();
+  const deepseek = {
+    ...provider,
+    type: 'deepseek',
+    baseUrl: 'https://api.deepseek.com/v1',
+  };
+  const searchConfig = {
+    ...defaultWebSearchConfig,
+    providerId: provider.id,
+    timeoutMs: 4321,
+  };
+  const fetchConfig = {
+    ...defaultWebFetchConfig,
+    providerId: provider.id,
+    timeoutMs: 5432,
+  };
+  for (const patch of [{ enabled: false }, { apiKey: '' }]) {
+    f.setProvider({ ...deepseek, ...patch });
+    await assert.rejects(f.service.update('web_search', searchConfig), {
+      code: 'INVALID_TOOL_PROVIDER',
+    });
+    await assert.rejects(f.service.update('web_fetch', fetchConfig), {
+      code: 'INVALID_TOOL_PROVIDER',
+    });
+  }
+  f.setProvider(deepseek);
+  await f.service.update('web_search', searchConfig);
+  await f.service.update('web_fetch', fetchConfig);
+  t.mock.method(
+    DeepSeekProvider.prototype,
+    'webSearch',
+    async function (this: DeepSeekProvider) {
+      assert.equal(this.provider.timeoutMs, 4321);
+      return [{ title: 'DeepSeek result', href: 'https://example.com/' }];
+    },
+  );
+  t.mock.method(
+    DeepSeekProvider.prototype,
+    'webFetch',
+    async function (this: DeepSeekProvider, url: string) {
+      assert.equal(this.provider.timeoutMs, 5432);
+      return { url, title: 'Page', content: '# Markdown' };
+    },
+  );
+  const tools = await f.service.buildTools(['web_search', 'web_fetch']);
+  assert.ok('execute' in tools.web_search && tools.web_search.execute);
+  assert.ok('execute' in tools.web_fetch && tools.web_fetch.execute);
+  assert.equal(
+    (await tools.web_search.execute({ query: 'query' }, {})).provider,
+    provider.id,
+  );
+  const fetched = await tools.web_fetch.execute(
+    { url: 'https://1.1.1.1/article' },
+    {},
+  );
+  assert.equal(fetched.provider, provider.id);
+  assert.equal(fetched.content, '# Markdown');
+  assert.equal(fetched.fallback, false);
+  assert.doesNotMatch(
+    JSON.stringify([...f.rows.values()]),
+    /synthetic-secret|apiKey/,
   );
 });
 

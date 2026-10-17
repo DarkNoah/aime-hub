@@ -216,6 +216,8 @@ export function ProviderActionDialog({
                       if (
                         !baseUrl ||
                         [
+                          'https://api.deepseek.com',
+                          'https://api.deepseek.com/v1',
                           'https://serpapi.com',
                           'https://r.jina.ai',
                           'https://mineru.net',
@@ -223,32 +225,36 @@ export function ProviderActionDialog({
                         ].includes(baseUrl)
                       )
                         setBaseUrl(
-                          type === 'serpapi'
-                            ? 'https://serpapi.com'
-                            : type === 'jina-ai'
-                              ? 'https://r.jina.ai'
-                              : type === 'mineru'
-                                ? 'https://mineru.net'
-                                : type === 'paddleocr'
-                                  ? 'https://paddleocr.aistudio-app.com'
-                                  : '',
+                          type === 'deepseek'
+                            ? 'https://api.deepseek.com/v1'
+                            : type === 'serpapi'
+                              ? 'https://serpapi.com'
+                              : type === 'jina-ai'
+                                ? 'https://r.jina.ai'
+                                : type === 'mineru'
+                                  ? 'https://mineru.net'
+                                  : type === 'paddleocr'
+                                    ? 'https://paddleocr.aistudio-app.com'
+                                    : '',
                         );
                     }}
                     disabled={pending}
                   />
                   <p className="text-xs text-muted-foreground">
                     {t(
-                      providerType === 'serpapi'
-                        ? 'providers.searchHint'
-                        : providerType === 'jina-ai'
-                          ? 'providers.fetchHint'
-                          : providerType === 'xinference'
-                            ? 'providers.xinferenceHint'
-                            : providerType === 'mineru'
-                              ? 'providers.mineruHint'
-                              : providerType === 'paddleocr'
-                                ? 'providers.paddleocrHint'
-                                : 'providers.typeHint',
+                      providerType === 'deepseek'
+                        ? 'providers.deepseekHint'
+                        : providerType === 'serpapi'
+                          ? 'providers.searchHint'
+                          : providerType === 'jina-ai'
+                            ? 'providers.fetchHint'
+                            : providerType === 'xinference'
+                              ? 'providers.xinferenceHint'
+                              : providerType === 'mineru'
+                                ? 'providers.mineruHint'
+                                : providerType === 'paddleocr'
+                                  ? 'providers.paddleocrHint'
+                                  : 'providers.typeHint',
                     )}
                   </p>
                 </div>
@@ -265,17 +271,19 @@ export function ProviderActionDialog({
                   />
                   <p className="text-xs text-muted-foreground">
                     {t(
-                      providerType === 'serpapi'
-                        ? 'providers.searchUrlHint'
-                        : providerType === 'jina-ai'
-                          ? 'providers.fetchUrlHint'
-                          : providerType === 'xinference'
-                            ? 'providers.xinferenceUrlHint'
-                            : providerType === 'mineru'
-                              ? 'providers.mineruUrlHint'
-                              : providerType === 'paddleocr'
-                                ? 'providers.paddleocrUrlHint'
-                                : 'providers.urlHint',
+                      providerType === 'deepseek'
+                        ? 'providers.deepseekUrlHint'
+                        : providerType === 'serpapi'
+                          ? 'providers.searchUrlHint'
+                          : providerType === 'jina-ai'
+                            ? 'providers.fetchUrlHint'
+                            : providerType === 'xinference'
+                              ? 'providers.xinferenceUrlHint'
+                              : providerType === 'mineru'
+                                ? 'providers.mineruUrlHint'
+                                : providerType === 'paddleocr'
+                                  ? 'providers.paddleocrUrlHint'
+                                  : 'providers.urlHint',
                     )}
                   </p>
                 </div>

@@ -12,7 +12,6 @@ type ToolDefinition = {
   missingProvider: TranslationKey;
   fallbackHint: TranslationKey;
   localLabel: TranslationKey;
-  providerType: 'serpapi' | 'jina-ai';
   localId: string;
 };
 
@@ -48,7 +47,6 @@ export const toolDefinitions = {
     missingProvider: 'tools.missingProvider',
     fallbackHint: 'tools.fallbackHint',
     localLabel: 'tools.sogou',
-    providerType: 'serpapi',
     localId: 'sogou',
   },
   web_fetch: {
@@ -62,7 +60,6 @@ export const toolDefinitions = {
     missingProvider: 'tools.missingFetchProvider',
     fallbackHint: 'tools.fetchFallbackHint',
     localLabel: 'tools.localFetch',
-    providerType: 'jina-ai',
     localId: 'local',
   },
 } satisfies Record<

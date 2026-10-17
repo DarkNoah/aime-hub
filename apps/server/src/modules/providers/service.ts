@@ -22,6 +22,7 @@ import {
 import { ProviderError, requestProviderJson } from './network.js';
 import { NewApiProvider } from '../../mastra/providers/newapi.js';
 import { OpenAICompatibleProvider } from '../../mastra/providers/openai-compatible.js';
+import { DeepSeekProvider } from '../../mastra/providers/deepseek.js';
 import { MinerUProvider } from '../../mastra/providers/mineru.js';
 import { PaddleOCRProvider } from '../../mastra/providers/paddleocr.js';
 import { XinferenceProvider } from '../../mastra/providers/xinference.js';
@@ -262,6 +263,12 @@ export class ProviderService {
   }
   private createProviderInstance(provider: Provider) {
     this.assertModelProvider(provider);
+    if (provider.type === 'deepseek')
+      return new DeepSeekProvider(
+        provider,
+        this.requestJson,
+        this.requestResource,
+      );
     if (provider.type === 'mineru')
       return new MinerUProvider(provider, this.requestResource);
     if (provider.type === 'paddleocr')

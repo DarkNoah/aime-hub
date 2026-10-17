@@ -6,7 +6,11 @@ import type { PluginService } from '../plugins/service.js';
 import type { DataSource } from 'typeorm';
 import { Setting } from '@aime/db';
 import type { ToolId, ToolConfig } from '@aime/shared/tools';
-import { isOcrProvider, modelSupportsType } from '@aime/shared/providers';
+import {
+  isOcrProvider,
+  modelSupportsType,
+  providerSupportsWebTool,
+} from '@aime/shared/providers';
 import {
   ViewFileError,
   type ResolvedOcrModel,
@@ -17,6 +21,7 @@ import type { ProviderService } from '../providers/service.js';
 import { ProviderError } from '../providers/network.js';
 import { SerpApiProvider } from '../../mastra/providers/serpapi.js';
 import { JinaAIProvider } from '../../mastra/providers/jina-ai.js';
+import { DeepSeekProvider } from '../../mastra/providers/deepseek.js';
 import {
   SpeechGenerationError,
   type ResolvedSpeechModel,
@@ -126,10 +131,7 @@ export class ToolService {
       tool.config.enabled &&
       tool.config.providerId
     )
-      await this.configuredProvider(
-        tool.config.providerId,
-        id === 'web_search' ? 'serpapi' : 'jina-ai',
-      );
+      await this.configuredProvider(tool.config.providerId, tool.kind);
     await this.database
       .getRepository(Setting)
       .upsert({ id: `tool:${id}`, value: config }, ['id']);
@@ -176,9 +178,16 @@ export class ToolService {
     }
   }
 
-  private async configuredProvider(id: string, type: 'serpapi' | 'jina-ai') {
+  private async configuredProvider(
+    id: string,
+    tool: 'web_search' | 'web_fetch',
+  ) {
     const provider = await this.providers.getProvider(id);
-    if (provider.type !== type || !provider.enabled || !provider.apiKey?.trim())
+    if (
+      !providerSupportsWebTool(provider.type, tool) ||
+      !provider.enabled ||
+      !provider.apiKey?.trim()
+    )
       throw new ProviderError('INVALID_TOOL_PROVIDER');
     return { ...provider, apiKey: provider.apiKey! };
   }
@@ -241,7 +250,9 @@ export class ToolService {
   }
 
   private async searchProvider(id: string, timeoutMs: number) {
-    const provider = await this.configuredProvider(id, 'serpapi');
+    const provider = await this.configuredProvider(id, 'web_search');
+    if (provider.type === 'deepseek')
+      return new DeepSeekProvider({ ...provider, timeoutMs });
     return new SerpApiProvider({
       baseUrl: provider.baseUrl,
       apiKey: provider.apiKey,
@@ -250,7 +261,9 @@ export class ToolService {
   }
 
   private async fetchProvider(id: string, timeoutMs: number) {
-    const provider = await this.configuredProvider(id, 'jina-ai');
+    const provider = await this.configuredProvider(id, 'web_fetch');
+    if (provider.type === 'deepseek')
+      return new DeepSeekProvider({ ...provider, timeoutMs });
     return new JinaAIProvider({
       baseUrl: provider.baseUrl,
       apiKey: provider.apiKey!,

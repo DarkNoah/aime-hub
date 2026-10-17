@@ -11,7 +11,10 @@ import { join } from 'node:path';
 import test from 'node:test';
 import type { ProcessLLMRequestArgs } from '@mastra/core/processors';
 import { resolveModelConfig } from '@mastra/core/llm';
-import { serializeAttachments } from '@aime/shared/chat-attachments';
+import {
+  serializeAttachments,
+  workspaceAttachmentParts,
+} from '@aime/shared/chat-attachments';
 import { MAX_IMAGE_BYTES } from '@aime/shared/threads';
 import { AttachmentProcessor } from './attachment-processor.js';
 import { AttachmentMediaReader } from './attachment-media.js';
@@ -228,6 +231,87 @@ test('ordinary prose, code examples and non-user messages retain their original 
     { role: 'system', content: xml },
   ];
   assert.deepEqual(await process(processor, prompt), prompt);
+});
+
+test('dragged thread/shared images use their scoped bytes while folders and audio/video remain references', async (t) => {
+  const root = await realpath(await mkdtemp('/tmp/chat-workspace-attachment-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const thread = join(root, 'thread');
+  const shared = join(root, 'shared');
+  await mkdir(thread);
+  await mkdir(shared);
+  const sharedPng = Buffer.concat([png, Buffer.from('shared')]);
+  await writeFile(join(thread, 'frame.png'), png);
+  await writeFile(join(shared, 'frame.png'), sharedPng);
+  const prompt: Prompt = [
+    {
+      role: 'user',
+      content: workspaceAttachmentParts([
+        { scope: 'thread', kind: 'file', path: 'frame.png' },
+        { scope: 'shared', kind: 'file', path: 'frame.png' },
+        { scope: 'shared', kind: 'directory', path: 'docs' },
+        { scope: 'shared', kind: 'file', path: 'clip.mp4' },
+        { scope: 'thread', kind: 'file', path: 'sound.wav' },
+      ]),
+    },
+  ];
+  let modalities = ['image', 'audio', 'video'];
+  const processor = new AttachmentProcessor(
+    new AttachmentMediaReader(thread, shared),
+    () => modalities,
+  );
+  const result = await process(processor, prompt);
+  assert.deepEqual(
+    files(result).map((file) => Buffer.from(file.data as Uint8Array)),
+    [png, sharedPng],
+  );
+  assert.match(
+    text(result),
+    /path="\.\/frame.png" size="\d+" mimeType="image\/png" width="1" height="1"/,
+  );
+  assert.match(
+    text(result),
+    /path="\.\.\/shared\/frame.png" size="\d+" mimeType="image\/png" width="1" height="1"/,
+  );
+  assert.match(
+    text(result),
+    /<attachment path="\.\.\/shared\/docs\/" mimeType="inode\/directory">/,
+  );
+  assert.match(
+    text(result),
+    /<attachment path="\.\.\/shared\/clip.mp4"><\/attachment>/,
+  );
+  assert.match(text(result), /<attachment path="\.\/sound.wav"><\/attachment>/);
+  assert.doesNotMatch(text(result), /Referenced workspace|<\/?attachments>/);
+  modalities = ['text'];
+  assert.equal(files(await process(processor, prompt)).length, 0);
+
+  const isolated = new AttachmentProcessor(
+    new AttachmentMediaReader(thread),
+    () => ['image'],
+  );
+  assert.equal(files(await process(isolated, prompt)).length, 1);
+  await assert.rejects(
+    new AttachmentMediaReader(thread, shared).read(
+      { path: '../shared/../thread/frame.png', mimeType: 'image/png' },
+      true,
+    ),
+    /Invalid attachment path/,
+  );
+
+  const legacy = await process(processor, [
+    {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: 'Referenced workspace files and folders (paths relative to the workspace):\n- "./frame.png"\n- "../shared/docs/"',
+        },
+      ],
+    },
+  ]);
+  assert.match(text(legacy), /<attachment path="\.\/frame.png"/);
+  assert.doesNotMatch(text(legacy), /Referenced workspace/);
 });
 
 test('Responses wraps native images individually and sends audio/video as path text even for multimodal models', async (t) => {

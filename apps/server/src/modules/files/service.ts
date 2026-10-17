@@ -8,31 +8,10 @@ import type {
 } from '@aime/shared/files';
 import { ThreadError } from '../threads/errors.js';
 import { filePath, validatePath } from './paths.js';
+import { fileMediaTypes } from '@aime/shared/files';
 
 export const TEXT_LIMIT = 512 * 1024;
-export const media: Record<string, [FilePreview['kind'], string]> = {
-  '.pdf': ['pdf', 'application/pdf'],
-  '.glb': ['model', 'model/gltf-binary'],
-  '.png': ['image', 'image/png'],
-  '.jpg': ['image', 'image/jpeg'],
-  '.jpeg': ['image', 'image/jpeg'],
-  '.gif': ['image', 'image/gif'],
-  '.webp': ['image', 'image/webp'],
-  '.avif': ['image', 'image/avif'],
-  '.svg': ['image', 'image/svg+xml'],
-  '.bmp': ['image', 'image/bmp'],
-  '.mp3': ['audio', 'audio/mpeg'],
-  '.wav': ['audio', 'audio/wav'],
-  '.ogg': ['audio', 'audio/ogg'],
-  '.m4a': ['audio', 'audio/mp4'],
-  '.flac': ['audio', 'audio/flac'],
-  '.aac': ['audio', 'audio/aac'],
-  '.opus': ['audio', 'audio/ogg'],
-  '.mp4': ['video', 'video/mp4'],
-  '.webm': ['video', 'video/webm'],
-  '.mov': ['video', 'video/quicktime'],
-  '.ogv': ['video', 'video/ogg'],
-};
+export const media = fileMediaTypes;
 
 export function decodeText(buffer: Buffer, partial = false) {
   if (

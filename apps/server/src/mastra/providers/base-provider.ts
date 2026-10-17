@@ -26,6 +26,7 @@ export const searchResultSchema = z.object({
   title: z.string(),
   href: z.string(),
   snippet: z.string().optional(),
+  summary: z.string().optional(),
 });
 export type SearchResult = z.infer<typeof searchResultSchema>;
 export type WebSearchInput = { query: string; numResults: number };

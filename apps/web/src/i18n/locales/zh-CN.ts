@@ -870,13 +870,13 @@ export const zhCN = {
   'tools.enableFetch': '启用网页读取',
   'tools.fetchProvider': '网页读取供应商',
   'tools.fetchProviderHint':
-    '选择已启用且配置了 API Key 的 Jina AI 供应商，或直接在本地提取网页。',
+    '选择已启用且配置了 API Key 的 DeepSeek 或 Jina AI 供应商，或直接在本地提取网页。',
   'tools.invalidFetchProvider':
-    '请选择已启用且配置了 API Key 的 Jina AI 供应商，或选择本地提取。',
+    '请选择已启用且配置了 API Key 的 DeepSeek 或 Jina AI 供应商，或选择本地提取。',
   'tools.missingFetchProvider': '供应商不可用 · 本地兜底',
   'tools.localFetch': '本地提取（无需 API Key）',
   'tools.fetchFallbackHint':
-    'Jina AI 读取失败后，先直接请求网页并提取正文；仍失败时使用独立浏览器读取，再转为 Markdown。取消聊天会终止读取。',
+    '供应商读取失败后，先直接请求网页并提取正文；仍失败时使用独立浏览器读取，再转为 Markdown。取消聊天会终止读取。',
   'tools.fetchSummary': '最多 {{count}} 字符 · 每阶段 {{seconds}} 秒',
   'tools.fetchTimeoutHint':
     '1–60 秒，分别用于供应商请求、直接抓取和浏览器读取阶段。',
@@ -903,11 +903,11 @@ export const zhCN = {
   'tools.provider': '搜索供应商',
   'tools.sogou': '搜狗（无需 API Key）',
   'tools.providerHint':
-    '选择供应商管理中已启用并配置 API Key 的 SerpAPI，也可直接使用搜狗。',
+    '选择供应商管理中已启用并配置 API Key 的 DeepSeek 或 SerpAPI，也可直接使用搜狗。',
   'tools.missingProvider': '供应商不可用 · 使用搜狗兜底',
   'tools.unavailable': '已停用或未配置 API Key',
   'tools.invalidProvider':
-    '请选择已启用并配置 API Key 的 SerpAPI 供应商，或选择搜狗。',
+    '请选择已启用并配置 API Key 的 DeepSeek 或 SerpAPI 供应商，或选择搜狗。',
   'tools.numResults': '最多结果数',
   'tools.numResultsHint': '1–20 条，实际数量取决于搜索引擎。',
   'tools.timeout': '超时（秒）',
@@ -928,6 +928,10 @@ export const zhCN = {
     'SerpAPI 提供网页搜索能力，保存后可在「工具配置 → 网页搜索」中选择。',
   'providers.searchUrlHint':
     'API 根地址填写 https://serpapi.com，不要附加 /search.json 或查询参数。',
+  'providers.deepseekHint':
+    'DeepSeek 支持模型调用、网页搜索和网页读取；保存后可在工具配置中选择同一供应商。',
+  'providers.deepseekUrlHint':
+    '填写 https://api.deepseek.com 或 https://api.deepseek.com/v1，搜索和读取会自动使用 /v1/tools 接口。',
   'theme.title': '外观',
   'theme.change': '切换主题（{{theme}}）',
   'theme.light': '浅色',

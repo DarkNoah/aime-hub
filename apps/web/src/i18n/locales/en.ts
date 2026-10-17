@@ -945,13 +945,13 @@ export const en = {
   'tools.enableFetch': 'Enable web fetch',
   'tools.fetchProvider': 'Reader provider',
   'tools.fetchProviderHint':
-    'Choose an enabled Jina AI provider with an API key, or extract pages locally.',
+    'Choose an enabled DeepSeek or Jina AI provider with an API key, or extract pages locally.',
   'tools.invalidFetchProvider':
-    'Select an enabled Jina AI provider with an API key, or choose local extraction.',
+    'Select an enabled DeepSeek or Jina AI provider with an API key, or choose local extraction.',
   'tools.missingFetchProvider': 'Provider unavailable · local fallback',
   'tools.localFetch': 'Local extraction (no API key)',
   'tools.fetchFallbackHint':
-    'If Jina AI fails, fetch the page directly and extract its main content. If that fails, read it in an isolated browser and convert it to Markdown. Cancelling the chat stops the fetch.',
+    'If the selected provider fails, fetch the page directly and extract its main content. If that fails, read it in an isolated browser and convert it to Markdown. Cancelling the chat stops the fetch.',
   'tools.fetchSummary': 'Up to {{count}} characters · {{seconds}}s per stage',
   'tools.fetchTimeoutHint':
     '1–60 seconds for each reader, direct fetch or browser stage.',
@@ -980,11 +980,11 @@ export const en = {
   'tools.provider': 'Search provider',
   'tools.sogou': 'Sogou (no API key)',
   'tools.providerHint':
-    'Choose an enabled SerpAPI provider with an API key from provider management, or use Sogou directly.',
+    'Choose an enabled DeepSeek or SerpAPI provider with an API key from provider management, or use Sogou directly.',
   'tools.missingProvider': 'Provider unavailable · Sogou fallback',
   'tools.unavailable': 'Disabled or missing API key',
   'tools.invalidProvider':
-    'Select an enabled SerpAPI provider with an API key, or choose Sogou.',
+    'Select an enabled DeepSeek or SerpAPI provider with an API key, or choose Sogou.',
   'tools.numResults': 'Maximum results',
   'tools.numResultsHint': '1–20 results; the engine may return fewer.',
   'tools.timeout': 'Timeout (seconds)',
@@ -1006,6 +1006,10 @@ export const en = {
     'SerpAPI provides web search. Select it in Tools → Web search after saving.',
   'providers.searchUrlHint':
     'Use https://serpapi.com as the API root. Do not include /search.json or query parameters.',
+  'providers.deepseekHint':
+    'DeepSeek supports model calls, web search and web fetch. Select the same provider in tool settings after saving.',
+  'providers.deepseekUrlHint':
+    'Use https://api.deepseek.com or https://api.deepseek.com/v1. Search and fetch automatically use the /v1/tools endpoints.',
   'theme.title': 'Appearance',
   'theme.change': 'Change theme ({{theme}})',
   'theme.light': 'Light',
