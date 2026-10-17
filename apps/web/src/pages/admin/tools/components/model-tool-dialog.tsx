@@ -27,28 +27,65 @@ export function ModelToolDialog({
   onClose,
   restoreFocus,
 }: {
-  tool: Extract<ToolConfig, { kind: 'image_gen' | 'speech' }>;
+  tool: Extract<
+    ToolConfig,
+    { kind: 'image_gen' | 'speech' | 'transcribe' | 'view_file' }
+  >;
   onSaved: (tool: ToolConfig) => void;
   onClose: () => void;
   restoreFocus: () => void;
 }) {
   const { t } = useTranslation();
   const speech = tool.kind === 'speech';
-  const labels = {
-    configure: speech ? 'tools.configureSpeech' : 'tools.configureImage',
-    enable: speech ? 'tools.enableSpeech' : 'tools.enableImage',
-    model: speech ? 'defaults.speechModel' : 'defaults.imageModel',
-    defaultModel: speech
-      ? 'tools.defaultSpeechModel'
-      : 'tools.defaultImageModel',
-    modelHint: speech ? 'tools.speechModelHint' : 'tools.imageModelHint',
-    providerHint: speech
-      ? 'tools.speechProviderHint'
-      : 'tools.imageProviderHint',
-    invalidModel: speech
-      ? 'tools.invalidSpeechModel'
-      : 'tools.invalidImageModel',
-  } satisfies Record<string, TranslationKey>;
+  const transcription = tool.kind === 'transcribe';
+  const ocr = tool.kind === 'view_file';
+  const labels = ocr
+    ? ({
+        configure: 'tools.configureViewFile',
+        enable: 'tools.enableViewFile',
+        model: 'tools.ocrModel',
+        defaultModel: 'tools.selectOcrModel',
+        modelHint: 'tools.ocrModelHint',
+        providerHint: 'tools.ocrProviderHint',
+        invalidModel: 'tools.invalidOcrModel',
+      } satisfies Record<string, TranslationKey>)
+    : ({
+        configure: transcription
+          ? 'tools.configureTranscribe'
+          : speech
+            ? 'tools.configureSpeech'
+            : 'tools.configureImage',
+        enable: transcription
+          ? 'tools.enableTranscribe'
+          : speech
+            ? 'tools.enableSpeech'
+            : 'tools.enableImage',
+        model: transcription
+          ? 'defaults.asrModel'
+          : speech
+            ? 'defaults.speechModel'
+            : 'defaults.imageModel',
+        defaultModel: transcription
+          ? 'tools.defaultTranscribeModel'
+          : speech
+            ? 'tools.defaultSpeechModel'
+            : 'tools.defaultImageModel',
+        modelHint: transcription
+          ? 'tools.transcribeModelHint'
+          : speech
+            ? 'tools.speechModelHint'
+            : 'tools.imageModelHint',
+        providerHint: transcription
+          ? 'tools.transcribeProviderHint'
+          : speech
+            ? 'tools.speechProviderHint'
+            : 'tools.imageProviderHint',
+        invalidModel: transcription
+          ? 'tools.invalidTranscribeModel'
+          : speech
+            ? 'tools.invalidSpeechModel'
+            : 'tools.invalidImageModel',
+      } satisfies Record<string, TranslationKey>);
   const [enabled, setEnabled] = useState(tool.config.enabled);
   const [model, setModel] = useState(tool.config.model);
   const [timeout, setTimeout] = useState(String(tool.config.timeoutMs / 1000));
@@ -60,6 +97,10 @@ export function ModelToolDialog({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (submitting.current) return;
+    if (ocr && enabled && !model) {
+      setErrors({ model: labels.invalidModel });
+      return;
+    }
     const parsed = toolConfigSchemas[tool.kind].safeParse({
       enabled,
       model,
@@ -142,7 +183,15 @@ export function ModelToolDialog({
                 <ModelSelector
                   id="generation-model"
                   label={t(labels.model)}
-                  modelType={speech ? 'speech' : 'image'}
+                  modelType={
+                    ocr
+                      ? 'ocr'
+                      : transcription
+                        ? 'asr'
+                        : speech
+                          ? 'speech'
+                          : 'image'
+                  }
                   value={model}
                   onValueChange={setModel}
                   disabled={pending}

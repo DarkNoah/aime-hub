@@ -20,16 +20,18 @@ import { EditFilePreview } from './edit-file';
 import { WriteFilePreview } from './write-file';
 import { GrepPreview } from './grep';
 import { ReadFilePreview } from './read-file';
+import { ViewFilePreview } from './view-file';
 import { WebSearchPreview } from './web-search';
 import { WebFetchPreview } from './web-fetch';
 import { ImageGenPreview } from './generated-media';
 import { SpeechPreview } from './speech';
+import { TranscribePreview, VoicesPreview } from './audio';
 import { LspPreview } from './lsp';
 import { BrowserPreview } from './browser';
 import type { PreviewPart } from './selection';
 import { getToolName } from '../tool-renderers/registry';
 
-type PreviewProps = { part: PreviewPart };
+type PreviewProps = { part: PreviewPart; threadId?: string };
 
 function RawPreview({ part }: PreviewProps) {
   return (
@@ -119,6 +121,7 @@ const previewRenderers: Partial<Record<string, ComponentType<PreviewProps>>> = {
   'tool:write_file': WriteFilePreview,
   'tool:grep': GrepPreview,
   'tool:read_file': ReadFilePreview,
+  'tool:view_file': ViewFilePreview,
   'tool:exec': ExecPreview,
   'tool:task_write': TaskPreview,
   'tool:task_update': TaskPreview,
@@ -134,6 +137,8 @@ const previewRenderers: Partial<Record<string, ComponentType<PreviewProps>>> = {
   'tool:web_fetch': WebFetchPreview,
   'tool:image_gen': ImageGenPreview,
   'tool:speech': SpeechPreview,
+  'tool:transcribe': TranscribePreview,
+  'tool:list_voices': VoicesPreview,
   'tool:lsp_inspect': LspPreview,
   'tool:mastra_workspace_lsp_inspect': LspPreview,
   'data-om-observation-end': ObservationPreview,
@@ -141,12 +146,12 @@ const previewRenderers: Partial<Record<string, ComponentType<PreviewProps>>> = {
   'data-om-activation': ObservationPreview,
 };
 
-export function MessagePartPreview({ part }: PreviewProps) {
+export function MessagePartPreview({ part, threadId }: PreviewProps) {
   const toolName = isToolUIPart(part) ? getToolName(part) : undefined;
   const Renderer =
     (toolName ? previewRenderers[`tool:${toolName}`] : undefined) ??
     (toolName?.startsWith('browser_') ? BrowserPreview : undefined) ??
     previewRenderers[part.type] ??
     (isToolUIPart(part) ? ToolPreview : RawPreview);
-  return <Renderer part={part} />;
+  return <Renderer part={part} threadId={threadId} />;
 }

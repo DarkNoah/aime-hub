@@ -1,11 +1,16 @@
 import type { KnowledgeService } from '../knowledge/service.js';
+import type { AudioService } from '../audio/service.js';
 import type { ResolveAutomations } from '../../mastra/tools/automations.js';
 import { enabledToolConfigSchema } from '@aime/shared/tools';
 import type { PluginService } from '../plugins/service.js';
 import type { DataSource } from 'typeorm';
 import { Setting } from '@aime/db';
 import type { ToolId, ToolConfig } from '@aime/shared/tools';
-import { modelSupportsType } from '@aime/shared/providers';
+import { isOcrProvider, modelSupportsType } from '@aime/shared/providers';
+import {
+  ViewFileError,
+  type ResolvedOcrModel,
+} from '../../mastra/tools/view_file.js';
 import type { ToolsInput } from '@mastra/core/agent';
 import type { AssetService } from '../assets/service.js';
 import type { ProviderService } from '../providers/service.js';
@@ -46,6 +51,7 @@ export class ToolService {
     private readonly plugins?: PluginService,
     private readonly knowledge?: KnowledgeService,
     private readonly automations?: ResolveAutomations,
+    private readonly audio?: AudioService,
   ) {}
 
   async get(id: ToolId): Promise<ToolConfig> {
@@ -91,6 +97,28 @@ export class ToolService {
           await this.speechModel(tool.config.model);
         } catch {
           throw new ProviderError('INVALID_SPEECH_MODEL');
+        }
+      }
+    } else if (tool.kind === 'transcribe') {
+      if (tool.config.enabled && tool.config.model) {
+        try {
+          const model = await this.providers.getModel(tool.config.model);
+          if (!model.enabled || !modelSupportsType(model, 'asr'))
+            throw new Error('Invalid ASR model');
+          const provider = await this.providers.getProviderInstance(
+            model.providerId,
+          );
+          provider.transcriptionModel(model.id);
+        } catch {
+          throw new ProviderError('INVALID_TRANSCRIPTION_MODEL');
+        }
+      }
+    } else if (tool.kind === 'view_file') {
+      if (tool.config.enabled) {
+        try {
+          await this.ocrModel(tool.config.model);
+        } catch {
+          throw new ProviderError('INVALID_OCR_MODEL');
         }
       }
     } else if (
@@ -155,6 +183,30 @@ export class ToolService {
     return { ...provider, apiKey: provider.apiKey! };
   }
 
+  private async ocrModel(reference: string | null): Promise<ResolvedOcrModel> {
+    if (!reference)
+      throw new ViewFileError(
+        'OCR_NOT_CONFIGURED',
+        'Select a MinerU or PaddleOCR model in the view_file tool settings.',
+      );
+    try {
+      const model = await this.providers.getModel(reference);
+      if (!model.enabled || !modelSupportsType(model, 'ocr'))
+        throw new Error('Invalid OCR model');
+      const provider = await this.providers.getProviderInstance(
+        model.providerId,
+      );
+      if (!isOcrProvider(provider.type))
+        throw new Error('Invalid OCR provider');
+      return { reference, model: provider.ocrModel(model.id) };
+    } catch {
+      throw new ViewFileError(
+        'OCR_UNAVAILABLE',
+        'The OCR model is unavailable. Select an enabled MinerU or PaddleOCR model in the view_file tool settings.',
+      );
+    }
+  }
+
   private async speechModel(
     selected: string | null,
   ): Promise<ResolvedSpeechModel> {
@@ -178,6 +230,7 @@ export class ToolService {
         reference,
         model: provider.speechModel(reference.slice(slash + 1), {
           modelName: model.name,
+          metadata: model.metadata,
         }),
       };
     } catch {
@@ -221,6 +274,7 @@ export class ToolService {
       ids?.filter((id) => !this.plugins?.ownsTool(id)),
       defaults,
       {
+        audio: this.audio,
         automations: this.automations,
         knowledgeSearch: this.knowledge?.searchContext.bind(this.knowledge),
         knowledge: this.knowledge,
@@ -238,6 +292,7 @@ export class ToolService {
         fetchProvider: (id, timeoutMs) => this.fetchProvider(id, timeoutMs),
         imageModel: (reference) => this.imageModel(reference),
         speechModel: (reference) => this.speechModel(reference),
+        ocrModel: (reference) => this.ocrModel(reference),
         recordAsset: this.assets
           ? (input) => this.assets!.record(input)
           : undefined,

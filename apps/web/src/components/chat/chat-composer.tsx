@@ -39,8 +39,10 @@ import {
   consumeCompactCommand,
   consumeDrawCommand,
   consumeGoalCommand,
+  consumeVoicesCommand,
 } from './slash-command';
 import { DrawingDialog } from './drawing-dialog';
+import { VoiceLibrary } from '@/components/audio/voice-library';
 import { ChatGoal } from './chat-goal';
 import type { GeneratedAsset } from '@aime/shared/assets';
 import type { WorkspaceFileReference } from '@aime/shared/files';
@@ -54,6 +56,8 @@ import { useChatUploads } from './use-chat-uploads';
 import { chatUploadParts, type ChatUpload } from './chat-uploads';
 import { ComposerAttachments } from './composer-attachments';
 import { ComposerAttachmentMenu } from './composer-attachment-menu';
+import { useChatSpeechInput } from './use-chat-speech-input';
+import { ChatSpeechButton } from './chat-speech-input';
 import {
   WorkspaceAttachments,
   WorkspaceFileDropZone,
@@ -206,6 +210,7 @@ export function ChatComposer({
   const [closingGoal, setClosingGoal] = useState(false);
   const [commandsOpen, setCommandsOpen] = useState(false);
   const [drawingOpen, setDrawingOpen] = useState(false);
+  const [voicesOpen, setVoicesOpen] = useState(false);
   const [editingDrawing, setEditingDrawing] = useState<ChatUpload | null>(null);
   const composer = useRef<HTMLDivElement>(null);
   const skillCatalog = useChatSkills(commandsOpen, threadId, projectId);
@@ -216,6 +221,12 @@ export function ChatComposer({
         {
           id: 'builtin',
           items: [
+            {
+              id: 'command:voices',
+              name: 'voices',
+              description: t('voices.command'),
+              action: 'voices' as const,
+            },
             {
               id: 'command:draw',
               name: 'draw',
@@ -241,7 +252,9 @@ export function ChatComposer({
     skillCommandGroup(
       skillCatalog.skills.filter(
         (skill) =>
-          !['goal', 'compact', 'draw'].includes(skill.name.toLowerCase()),
+          !['goal', 'compact', 'draw', 'voices'].includes(
+            skill.name.toLowerCase(),
+          ),
       ),
       t('chat.commands.skills'),
     ),
@@ -257,6 +270,11 @@ export function ChatComposer({
     loadingSettings ||
     savingSettings ||
     !!settingsError;
+  const speech = useChatSpeechInput({
+    setText,
+    disabled:
+      pending || !!unavailable || !!stopping || drawingOpen || voicesOpen,
+  });
   const showStop =
     (running || stopping) &&
     !text.trim() &&
@@ -358,6 +376,28 @@ export function ChatComposer({
               );
             }}
             onSubmitCapture={(event) => {
+              if (speech.active) {
+                event.preventDefault();
+                event.stopPropagation();
+                const form = event.currentTarget;
+                // Flush the last words, then let the regular form path read the
+                // updated textarea. Preserve all existing command/send handling.
+                void speech.stop().then((ready) => {
+                  if (ready)
+                    requestAnimationFrame(() => {
+                      if (form.isConnected) form.requestSubmit();
+                    });
+                });
+                return;
+              }
+              const voiceText = consumeVoicesCommand(text);
+              if (voiceText !== null) {
+                event.preventDefault();
+                event.stopPropagation();
+                setText(voiceText);
+                setVoicesOpen(true);
+                return;
+              }
               const drawingText = consumeDrawCommand(text);
               if (drawingText !== null) {
                 event.preventDefault();
@@ -368,6 +408,7 @@ export function ChatComposer({
               }
               if (
                 drawingOpen ||
+                voicesOpen ||
                 capturingRef.current ||
                 uploads.queue
                   .getSnapshot()
@@ -394,6 +435,7 @@ export function ChatComposer({
                 pendingRef.current ||
                 capturingRef.current ||
                 drawingOpen ||
+                voicesOpen ||
                 attached.some((item) => item.status !== 'done')
               )
                 throw new Error('Unavailable');
@@ -524,7 +566,9 @@ export function ChatComposer({
                 onRetry={skillCatalog.retry}
                 onOpenChange={setCommandsOpen}
                 onCommand={(item) => {
-                  if (item.action === 'draw') {
+                  if (item.action === 'voices') {
+                    setVoicesOpen(true);
+                  } else if (item.action === 'draw') {
                     openDrawing();
                   } else if (item.action === 'compact') {
                     void compact();
@@ -534,6 +578,8 @@ export function ChatComposer({
                   }
                 }}
                 onValueChange={(value) => {
+                  // A deliberate edit wins over any pending recognition result.
+                  speech.cancel();
                   const body = consumeGoalCommand(value);
                   if (body !== null) {
                     setGoalDraft(goal?.status !== 'active');
@@ -629,6 +675,20 @@ export function ChatComposer({
               </div>
               <div className="ml-auto flex shrink-0 items-center gap-1">
                 {usage && <ChatContextUsage usage={usage} />}
+                <ChatSpeechButton
+                  status={speech.status}
+                  disabled={
+                    pending ||
+                    !!unavailable ||
+                    !!stopping ||
+                    drawingOpen ||
+                    voicesOpen
+                  }
+                  onClick={() => {
+                    retryId.current = null;
+                    speech.toggle(text);
+                  }}
+                />
                 <PromptInputSubmit
                   className="size-7 @xl/chat:size-8"
                   disabled={
@@ -702,6 +762,19 @@ export function ChatComposer({
               );
             }
             return added;
+          }}
+        />
+      )}
+      {voicesOpen && (
+        <VoiceLibrary
+          onClose={() => setVoicesOpen(false)}
+          onSelect={(voice) => {
+            const reference = t('voices.reference', {
+              name: voice.name,
+              id: voice.id,
+            });
+            setText(text ? `${text}\n${reference}` : reference);
+            retryId.current = null;
           }}
         />
       )}

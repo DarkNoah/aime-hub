@@ -44,6 +44,8 @@ export const chatApi = {
       { params: { threadId }, query: { page, anchor } },
       { signal },
     ),
+  stopSpeech: (threadId: string) =>
+    api.threads.stopSpeech({ params: { threadId } }),
   abort: (threadId: string) => api.threads.abort({ params: { threadId } }),
   compact: (threadId: string) => api.threads.compact({ params: { threadId } }),
   clearGoal: (threadId: string) =>

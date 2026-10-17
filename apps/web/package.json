@@ -12,6 +12,7 @@
     "@ai-sdk/react": "^3.0.0",
     "@aime/shared": "workspace:*",
     "@base-ui/react": "^1.9.0",
+    "@moonshine-ai/moonshine-wasm": "0.1.5",
     "@nivo/heatmap": "0.99.0",
     "@orpc/client": "^1.15.4",
     "@orpc/contract": "^1.15.4",

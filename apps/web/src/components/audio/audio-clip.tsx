@@ -22,6 +22,7 @@ type AudioClipProps = {
   downloadUrl?: string;
   onOpen?: () => void;
   className?: string;
+  compact?: boolean;
 };
 
 export function AudioClip(props: AudioClipProps) {
@@ -37,6 +38,7 @@ function AudioClipContent({
   downloadUrl = src,
   onOpen,
   className,
+  compact = false,
 }: AudioClipProps) {
   const { t, i18n } = useTranslation();
   const audio = useRef<HTMLAudioElement>(null);
@@ -55,55 +57,58 @@ function AudioClipContent({
     <section
       aria-label={filename}
       className={cn(
-        'min-w-0 rounded-xl border bg-card p-3.5 text-left',
+        'min-w-0 text-left',
+        !compact && 'rounded-xl border bg-card p-3.5',
         className,
       )}
     >
-      <div className="flex min-w-0 items-center gap-2.5">
-        <AudioLines
-          className="size-5 shrink-0 text-primary"
-          aria-hidden="true"
-        />
-        <div className="min-w-0 flex-1">
-          {onOpen ? (
-            <button
-              type="button"
-              onClick={onOpen}
-              aria-label={t('files.openPreview', { path: filename })}
-              title={filename}
-              className="block max-w-full truncate rounded text-sm font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      {!compact && (
+        <div className="flex min-w-0 items-center gap-2.5">
+          <AudioLines
+            className="size-5 shrink-0 text-primary"
+            aria-hidden="true"
+          />
+          <div className="min-w-0 flex-1">
+            {onOpen ? (
+              <button
+                type="button"
+                onClick={onOpen}
+                aria-label={t('files.openPreview', { path: filename })}
+                title={filename}
+                className="block max-w-full truncate rounded text-sm font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {filename}
+              </button>
+            ) : (
+              <p className="truncate text-sm font-medium" title={filename}>
+                {filename}
+              </p>
+            )}
+            {metadata && (
+              <p className="mt-0.5 text-xs text-muted-foreground">{metadata}</p>
+            )}
+          </div>
+          {downloadUrl && (
+            <Button
+              asChild
+              variant="ghost"
+              size="icon-sm"
+              className="shrink-0 text-muted-foreground"
             >
-              {filename}
-            </button>
-          ) : (
-            <p className="truncate text-sm font-medium" title={filename}>
-              {filename}
-            </p>
-          )}
-          {metadata && (
-            <p className="mt-0.5 text-xs text-muted-foreground">{metadata}</p>
+              <a
+                href={downloadUrl}
+                download={filename}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`${t('files.download')}: ${filename}`}
+                title={t('files.download')}
+              >
+                <Download className="size-4" aria-hidden="true" />
+              </a>
+            </Button>
           )}
         </div>
-        {downloadUrl && (
-          <Button
-            asChild
-            variant="ghost"
-            size="icon-sm"
-            className="shrink-0 text-muted-foreground"
-          >
-            <a
-              href={downloadUrl}
-              download={filename}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label={`${t('files.download')}: ${filename}`}
-              title={t('files.download')}
-            >
-              <Download className="size-4" aria-hidden="true" />
-            </a>
-          </Button>
-        )}
-      </div>
+      )}
       {src && (
         <AudioPlayer
           key={i18n.resolvedLanguage}
@@ -113,7 +118,11 @@ function AudioClipContent({
             // Media Chrome initializes its label before React applies `audio`.
             controller?.setAttribute('aria-label', t('audio.player'));
           }}
-          className={cn('mt-3 block! w-full min-w-0', failed && 'hidden!')}
+          className={cn(
+            'block! w-full min-w-0',
+            !compact && 'mt-3',
+            failed && 'hidden!',
+          )}
           style={
             {
               '--media-font-size': '12px',
@@ -129,7 +138,7 @@ function AudioClipContent({
             ref={audio}
             src={src}
             aria-label={filename}
-            preload="metadata"
+            preload={compact ? 'none' : 'metadata'}
             onError={() => setFailed(true)}
             onPlay={(event) => {
               // A clip can appear both in the message and in the preview pane.
@@ -140,26 +149,45 @@ function AudioClipContent({
               }
             }}
           />
-          <AudioPlayerTimeRange className="flex! h-6 w-full min-w-0 border-0! px-0! shadow-none!" />
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            <AudioPlayerPlayButton className="size-9! shrink-0 rounded-full! border-0! bg-primary! text-primary-foreground shadow-none! [--media-icon-color:var(--color-primary-foreground)] [--media-control-hover-background:var(--color-primary)]" />
-            <AudioPlayerTimeDisplay
-              showDuration
-              noToggle
-              className="border-0! px-1! text-xs text-muted-foreground shadow-none!"
-            />
-            <div className="ml-auto flex shrink-0 items-center gap-1">
-              <MediaPlaybackRateButton
-                rates={[0.75, 1, 1.25, 1.5, 2]}
-                className="inline-flex h-8 min-w-8 items-center justify-center rounded-md px-1 text-xs text-muted-foreground"
+          {compact ? (
+            <div className="flex w-full min-w-0 items-center gap-2">
+              <AudioPlayerPlayButton className="size-8! shrink-0 rounded-full! border-0! bg-primary/10! text-primary shadow-none! [--media-icon-color:var(--color-primary)] [--media-control-hover-background:var(--color-accent)]" />
+              <AudioPlayerTimeRange className="flex! h-8 min-w-0 flex-1 border-0! px-0! shadow-none!" />
+              <AudioPlayerTimeDisplay
+                noToggle
+                className="shrink-0 border-0! px-0! text-xs tabular-nums text-muted-foreground shadow-none!"
               />
-              <AudioPlayerMuteButton className="size-8 justify-center rounded-md border-0! px-0! text-muted-foreground shadow-none!" />
             </div>
-          </div>
+          ) : (
+            <>
+              <AudioPlayerTimeRange className="flex! h-6 w-full min-w-0 border-0! px-0! shadow-none!" />
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <AudioPlayerPlayButton className="size-9! shrink-0 rounded-full! border-0! bg-primary! text-primary-foreground shadow-none! [--media-icon-color:var(--color-primary-foreground)] [--media-control-hover-background:var(--color-primary)]" />
+                <AudioPlayerTimeDisplay
+                  showDuration
+                  noToggle
+                  className="border-0! px-1! text-xs text-muted-foreground shadow-none!"
+                />
+                <div className="ml-auto flex shrink-0 items-center gap-1">
+                  <MediaPlaybackRateButton
+                    rates={[0.75, 1, 1.25, 1.5, 2]}
+                    className="inline-flex h-8 min-w-8 items-center justify-center rounded-md px-1 text-xs text-muted-foreground"
+                  />
+                  <AudioPlayerMuteButton className="size-8 justify-center rounded-md border-0! px-0! text-muted-foreground shadow-none!" />
+                </div>
+              </div>
+            </>
+          )}
         </AudioPlayer>
       )}
       {(!src || failed) && (
-        <div className="mt-3 space-y-2 border-t pt-3">
+        <div
+          className={cn(
+            compact
+              ? 'flex items-center gap-2'
+              : 'mt-3 space-y-2 border-t pt-3',
+          )}
+        >
           <p role="status" className="text-sm leading-6 text-muted-foreground">
             {t(src ? 'audio.unavailable' : 'chat.readFile.mediaUnavailable')}
           </p>

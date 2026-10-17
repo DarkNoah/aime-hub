@@ -10,6 +10,7 @@ import {
   type MessageCompression,
 } from './message-compression.js';
 import { getToolName, isSpecialTool } from './tool-renderers/registry.js';
+import { messageDate } from './message-time.js';
 import {
   mergeThreadMessages,
   threadMessageSourceIds,
@@ -72,8 +73,29 @@ export function groupChatMessages(
   interactiveToolIds?: Set<string>,
 ) {
   const compressions = getMessageCompressions(messages);
-  const rows: { message: UIMessage; sourceIds: string[] }[] = [];
+  const rows: {
+    message: UIMessage;
+    sourceIds: string[];
+    elapsedMs?: number;
+  }[] = [];
+  let previousUserMessageTime: number | undefined;
   for (const message of mergeThreadMessages([], messages)) {
+    const hasAssistantText =
+      message.role === 'assistant' &&
+      message.parts.some((part) => part.type === 'text' && part.text.trim());
+    let elapsedMs: number | undefined;
+    if (message.role === 'user') {
+      // An undated user message must not fall back to an older user turn.
+      previousUserMessageTime = messageDate(message.metadata)?.getTime();
+    } else if (hasAssistantText) {
+      const time = messageDate(message.metadata)?.getTime();
+      if (
+        time !== undefined &&
+        previousUserMessageTime !== undefined &&
+        time >= previousUserMessageTime
+      )
+        elapsedMs = time - previousUserMessageTime;
+    }
     const previous = rows.at(-1);
     const lastPart = previous?.message.parts.reduce<
       UIMessage['parts'][number] | undefined
@@ -92,7 +114,15 @@ export function groupChatMessages(
         parts: [...previous.message.parts, ...message.parts],
       };
       previous.sourceIds.push(...threadMessageSourceIds(message));
-    } else rows.push({ message, sourceIds: threadMessageSourceIds(message) });
+      // Tool grouping keeps the first message's metadata; use the last text's
+      // own timestamp for its footer instead of the start of the tool group.
+      if (hasAssistantText) previous.elapsedMs = elapsedMs;
+    } else
+      rows.push({
+        message,
+        sourceIds: threadMessageSourceIds(message),
+        elapsedMs,
+      });
   }
   return rows.map((row) => ({
     ...row,

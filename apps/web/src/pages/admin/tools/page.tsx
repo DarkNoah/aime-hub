@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import {
   Globe,
   ImagePlus,
+  FileScan,
   AudioLines,
   Wrench,
   Settings2,
@@ -173,7 +174,9 @@ export function AdminToolsPage() {
                 <ItemMedia variant="icon">
                   {tool.kind === 'image_gen' ? (
                     <ImagePlus />
-                  ) : tool.kind === 'speech' ? (
+                  ) : tool.kind === 'view_file' ? (
+                    <FileScan />
+                  ) : tool.kind === 'speech' || tool.kind === 'transcribe' ? (
                     <AudioLines />
                   ) : tool.kind === 'builtin' ? (
                     <Wrench />
@@ -200,13 +203,20 @@ export function AdminToolsPage() {
                   <code className="mt-1 block text-xs text-muted-foreground">
                     {tool.id}
                   </code>
-                  {tool.kind === 'image_gen' || tool.kind === 'speech' ? (
+                  {tool.kind === 'image_gen' ||
+                  tool.kind === 'view_file' ||
+                  tool.kind === 'speech' ||
+                  tool.kind === 'transcribe' ? (
                     <p className="mt-2 text-xs text-muted-foreground">
                       {tool.config.model ??
                         t(
-                          tool.kind === 'speech'
-                            ? 'tools.defaultSpeechModel'
-                            : 'tools.defaultImageModel',
+                          tool.kind === 'view_file'
+                            ? 'tools.selectOcrModel'
+                            : tool.kind === 'transcribe'
+                              ? 'tools.defaultTranscribeModel'
+                              : tool.kind === 'speech'
+                                ? 'tools.defaultSpeechModel'
+                                : 'tools.defaultImageModel',
                         )}{' '}
                       ·{' '}
                       {t('tools.imageSummary', {
@@ -270,7 +280,10 @@ export function AdminToolsPage() {
           })}
         </ItemGroup>
       ) : null}
-      {selected?.kind === 'image_gen' || selected?.kind === 'speech' ? (
+      {selected?.kind === 'image_gen' ||
+      selected?.kind === 'view_file' ||
+      selected?.kind === 'speech' ||
+      selected?.kind === 'transcribe' ? (
         <ModelToolDialog
           tool={selected}
           onClose={() => setSelected(undefined)}

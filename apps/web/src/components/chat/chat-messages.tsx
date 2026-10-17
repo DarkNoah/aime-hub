@@ -74,12 +74,13 @@ export function ChatMessages({
   );
   return (
     <>
-      {rows.map(({ message, sourceIds, parts }) => (
+      {rows.map(({ message, sourceIds, parts, elapsedMs }) => (
         <ChatMessage
           key={message.id}
           message={message}
           threadId={threadId}
           parts={parts}
+          elapsedMs={elapsedMs}
           streaming={
             running && !!activeMessageId && sourceIds.includes(activeMessageId)
           }
@@ -110,6 +111,7 @@ export const ChatMessage = memo(function ChatMessage({
   message,
   threadId,
   parts,
+  elapsedMs,
   streaming,
   showReasoning,
   isLastMessage = false,
@@ -120,6 +122,7 @@ export const ChatMessage = memo(function ChatMessage({
   message: UIMessage;
   threadId?: string;
   parts?: ChatMessagePart[];
+  elapsedMs?: number;
   streaming: boolean;
   showReasoning: boolean;
   isLastMessage?: boolean;
@@ -224,7 +227,7 @@ export const ChatMessage = memo(function ChatMessage({
                       ))}
                     </ChainOfThoughtContent>
                   </ChainOfThought>
-                  <ChatToolAttachments tools={item.tools} />
+                  <ChatToolAttachments tools={item.tools} threadId={threadId} />
                 </Fragment>
               );
             }
@@ -336,7 +339,11 @@ export const ChatMessage = memo(function ChatMessage({
         attachments={display.attachments}
         threadId={threadId}
       />
-      <ChatMessageActions message={displayMessage} streaming={streaming} />
+      <ChatMessageActions
+        message={displayMessage}
+        streaming={streaming}
+        elapsedMs={elapsedMs}
+      />
       {streaming && (
         <LoaderCircle
           className="mb-2 size-3 animate-spin text-muted-foreground"

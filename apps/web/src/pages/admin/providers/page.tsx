@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import {
   providerGroup,
+  isOcrProvider,
   providerSupportsModels,
   providerGroups,
   type ProviderModel,
@@ -96,7 +97,7 @@ export function AdminProvidersPage() {
       const result = await providerApi.sync(provider.id);
       toast.success(t('models.synced', result), {
         description:
-          provider.type !== 'mineru' && !result.catalogAvailable
+          !isOcrProvider(provider.type) && !result.catalogAvailable
             ? t('models.catalogUnavailable')
             : undefined,
       });

@@ -6,27 +6,16 @@ import {
   MessageAction,
   MessageActions,
 } from '@/components/ai-elements/message';
-
-function messageDate(metadata: UIMessage['metadata']) {
-  if (!metadata || typeof metadata !== 'object' || !('createdAt' in metadata))
-    return;
-  const value = metadata.createdAt;
-  if (
-    !(value instanceof Date) &&
-    typeof value !== 'string' &&
-    typeof value !== 'number'
-  )
-    return;
-  const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date : undefined;
-}
+import { formatMessageElapsedTime, messageDate } from './message-time';
 
 export function ChatMessageActions({
   message,
   streaming,
+  elapsedMs,
 }: {
   message: UIMessage;
   streaming: boolean;
+  elapsedMs?: number;
 }) {
   const { t, i18n } = useTranslation();
   const isUser = message.role === 'user';
@@ -38,6 +27,8 @@ export function ChatMessageActions({
     .join('\n');
   const date = isUser ? messageDate(message.metadata) : undefined;
   const canCopy = text.trim().length > 0;
+  const elapsed =
+    !isUser && canCopy ? formatMessageElapsedTime(elapsedMs) : undefined;
   if (!canCopy && !date) return null;
 
   async function copyMessage() {
@@ -75,6 +66,11 @@ export function ChatMessageActions({
         >
           <Copy className="size-3.5" aria-hidden="true" />
         </MessageAction>
+      )}
+      {elapsed && (
+        <span className="text-xs tabular-nums" title={t('chat.messageElapsed')}>
+          {elapsed}
+        </span>
       )}
     </MessageActions>
   );

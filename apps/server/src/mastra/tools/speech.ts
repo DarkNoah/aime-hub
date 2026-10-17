@@ -8,13 +8,14 @@ import {
 import { z } from 'zod';
 import type { GeneratedAssetInput } from '@aime/shared/assets';
 import { defaultSpeechConfig, type SpeechConfig } from '@aime/shared/tools';
+import { speechFormats, speechMediaTypes } from '@aime/shared/audio';
+import { speechMetadata } from '../../modules/audio/speech-metadata.js';
 import { validatePath } from '../../modules/files/paths.js';
-import {
-  audioMimeType,
-  maxReferenceAudioBytes,
-  wavMetadata,
-} from '../providers/audio-data.js';
-import { requestWebResource } from '../web/request.js';
+import { ThreadError } from '../../modules/threads/errors.js';
+import type { AudioService } from '../../modules/audio/service.js';
+import { audioUser } from './audio/context.js';
+import { SpeechPlayback } from '../../modules/audio/playback.js';
+import { supportsSpeechStreaming } from '../providers/speech-model.js';
 
 export class SpeechGenerationError extends Error {}
 export type ResolvedSpeechModel = { reference: string; model: SpeechModel };
@@ -24,219 +25,214 @@ export function createSpeechTool(
   dependencies: {
     resolveModel?: (reference: string | null) => Promise<ResolvedSpeechModel>;
     generate?: typeof generateSpeech;
-    request?: typeof requestWebResource;
     recordAsset?: (asset: GeneratedAssetInput) => Promise<void>;
+    audio?: AudioService;
   } = {},
 ) {
   return createTool({
     id: 'speech',
     description:
-      'Convert text to a WAV audio file using the configured speech model. Supports voice names and delivery instructions when the model supports them. For voice cloning, provide ref_audio (workspace path or public HTTP(S) URL) and its exact transcript ref_text together. Reuse the same reference for consistent voices across calls. Saves audio in the conversation workspace and returns its path and playback link.',
+      'Generate an audio file in the conversation workspace using OpenAI-style speech fields. The model is selected in tool settings. voice first matches a saved personal or shared voice from list_voices; otherwise it is passed as the provider voice ID. To clone a voice, first save its audio and accurate transcript in the voice library, then pass its ID as voice. Saved-voice cloning requires a compatible Xinference model. With play_immediately=true, enqueue playback and return immediately; audio is sent to the frontend without saving a file. Streaming-capable models emit audio chunks; other models emit completed audio. Otherwise returns duration in seconds, file_path and sample_rate in Hz.',
     inputSchema: z.strictObject({
-      text: z
-        .string()
-        .trim()
-        .min(1)
-        .max(32000)
-        .describe('Text to convert to speech'),
-      language: z
-        .string()
-        .trim()
-        .min(1)
-        .max(100)
-        .optional()
-        .describe(
-          'Language, when supported by the model; otherwise inferred from text',
-        ),
+      input: z.string().trim().min(1).describe('Text to convert to speech'),
       voice: z
         .string()
         .trim()
-        .min(1)
-        .max(1000)
-        .optional()
-        .describe('Voice name or identifier supported by the selected model'),
-      instruct: z
-        .string()
-        .trim()
-        .min(1)
-        .max(4000)
         .optional()
         .describe(
-          'Voice design or delivery instruction, when supported (VoxCPM2 supports this)',
+          'Saved voice ID from list_voices, or the selected provider’s voice ID. Saved voices take precedence. Omit for the model default.',
+        ),
+      instructions: z
+        .string()
+        .trim()
+        .optional()
+        .describe(
+          'Voice design or delivery instructions, when supported by the model',
+        ),
+      response_format: z
+        .enum(speechFormats)
+        .optional()
+        .describe(
+          'Audio file format, when supported by the model. Defaults to wav. PCM is raw 24 kHz, 16-bit little-endian mono audio.',
         ),
       speed: z
         .number()
         .min(0.25)
         .max(4)
         .optional()
-        .describe('Speech rate, default 1. VoxCPM2 ignores this parameter.'),
-      ref_audio: z
-        .string()
-        .trim()
-        .min(1)
-        .max(4096)
+        .describe('Speech rate, default 1. Some models ignore this parameter.'),
+      play_immediately: z
+        .boolean()
         .optional()
         .describe(
-          'Reference WAV, MP3, FLAC or OGG: workspace-relative path or public URL; requires ref_text',
+          'Start playback in the current chat and return immediately. Uses streaming when supported; otherwise plays the completed audio. No file is saved; save_path and response_format are ignored. Defaults to false.',
         ),
-      ref_text: z
-        .string()
-        .trim()
-        .min(1)
-        .max(16000)
-        .optional()
-        .describe('Exact transcript of ref_audio; requires ref_audio'),
       save_path: z
         .string()
         .trim()
         .min(1)
-        .max(2048)
         .optional()
         .describe(
-          'New workspace-relative .wav path. Existing files are never overwritten. Defaults to outputs/audio/<random>.wav',
+          'New workspace-relative path ending in the response_format extension. Existing files are never overwritten. Defaults to outputs/audio/<random>.<response_format>.',
         ),
     }),
-    outputSchema: z.object({
-      ok: z.boolean(),
-      isError: z.boolean().optional(),
-      model: z.string().optional(),
-      file_path: z.string().optional(),
-      duration: z.number().positive().optional(),
-      sampleRate: z.number().int().positive().optional(),
-      asset: z
-        .object({
-          threadId: z.string(),
-          resourceId: z.string(),
-          createdBy: z.string().nullable(),
-          mimeType: z.string(),
-          size: z.number().int().positive(),
-        })
-        .optional(),
-      content: z.array(
-        z.discriminatedUnion('type', [
-          z.object({ type: z.literal('text'), text: z.string() }),
-          z.object({
-            type: z.literal('file'),
-            url: z.string(),
-            mimeType: z.literal('audio/wav'),
-            filename: z.string(),
-          }),
-        ]),
-      ),
-    }),
+    outputSchema: z.union([
+      z.object({
+        duration: z.number(),
+        file_path: z.string(),
+        sample_rate: z.number(),
+      }),
+      z.object({
+        status: z.literal('queued'),
+        playback_id: z.string(),
+        text: z.string(),
+      }),
+    ]),
     execute: async (
       {
-        text,
-        language,
+        input,
         voice,
-        instruct,
+        instructions,
+        response_format = 'wav',
         speed,
-        ref_audio,
-        ref_text,
         save_path,
+        play_immediately = false,
       },
       context,
     ) => {
+      const voiceId = voice?.trim() || undefined;
+      const voiceUser =
+        voiceId && dependencies.audio ? audioUser(context) : undefined;
+      const prepare = async (signal: AbortSignal) => {
+        if (!dependencies.resolveModel)
+          throw new SpeechGenerationError(
+            'Speech model is not configured. Select a model in speech tool settings or set the default speech model.',
+          );
+        const resolved = await dependencies.resolveModel(config.model);
+        let savedReference: { audio: Buffer; text: string } | undefined;
+        if (voiceId && dependencies.audio) {
+          try {
+            savedReference = await dependencies.audio.voices.readAudioById(
+              voiceUser!,
+              voiceId,
+            );
+          } catch (error) {
+            if (!(
+              error instanceof ThreadError && error.code === 'FILE_NOT_FOUND'
+            ))
+              throw new SpeechGenerationError(
+                'Could not read the saved voice. Check its audio, transcript and access permissions.',
+              );
+          }
+        }
+        if (
+          savedReference &&
+          (typeof resolved.model === 'string' ||
+            resolved.model.provider !== 'xinference')
+        )
+          throw new SpeechGenerationError(
+            'Saved-voice cloning is currently supported by Xinference speech models. Select a compatible model or use a provider voice ID.',
+          );
+        signal.throwIfAborted();
+        return {
+          model: resolved.model,
+          reference: resolved.reference,
+          options: {
+            text: input,
+            voice: savedReference ? undefined : voiceId,
+            instructions,
+            speed,
+            providerOptions: {
+              xinference: {
+                timeoutMs: config.timeoutMs,
+                ...(savedReference
+                  ? {
+                      promptSpeech: savedReference.audio.toString('base64'),
+                      promptSpeechMediaType: 'audio/wav',
+                      kwargs: { prompt_text: savedReference.text },
+                    }
+                  : {}),
+              },
+            },
+          },
+        };
+      };
+      if (play_immediately) {
+        context?.abortSignal?.throwIfAborted();
+        const playback = context?.requestContext?.get('speechPlayback');
+        if (!(playback instanceof SpeechPlayback))
+          throw new SpeechGenerationError(
+            'Immediate playback requires an active chat session. Disable play_immediately to save an audio file.',
+          );
+        const playback_id = playback.start({
+          text: input,
+          toolCallId: context?.agent?.toolCallId,
+          timeoutMs: config.timeoutMs,
+          generate: async (signal, emit) => {
+            const resolved = await prepare(signal);
+            if (supportsSpeechStreaming(resolved.model)) {
+              await resolved.model.streamSpeech(
+                { ...resolved.options, abortSignal: signal },
+                emit,
+              );
+            } else {
+              const result = await (dependencies.generate ?? generateSpeech)({
+                model: resolved.model,
+                ...resolved.options,
+                outputFormat: 'wav',
+                maxRetries: 0,
+                abortSignal: signal,
+              });
+              signal.throwIfAborted();
+              await emit({
+                data: result.audio.uint8Array,
+                encoding: 'file',
+                mimeType: result.audio.mediaType,
+              });
+            }
+          },
+        });
+        return { status: 'queued' as const, playback_id, text: input };
+      }
       const signal = AbortSignal.any([
         AbortSignal.timeout(config.timeoutMs),
         ...(context?.abortSignal ? [context.abortSignal] : []),
       ]);
       try {
         signal.throwIfAborted();
-        if (!!ref_audio !== !!ref_text)
-          throw new SpeechGenerationError(
-            'Provide ref_audio and its exact transcript ref_text together for voice cloning.',
-          );
-        if (!dependencies.resolveModel)
-          throw new SpeechGenerationError(
-            'Speech model is not configured. Select a model in speech tool settings or set the default speech model.',
-          );
-        const resolved = await dependencies.resolveModel(config.model);
         const filesystem = context?.workspace?.filesystem;
         if (!filesystem)
           throw new SpeechGenerationError(
             'Speech generation requires a conversation workspace to save the audio.',
           );
-        const file_path = save_path ?? `outputs/audio/${randomUUID()}.wav`;
+        const file_path =
+          save_path ?? `outputs/audio/${randomUUID()}.${response_format}`;
         try {
           validatePath(file_path);
-          if (!file_path.toLowerCase().endsWith('.wav'))
+          if (!file_path.toLowerCase().endsWith(`.${response_format}`))
             throw new Error('Invalid extension');
         } catch {
           throw new SpeechGenerationError(
-            'save_path must be a workspace-relative .wav path without parent-directory segments.',
+            `save_path must be a workspace-relative .${response_format} path without parent-directory segments.`,
           );
         }
         if (await filesystem.exists(file_path))
           throw new SpeechGenerationError(
             'The output file already exists. Choose a new save_path.',
           );
-        let referenceAudio:
-          | {
-              promptSpeech: string;
-              promptSpeechMediaType: ReturnType<typeof audioMimeType>;
-            }
-          | undefined;
-        if (ref_audio) {
-          if (
-            typeof resolved.model === 'string' ||
-            resolved.model.provider !== 'xinference'
-          )
-            throw new SpeechGenerationError(
-              'Reference audio is currently supported by Xinference speech models. Select a compatible model for voice cloning.',
-            );
-          try {
-            signal.throwIfAborted();
-            let data: Buffer;
-            if (/^https?:\/\//i.test(ref_audio)) {
-              const response = await (
-                dependencies.request ?? requestWebResource
-              )(ref_audio, { signal, maxBytes: maxReferenceAudioBytes });
-              if (response.status !== 200)
-                throw new Error('Reference download failed');
-              data = response.body;
-            } else {
-              validatePath(ref_audio);
-              const stat = await filesystem.stat(ref_audio);
-              if (stat.type !== 'file' || stat.size > maxReferenceAudioBytes)
-                throw new Error('Invalid reference size');
-              data = Buffer.from(await filesystem.readFile(ref_audio));
-            }
-            const mimeType = audioMimeType(data);
-            if (mimeType === 'audio/wav') wavMetadata(data);
-            referenceAudio = {
-              promptSpeech: data.toString('base64'),
-              promptSpeechMediaType: mimeType,
-            };
-          } catch {
-            throw new SpeechGenerationError(
-              'Could not read reference audio. Use an accessible WAV, MP3, FLAC or OGG file in the workspace or a public URL, up to 20 MB.',
-            );
-          }
-        }
         signal.throwIfAborted();
+        const resolved = await prepare(signal);
         const result = await (dependencies.generate ?? generateSpeech)({
           model: resolved.model,
-          text,
-          language,
-          voice,
-          instructions: instruct,
-          speed,
-          outputFormat: 'wav',
+          ...resolved.options,
+          outputFormat: response_format,
           maxRetries: 0,
           abortSignal: signal,
-          providerOptions: {
-            xinference: {
-              timeoutMs: config.timeoutMs,
-              ...(referenceAudio
-                ? { ...referenceAudio, kwargs: { prompt_text: ref_text! } }
-                : {}),
-            },
-          },
         });
         signal.throwIfAborted();
         const data = Buffer.from(result.audio.uint8Array);
-        const metadata = wavMetadata(data);
+        const metadata = await speechMetadata(data, response_format, signal);
+        signal.throwIfAborted();
         const directory = posix.dirname(file_path);
         if (directory !== '.')
           await filesystem.mkdir(directory, { recursive: true });
@@ -250,46 +246,23 @@ export function createSpeechTool(
               : null;
         const threadId = context?.agent?.threadId;
         const resourceId = context?.agent?.resourceId;
-        const warnings = result.warnings.map((warning) =>
-          warning.type === 'unsupported'
-            ? `Unsupported speech option: ${warning.feature}.`
-            : 'The speech provider returned a generation warning.',
-        );
+        if (threadId && resourceId)
+          await dependencies.recordAsset?.({
+            threadId,
+            resourceId,
+            createdBy,
+            mimeType: speechMediaTypes[response_format],
+            size: data.length,
+            path: file_path,
+            toolName: 'speech',
+            toolCallId: context?.agent?.toolCallId,
+            model: resolved.reference,
+            metadata,
+          });
         return {
-          ok: true,
-          model: resolved.reference,
+          duration: metadata.duration,
           file_path,
-          ...metadata,
-          ...(threadId && resourceId
-            ? {
-                asset: {
-                  threadId,
-                  resourceId,
-                  createdBy,
-                  mimeType: 'audio/wav',
-                  size: data.length,
-                },
-              }
-            : {}),
-          content: [
-            {
-              type: 'text' as const,
-              text: [
-                `Speech saved to "${file_path}" (${metadata.duration.toFixed(2)} s, ${metadata.sampleRate} Hz, WAV).`,
-                ...warnings,
-              ].join('\n'),
-            },
-            ...(threadId
-              ? [
-                  {
-                    type: 'file' as const,
-                    url: `/api/threads/${encodeURIComponent(threadId)}/files/raw?${new URLSearchParams({ path: file_path })}`,
-                    mimeType: 'audio/wav' as const,
-                    filename: file_path,
-                  },
-                ]
-              : []),
-          ],
+          sample_rate: metadata.sampleRate,
         };
       } catch (error) {
         const message = signal.aborted
@@ -299,35 +272,13 @@ export function createSpeechTool(
           : error instanceof SpeechGenerationError
             ? error.message
             : 'Speech generation failed. Check the selected speech model, its supported options and workspace write access.';
-        return {
-          ok: false,
-          isError: true,
-          content: [{ type: 'text' as const, text: message }],
-        };
+        throw new SpeechGenerationError(message);
       }
-    },
-    onOutput: async ({ output, toolCallId }) => {
-      if (!output.ok || output.isError || !output.file_path || !output.asset)
-        return;
-      await dependencies.recordAsset?.({
-        ...output.asset,
-        path: output.file_path,
-        toolName: 'speech',
-        toolCallId,
-        model: output.model,
-        metadata: {
-          ...(output.duration ? { duration: output.duration } : {}),
-          ...(output.sampleRate ? { sampleRate: output.sampleRate } : {}),
-        },
-      });
     },
     // Audio stays in the workspace; model history contains only the compact result.
     toModelOutput: (output) => ({
       type: 'text',
-      value: output.content
-        .filter((part) => part.type === 'text')
-        .map((part) => part.text)
-        .join('\n'),
+      value: JSON.stringify(output),
     }),
   });
 }

@@ -1,3 +1,4 @@
+import type { SpeechEvent } from '@aime/shared/audio';
 import { nanoid } from 'nanoid';
 import {
   emptyBrowserState,
@@ -66,6 +67,7 @@ type Subscription = {
   active: boolean;
   listener: (snapshot: ThreadSnapshot<UIMessage>, initial: boolean) => void;
   revoked?: (code?: string) => void;
+  speech?: (event: SpeechEvent) => void | Promise<void>;
   pending: Promise<void>;
 };
 
@@ -448,8 +450,9 @@ export class ThreadService {
   private deliver(
     runtime: Runtime,
     subscription: Subscription,
-    snapshot: ThreadSnapshot<UIMessage>,
+    snapshot: ThreadSnapshot<UIMessage> | null,
     initial: boolean,
+    speech?: SpeechEvent,
   ) {
     // Serialize authorization and delivery so delayed membership reads cannot reorder SSE events.
     subscription.pending = subscription.pending
@@ -457,7 +460,10 @@ export class ThreadService {
         if (!subscription.active) return;
         const { projectId } = threadScope(runtime.thread.resourceId);
         if (projectId) await this.projectAccess(subscription.userId, projectId);
-        if (subscription.active) subscription.listener(snapshot, initial);
+        if (subscription.active) {
+          if (speech) await subscription.speech?.(speech);
+          else if (snapshot) subscription.listener(snapshot, initial);
+        }
       })
       .catch(() => {
         subscription.active = false;
@@ -474,6 +480,7 @@ export class ThreadService {
       this.closing ||
       this.busy(runtime) ||
       this.hasRunningCommands(runtime) ||
+      runtime.session?.speech?.active ||
       runtime.listeners.size ||
       runtime.backgroundTasks.some(
         (task) => task.status === 'pending' || task.status === 'running',
@@ -484,6 +491,7 @@ export class ThreadService {
       if (
         !this.busy(runtime) &&
         !this.hasRunningCommands(runtime) &&
+        !runtime.session?.speech?.active &&
         !runtime.listeners.size
       ) {
         void runtime.backgroundObserver?.stop();
@@ -543,6 +551,16 @@ export class ThreadService {
   }
 
   private observe(runtime: Runtime, event: ChatSessionEvent) {
+    // Audio is ephemeral: authorize live listeners without persisting chunks or locking storage.
+    if (event.type === 'speech') {
+      if (this.runtimes.get(runtime.thread.id) !== runtime)
+        return Promise.resolve();
+      return Promise.all(
+        [...runtime.listeners].map((subscription) =>
+          this.deliver(runtime, subscription, null, false, event.event),
+        ),
+      ).then(() => this.release(runtime));
+    }
     // Serialize snapshot/storage updates only. Mastra schedules all model work.
     return this.locked(runtime.thread.id, async () => {
       if (this.runtimes.get(runtime.thread.id) !== runtime) return;
@@ -666,6 +684,7 @@ export class ThreadService {
       if (
         this.busy(runtime) ||
         this.hasRunningCommands(runtime) ||
+        runtime.session.speech?.active ||
         runtime.data.toolInteractions.some((item) => !item.response) ||
         runtime.backgroundTasks.some(isBackgroundTaskActive) ||
         runtime.goal?.status === 'active'
@@ -1372,6 +1391,13 @@ export class ThreadService {
     }
   }
 
+  stopSpeech(userId: string, id: string) {
+    return this.scopeLocked(userId, id, async () => {
+      await this.accessible(userId, id);
+      this.runtimes.get(id)?.session?.speech?.stop();
+    });
+  }
+
   abort(userId: string, id: string) {
     return this.scopeLocked(userId, id, async () => {
       const runtime = await this.runtime(userId, id);
@@ -1538,6 +1564,7 @@ export class ThreadService {
     id: string,
     listener: (snapshot: ThreadSnapshot<UIMessage>, initial: boolean) => void,
     revoked?: (code?: string) => void,
+    speech?: (event: SpeechEvent) => void | Promise<void>,
   ) {
     return this.scopeLocked(userId, id, async () => {
       const runtime = await this.runtime(userId, id);
@@ -1546,6 +1573,7 @@ export class ThreadService {
         userId,
         listener,
         revoked,
+        speech,
         active: true,
         pending: Promise.resolve(),
       };

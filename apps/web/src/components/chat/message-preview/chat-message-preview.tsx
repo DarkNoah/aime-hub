@@ -14,9 +14,11 @@ import type { PreviewPart } from './selection';
 
 export function ChatMessagePreview({
   part,
+  threadId,
   onClose,
 }: {
   part: PreviewPart | null;
+  threadId?: string;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -51,7 +53,7 @@ export function ChatMessagePreview({
             >
               {part.type}
             </Badge>
-            <MessagePartPreview part={part} />
+            <MessagePartPreview part={part} threadId={threadId} />
             <Collapsible className="group border-t pt-3">
               <CollapsibleTrigger asChild>
                 <Button

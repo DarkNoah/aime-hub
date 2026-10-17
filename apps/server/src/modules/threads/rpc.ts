@@ -77,6 +77,9 @@ export function threadRouter(
         createdAt: new Date().toISOString(),
       }),
     ),
+    stopSpeech: p.stopSpeech.handler(({ context, input }) =>
+      threads().stopSpeech(context.userId, input.params.threadId),
+    ),
     abort: p.abort.handler(({ context, input }) =>
       threads().abort(context.userId, input.params.threadId),
     ),

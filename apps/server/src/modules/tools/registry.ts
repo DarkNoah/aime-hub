@@ -5,6 +5,13 @@ import {
   type ResolveAutomations,
 } from '../../mastra/tools/automations.js';
 import type { KnowledgeService } from '../knowledge/service.js';
+import type { AudioService } from '../audio/service.js';
+import { createTranscribeTool } from '../../mastra/tools/transcribe.js';
+import {
+  createViewFileTool,
+  type ResolvedOcrModel,
+} from '../../mastra/tools/view_file.js';
+import { createListVoicesTool } from '../../mastra/tools/list_voices.js';
 import type { ToolsInput } from '@mastra/core/agent';
 import { z } from 'zod';
 import {
@@ -16,6 +23,7 @@ import {
   type WebFetchConfig,
   type ImageGenConfig,
   type SpeechConfig,
+  type ViewFileConfig,
 } from '@aime/shared/tools';
 import * as applicationTools from '../../mastra/tools/index.js';
 import { createExecTool } from '../../mastra/tools/exec.js';
@@ -41,8 +49,10 @@ export type ToolDefaultConfigs = Partial<
   web_fetch?: Partial<WebFetchConfig>;
   image_gen?: Partial<ImageGenConfig>;
   speech?: Partial<SpeechConfig>;
+  view_file?: Partial<ViewFileConfig>;
 };
 type ToolDependencies = {
+  audio?: AudioService;
   automations?: ResolveAutomations;
   knowledgeSearch?: KnowledgeService['searchContext'];
   knowledge?: KnowledgeService;
@@ -54,6 +64,7 @@ type ToolDependencies = {
   fetchProvider?: (id: string, timeoutMs: number) => Promise<JinaAIProvider>;
   imageModel?: (reference: string | null) => Promise<ResolvedImageModel>;
   speechModel?: (reference: string | null) => Promise<ResolvedSpeechModel>;
+  ocrModel?: (reference: string | null) => Promise<ResolvedOcrModel>;
   recordAsset?: AssetService['record'];
 };
 
@@ -111,6 +122,20 @@ export function parseToolConfig(id: string, input: unknown): ToolConfig {
         description,
         config: toolConfigSchemas.speech.parse(input),
       };
+    case 'transcribe':
+      return {
+        id,
+        kind: id,
+        description,
+        config: toolConfigSchemas.transcribe.parse(input),
+      };
+    case 'view_file':
+      return {
+        id,
+        kind: id,
+        description,
+        config: toolConfigSchemas.view_file.parse(input),
+      };
     default:
       return {
         id,
@@ -156,8 +181,17 @@ async function buildTool(
       return createSpeechTool(tool.config, {
         resolveModel: dependencies.speechModel,
         recordAsset: dependencies.recordAsset,
+        audio: dependencies.audio,
+      });
+    case 'transcribe':
+      return createTranscribeTool(tool.config, dependencies.audio);
+    case 'view_file':
+      return createViewFileTool(tool.config, {
+        resolveModel: dependencies.ocrModel,
       });
     case 'builtin':
+      if (id === 'list_voices')
+        return createListVoicesTool(dependencies.audio?.voices);
       if (id.startsWith('automation_')) {
         const tools = createAutomationTools(dependencies.automations);
         if (id in tools) return tools[id as keyof typeof tools];

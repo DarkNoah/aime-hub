@@ -24,7 +24,11 @@ export type AgentRuntimeOptions = Omit<
     config: AgentDefinition,
   ) => Pick<
     AgentConfig,
-    'model' | 'instructions' | 'defaultOptions' | 'workspace'
+    | 'model'
+    | 'instructions'
+    | 'defaultOptions'
+    | 'workspace'
+    | 'inputProcessors'
   >;
 };
 

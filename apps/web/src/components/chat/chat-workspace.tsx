@@ -389,6 +389,7 @@ export function ChatWorkspace({
   ) : view === 'preview' ? (
     <ChatMessagePreview
       key={JSON.stringify(selection)}
+      threadId={threadId}
       part={resolveMessagePart(messages, selection)}
       onClose={close}
     />

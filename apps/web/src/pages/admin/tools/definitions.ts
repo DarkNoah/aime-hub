@@ -17,10 +17,20 @@ type ToolDefinition = {
 };
 
 export const toolDefinitions = {
+  view_file: {
+    title: 'tools.viewFile',
+    description: 'tools.viewFileDescription',
+    configure: 'tools.configureViewFile',
+  },
   image_gen: {
     title: 'tools.imageGen',
     description: 'tools.imageDescription',
     configure: 'tools.configureImage',
+  },
+  transcribe: {
+    title: 'tools.transcribe',
+    description: 'tools.transcribeDescription',
+    configure: 'tools.configureTranscribe',
   },
   speech: {
     title: 'tools.speech',
@@ -56,10 +66,13 @@ export const toolDefinitions = {
     localId: 'local',
   },
 } satisfies Record<
-  Exclude<ConfigurableToolId, 'image_gen' | 'speech'>,
+  Exclude<
+    ConfigurableToolId,
+    'image_gen' | 'speech' | 'transcribe' | 'view_file'
+  >,
   ToolDefinition
 > &
   Record<
-    'image_gen' | 'speech',
+    'image_gen' | 'speech' | 'transcribe' | 'view_file',
     Pick<ToolDefinition, 'title' | 'description' | 'configure'>
   >;

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import type { ProviderModel, ProviderSummary } from '@aime/shared/providers';
-import { providerModelTypes } from '@aime/shared/providers';
+import { isOcrProvider, providerModelTypes } from '@aime/shared/providers';
 import {
   Select,
   SelectContent,
@@ -70,7 +70,8 @@ export function ProviderActionDialog({
   const modelTypes = providerModelTypes(
     action.kind === 'model' ? (action.providerType ?? 'openai') : 'openai',
   );
-  const isOcr = action.kind === 'model' && action.providerType === 'mineru';
+  const isOcr =
+    action.kind === 'model' && isOcrProvider(action.providerType ?? '');
   const [limits, setLimits] = useState({
     limitContext: String(model?.limitContext ?? ''),
     limitOutput: String(model?.limitOutput ?? ''),
@@ -218,6 +219,7 @@ export function ProviderActionDialog({
                           'https://serpapi.com',
                           'https://r.jina.ai',
                           'https://mineru.net',
+                          'https://paddleocr.aistudio-app.com',
                         ].includes(baseUrl)
                       )
                         setBaseUrl(
@@ -227,7 +229,9 @@ export function ProviderActionDialog({
                               ? 'https://r.jina.ai'
                               : type === 'mineru'
                                 ? 'https://mineru.net'
-                                : '',
+                                : type === 'paddleocr'
+                                  ? 'https://paddleocr.aistudio-app.com'
+                                  : '',
                         );
                     }}
                     disabled={pending}
@@ -242,7 +246,9 @@ export function ProviderActionDialog({
                             ? 'providers.xinferenceHint'
                             : providerType === 'mineru'
                               ? 'providers.mineruHint'
-                              : 'providers.typeHint',
+                              : providerType === 'paddleocr'
+                                ? 'providers.paddleocrHint'
+                                : 'providers.typeHint',
                     )}
                   </p>
                 </div>
@@ -267,7 +273,9 @@ export function ProviderActionDialog({
                             ? 'providers.xinferenceUrlHint'
                             : providerType === 'mineru'
                               ? 'providers.mineruUrlHint'
-                              : 'providers.urlHint',
+                              : providerType === 'paddleocr'
+                                ? 'providers.paddleocrUrlHint'
+                                : 'providers.urlHint',
                     )}
                   </p>
                 </div>

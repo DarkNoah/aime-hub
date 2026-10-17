@@ -1,7 +1,9 @@
+import type { SpeechModelSettings } from './speech-model.js';
 import type { OpenAICompatibleConfig } from '@mastra/core/llm';
 import { z } from 'zod';
 import { requestProviderJson } from '../../modules/providers/network.js';
 import { createImageModel } from './image-model.js';
+import { createSpeechModel } from './openai-compatible-speech.js';
 import { createTranscriptionModel } from './openai-compatible-transcription.js';
 import {
   createEmbeddingModel,
@@ -44,6 +46,15 @@ export class OpenAICompatibleProvider extends BaseProvider {
 
   imageModel(modelId: string) {
     return createImageModel(this.provider, modelId, this.requestResource);
+  }
+
+  speechModel(modelId: string, settings?: SpeechModelSettings) {
+    return createSpeechModel(
+      { ...this.provider, type: this.type },
+      modelId,
+      settings,
+      this.requestResource,
+    );
   }
 
   textEmbeddingModel(modelId: string) {

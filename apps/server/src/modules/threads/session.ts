@@ -1,5 +1,6 @@
 import type { StorageThreadType } from '@mastra/core/memory';
 import type { UIMessage } from 'ai';
+import type { SpeechEvent } from '@aime/shared/audio';
 import type {
   ChatSettings,
   ChatUsage,
@@ -14,6 +15,7 @@ import type {
 } from '@aime/shared/threads';
 
 export type ChatSessionEvent =
+  | { type: 'speech'; event: SpeechEvent }
   | { type: 'commands' }
   | {
       type: 'goal';
@@ -41,6 +43,7 @@ export type ChatSessionContext = {
 
 /** Mastra owns input scheduling. This interface only submits and observes it. */
 export interface ChatSession {
+  speech?: { readonly active: boolean; stop(): void };
   commands?: {
     list(): ThreadCommandSession[];
     cleanup(sessionId: number): Promise<void>;

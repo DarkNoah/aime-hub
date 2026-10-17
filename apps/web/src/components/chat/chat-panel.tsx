@@ -1,3 +1,4 @@
+import { SpeechPlaybackBar } from '@/components/audio/speech-playback-bar';
 import { isThreadActive } from '@aime/shared/threads';
 import { canContinueThread } from '@aime/shared/thread-messages';
 import {
@@ -393,16 +394,28 @@ function ExistingChat({
               goal={chat.goal}
               onClearGoal={chat.clearGoal}
               queue={
-                <ChatQueue
-                  thread={chat.thread}
-                  disabled={!chat.connected}
-                  waitingForTool={chat.toolInteractions.some(
-                    (item) => !item.response,
-                  )}
-                />
+                <>
+                  <SpeechPlaybackBar
+                    state={chat.speech.state}
+                    readSpectrum={chat.speech.readSpectrum}
+                    onResume={chat.speech.unlock}
+                    onStop={() => {
+                      chat.speech.stop();
+                      void chatApi.stopSpeech(threadId).catch(notifyError);
+                    }}
+                  />
+                  <ChatQueue
+                    thread={chat.thread}
+                    disabled={!chat.connected}
+                    waitingForTool={chat.toolInteractions.some(
+                      (item) => !item.response,
+                    )}
+                  />
+                </>
               }
               onSend={chat.send}
               onStop={async () => {
+                chat.speech.stop();
                 setStopping(true);
                 try {
                   await chatApi.abort(threadId);

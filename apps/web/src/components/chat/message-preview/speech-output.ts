@@ -1,6 +1,7 @@
+import { speechMediaTypes, type SpeechFormat } from '@aime/shared/audio';
 import { readFileBlocks } from './read-file-output.js';
 
-export function parseSpeechOutput(output: unknown) {
+export function parseSpeechOutput(output: unknown, threadId?: string) {
   if (typeof output === 'string') {
     try {
       output = JSON.parse(output) as unknown;
@@ -11,10 +12,42 @@ export function parseSpeechOutput(output: unknown) {
   if (!output || typeof output !== 'object' || Array.isArray(output))
     return null;
   const record = output as Record<string, unknown>;
-  if (typeof record.ok !== 'boolean' || !Array.isArray(record.content))
-    return null;
   const path =
     typeof record.file_path === 'string' ? record.file_path : undefined;
+  if (
+    path?.trim() &&
+    typeof record.duration === 'number' &&
+    Number.isFinite(record.duration) &&
+    record.duration > 0 &&
+    typeof record.sample_rate === 'number' &&
+    Number.isFinite(record.sample_rate) &&
+    record.sample_rate > 0 &&
+    record.ok !== false &&
+    record.isError !== true
+  ) {
+    return {
+      path,
+      model: undefined,
+      sampleRate: record.sample_rate,
+      audio:
+        threadId && !path.toLowerCase().endsWith('.pcm')
+          ? readFileBlocks({
+              type: 'file',
+              url: `/api/threads/${encodeURIComponent(threadId)}/files/raw?${new URLSearchParams({ path })}`,
+              mimeType:
+                speechMediaTypes[
+                  path.split('.').at(-1)?.toLowerCase() as SpeechFormat
+                ] ?? 'audio/wav',
+              filename: path,
+            })
+          : [],
+      failed: false,
+      message: '',
+    };
+  }
+  // Keep historical tool results playable after the output format changes.
+  if (typeof record.ok !== 'boolean' || !Array.isArray(record.content))
+    return null;
   const blocks = readFileBlocks(output, path);
   const audio = blocks.filter(
     (block) => block.type === 'media' && block.mediaType.startsWith('audio/'),

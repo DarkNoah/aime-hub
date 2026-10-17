@@ -1,4 +1,24 @@
 export const en = {
+  'chat.voiceInput.start': 'Start voice input',
+  'chat.voiceInput.stop': 'Stop voice input',
+  'chat.voiceInput.downloading': 'Downloading speech model',
+  'chat.voiceInput.initializing': 'Preparing speech model',
+  'chat.voiceInput.downloadHint':
+    'The first use downloads a model for your interface language. It is cached in this browser for next time.',
+  'chat.voiceInput.starting': 'Opening microphone',
+  'chat.voiceInput.listening': 'Listening…',
+  'chat.voiceInput.finishing': 'Finishing transcription…',
+  'chat.voiceInput.permissionDenied':
+    'Microphone access was denied. Allow it in your browser settings and try again.',
+  'chat.voiceInput.noMicrophone': 'No microphone was found.',
+  'chat.voiceInput.microphoneBusy':
+    'The microphone is unavailable or in use. Check your device and try again.',
+  'chat.voiceInput.unsupported':
+    'Voice input needs a browser with microphone support on HTTPS or localhost.',
+  'chat.voiceInput.isolationRequired':
+    'Voice input needs cross-origin isolation. Check the web server configuration and reload.',
+  'chat.voiceInput.failed':
+    'Voice input failed. Check your network and microphone, then try again. Your draft has been kept.',
   'knowledge.probingEmbedding':
     'Testing the embedding model to determine vector dimensions, then creating the knowledge base…',
   'knowledge.documentCount': '{{count}} sources',
@@ -763,7 +783,109 @@ export const en = {
   'agents.tool.knowledge_archive_document': 'Archive knowledge source',
   'agents.tool.web_search': 'Web search',
   'agents.tool.speech': 'Speech generation',
+  'voices.title': 'Voice library',
+  'voices.command': 'Browse, create and manage voices',
+  'voices.create': 'Create voice',
+  'voices.actions': 'Manage {{name}}',
+  'voices.edit': 'Edit voice',
+  'voices.delete': 'Delete voice',
+  'voices.deleteHint':
+    'Delete the sample and transcript for “{{name}}”? This cannot be undone.',
+  'voices.editorHint':
+    'Save a sample and its exact transcript to reuse in speech synthesis.',
+  'voices.libraryHint': 'Preview and choose a voice. Sharing cannot be undone.',
+  'voices.generate': 'Generate sample',
+  'voices.upload': 'Upload audio',
+  'voices.generateSave': 'Generate and save',
+  'voices.name': 'Voice name',
+  'voices.description': 'Voice description',
+  'voices.descriptionHint':
+    'For example: a warm, deep male voice with a calm tone, suited to narration.',
+  'voices.audioFile': 'Audio sample',
+  'voices.uploadHint':
+    'WAV, MP3, FLAC, OGG, M4A or WebM, up to 20 MB. Converted to WAV when saved.',
+  'voices.instructions': 'Sample generation instructions (optional)',
+  'voices.instructionsHint':
+    'Describe the desired voice and delivery; model support varies.',
+  'voices.preset': 'Model preset voice (optional)',
+  'voices.presetHint': 'A voice name supported by the selected model',
+  'voices.text': 'Sample transcript',
+  'voices.textHint':
+    'Enter the exact words in the uploaded audio or use recognition. For generation, enter the text to speak.',
+  'voices.recognize': 'Fill with recognition',
+  'voices.transcribed': 'Transcript filled. Please check the wording.',
+  'voices.share': 'Share voice',
+  'voices.shareHint':
+    'Everyone can use a shared voice. Sharing cannot be undone.',
+  'voices.sharedLocked': 'Shared voices cannot be made personal again.',
+  'voices.shared': 'Shared',
+  'voices.personal': 'Personal',
+  'voices.saved': 'Voice saved.',
+  'voices.deleted': 'Voice deleted.',
+  'voices.cancelOperation': 'Cancel operation',
+  'voices.search': 'Search voice names or descriptions…',
+  'voices.loading': 'Loading voices…',
+  'voices.retry': 'Retry',
+  'voices.empty': 'No matching voices. Generate or upload a sample.',
+  'voices.use': 'Use this voice',
+  'voices.reference':
+    'Use voice “{{name}}” for speech synthesis, voice: {{id}}',
+  'voices.required':
+    'Enter a voice name and transcript, and select an audio file when uploading.',
+  'voices.tooLarge':
+    'The audio or converted WAV exceeds 20 MB. Use a shorter sample.',
+  'voices.invalidAudio': 'Could not read the audio. Select a valid sample.',
+  'voices.converterUnavailable':
+    'FFmpeg is unavailable on the server. Upload a WAV file instead.',
+  'voices.asrUnavailable':
+    'Configure an available ASR model and enable the transcription tool in settings.',
+  'voices.speechUnavailable':
+    'Configure an available speech synthesis model first.',
+  'voices.emptyTranscript':
+    'No speech was recognized. Check the audio or enter the transcript manually.',
+  'agents.tool.transcribe': 'Speech recognition',
+  'agents.tool.list_voices': 'List voices',
+  'tools.transcribe': 'Speech recognition',
+  'agents.tool.view_file': 'Read binary file',
+  'tools.viewFile': 'Read binary file',
+  'tools.viewFileDescription':
+    'Parse workspace images and PDFs into Markdown using OCR.',
+  'tools.configureViewFile': 'Configure file reading',
+  'tools.enableViewFile': 'Enable file reading',
+  'tools.ocrModel': 'OCR model',
+  'tools.selectOcrModel': 'Select an OCR model',
+  'tools.ocrModelHint': 'Select an enabled MinerU or PaddleOCR model.',
+  'tools.ocrProviderHint':
+    'Currently supports images and PDFs. Audio, video and GLB are not supported yet. PDF page selection depends on the provider endpoint.',
+  'tools.invalidOcrModel':
+    'Select an available MinerU or PaddleOCR model from an enabled provider.',
+  'chat.viewFile.loading': 'Parsing file…',
+  'chat.viewFile.empty': 'No text was recognized.',
+  'chat.viewFile.truncated': 'Content truncated',
+  'chat.viewFile.truncatedHint':
+    'Only the first 100,000 characters are shown. Split the file to read the remaining content.',
+  'chat.viewFile.failed': 'File parsing failed.',
+  'tools.transcribeDescription':
+    'Recognize speech from audio files with timestamps when supported.',
+  'tools.configureTranscribe': 'Configure recognition',
+  'tools.enableTranscribe': 'Enable recognition',
+  'tools.defaultTranscribeModel': 'Use the default ASR model',
+  'tools.transcribeModelHint':
+    'Leave empty to use the default ASR model from Providers.',
+  'tools.transcribeProviderHint':
+    'Used by transcription, voice uploads, and automatic reference transcription during speech synthesis.',
+  'tools.invalidTranscribeModel':
+    'Select an enabled ASR model from an enabled provider.',
   'tools.speech': 'Speech generation',
+  'chat.speech.playback': 'Speech playback',
+  'chat.speech.playing': 'Playing',
+  'chat.speech.blocked': 'Ready to play',
+  'chat.speech.resume': 'Play audio',
+  'chat.speech.stop': 'Stop speech',
+  'chat.speech.queuedCount': '{{count}} queued',
+  'chat.speech.playbackFailed': 'Speech playback failed. Please try again.',
+  'chat.speech.queued':
+    'Speech has been queued for live playback. No audio file is saved.',
   'chat.speech.text': 'Generated text',
   'audio.player': 'Audio player',
   'audio.unavailable':
@@ -775,6 +897,7 @@ export const en = {
   'chat.speech.settings': 'Generation settings',
   'chat.speech.model': 'Model',
   'chat.speech.voice': 'Voice',
+  'chat.speech.voiceId': 'Voice ID',
   'chat.speech.language': 'Language',
   'chat.speech.speed': 'Synthesis speed',
   'chat.speech.instruct': 'Voice instructions',
@@ -1876,6 +1999,7 @@ export const en = {
   'chat.copy': 'Copy',
   'chat.copied': 'Message copied.',
   'chat.copyFailed': 'Copy failed. Check clipboard permissions.',
+  'chat.messageElapsed': 'Time since the previous user message',
   'chat.toolRunning': 'Running',
   'chat.toolDone': 'Completed',
   'chat.toolFailed': 'Failed',
@@ -2152,6 +2276,10 @@ export const en = {
     'OCR document parsing only. Sync models to add MinerU VLM and Pipeline.',
   'providers.mineruUrlHint':
     'Use https://mineru.net (or a base URL ending in /api/v4). Enter your MinerU API token below.',
+  'providers.paddleocrHint':
+    'Supports the PaddleOCR cloud jobs API and deployed /layout-parsing services. Sync to add the corresponding OCR models.',
+  'providers.paddleocrUrlHint':
+    'For cloud use https://paddleocr.aistudio-app.com with an AI Studio Access Token. For self-hosting enter the full /layout-parsing URL; leave API Key empty if authentication is not required. Supports images and PDFs.',
   'providers.configOnly': 'Configuration only',
   'providers.configOnlyHint': 'This provider saves connection settings only.',
   'providers.otherUrlHint': 'Enter the HTTP(S) API base URL for this service.',

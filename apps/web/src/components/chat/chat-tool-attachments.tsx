@@ -15,12 +15,17 @@ import { getToolAttachments } from './tool-attachments';
 
 export function ChatToolAttachments({
   tools,
+  threadId,
 }: {
   tools: (ToolUIPart | DynamicToolUIPart)[];
+  threadId?: string;
 }) {
   const { t } = useTranslation();
   const openFile = useWorkspaceFile();
-  const attachments = useMemo(() => getToolAttachments(tools), [tools]);
+  const attachments = useMemo(
+    () => getToolAttachments(tools, threadId),
+    [tools, threadId],
+  );
   if (attachments.length === 0) return null;
 
   return (

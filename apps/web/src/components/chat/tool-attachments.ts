@@ -1,5 +1,6 @@
 import type { DynamicToolUIPart, FileUIPart, ToolUIPart } from 'ai';
 import { readFileBlocks } from './message-preview/read-file-output.js';
+import { parseSpeechOutput } from './message-preview/speech-output.js';
 import { browserScreenshotOutput } from './message-preview/browser-data.js';
 import { getToolName } from './tool-renderers/registry.js';
 
@@ -10,6 +11,7 @@ export type ToolAttachment = FileUIPart & {
 
 export function getToolAttachments(
   tools: (ToolUIPart | DynamicToolUIPart)[],
+  threadId?: string,
 ): ToolAttachment[] {
   return tools.flatMap((tool) => {
     if (tool.state !== 'output-available') return [];
@@ -38,7 +40,11 @@ export function getToolAttachments(
           ? input.path
           : undefined;
 
-    return readFileBlocks(output, path).flatMap((block, index) =>
+    const blocks =
+      getToolName(tool) === 'speech'
+        ? (parseSpeechOutput(output, threadId)?.audio ?? [])
+        : readFileBlocks(output, path);
+    return blocks.flatMap((block, index) =>
       block.type === 'media' && block.source
         ? [
             {

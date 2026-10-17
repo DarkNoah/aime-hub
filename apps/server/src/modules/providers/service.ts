@@ -11,6 +11,7 @@ import {
   normalizeModelDefaults,
   type AvailableModels,
   providerGroup,
+  isOcrProvider,
   providerSupportsModels,
   providerModelTypes,
   defaultModelKeys,
@@ -22,6 +23,7 @@ import { ProviderError, requestProviderJson } from './network.js';
 import { NewApiProvider } from '../../mastra/providers/newapi.js';
 import { OpenAICompatibleProvider } from '../../mastra/providers/openai-compatible.js';
 import { MinerUProvider } from '../../mastra/providers/mineru.js';
+import { PaddleOCRProvider } from '../../mastra/providers/paddleocr.js';
 import { XinferenceProvider } from '../../mastra/providers/xinference.js';
 import type { requestWebResource } from '../../mastra/web/request.js';
 
@@ -262,6 +264,8 @@ export class ProviderService {
     this.assertModelProvider(provider);
     if (provider.type === 'mineru')
       return new MinerUProvider(provider, this.requestResource);
+    if (provider.type === 'paddleocr')
+      return new PaddleOCRProvider(provider, this.requestResource);
     if (provider.type === 'xinference')
       return new XinferenceProvider(provider, this.requestResource);
     return provider.type === 'newapi'
@@ -291,6 +295,7 @@ export class ProviderService {
       provider: await this.getProviderInstance(model.providerId),
       modelId: model.id,
       modelName: model.name,
+      metadata: model.metadata,
     };
   }
 
@@ -311,11 +316,9 @@ export class ProviderService {
   }
 
   async getSpeechModel(reference?: string) {
-    const { provider, modelId, modelName } = await this.resolveDefaultModel(
-      'speechModel',
-      reference,
-    );
-    return provider.speechModel(modelId, { modelName });
+    const { provider, modelId, modelName, metadata } =
+      await this.resolveDefaultModel('speechModel', reference);
+    return provider.speechModel(modelId, { modelName, metadata });
   }
 
   async getTranscriptionModel(reference?: string) {
@@ -395,8 +398,8 @@ export class ProviderService {
         input.type &&
         input.type !== provider.type &&
         (providerGroup(input.type) !== providerGroup(provider.type) ||
-          input.type === 'mineru' ||
-          provider.type === 'mineru')
+          isOcrProvider(input.type) ||
+          isOcrProvider(provider.type))
       ) {
         await this.assertUnused(manager, id);
         if (await manager.countBy(ProviderModel, { providerId: id }))
@@ -568,7 +571,7 @@ export class ProviderService {
     let catalog: unknown = {};
     let catalogAvailable = false;
     try {
-      if (provider.type !== 'mineru') {
+      if (!isOcrProvider(provider.type)) {
         catalog = await this.requestJson(
           'https://models.dev/api.json',
           undefined,
@@ -595,7 +598,7 @@ export class ProviderService {
           id,
           name: id,
           ...catalogFields(id, lookupModel(id)),
-          ...(['xinference', 'mineru'].includes(provider.type)
+          ...(provider.type === 'xinference' || isOcrProvider(provider.type)
             ? discoveredModels.get(id)
             : {}),
           deprecated: false,

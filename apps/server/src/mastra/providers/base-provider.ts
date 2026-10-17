@@ -1,3 +1,4 @@
+import type { SpeechModelSettings } from './speech-model.js';
 import type { OpenAICompatibleConfig } from '@mastra/core/llm';
 import { NoSuchModelError } from 'ai';
 import type {
@@ -79,7 +80,7 @@ export abstract class BaseProvider {
     return this.rerankModel(modelId);
   }
 
-  speechModel(modelId: string, options?: { modelName?: string }): SpeechModel {
+  speechModel(modelId: string, options?: SpeechModelSettings): SpeechModel {
     void options;
     throw new Error(`Speech model is not supported: ${this.type}/${modelId}`);
   }

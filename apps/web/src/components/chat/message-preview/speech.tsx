@@ -19,30 +19,52 @@ import { parseSpeechOutput } from './speech-output';
 import type { PreviewPart } from './selection';
 
 const settings: [string, TranslationKey][] = [
-  ['voice', 'chat.speech.voice'],
+  ['voice', 'chat.speech.voiceId'],
   ['language', 'chat.speech.language'],
   ['speed', 'chat.speech.speed'],
-  ['instruct', 'chat.speech.instruct'],
+  ['instructions', 'chat.speech.instruct'],
   ['ref_audio', 'chat.speech.referenceAudio'],
   ['ref_text', 'chat.speech.referenceText'],
 ];
 
-export function SpeechPreview({ part }: { part: PreviewPart }) {
+export function SpeechPreview({
+  part,
+  threadId,
+}: {
+  part: PreviewPart;
+  threadId?: string;
+}) {
   const { t } = useTranslation();
   const openFile = useWorkspaceFile();
   const output = isToolUIPart(part) ? part.output : undefined;
-  const result = useMemo(() => parseSpeechOutput(output), [output]);
+  const result = useMemo(
+    () => parseSpeechOutput(output, threadId),
+    [output, threadId],
+  );
   if (!isToolUIPart(part)) return null;
   const input =
     part.input && typeof part.input === 'object'
       ? (part.input as Record<string, unknown>)
       : {};
-  const text = typeof input.text === 'string' ? input.text : '';
-  const path =
-    result?.path ??
-    (typeof input.save_path === 'string' ? input.save_path : undefined);
+  const speechInput = input.input ?? input.text;
+  const text = typeof speechInput === 'string' ? speechInput : '';
+  const queued =
+    !!output &&
+    typeof output === 'object' &&
+    'status' in output &&
+    output.status === 'queued';
+  const path = queued
+    ? undefined
+    : (result?.path ??
+      (typeof input.save_path === 'string' ? input.save_path : undefined));
   const parameters = settings.flatMap(([key, label]) => {
-    const value = input[key];
+    // Keep historical tool calls readable after the parameter rename.
+    const value =
+      key === 'voice'
+        ? (input.voice ?? input.voice_id)
+        : key === 'instructions'
+          ? (input.instructions ?? input.instruct)
+          : input[key];
     return (typeof value === 'string' && value.trim()) ||
       (typeof value === 'number' && Number.isFinite(value))
       ? [{ key, label, value: key === 'speed' ? `${value}×` : String(value) }]
@@ -77,6 +99,11 @@ export function SpeechPreview({ part }: { part: PreviewPart }) {
               onOpen={openFile && path ? () => openFile(path) : undefined}
             />
           ),
+      )}
+      {queued && (
+        <p className="text-sm text-muted-foreground">
+          {t('chat.speech.queued')}
+        </p>
       )}
       {pending && (
         <div role="status" className="space-y-3 rounded-xl border p-4">
@@ -154,7 +181,7 @@ export function SpeechPreview({ part }: { part: PreviewPart }) {
           </CollapsibleContent>
         </Collapsible>
       )}
-      {output !== undefined && !result && (
+      {output !== undefined && !result && !queued && (
         <ToolOutput output={output} errorText={undefined} />
       )}
     </div>

@@ -69,6 +69,56 @@ export type WebRequestOptions = {
   body?: string | Buffer;
 };
 
+/** Stream through the same destination validation and pinned connection as buffered requests. */
+export async function streamWebResource(
+  url: string,
+  options: WebRequestOptions,
+  consume: {
+    response: (response: Omit<WebResource, 'body'>) => void;
+    chunk: (chunk: Uint8Array) => Promise<void>;
+  },
+) {
+  const address = await publicWebAddress(url, options.signal);
+  const dispatcher = new Agent({
+    connect: {
+      lookup: (_hostname, lookupOptions, callback) => {
+        if (lookupOptions.all) callback(null, [address]);
+        else callback(null, address.address, address.family);
+      },
+    },
+  });
+  try {
+    const response = await fetchRequest(url, {
+      method: options.method ?? 'GET',
+      headers: options.headers,
+      body: options.body,
+      signal: options.signal,
+      dispatcher,
+      redirect: 'manual',
+    });
+    consume.response({
+      url,
+      status: response.status,
+      headers: Object.fromEntries(response.headers),
+    });
+    let size = 0;
+    if (response.body)
+      for await (const chunk of response.body) {
+        options.signal.throwIfAborted();
+        size += chunk.length;
+        if (size > (options.maxBytes ?? 5_000_000))
+          throw new WebRequestError('TOO_LARGE');
+        await consume.chunk(chunk);
+      }
+    if (!size) throw new WebRequestError('REQUEST_FAILED');
+  } catch (error) {
+    if (error instanceof WebRequestError || options.signal.aborted) throw error;
+    throw new WebRequestError('REQUEST_FAILED');
+  } finally {
+    await dispatcher.destroy();
+  }
+}
+
 // Validate every destination and pin DNS to the connection, including browser resources.
 // Redirects are returned to the caller; credentials are never forwarded automatically.
 export async function requestWebResource(

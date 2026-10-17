@@ -148,6 +148,14 @@ export const threadsContract = {
     })
     .input(z.object({ params: z.object({ threadId }), body: runInputSchema }))
     .output(type<ThreadSummary>()),
+  stopSpeech: procedure
+    .route({
+      method: 'POST',
+      path: '/threads/{threadId}/speech/stop',
+      inputStructure: 'detailed',
+    })
+    .input(z.object({ params: z.object({ threadId }) }))
+    .output(z.void()),
   abort: procedure
     .route({
       method: 'POST',

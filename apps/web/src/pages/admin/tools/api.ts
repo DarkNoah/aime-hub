@@ -9,10 +9,14 @@ export function toolErrorKey(error: unknown, toolId?: ToolId): TranslationKey {
       return 'errors.sessionExpired';
     case 'FORBIDDEN':
       return 'errors.forbidden';
+    case 'INVALID_TRANSCRIPTION_MODEL':
+      return 'tools.invalidTranscribeModel';
     case 'INVALID_SPEECH_MODEL':
       return 'tools.invalidSpeechModel';
     case 'INVALID_IMAGE_MODEL':
       return 'tools.invalidImageModel';
+    case 'INVALID_OCR_MODEL':
+      return 'tools.invalidOcrModel';
     case 'NOT_FOUND':
     case 'INVALID_TOOL_PROVIDER':
       return toolId === 'web_fetch'

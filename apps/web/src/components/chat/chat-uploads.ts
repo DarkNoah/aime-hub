@@ -69,9 +69,7 @@ export function chatUploadParts(
       type: 'text',
       text: serializeAttachments(
         uploaded.map((item) => ({
-          id: item.id,
           path: `/${item.path}`,
-          name: item.file.name,
           size: item.file.size,
           mimeType: item.file.type || 'application/octet-stream',
         })),

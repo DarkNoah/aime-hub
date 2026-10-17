@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { SpeechPlayback } from '../audio/playback.js';
 import { runtimeTokenCounts } from '../usage/runtime.js';
 import type { UsageService } from '../usage/service.js';
 import type { EnvironmentVariableService } from '../environment-variables/service.js';
@@ -56,6 +57,8 @@ import { buildTools, type ToolService } from '../tools/service.js';
 import { CommandSandbox } from '../../mastra/tools/command/sandbox.js';
 import { agentEnvironment } from './agent-environment.js';
 import { AgentsMDProcessor } from '../../mastra/processors/agents-md.js';
+import { AttachmentProcessor } from './attachment-processor.js';
+import { AttachmentMediaReader } from './attachment-media.js';
 import {
   ContextBudget,
   ContextCompactionProcessor,
@@ -149,13 +152,7 @@ export function createChatRunner(
       }
     },
     async validate(userId, input, projectId) {
-      const model = await getModel(userId, input, projectId);
-      if (
-        'parts' in input &&
-        input.parts.some((part) => part.type === 'file') &&
-        !model.supportsImages
-      )
-        throw new ThreadError('MODEL_NO_IMAGES');
+      await getModel(userId, input, projectId);
     },
     async createWorkspace(userId, projectId) {
       if (!projectId) return createPersonalWorkspace(workspaceRoot, userId);
@@ -179,6 +176,9 @@ export function createChatRunner(
         );
       let currentSettings = settings;
       let runAbort = new AbortController();
+      const speechPlayback = new SpeechPlayback((event) =>
+        onEvent({ type: 'speech', event }),
+      );
       let resolved = await sessionModel(settings);
       const memoryConfig = await getMemoryConfig?.();
       const observationConfig = {
@@ -270,6 +270,12 @@ export function createChatRunner(
         const projectInstructions = projectId
           ? ' This is a shared project conversation. Its workspace is shared by project members and other project conversations. File tools and the command sandbox share the same mounted storage. In composite mode, a file tool path such as /data/file.txt is data/file.txt relative to the command working directory. Do not unmount or replace mount directories.'
           : '';
+        const attachmentMedia = new AttachmentMediaReader(
+          workspace.filesystem!,
+        );
+        const inputModalities = (selection: typeof resolved) =>
+          selection.modalitiesInput ??
+          (selection.supportsImages ? ['text', 'image'] : ['text']);
         const agent = await createAgent(config.id, {
           versionId:
             config.source === 'database' ? config.versionId : undefined,
@@ -282,6 +288,9 @@ export function createChatRunner(
           inputProcessors: [
             compaction,
             new AgentsMDProcessor(commands.workingDirectory),
+            new AttachmentProcessor(attachmentMedia, () =>
+              inputModalities(resolved),
+            ),
           ],
           outputProcessors: [compaction],
           subagentOptions: (child) => {
@@ -295,6 +304,11 @@ export function createChatRunner(
                   )
                 : Promise.resolve(resolved);
             return {
+              inputProcessors: [
+                new AttachmentProcessor(attachmentMedia, async () =>
+                  inputModalities(await childModel()),
+                ),
+              ],
               instructions: async () =>
                 child.instructions +
                 projectInstructions +
@@ -464,6 +478,7 @@ export function createChatRunner(
           const selection = await sessionModel(next);
           const abortSignal = runAbort.signal;
           const requestContext = new RequestContext();
+          requestContext.set('speechPlayback', speechPlayback);
           requestContext.set('userId', createdBy ?? userId);
           // Resolve against the current message author, including queued project messages.
           requestContext.set(
@@ -610,12 +625,7 @@ export function createChatRunner(
           };
         };
         const prepareSubmission = async (input: RunInput) => {
-          const selection = await sessionModel(input);
-          if (
-            input.parts.some((part) => part.type === 'file') &&
-            !selection.supportsImages
-          )
-            throw new ThreadError('MODEL_NO_IMAGES');
+          await sessionModel(input);
           const message: AgentMessageInput = {
             contents: input.parts.map((part) =>
               part.type === 'text'
@@ -656,6 +666,7 @@ export function createChatRunner(
                 });
         };
         return {
+          speech: speechPlayback,
           commands: {
             list: () => commands.listCommandSessions(),
             cleanup: (sessionId) => commands.cleanupCommandSession(sessionId),
@@ -674,7 +685,20 @@ export function createChatRunner(
               createObservabilityContext(),
               selection.model,
               undefined,
-              [{ role: 'user', parts: input.parts }],
+              [
+                {
+                  role: 'user',
+                  parts: input.parts.map((part) =>
+                    part.type === 'text' ||
+                    inputModalities(selection).includes('image')
+                      ? part
+                      : {
+                          type: 'text' as const,
+                          text: `Attached file: ${part.filename ?? 'attachment'} (${part.mediaType})`,
+                        },
+                  ),
+                },
+              ],
             );
           },
           async compact() {
@@ -791,6 +815,7 @@ export function createChatRunner(
             consume(await agent.streamUntilIdle([], await optionsFor(next)));
           },
           abort() {
+            speechPlayback.stop();
             runAbort.abort();
             agent.abortThreadStream({ ...target, clearPendingSignals: true });
             pending.discard();
@@ -800,6 +825,7 @@ export function createChatRunner(
             pending.clear();
           },
           async close() {
+            const closingSpeech = speechPlayback.close();
             unsubscribeCommands?.();
             runAbort.abort();
             agent.abortThreadStream({ ...target, clearPendingSignals: true });
@@ -807,6 +833,7 @@ export function createChatRunner(
             unsubscribeQueue();
             await observing;
             await Promise.allSettled([...streams]);
+            await closingSpeech;
             await compaction.engine.settled();
             await memory.settled();
             await workspace?.destroy();
@@ -814,6 +841,7 @@ export function createChatRunner(
           },
         };
       } catch (error) {
+        await speechPlayback.close();
         unsubscribeCommands?.();
         await browsers.releaseInactive(thread.id);
         if (workspace) await workspace.destroy();

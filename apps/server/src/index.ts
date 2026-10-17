@@ -1,3 +1,4 @@
+import { AudioService } from './modules/audio/service.js';
 import { PgVector } from '@mastra/pg';
 import { resolveMemoryConfig } from './mastra/memory.js';
 import { KnowledgeService } from './modules/knowledge/service.js';
@@ -154,6 +155,12 @@ const knowledge = new KnowledgeService(
 );
 const knowledgeWorker = new KnowledgeWorker(knowledge);
 knowledgeWorker.start();
+const audio = new AudioService(workspaceRoot, providers, async () => {
+  const config = await tools.get('transcribe');
+  if (config.kind !== 'transcribe')
+    throw new Error('Invalid transcription configuration');
+  return config.config;
+});
 const tools: ToolService = new ToolService(
   database,
   providers,
@@ -162,6 +169,7 @@ const tools: ToolService = new ToolService(
   plugins,
   knowledge,
   () => automations.service,
+  audio,
 );
 const agents = new AgentService(
   agentStore,
@@ -232,6 +240,7 @@ const app = createApp(
   plugins,
   knowledge,
   await createApiDocsPlugin(env.NODE_ENV),
+  audio,
 );
 
 async function disposeResources() {

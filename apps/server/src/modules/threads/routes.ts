@@ -52,7 +52,7 @@ export function threadRoutes(
     await service.getThread(userId, threadId);
     return eventStream(
       c.req.raw.signal,
-      (send, close) =>
+      (send, close, sendStreaming) =>
         service.subscribe(
           userId,
           threadId,
@@ -62,6 +62,7 @@ export function threadRoutes(
             send('revoked', { code: code ?? 'PROJECT_NOT_FOUND' });
             close();
           },
+          (event) => sendStreaming('speech', event),
         ),
       async () => {
         const session = await auth.api.getSession({

@@ -9,6 +9,7 @@ export const languageModelProviders = {
 } as const;
 export const otherProviders = {
   mineru: 'MinerU',
+  paddleocr: 'PaddleOCR',
   serpapi: 'SerpAPI',
   'jina-ai': 'Jina AI',
 } as const;
@@ -17,13 +18,17 @@ export function providerGroup(type: string) {
   return Object.hasOwn(otherProviders, type) ? 'other' : 'languageModel';
 }
 export function providerSupportsModels(type: string) {
-  return type === 'mineru' || providerGroup(type) === 'languageModel';
+  return isOcrProvider(type) || providerGroup(type) === 'languageModel';
+}
+export function isOcrProvider(type: string) {
+  return type === 'mineru' || type === 'paddleocr';
 }
 export const providerTypeSchema = z.enum([
   ...(Object.keys(languageModelProviders) as Array<
     keyof typeof languageModelProviders
   >),
   'mineru',
+  'paddleocr',
   'serpapi',
   'jina-ai',
 ]);
@@ -84,7 +89,7 @@ export const modelTypes = [
 export const modelTypeSchema = z.enum(modelTypes);
 export type ModelType = z.infer<typeof modelTypeSchema>;
 export function providerModelTypes(type: string): readonly ModelType[] {
-  if (type === 'mineru') return ['ocr'];
+  if (isOcrProvider(type)) return ['ocr'];
   return providerSupportsModels(type)
     ? modelTypes.filter((modelType) => modelType !== 'ocr')
     : [];

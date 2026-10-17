@@ -11,16 +11,21 @@ export type OcrOptions = {
   enableFormula?: boolean;
   enableTable?: boolean;
   pageRanges?: string;
+  // Provider-specific recognition options (PaddleOCR: official optionalPayload).
+  providerOptions?: Record<string, unknown>;
 };
 
 export type OcrResult = {
   markdown: string;
-  archiveUrl: string;
+  archiveUrl?: string;
+  // Some providers return structured results instead of a ZIP archive.
+  resultUrl?: string;
   taskId: string;
 };
 
 export interface OcrModel {
   readonly provider: string;
   readonly modelId: string;
+  readonly supportsPageRanges?: boolean;
   doOCR(options: OcrOptions): Promise<OcrResult>;
 }

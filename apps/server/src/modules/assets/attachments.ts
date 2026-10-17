@@ -4,6 +4,10 @@ import { extname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { GeneratedAsset } from '@aime/db';
 import { MAX_IMAGE_BYTES, type RunInput } from '@aime/shared/threads';
+import {
+  serializeAttachments,
+  type AttachmentMetadata,
+} from '@aime/shared/chat-attachments';
 import { FILE_UPLOAD_MAX_SIZE } from '@aime/shared/files';
 import type { ThreadService } from '../threads/service.js';
 import { ThreadError } from '../threads/errors.js';
@@ -32,7 +36,7 @@ export async function prepareAssetAttachments(
   signal?: AbortSignal,
 ): Promise<{ parts: RunInput['parts'] }> {
   const parts: RunInput['parts'] = [];
-  const references: string[] = [];
+  const references: AttachmentMetadata[] = [];
   for (const asset of assets) {
     signal?.throwIfAborted();
     const copy =
@@ -40,12 +44,14 @@ export async function prepareAssetAttachments(
     const temporary = await mkdtemp(join(tmpdir(), 'asset-attachment-'));
     const source = join(temporary, 'source');
     let path = asset.path;
+    let attachmentSize: number | undefined;
     try {
       const inline = await threads.withWorkspaceFiles(
         userId,
         asset.threadId,
         async (root) => {
           const info = await previewWorkspaceFile(root, asset.path);
+          attachmentSize = info.size;
           if (info.size > FILE_UPLOAD_MAX_SIZE)
             throw new ThreadError('FILE_UPLOAD_TOO_LARGE', 413);
           const isInline =
@@ -120,21 +126,19 @@ export async function prepareAssetAttachments(
             : imageMimeType(bytes);
         parts.push({
           type: 'file',
-          filename: asset.name,
+          filename: path.split('/').at(-1),
           mediaType,
           url: `data:${mediaType};base64,${bytes.toString('base64')}`,
         });
       }
-      references.push(
-        `- ${JSON.stringify(asset.name)} (${asset.mimeType}): ${JSON.stringify(path)}`,
-      );
+      references.push({ path, size: attachmentSize, mimeType: asset.mimeType });
     } finally {
       await rm(temporary, { recursive: true, force: true });
     }
   }
   parts.push({
     type: 'text',
-    text: `Attached generated assets (paths relative to this conversation workspace):\n${references.join('\n')}`,
+    text: serializeAttachments(references),
   });
   return { parts };
 }

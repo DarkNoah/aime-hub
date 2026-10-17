@@ -3,6 +3,12 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { webOriginsEnvSchema } from '../../packages/shared/src/web-origins';
+import { moonshineAssets } from './build/moonshine-assets';
+
+const isolationHeaders = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'credentialless',
+};
 
 export default defineConfig(({ mode, command }) => {
   const envDir = fileURLToPath(new URL('../../', import.meta.url));
@@ -20,6 +26,7 @@ export default defineConfig(({ mode, command }) => {
     plugins: [
       react(),
       tailwindcss(),
+      moonshineAssets(),
       {
         name: 'dev-entry-url',
         apply: 'serve',
@@ -40,7 +47,9 @@ export default defineConfig(({ mode, command }) => {
     // Keep Vite's ?url handling for tldraw JSON translations and bundled assets.
     // Dependency prebundling otherwise turns translations into JSON objects.
     optimizeDeps: { exclude: ['@tldraw/assets'] },
+    preview: { headers: isolationHeaders },
     server: {
+      headers: isolationHeaders,
       host: rootEnv.WEB_HOST ?? '0.0.0.0',
       port: Number(webUrl.port || (webUrl.protocol === 'https:' ? 443 : 80)),
       allowedHosts: webOrigins.map((origin) => new URL(origin).hostname),

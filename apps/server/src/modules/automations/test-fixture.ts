@@ -164,6 +164,7 @@ export async function fixture(
           reference: 'fixture/model',
           providerOptions: {},
           supportsImages: false,
+          modalitiesInput: ['text'],
           toolCall: false,
         };
       },

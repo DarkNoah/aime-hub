@@ -32,3 +32,15 @@ plugins/vibe-quant/**/__pycache__/
 !scripts/chat-automation-preview.test.ts
 !apps/server/src/modules/threads/browser.test.ts
 !apps/server/src/modules/threads/context-compaction.test.ts
+!apps/server/src/modules/threads/attachment-processor.test.ts
+!apps/server/src/modules/threads/runner-attachments.test.ts
+
+!apps/server/src/modules/tools/audio.test.ts
+!apps/server/src/modules/tools/speech.test.ts
+!apps/server/src/modules/tools/speech-playback.test.ts
+!scripts/chat-speech-preview.test.ts
+!scripts/chat-voice-input.test.ts
+!scripts/paddleocr.test.ts
+!scripts/paddleocr-settings.test.ts
+!apps/server/src/modules/tools/view-file.test.ts
+!scripts/tool-config.test.ts

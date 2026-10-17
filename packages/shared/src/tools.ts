@@ -32,11 +32,17 @@ export const imageGenConfigSchema = z.strictObject({
 export const speechConfigSchema = imageGenConfigSchema.extend({
   timeoutMs: z.number().int().min(1000).max(600000).default(300000),
 });
+export const transcribeConfigSchema = speechConfigSchema;
+export const viewFileConfigSchema = imageGenConfigSchema.extend({
+  timeoutMs: z.number().int().min(1000).max(600000).default(600000),
+});
 export const toolConfigSchemas = {
   web_search: webSearchConfigSchema,
   web_fetch: webFetchConfigSchema,
   image_gen: imageGenConfigSchema,
   speech: speechConfigSchema,
+  transcribe: transcribeConfigSchema,
+  view_file: viewFileConfigSchema,
 };
 export type ConfigurableToolId = keyof typeof toolConfigSchemas;
 export const toolIds = Object.keys(toolConfigSchemas) as ConfigurableToolId[];
@@ -45,11 +51,15 @@ export type WebSearchConfig = z.infer<typeof webSearchConfigSchema>;
 export type WebFetchConfig = z.infer<typeof webFetchConfigSchema>;
 export type ImageGenConfig = z.infer<typeof imageGenConfigSchema>;
 export type SpeechConfig = z.infer<typeof speechConfigSchema>;
+export type TranscribeConfig = z.infer<typeof transcribeConfigSchema>;
+export type ViewFileConfig = z.infer<typeof viewFileConfigSchema>;
 export type ToolConfig = { description: string } & (
   | { id: 'web_search'; kind: 'web_search'; config: WebSearchConfig }
   | { id: 'web_fetch'; kind: 'web_fetch'; config: WebFetchConfig }
   | { id: 'image_gen'; kind: 'image_gen'; config: ImageGenConfig }
   | { id: 'speech'; kind: 'speech'; config: SpeechConfig }
+  | { id: 'transcribe'; kind: 'transcribe'; config: TranscribeConfig }
+  | { id: 'view_file'; kind: 'view_file'; config: ViewFileConfig }
   | {
       id: string;
       kind: 'builtin';
@@ -60,3 +70,5 @@ export const defaultWebSearchConfig = webSearchConfigSchema.parse({});
 export const defaultWebFetchConfig = webFetchConfigSchema.parse({});
 export const defaultImageGenConfig = imageGenConfigSchema.parse({});
 export const defaultSpeechConfig = speechConfigSchema.parse({});
+export const defaultTranscribeConfig = transcribeConfigSchema.parse({});
+export const defaultViewFileConfig = viewFileConfigSchema.parse({});

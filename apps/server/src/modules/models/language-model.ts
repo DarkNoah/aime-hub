@@ -10,7 +10,7 @@ import type { AgentExecutionOptions } from '@mastra/core/agent';
 type SharedProviderOptions = NonNullable<
   AgentExecutionOptions<undefined>['providerOptions']
 >;
-import type { ModelDefaults } from '@aime/shared/providers';
+import type { ModelDefaults, ModelInput } from '@aime/shared/providers';
 import { modelSupportsType, providerModelTypes } from '@aime/shared/providers';
 import type { ProviderService } from '../providers/service.js';
 import { ProviderError } from '../providers/network.js';
@@ -44,6 +44,7 @@ export type ResolvedChatModel = {
   model: OpenAICompatibleConfig;
   providerOptions: SharedProviderOptions;
   supportsImages: boolean;
+  modalitiesInput: ModelInput['modalitiesInput'];
   toolCall: boolean;
   maxOutputTokens?: number;
   maxContextTokens?: number;
@@ -126,6 +127,7 @@ export class LanguageModelService {
         thinkingMode: defaults.thinkingMode,
       }),
       supportsImages: model.modalitiesInput.includes('image'),
+      modalitiesInput: model.modalitiesInput,
       toolCall: model.toolCall,
       maxOutputTokens: model.limitOutput ?? undefined,
       maxContextTokens: model.limitContext ?? undefined,

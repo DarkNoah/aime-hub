@@ -49,6 +49,8 @@ import type { McpService } from './modules/mcp/service.js';
 import { mcpRouter } from './modules/mcp/rpc.js';
 import type { SystemSettingsService } from './modules/system-settings/service.js';
 import { systemSettingsRouter } from './modules/system-settings/rpc.js';
+import { audioRoutes } from './modules/audio/routes.js';
+import type { AudioService } from './modules/audio/service.js';
 
 export function createApp(
   auth: Auth,
@@ -76,6 +78,7 @@ export function createApp(
   plugins?: PluginService,
   knowledge?: KnowledgeService,
   apiDocs?: OpenAPIReferencePlugin<RpcContext>,
+  audio?: AudioService,
 ) {
   const app = new Hono<HttpEnv>();
   const webOrigins = normalizeWebOrigins(
@@ -103,6 +106,7 @@ export function createApp(
   });
   if (plugins)
     app.route('/api/plugins', pluginRoutes(auth, plugins, webOrigins));
+  if (audio) app.route('/api/audio', audioRoutes(auth, audio, webOrigins));
   const router = rpc.router({
     knowledge: knowledgeRouter(knowledge),
     usage: usageRouter(usage?.service),

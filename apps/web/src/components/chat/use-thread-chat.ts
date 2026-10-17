@@ -1,3 +1,4 @@
+import { useSpeechPlayback } from '@/components/audio/use-speech-playback';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UIMessage } from 'ai';
 import type {
@@ -19,6 +20,12 @@ export function useThreadChat(
   threadId: string,
   onThreadUpdated?: (thread: ThreadSummary) => void,
 ) {
+  const speech = useSpeechPlayback(threadId);
+  const {
+    receive: receiveSpeech,
+    stop: stopSpeech,
+    unlock: unlockSpeech,
+  } = speech;
   const [thread, setThread] = useState<ThreadSummary | null>(null);
   const [connected, setConnected] = useState(false);
   const [usage, setUsage] = useState<ChatUsage | null>(null);
@@ -77,6 +84,7 @@ export function useThreadChat(
           ) as ThreadSnapshot<UIMessage>;
           if (snapshot.thread.error === 'THREAD_NOT_FOUND') {
             source?.close();
+            stopSpeech();
             setConnected(false);
             setError(new ChatApiError('THREAD_NOT_FOUND'));
             return;
@@ -134,13 +142,16 @@ export function useThreadChat(
             });
         });
         source.addEventListener('update', receive);
+        source.addEventListener('speech', receiveSpeech);
         source.addEventListener('expired', () => {
           source?.close();
+          stopSpeech();
           setConnected(false);
           setError(new ChatApiError('UNAUTHORIZED'));
         });
         source.addEventListener('revoked', (event) => {
           source?.close();
+          stopSpeech();
           recoveryVersion++;
           setConnected(false);
           setMessages([]);
@@ -163,6 +174,7 @@ export function useThreadChat(
         });
         source.onerror = () => {
           if (!disposed) {
+            stopSpeech();
             setConnected(false);
             setError(new TypeError('Disconnected'));
           }
@@ -175,10 +187,12 @@ export function useThreadChat(
       disposed = true;
       controller.abort();
       source?.close();
+      stopSpeech();
     };
-  }, [threadId, setMessages, updateThread]);
+  }, [threadId, setMessages, updateThread, receiveSpeech, stopSpeech]);
 
   async function send(input: RunInput) {
+    unlockSpeech();
     setSubmitting(true);
     try {
       updateThread(await chatApi.run(threadId, input));
@@ -204,6 +218,7 @@ export function useThreadChat(
   }
 
   return {
+    speech,
     thread,
     usage,
     goal,
