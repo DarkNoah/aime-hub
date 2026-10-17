@@ -11,6 +11,8 @@ import { filePath, validatePath } from './paths.js';
 
 export const TEXT_LIMIT = 512 * 1024;
 export const media: Record<string, [FilePreview['kind'], string]> = {
+  '.pdf': ['pdf', 'application/pdf'],
+  '.glb': ['model', 'model/gltf-binary'],
   '.png': ['image', 'image/png'],
   '.jpg': ['image', 'image/jpeg'],
   '.jpeg': ['image', 'image/jpeg'],

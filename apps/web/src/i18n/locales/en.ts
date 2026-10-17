@@ -1352,6 +1352,21 @@ export const en = {
   'files.renderedPreview': 'Preview',
   'files.sourcePreview': 'Source',
   'files.htmlPreview': 'HTML preview of {{name}}',
+  'files.previousPage': 'Previous page',
+  'files.nextPage': 'Next page',
+  'files.pageNumber': 'Page number',
+  'files.fitWidth': 'Fit width',
+  'files.pdfError': 'Could not preview this PDF. Download it to open locally.',
+  'files.pdfPassword':
+    'This PDF requires a password. Download it to open locally.',
+  'files.modelPreview': '3D model preview of {{name}}',
+  'files.modelHint':
+    'Drag to rotate · Scroll or pinch to zoom · Right-drag to pan',
+  'files.modelError':
+    'Could not preview this model. Check the GLB file or your browser’s 3D support.',
+  'files.resetView': 'Reset view',
+  'files.playAnimation': 'Play animation',
+  'files.pauseAnimation': 'Pause animation',
   'files.refreshPreview': 'Reload file',
   'files.download': 'Download file',
   'imagePreview.open': 'View image: {{name}}',
@@ -1384,7 +1399,7 @@ export const en = {
   'files.closeFile': 'Close {{name}}',
   'files.selectFile': 'Select a file to preview',
   'files.previewHint':
-    'Open files in separate tabs. Preview HTML, images, audio, video, code, and plain text.',
+    'Open files in separate tabs. Preview PDFs, GLB models, HTML, images, audio, video, code, and plain text.',
   'projects.all': 'All projects',
   'projects.list': 'Project list',
   'projects.openNamed': 'Open {{name}} dashboard',

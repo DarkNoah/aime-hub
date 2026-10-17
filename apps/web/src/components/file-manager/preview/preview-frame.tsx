@@ -22,9 +22,11 @@ export function PreviewFrame({ children }: { children: ReactNode }) {
 export function PreviewFallback({
   downloadUrl,
   mediaError = false,
+  message,
 }: {
   downloadUrl: string;
   mediaError?: boolean;
+  message?: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -36,7 +38,7 @@ export function PreviewFallback({
         role={mediaError ? 'alert' : undefined}
         className="text-sm text-muted-foreground"
       >
-        {t(mediaError ? 'files.mediaError' : 'files.binary')}
+        {message ?? t(mediaError ? 'files.mediaError' : 'files.binary')}
       </p>
       <Button asChild variant="outline" className="mt-4">
         <a href={downloadUrl} download>

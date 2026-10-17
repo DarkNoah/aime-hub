@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { webOriginsEnvSchema } from '../../packages/shared/src/web-origins';
 import { moonshineAssets } from './build/moonshine-assets';
+import { filePreviewAssets } from './build/file-preview-assets';
 
 const isolationHeaders = {
   'Cross-Origin-Opener-Policy': 'same-origin',
@@ -27,6 +28,7 @@ export default defineConfig(({ mode, command }) => {
       react(),
       tailwindcss(),
       moonshineAssets(),
+      filePreviewAssets(),
       {
         name: 'dev-entry-url',
         apply: 'serve',

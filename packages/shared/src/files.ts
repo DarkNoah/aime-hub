@@ -19,7 +19,7 @@ export type FilePreview = {
   path: string;
   size: number;
   modifiedAt: string;
-  kind: 'text' | 'image' | 'audio' | 'video' | 'binary';
+  kind: 'text' | 'image' | 'audio' | 'video' | 'pdf' | 'model' | 'binary';
   mime: string;
   text?: string;
   truncated?: boolean;

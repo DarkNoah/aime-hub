@@ -10,6 +10,8 @@ import { VideoPreview } from './video-preview';
 const renderers: Record<PreviewKind, ComponentType<PreviewRendererProps>> = {
   text: lazy(() => import('./text-preview')),
   html: lazy(() => import('./html-preview')),
+  pdf: lazy(() => import('./pdf-preview')),
+  model: lazy(() => import('./model-preview')),
   image: ImagePreview,
   audio: AudioPreview,
   video: VideoPreview,
@@ -20,7 +22,7 @@ export function FilePreviewContent(props: PreviewRendererProps) {
   const Renderer = renderers[getPreviewKind(props.data)];
   return (
     <Suspense fallback={<PreviewLoading />}>
-      <Renderer {...props} />
+      <Renderer key={props.url} {...props} />
     </Suspense>
   );
 }

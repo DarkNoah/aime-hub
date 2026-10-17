@@ -35,7 +35,7 @@ export function FilePreview({
         if (!controller.signal.aborted) {
           setData({
             ...result,
-            url: `${rawUrl}&v=${encodeURIComponent(result.modifiedAt)}`,
+            url: `${rawUrl}&v=${encodeURIComponent(result.modifiedAt)}&retry=${retry}`,
           });
           setError(null);
         }
