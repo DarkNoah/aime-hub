@@ -19,6 +19,9 @@ export function signalMessage(
     role: 'user',
     metadata: {
       ...data.metadata,
+      // A queued input is inserted into the conversation when consumed. Keep
+      // its submission time for display/elapsed time, but sort by this boundary.
+      signalCreatedAt: data.createdAt,
       createdAt:
         typeof data.metadata?.createdAt === 'string'
           ? data.metadata.createdAt

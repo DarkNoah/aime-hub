@@ -1,4 +1,7 @@
 import { Braces, ChevronDown, ScanText, X } from 'lucide-react';
+import { useMemo } from 'react';
+import { isToolUIPart } from 'ai';
+import { transcriptionExcerpt } from '@aime/shared/audio';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -11,6 +14,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { CodeBlock } from '@/components/ai-elements/code-block';
 import { MessagePartPreview } from './renderers';
 import type { PreviewPart } from './selection';
+import { getToolName } from '../tool-renderers/registry';
 
 export function ChatMessagePreview({
   part,
@@ -22,6 +26,14 @@ export function ChatMessagePreview({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const raw = useMemo(() => {
+    if (!part) return null;
+    const text = JSON.stringify(part, null, 2);
+    const name = isToolUIPart(part) ? getToolName(part) : undefined;
+    return name === 'transcriptions' || name === 'transcribe'
+      ? transcriptionExcerpt(text)
+      : { text, truncated: false };
+  }, [part]);
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <header className="flex min-h-12 shrink-0 items-center gap-2 border-b px-3">
@@ -69,9 +81,14 @@ export function ChatMessagePreview({
                   />
                 </Button>
               </CollapsibleTrigger>
-              <CollapsibleContent className="pt-2">
+              <CollapsibleContent className="space-y-2 pt-2">
+                {raw?.truncated && (
+                  <Badge variant="secondary">
+                    {t('chat.transcriptions.truncated')}
+                  </Badge>
+                )}
                 <CodeBlock
-                  code={JSON.stringify(part, null, 2)}
+                  code={raw?.text ?? ''}
                   language="json"
                   className="[&_pre]:whitespace-pre-wrap [&_pre]:[overflow-wrap:anywhere]"
                 />

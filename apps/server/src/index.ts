@@ -167,8 +167,8 @@ const knowledge = new KnowledgeService(
 const knowledgeWorker = new KnowledgeWorker(knowledge);
 knowledgeWorker.start();
 const audio = new AudioService(workspaceRoot, providers, async () => {
-  const config = await tools.get('transcribe');
-  if (config.kind !== 'transcribe')
+  const config = await tools.get('transcriptions');
+  if (config.kind !== 'transcriptions')
     throw new Error('Invalid transcription configuration');
   return config.config;
 });

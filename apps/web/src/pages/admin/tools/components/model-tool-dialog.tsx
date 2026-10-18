@@ -29,7 +29,7 @@ export function ModelToolDialog({
 }: {
   tool: Extract<
     ToolConfig,
-    { kind: 'image_gen' | 'speech' | 'transcribe' | 'read_file' }
+    { kind: 'image_gen' | 'speech' | 'transcriptions' | 'read_file' }
   >;
   onSaved: (tool: ToolConfig) => void;
   onClose: () => void;
@@ -37,7 +37,7 @@ export function ModelToolDialog({
 }) {
   const { t } = useTranslation();
   const speech = tool.kind === 'speech';
-  const transcription = tool.kind === 'transcribe';
+  const transcription = tool.kind === 'transcriptions';
   const ocr = tool.kind === 'read_file';
   const labels = ocr
     ? ({
@@ -51,12 +51,12 @@ export function ModelToolDialog({
       } satisfies Record<string, TranslationKey>)
     : ({
         configure: transcription
-          ? 'tools.configureTranscribe'
+          ? 'tools.configureTranscriptions'
           : speech
             ? 'tools.configureSpeech'
             : 'tools.configureImage',
         enable: transcription
-          ? 'tools.enableTranscribe'
+          ? 'tools.enableTranscriptions'
           : speech
             ? 'tools.enableSpeech'
             : 'tools.enableImage',
@@ -66,22 +66,22 @@ export function ModelToolDialog({
             ? 'defaults.speechModel'
             : 'defaults.imageModel',
         defaultModel: transcription
-          ? 'tools.defaultTranscribeModel'
+          ? 'tools.defaultTranscriptionsModel'
           : speech
             ? 'tools.defaultSpeechModel'
             : 'tools.defaultImageModel',
         modelHint: transcription
-          ? 'tools.transcribeModelHint'
+          ? 'tools.transcriptionsModelHint'
           : speech
             ? 'tools.speechModelHint'
             : 'tools.imageModelHint',
         providerHint: transcription
-          ? 'tools.transcribeProviderHint'
+          ? 'tools.transcriptionsProviderHint'
           : speech
             ? 'tools.speechProviderHint'
             : 'tools.imageProviderHint',
         invalidModel: transcription
-          ? 'tools.invalidTranscribeModel'
+          ? 'tools.invalidTranscriptionsModel'
           : speech
             ? 'tools.invalidSpeechModel'
             : 'tools.invalidImageModel',

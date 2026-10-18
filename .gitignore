@@ -37,9 +37,13 @@ plugins/vibe-quant/**/__pycache__/
 !apps/server/src/modules/threads/runner-attachments.test.ts
 
 !apps/server/src/modules/tools/audio.test.ts
+!apps/server/src/modules/tools/audio-cancellation.test.ts
+!apps/server/src/modules/tools/audio-cleanup.test.ts
+!apps/server/src/modules/tools/transcriptions-subtitles.test.ts
 !apps/server/src/modules/tools/speech.test.ts
 !apps/server/src/modules/tools/speech-playback.test.ts
 !scripts/chat-speech-preview.test.ts
+!scripts/chat-transcriptions-preview.test.ts
 !scripts/chat-voice-input.test.ts
 !scripts/paddleocr.test.ts
 !scripts/paddleocr-settings.test.ts
@@ -50,3 +54,7 @@ plugins/vibe-quant/**/__pycache__/
 !scripts/e2b-desktop-settings.test.ts
 !apps/server/src/modules/agents/local.test.ts
 !apps/server/src/modules/threads/runner-local-agents.test.ts
+!apps/server/src/modules/threads/incomplete-tool-calls.test.ts
+!apps/server/src/modules/threads/runner-incomplete-tool-calls.test.ts
+!apps/server/src/modules/threads/turn-history.test.ts
+!scripts/chat-turns.test.ts

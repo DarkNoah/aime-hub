@@ -2,9 +2,14 @@ import { z } from 'zod';
 
 // Runtime registrations own the catalog; only tools with extra settings need a schema here.
 export const toolIdSchema = z.string().regex(/^[a-zA-Z][a-zA-Z0-9_]{0,99}$/);
-// Existing Agent versions may still store the OCR tool's former ID.
+// Existing Agent versions may still store former tool IDs.
+export const legacyToolIds: Record<string, string> = {
+  read_file: 'view_file',
+  transcriptions: 'transcribe',
+};
 export const normalizeToolId = (id: string) =>
-  id === 'view_file' ? 'read_file' : id;
+  Object.keys(legacyToolIds).find((current) => legacyToolIds[current] === id) ??
+  id;
 export const enabledToolConfigSchema = z.strictObject({
   enabled: z.boolean().default(true),
 });
@@ -35,7 +40,7 @@ export const imageGenConfigSchema = z.strictObject({
 export const speechConfigSchema = imageGenConfigSchema.extend({
   timeoutMs: z.number().int().min(1000).max(600000).default(300000),
 });
-export const transcribeConfigSchema = speechConfigSchema;
+export const transcriptionsConfigSchema = speechConfigSchema;
 export const readFileConfigSchema = imageGenConfigSchema.extend({
   timeoutMs: z.number().int().min(1000).max(600000).default(600000),
 });
@@ -44,7 +49,7 @@ export const toolConfigSchemas = {
   web_fetch: webFetchConfigSchema,
   image_gen: imageGenConfigSchema,
   speech: speechConfigSchema,
-  transcribe: transcribeConfigSchema,
+  transcriptions: transcriptionsConfigSchema,
   read_file: readFileConfigSchema,
 };
 export type ConfigurableToolId = keyof typeof toolConfigSchemas;
@@ -54,14 +59,18 @@ export type WebSearchConfig = z.infer<typeof webSearchConfigSchema>;
 export type WebFetchConfig = z.infer<typeof webFetchConfigSchema>;
 export type ImageGenConfig = z.infer<typeof imageGenConfigSchema>;
 export type SpeechConfig = z.infer<typeof speechConfigSchema>;
-export type TranscribeConfig = z.infer<typeof transcribeConfigSchema>;
+export type TranscriptionsConfig = z.infer<typeof transcriptionsConfigSchema>;
 export type ReadFileConfig = z.infer<typeof readFileConfigSchema>;
 export type ToolConfig = { description: string } & (
   | { id: 'web_search'; kind: 'web_search'; config: WebSearchConfig }
   | { id: 'web_fetch'; kind: 'web_fetch'; config: WebFetchConfig }
   | { id: 'image_gen'; kind: 'image_gen'; config: ImageGenConfig }
   | { id: 'speech'; kind: 'speech'; config: SpeechConfig }
-  | { id: 'transcribe'; kind: 'transcribe'; config: TranscribeConfig }
+  | {
+      id: 'transcriptions';
+      kind: 'transcriptions';
+      config: TranscriptionsConfig;
+    }
   | { id: 'read_file'; kind: 'read_file'; config: ReadFileConfig }
   | {
       id: string;
@@ -73,5 +82,5 @@ export const defaultWebSearchConfig = webSearchConfigSchema.parse({});
 export const defaultWebFetchConfig = webFetchConfigSchema.parse({});
 export const defaultImageGenConfig = imageGenConfigSchema.parse({});
 export const defaultSpeechConfig = speechConfigSchema.parse({});
-export const defaultTranscribeConfig = transcribeConfigSchema.parse({});
+export const defaultTranscriptionsConfig = transcriptionsConfigSchema.parse({});
 export const defaultReadFileConfig = readFileConfigSchema.parse({});

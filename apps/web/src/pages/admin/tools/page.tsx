@@ -176,7 +176,8 @@ export function AdminToolsPage() {
                     <ImagePlus />
                   ) : tool.kind === 'read_file' ? (
                     <FileScan />
-                  ) : tool.kind === 'speech' || tool.kind === 'transcribe' ? (
+                  ) : tool.kind === 'speech' ||
+                    tool.kind === 'transcriptions' ? (
                     <AudioLines />
                   ) : tool.kind === 'builtin' ? (
                     <Wrench />
@@ -206,14 +207,14 @@ export function AdminToolsPage() {
                   {tool.kind === 'image_gen' ||
                   tool.kind === 'read_file' ||
                   tool.kind === 'speech' ||
-                  tool.kind === 'transcribe' ? (
+                  tool.kind === 'transcriptions' ? (
                     <p className="mt-2 text-xs text-muted-foreground">
                       {tool.config.model ??
                         t(
                           tool.kind === 'read_file'
                             ? 'tools.selectOcrModel'
-                            : tool.kind === 'transcribe'
-                              ? 'tools.defaultTranscribeModel'
+                            : tool.kind === 'transcriptions'
+                              ? 'tools.defaultTranscriptionsModel'
                               : tool.kind === 'speech'
                                 ? 'tools.defaultSpeechModel'
                                 : 'tools.defaultImageModel',
@@ -283,7 +284,7 @@ export function AdminToolsPage() {
       {selected?.kind === 'image_gen' ||
       selected?.kind === 'read_file' ||
       selected?.kind === 'speech' ||
-      selected?.kind === 'transcribe' ? (
+      selected?.kind === 'transcriptions' ? (
         <ModelToolDialog
           tool={selected}
           onClose={() => setSelected(undefined)}

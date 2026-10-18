@@ -10,7 +10,7 @@ export function toolErrorKey(error: unknown, toolId?: ToolId): TranslationKey {
     case 'FORBIDDEN':
       return 'errors.forbidden';
     case 'INVALID_TRANSCRIPTION_MODEL':
-      return 'tools.invalidTranscribeModel';
+      return 'tools.invalidTranscriptionsModel';
     case 'INVALID_SPEECH_MODEL':
       return 'tools.invalidSpeechModel';
     case 'INVALID_IMAGE_MODEL':

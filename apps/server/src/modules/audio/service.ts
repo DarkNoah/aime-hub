@@ -6,12 +6,23 @@ import {
   generateVoiceSchema,
   type GenerateVoiceInput,
 } from '@aime/shared/audio';
-import type { TranscribeConfig } from '@aime/shared/tools';
-import { defaultTranscribeConfig } from '@aime/shared/tools';
+import type { TranscriptionsConfig } from '@aime/shared/tools';
+import { defaultTranscriptionsConfig } from '@aime/shared/tools';
 import type { ProviderService } from '../providers/service.js';
 import { ThreadError } from '../threads/errors.js';
 import { normalizeVoiceAudio } from './convert.js';
 import { VoiceStore } from './voices.js';
+import {
+  parseTranscriptionResponse,
+  type TranscriptionResponseFormat,
+} from '../../mastra/providers/transcription-response.js';
+
+type TranscriptionOptions = {
+  model?: string;
+  signal?: AbortSignal;
+  language?: string;
+  prompt?: string;
+};
 
 export class AudioService {
   readonly voices: VoiceStore;
@@ -21,21 +32,13 @@ export class AudioService {
       ProviderService,
       'getTranscriptionModel' | 'getSpeechModel'
     >,
-    private readonly config: () => Promise<TranscribeConfig> = async () =>
-      defaultTranscribeConfig,
+    private readonly config: () => Promise<TranscriptionsConfig> = async () =>
+      defaultTranscriptionsConfig,
   ) {
     this.voices = new VoiceStore(root);
   }
 
-  async transcribe(
-    audio: Buffer,
-    options: {
-      model?: string;
-      signal?: AbortSignal;
-      language?: string;
-      prompt?: string;
-    } = {},
-  ) {
+  private async transcriptionContext(options: TranscriptionOptions) {
     const config = await this.config();
     if (!config.enabled)
       throw new ThreadError('AUDIO_TRANSCRIPTION_DISABLED', 403);
@@ -53,6 +56,39 @@ export class AudioService {
       typeof model === 'string'
         ? model.split('/')[0]
         : model.provider.split('.')[0];
+    return { model, provider, signal };
+  }
+
+  /** Preserve the native OpenAI response, including empty transcripts and subtitles. */
+  async transcriptions(
+    audio: Buffer,
+    options: Omit<TranscriptionOptions, 'prompt'> & {
+      response_format?: TranscriptionResponseFormat;
+    } = {},
+  ) {
+    const { model, provider, signal } =
+      await this.transcriptionContext(options);
+    if (typeof model === 'string')
+      throw new ThreadError('AUDIO_ASR_UNAVAILABLE');
+    const responseFormat = options.response_format ?? 'json';
+    const result = await model.doGenerate({
+      audio,
+      mediaType: 'audio/wav',
+      abortSignal: signal,
+      providerOptions: {
+        [provider]: {
+          response_format: responseFormat,
+          ...(options.language ? { language: options.language } : {}),
+        },
+      },
+    });
+    signal.throwIfAborted();
+    return parseTranscriptionResponse(result.response.body, responseFormat);
+  }
+
+  async transcribe(audio: Buffer, options: TranscriptionOptions = {}) {
+    const { model, provider, signal } =
+      await this.transcriptionContext(options);
     const result = await transcribe({
       model,
       audio,

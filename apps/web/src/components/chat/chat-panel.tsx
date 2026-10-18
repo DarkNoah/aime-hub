@@ -1,6 +1,5 @@
 import { SpeechPlaybackBar } from '@/components/audio/speech-playback-bar';
 import { isThreadActive } from '@aime/shared/threads';
-import { canContinueThread } from '@aime/shared/thread-messages';
 import {
   useContext,
   useEffect,
@@ -24,7 +23,8 @@ import { ChatConversation } from './chat-conversation';
 import { ChatQueue } from './chat-queue';
 import { ChatWorkspace } from './chat-workspace';
 import { LoadingState } from '@/components/loading-state';
-import { ChatMessages } from './chat-messages';
+import { ChatTurns } from './chat-turns';
+import { ChatHistoryLoader } from './chat-history-loader';
 import { ChatErrorCard } from './chat-error-card';
 import { ChatContinueButton } from './chat-continue-button';
 import { ChatRunningTasks } from './chat-running-tasks';
@@ -52,6 +52,7 @@ type WorkspaceSnapshot = {
   messages?: UIMessage[];
   loading?: boolean;
   hasEarlier?: boolean;
+  assetRevision?: string;
 };
 type SessionProps = ChatPanelProps & {
   onWorkspaceChange: (snapshot: WorkspaceSnapshot) => void;
@@ -108,10 +109,10 @@ function WorkspaceMessages({
 }: WorkspaceSnapshot & {
   onChange: (snapshot: WorkspaceSnapshot) => void;
 }) {
-  const { threadId, messages, loading, hasEarlier } = snapshot;
+  const { threadId, messages, loading, hasEarlier, assetRevision } = snapshot;
   useLayoutEffect(() => {
-    onChange({ threadId, messages, loading, hasEarlier });
-  }, [onChange, threadId, messages, loading, hasEarlier]);
+    onChange({ threadId, messages, loading, hasEarlier, assetRevision });
+  }, [onChange, threadId, messages, loading, hasEarlier, assetRevision]);
   return null;
 }
 
@@ -332,11 +333,7 @@ function ExistingChat({
   const chat = useThreadChat(threadId, onThreadUpdated);
   const running = isThreadActive(chat.thread?.status);
   const [stopping, setStopping] = useState(false);
-  const canContinue = canContinueThread(
-    chat.messages,
-    chat.thread,
-    chat.toolInteractions,
-  );
+  const canContinue = chat.canContinue;
   const notifyError = (cause: unknown) => toast.error(t(chatErrorKey(cause)));
   return (
     <>
@@ -346,6 +343,10 @@ function ExistingChat({
         messages={chat.messages}
         loading={!chat.thread && !chat.error}
         hasEarlier={chat.hasEarlier}
+        assetRevision={chat.turns
+          .map((turn) => turn.assetRevision)
+          .filter(Boolean)
+          .join(',')}
       />
       <PanelHeader
         title={chat.thread?.title || t('chat.new')}
@@ -427,17 +428,12 @@ function ExistingChat({
           )
         }
       >
-        {chat.hasEarlier && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="mx-auto"
-            disabled={chat.loadingHistory}
-            onClick={() => void chat.loadEarlier().catch(notifyError)}
-          >
-            {t(chat.loadingHistory ? 'chat.loading' : 'chat.loadEarlier')}
-          </Button>
-        )}
+        <ChatHistoryLoader
+          hasEarlier={chat.hasEarlier}
+          loading={chat.loadingHistory}
+          loadEarlier={chat.loadEarlier}
+          firstTurnId={chat.turns[0]?.id}
+        />
         {!chat.thread && !chat.error && (
           <div
             role="status"
@@ -449,16 +445,19 @@ function ExistingChat({
             <div className="ml-auto h-14 w-3/5 rounded-lg bg-muted" />
           </div>
         )}
-        <ChatMessages
-          messages={chat.messages}
-          threadId={chat.thread?.id}
+        <ChatTurns
+          turns={chat.turns}
+          details={chat.details}
+          loadDetails={chat.loadDetails}
+          activeTurnId={chat.activeTurnId}
+          threadId={threadId}
           running={running}
           activeMessageId={chat.activeMessageId}
           toolInteractions={chat.toolInteractions}
           onToolResponse={chat.respondToTool}
           disabled={!chat.connected || running || stopping}
         />
-        {chat.thread && !chat.messages.length && <ChatWelcome />}
+        {chat.thread && !chat.turns.length && <ChatWelcome />}
         {running && !chat.activeMessageId && (
           <p
             role="status"

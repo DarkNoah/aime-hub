@@ -855,9 +855,9 @@ export const en = {
     'Configure an available speech synthesis model first.',
   'voices.emptyTranscript':
     'No speech was recognized. Check the audio or enter the transcript manually.',
-  'agents.tool.transcribe': 'Speech recognition',
+  'agents.tool.transcriptions': 'Speech recognition',
   'agents.tool.list_voices': 'List voices',
-  'tools.transcribe': 'Speech recognition',
+  'tools.transcriptions': 'Speech recognition',
   'agents.tool.read_file': 'Read file',
   'tools.viewFile': 'Read file',
   'tools.viewFileDescription':
@@ -878,16 +878,16 @@ export const en = {
   'chat.viewFile.truncatedHint':
     'Only the first 100,000 characters are shown. Split the file to read the remaining content.',
   'chat.viewFile.failed': 'File parsing failed.',
-  'tools.transcribeDescription':
-    'Recognize speech from audio files with timestamps when supported.',
-  'tools.configureTranscribe': 'Configure recognition',
-  'tools.enableTranscribe': 'Enable recognition',
-  'tools.defaultTranscribeModel': 'Use the default ASR model',
-  'tools.transcribeModelHint':
+  'tools.transcriptionsDescription':
+    'Transcribe audio or video as JSON, text, SRT or VTT. Video audio is converted to WAV first.',
+  'tools.configureTranscriptions': 'Configure recognition',
+  'tools.enableTranscriptions': 'Enable recognition',
+  'tools.defaultTranscriptionsModel': 'Use the default ASR model',
+  'tools.transcriptionsModelHint':
     'Leave empty to use the default ASR model from Providers.',
-  'tools.transcribeProviderHint':
+  'tools.transcriptionsProviderHint':
     'Used by transcription, voice uploads, and automatic reference transcription during speech synthesis.',
-  'tools.invalidTranscribeModel':
+  'tools.invalidTranscriptionsModel':
     'Select an enabled ASR model from an enabled provider.',
   'tools.speech': 'Speech generation',
   'chat.speech.playback': 'Speech playback',
@@ -900,6 +900,23 @@ export const en = {
   'chat.speech.queued':
     'Speech has been queued for live playback. No audio file is saved.',
   'chat.speech.text': 'Generated text',
+  'chat.transcriptions.source': 'Source audio or video',
+  'chat.transcriptions.result': 'Transcription result',
+  'chat.transcriptions.loading': 'Transcribing audio…',
+  'chat.transcriptions.failed': 'Transcription failed.',
+  'chat.transcriptions.empty': 'No speech was recognized in this file.',
+  'chat.transcriptions.language': 'Language: {{language}}',
+  'chat.transcriptions.duration': 'Duration {{duration}}',
+  'chat.transcriptions.copy': 'Copy transcript',
+  'chat.transcriptions.copied': 'Transcript copied.',
+  'chat.transcriptions.view': 'Transcript view',
+  'chat.transcriptions.timeline': 'Timeline',
+  'chat.transcriptions.text': 'Transcript',
+  'chat.transcriptions.saved': 'Saved file',
+  'chat.transcriptions.truncated': 'Excerpt',
+  'chat.transcriptions.truncatedHint':
+    'Content exceeds 2,000 characters. Only the beginning and end are shown.',
+  'chat.transcriptions.copyExcerpt': 'Copy excerpt',
   'audio.player': 'Audio player',
   'audio.unavailable':
     'Audio could not be played. Retry or download the file to listen locally.',
@@ -2015,7 +2032,7 @@ export const en = {
   'chat.inspector.copied': 'Messages JSON copied.',
   'chat.inspector.count': 'Loaded messages: {{count}}',
   'chat.inspector.hint':
-    'Original message objects, updated as messages stream in. Base64 content is limited to the first 30 characters, including when copied.',
+    'Complete saved messages, loaded and refreshed while this panel is open. Base64 content is limited to the first 30 characters, including when copied.',
   'chat.inspector.earlier':
     'Load earlier messages in the chat to include more history.',
   'chat.inspector.floating': 'Chat',
@@ -2138,6 +2155,8 @@ export const en = {
   'chat.status.running': 'Running',
   'chat.loading': 'Loading…',
   'chat.loadEarlier': 'Load earlier messages',
+  'chat.turns.details': 'View details',
+  'chat.turns.collapse': 'Hide details',
   'chat.toLatest': 'Jump to latest message',
   'chat.reconnect': 'Reconnect',
   'chat.threadList': 'Chat history',

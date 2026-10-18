@@ -10,7 +10,7 @@ import {
   defaultWebFetchConfig,
   defaultImageGenConfig,
   defaultSpeechConfig,
-  defaultTranscribeConfig,
+  defaultTranscriptionsConfig,
   defaultReadFileConfig,
   webFetchConfigSchema,
   webSearchConfigSchema,
@@ -248,6 +248,42 @@ test('renamed OCR settings and Agent exclusions preserve legacy state', async ()
   );
 });
 
+test('renamed transcription settings, defaults and Agent exclusions preserve legacy state', async () => {
+  const f = fixture();
+  const config = {
+    ...defaultTranscriptionsConfig,
+    enabled: false,
+    timeoutMs: 12345,
+  };
+  f.rows.set('tool:transcribe', { id: 'tool:transcribe', value: config });
+  assert.deepEqual((await f.service.get('transcriptions')).config, config);
+  assert.deepEqual(await f.service.buildTools(['transcribe']), {});
+  await f.service.setEnabled('transcriptions', true);
+  assert.deepEqual((await f.service.get('transcriptions')).config, {
+    ...config,
+    enabled: true,
+  });
+  assert.deepEqual(
+    Object.keys(await f.service.buildTools(['transcribe', 'transcriptions'])),
+    ['transcriptions'],
+  );
+  assert.deepEqual(
+    await f.service.buildTools(['transcriptions'], {}, ['transcribe']),
+    {},
+  );
+  assert.deepEqual(
+    await buildTools(['transcriptions'], { transcribe: { enabled: false } }),
+    {},
+  );
+  assert.deepEqual(
+    agentInputSchema.shape.disabledTools.parse([
+      'transcribe',
+      'transcriptions',
+    ]),
+    ['transcriptions'],
+  );
+});
+
 test('all built-in switches persist independently and preserve configured parameters', async () => {
   const f = fixture();
   await f.service.update('read_file', {
@@ -296,7 +332,7 @@ test('persisted configuration controls new tool instances, without credentials i
       { id: 'web_fetch', config: defaultWebFetchConfig },
       { id: 'image_gen', config: defaultImageGenConfig },
       { id: 'speech', config: defaultSpeechConfig },
-      { id: 'transcribe', config: defaultTranscribeConfig },
+      { id: 'transcriptions', config: defaultTranscriptionsConfig },
       { id: 'read_file', config: defaultReadFileConfig },
     ],
   );

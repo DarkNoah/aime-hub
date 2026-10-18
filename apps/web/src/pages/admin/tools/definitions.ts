@@ -25,10 +25,10 @@ export const toolDefinitions = {
     description: 'tools.imageDescription',
     configure: 'tools.configureImage',
   },
-  transcribe: {
-    title: 'tools.transcribe',
-    description: 'tools.transcribeDescription',
-    configure: 'tools.configureTranscribe',
+  transcriptions: {
+    title: 'tools.transcriptions',
+    description: 'tools.transcriptionsDescription',
+    configure: 'tools.configureTranscriptions',
   },
   speech: {
     title: 'tools.speech',
@@ -62,11 +62,11 @@ export const toolDefinitions = {
 } satisfies Record<
   Exclude<
     ConfigurableToolId,
-    'image_gen' | 'speech' | 'transcribe' | 'read_file'
+    'image_gen' | 'speech' | 'transcriptions' | 'read_file'
   >,
   ToolDefinition
 > &
   Record<
-    'image_gen' | 'speech' | 'transcribe' | 'read_file',
+    'image_gen' | 'speech' | 'transcriptions' | 'read_file',
     Pick<ToolDefinition, 'title' | 'description' | 'configure'>
   >;

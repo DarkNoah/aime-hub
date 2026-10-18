@@ -18,6 +18,7 @@ import {
   type MessagePage,
 } from '../threads.js';
 import type { UIMessage } from 'ai';
+import type { ChatTurnDetail, ChatTurnPage } from '../chat-turns.js';
 import { browserContract } from './browser.js';
 
 export const threadsContract = {
@@ -135,10 +136,28 @@ export const threadsContract = {
     .input(
       z.object({
         params: z.object({ threadId }),
-        query: z.object({ page, anchor: z.iso.datetime().optional() }),
+        query: z.object({
+          page,
+          anchor: z.iso.datetime().optional(),
+          view: z.enum(['full', 'summary']).default('full'),
+          cursor: z.string().optional(),
+        }),
       }),
     )
-    .output(type<MessagePage<UIMessage>>()),
+    .output(type<MessagePage<UIMessage> | ChatTurnPage>()),
+  turn: procedure
+    .route({
+      method: 'GET',
+      path: '/threads/{threadId}/turns/{turnId}',
+      inputStructure: 'detailed',
+    })
+    .input(
+      z.object({
+        params: z.object({ threadId, turnId: id }),
+        query: z.object({ cursor: z.string().optional() }),
+      }),
+    )
+    .output(type<ChatTurnDetail>()),
   run: procedure
     .route({
       method: 'POST',

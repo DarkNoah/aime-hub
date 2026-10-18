@@ -3,25 +3,16 @@ import { z } from 'zod';
 import type { ProviderConfig } from './base-provider.js';
 import { requestWebResource, webUrl } from '../web/request.js';
 import { allowAllNetworks } from '../../modules/network/policy.js';
+import {
+  parseTranscriptionResponse,
+  transcriptionResponseFormatSchema,
+} from './transcription-response.js';
 
 const transcriptionOptions = z.object({
   language: z.string().optional(),
   prompt: z.string().optional(),
   temperature: z.number().min(0).max(1).optional(),
-});
-const responseSchema = z.object({
-  text: z.string(),
-  language: z.string().nullish(),
-  duration: z.number().nonnegative().nullish(),
-  segments: z
-    .array(
-      z.object({
-        text: z.string(),
-        start: z.number().nonnegative(),
-        end: z.number().nonnegative(),
-      }),
-    )
-    .nullish(),
+  response_format: transcriptionResponseFormatSchema.default('json'),
 });
 const audioExtensions: Record<string, string> = {
   'audio/wav': 'wav',
@@ -67,10 +58,15 @@ export function createTranscriptionModel(
       abortSignal,
       headers: extraHeaders,
     }) => {
-      const signal = AbortSignal.any([
-        AbortSignal.timeout(provider.timeoutMs ?? 300_000),
-        ...(abortSignal ? [abortSignal] : []),
-      ]);
+      // A tool-supplied signal already includes its configured timeout. Do not
+      // silently shorten long transcription jobs to the standalone default.
+      const signal =
+        provider.timeoutMs === undefined
+          ? (abortSignal ?? AbortSignal.timeout(300_000))
+          : AbortSignal.any([
+              AbortSignal.timeout(provider.timeoutMs),
+              ...(abortSignal ? [abortSignal] : []),
+            ]);
       signal.throwIfAborted();
       const options = transcriptionOptions.parse(
         providerOptions?.[provider.type] ?? {},
@@ -81,8 +77,6 @@ export function createTranscriptionModel(
       const mimeType = mediaType.split(';')[0].trim().toLowerCase();
       const form = new FormData();
       form.set('model', modelId);
-      // tudao returns text JSON; it does not require verbose JSON or timestamps.
-      form.set('response_format', 'json');
       form.set(
         'file',
         new Blob([new Uint8Array(bytes)], { type: mimeType }),
@@ -105,34 +99,46 @@ export function createTranscriptionModel(
         signal,
         headers: Object.fromEntries(headers),
         body,
-        maxBytes: 20_000_000,
+        maxBytes: Infinity,
       });
       signal.throwIfAborted();
       if (response.status !== 200)
         throw new Error(`Transcription request failed (${response.status})`);
+      const json =
+        options.response_format === 'json' ||
+        options.response_format === 'verbose_json';
+      if (
+        !json &&
+        response.headers['content-type']?.includes('application/json')
+      )
+        throw new Error(
+          'The ASR provider returned JSON instead of the requested text format.',
+        );
       let raw: unknown;
+      let data: ReturnType<typeof parseTranscriptionResponse>;
       try {
-        raw = JSON.parse(response.body.toString('utf8'));
+        raw = json
+          ? JSON.parse(response.body.toString('utf8'))
+          : response.body.toString('utf8');
+        data = parseTranscriptionResponse(raw, options.response_format);
       } catch {
-        throw new Error('Invalid transcription JSON response');
+        throw new Error('Invalid transcription response');
       }
-      const parsed = responseSchema.safeParse(raw);
-      if (!parsed.success) throw new Error('Invalid transcription response');
-      const data = parsed.data;
+      const details = typeof data === 'string' ? undefined : data;
       return {
-        text: data.text,
+        text: typeof data === 'string' ? data : data.text,
         segments:
-          data.segments?.map(({ text, start, end }) => ({
+          details?.segments?.map(({ text, start, end }) => ({
             text,
             startSecond: start,
             endSecond: end,
           })) ?? [],
         language:
-          data.language && /^[a-z]{2}$/i.test(data.language)
-            ? data.language.toLowerCase()
+          details?.language && /^[a-z]{2}$/i.test(details.language)
+            ? details.language.toLowerCase()
             : undefined,
         // Billing usage.seconds can be rounded; only duration is an audio duration.
-        durationInSeconds: data.duration ?? undefined,
+        durationInSeconds: details?.duration ?? undefined,
         warnings: [],
         response: { timestamp, modelId, headers: response.headers, body: raw },
       };

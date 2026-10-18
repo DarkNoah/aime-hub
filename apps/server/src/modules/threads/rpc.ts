@@ -63,11 +63,25 @@ export function threadRouter(
       required(models).setPreferences(context.userId, input.body),
     ),
     history: p.history.handler(({ context, input }) =>
-      threads().history(
+      input.query.view === 'summary'
+        ? threads().turnHistory(
+            context.userId,
+            input.params.threadId,
+            input.query.cursor,
+          )
+        : threads().history(
+            context.userId,
+            input.params.threadId,
+            input.query.page,
+            input.query.anchor,
+          ),
+    ),
+    turn: p.turn.handler(({ context, input }) =>
+      threads().turnDetail(
         context.userId,
         input.params.threadId,
-        input.query.page,
-        input.query.anchor,
+        input.params.turnId,
+        input.query.cursor,
       ),
     ),
     run: p.run.handler(({ context, input }) =>

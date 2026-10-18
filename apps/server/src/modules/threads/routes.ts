@@ -50,19 +50,25 @@ export function threadRoutes(
     if (!/^(?:schedule:)?[a-zA-Z0-9_-]{16}$/.test(threadId))
       throw new ThreadError('THREAD_NOT_FOUND', 404);
     await service.getThread(userId, threadId);
+    const summary = c.req.query('view') === 'summary';
     return eventStream(
       c.req.raw.signal,
       (send, close, sendStreaming) =>
         service.subscribe(
           userId,
           threadId,
-          (snapshot, initial) =>
-            send(initial ? 'snapshot' : 'update', snapshot),
+          (snapshot, initial) => {
+            if (!summary) send(initial ? 'snapshot' : 'update', snapshot);
+          },
           (code) => {
             send('revoked', { code: code ?? 'PROJECT_NOT_FOUND' });
             close();
           },
           (event) => sendStreaming('speech', event),
+          summary
+            ? (snapshot, initial) =>
+                send(initial ? 'snapshot' : 'update', snapshot)
+            : undefined,
         ),
       async () => {
         const session = await auth.api.getSession({

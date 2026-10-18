@@ -1,7 +1,7 @@
 import type { KnowledgeService } from '../knowledge/service.js';
 import type { AudioService } from '../audio/service.js';
 import type { ResolveAutomations } from '../../mastra/tools/automations.js';
-import { enabledToolConfigSchema } from '@aime/shared/tools';
+import { enabledToolConfigSchema, legacyToolIds } from '@aime/shared/tools';
 import type { PluginService } from '../plugins/service.js';
 import type { DataSource } from 'typeorm';
 import { Setting } from '@aime/db';
@@ -69,10 +69,10 @@ export class ToolService {
   private async loadConfig(id: ToolId) {
     const settings = this.database.getRepository(Setting);
     const row = await settings.findOneBy({ id: `tool:${id}` });
-    // Preserve the saved OCR model, timeout and enabled state after renaming.
+    // Preserve model, timeout and enabled state when a tool is renamed.
     const legacy =
-      !row && id === 'read_file'
-        ? await settings.findOneBy({ id: 'tool:view_file' })
+      !row && legacyToolIds[id]
+        ? await settings.findOneBy({ id: `tool:${legacyToolIds[id]}` })
         : undefined;
     return (row ?? legacy)?.value;
   }
@@ -112,7 +112,7 @@ export class ToolService {
           throw new ProviderError('INVALID_SPEECH_MODEL');
         }
       }
-    } else if (tool.kind === 'transcribe') {
+    } else if (tool.kind === 'transcriptions') {
       if (tool.config.enabled && tool.config.model) {
         try {
           const model = await this.providers.getModel(tool.config.model);

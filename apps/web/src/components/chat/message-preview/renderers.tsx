@@ -25,7 +25,8 @@ import { WebSearchPreview } from './web-search';
 import { WebFetchPreview } from './web-fetch';
 import { ImageGenPreview } from './generated-media';
 import { SpeechPreview } from './speech';
-import { TranscribePreview, VoicesPreview } from './audio';
+import { VoicesPreview } from './audio';
+import { TranscriptionsPreview } from './transcriptions';
 import { LspPreview } from './lsp';
 import { BrowserPreview } from './browser';
 import { SkillPreview } from './skill';
@@ -140,7 +141,8 @@ const previewRenderers: Partial<Record<string, ComponentType<PreviewProps>>> = {
   'tool:web_fetch': WebFetchPreview,
   'tool:image_gen': ImageGenPreview,
   'tool:speech': SpeechPreview,
-  'tool:transcribe': TranscribePreview,
+  'tool:transcribe': TranscriptionsPreview,
+  'tool:transcriptions': TranscriptionsPreview,
   'tool:list_voices': VoicesPreview,
   'tool:lsp_inspect': LspPreview,
   'tool:mastra_workspace_lsp_inspect': LspPreview,

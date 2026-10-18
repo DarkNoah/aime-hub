@@ -50,6 +50,8 @@ export function ChatMessages({
   toolInteractions = [],
   onToolResponse,
   disabled,
+  showAllReasoning = false,
+  hideUserMessages = false,
 }: {
   messages: UIMessage[];
   threadId?: string;
@@ -61,6 +63,8 @@ export function ChatMessages({
     response: ToolResponse,
   ) => Promise<void>;
   disabled?: boolean;
+  showAllReasoning?: boolean;
+  hideUserMessages?: boolean;
 }) {
   const rows = groupChatMessages(
     messages,
@@ -74,23 +78,30 @@ export function ChatMessages({
   );
   return (
     <>
-      {rows.map(({ message, sourceIds, parts, elapsedMs }) => (
-        <ChatMessage
-          key={message.id}
-          message={message}
-          threadId={threadId}
-          parts={parts}
-          elapsedMs={elapsedMs}
-          streaming={
-            running && !!activeMessageId && sourceIds.includes(activeMessageId)
-          }
-          showReasoning={sourceIds.includes(lastMessageId ?? '')}
-          isLastMessage={sourceIds.includes(lastMessageId ?? '')}
-          toolInteractions={toolInteractions}
-          onToolResponse={onToolResponse}
-          disabled={disabled}
-        />
-      ))}
+      {rows
+        .filter((row) => !hideUserMessages || row.message.role !== 'user')
+        .map(({ message, sourceIds, parts, elapsedMs }) => (
+          <ChatMessage
+            key={message.id}
+            message={message}
+            threadId={threadId}
+            parts={parts}
+            elapsedMs={elapsedMs}
+            streaming={
+              running &&
+              !!activeMessageId &&
+              sourceIds.includes(activeMessageId)
+            }
+            showReasoning={
+              showAllReasoning || sourceIds.includes(lastMessageId ?? '')
+            }
+            showAllReasoning={showAllReasoning}
+            isLastMessage={sourceIds.includes(lastMessageId ?? '')}
+            toolInteractions={toolInteractions}
+            onToolResponse={onToolResponse}
+            disabled={disabled}
+          />
+        ))}
       {toolInteractions
         .filter(
           (item) => !item.response && !visibleToolIds.has(item.toolCallId),
@@ -118,6 +129,7 @@ export const ChatMessage = memo(function ChatMessage({
   toolInteractions = [],
   onToolResponse,
   disabled,
+  showAllReasoning = false,
 }: {
   message: UIMessage;
   threadId?: string;
@@ -132,6 +144,7 @@ export const ChatMessage = memo(function ChatMessage({
     response: ToolResponse,
   ) => Promise<void>;
   disabled?: boolean;
+  showAllReasoning?: boolean;
 }) {
   const { t } = useTranslation();
   const openPreview = useMessagePreview();
@@ -295,7 +308,11 @@ export const ChatMessage = memo(function ChatMessage({
                 </MessageResponse>
               );
             if (part.type === 'reasoning') {
-              if (!showReasoning || index !== lastReasoningIndex) return null;
+              if (
+                !showReasoning ||
+                (!showAllReasoning && index !== lastReasoningIndex)
+              )
+                return null;
               const isReasoningStreaming =
                 streaming && part.state === 'streaming';
               if (!part.text && !isReasoningStreaming) return null;

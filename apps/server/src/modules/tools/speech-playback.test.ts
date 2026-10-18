@@ -171,7 +171,12 @@ test('immediate speech returns before model resolution, streams after the tool a
       observe,
     },
   );
-  assert.ok(output && 'status' in output && output.status === 'queued');
+  assert.ok(
+    output &&
+      typeof output === 'object' &&
+      'status' in output &&
+      output.status === 'queued',
+  );
   assert.equal(playback.active, true);
   assert.equal(
     events.some((event) => event.phase === 'chunk'),
@@ -698,7 +703,12 @@ test(
       { requestContext, observe },
     );
     const returnedMs = Date.now() - started;
-    assert.ok(result && 'status' in result && result.status === 'queued');
+    assert.ok(
+      result &&
+        typeof result === 'object' &&
+        'status' in result &&
+        result.status === 'queued',
+    );
     await playback.settled();
     assert.equal(times.at(-1)?.phase, 'end');
     const first = times.find((event) => event.phase === 'chunk')!;

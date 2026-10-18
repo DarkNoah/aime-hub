@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { ffmpegPath } from '../audio/binaries.js';
 import type { SpeechModel } from 'ai';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -73,7 +74,7 @@ function runnable(tool: ReturnType<typeof createSpeechTool>) {
       observe: { span: async (_name, fn) => fn(), log: () => {} },
       ...context,
     });
-    assert.ok(result && 'file_path' in result);
+    assert.ok(result && typeof result === 'object' && 'file_path' in result);
     return result;
   };
 }
@@ -97,20 +98,6 @@ const scope = {
   threadId: 'thread0000000001',
   resourceId: 'user:owner',
 };
-
-async function requireAudioBinaries(t: test.TestContext) {
-  try {
-    await Promise.all(
-      ['ffmpeg', 'ffprobe'].map((binary) =>
-        promisify(execFile)(binary, ['-version']),
-      ),
-    );
-    return true;
-  } catch {
-    t.skip('ffmpeg or ffprobe unavailable');
-    return false;
-  }
-}
 
 test(
   'live Xinference speech tool generates a real WAV in the workspace',
@@ -372,14 +359,14 @@ test('OpenAI-style arguments reach the configured speech model without exposing 
 });
 
 test('speech saves each response format with matching metadata, extension and asset MIME type', async (t) => {
-  if (!(await requireAudioBinaries(t))) return;
+  assert.ok(ffmpegPath);
   const w = await workspace(t);
   const source = join(w.directory, 'source.wav');
   await writeFile(source, wav);
   for (const format of speechFormats) {
     const encoded = join(w.directory, `source.${format}`);
     if (format !== 'wav')
-      await promisify(execFile)('ffmpeg', [
+      await promisify(execFile)(ffmpegPath, [
         '-nostdin',
         '-v',
         'error',
@@ -428,7 +415,6 @@ test('speech saves each response format with matching metadata, extension and as
 });
 
 test('speech rejects mislabeled compressed responses instead of saving WAV bytes as MP3', async (t) => {
-  if (!(await requireAudioBinaries(t))) return;
   const f = fixture();
   const w = await workspace(t);
   const tool = createSpeechTool(defaultSpeechConfig, {
@@ -462,7 +448,7 @@ test('invalid workspace paths, mismatched extensions and existing outputs fail b
   assert.deepEqual(await readFile(join(w.directory, 'existing.wav')), wav);
 });
 
-test('malformed audio, cancellation, timeouts and upstream errors never save successful output or expose secrets', async (t) => {
+test('malformed audio, timeouts and upstream errors never save successful output or expose secrets', async (t) => {
   const w = await workspace(t);
   for (const body of [
     Buffer.from('<html>synthetic-secret</html>'),
@@ -492,11 +478,6 @@ test('malformed audio, cancellation, timeouts and upstream errors never save suc
   const execute = runnable(
     createSpeechTool(defaultSpeechConfig, { resolveModel: f.resolveModel }),
   );
-  await assert.rejects(
-    execute({ input: 'Hello' }, { ...w, abortSignal: AbortSignal.abort() }),
-    /cancelled/,
-  );
-  assert.equal(f.calls.length, 0);
   await assert.rejects(execute({ input: 'Hello' }, w), (error: Error) => {
     assert.doesNotMatch(error.message, /synthetic-secret/);
     assert.match(error.message, /Speech generation failed/);

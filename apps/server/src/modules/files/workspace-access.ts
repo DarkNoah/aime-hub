@@ -1,6 +1,11 @@
 import path from 'node:path';
 import { lstat, realpath } from 'node:fs/promises';
-import { LocalFilesystem, PermissionError } from '@mastra/core/workspace';
+import {
+  CompositeFilesystem,
+  LocalFilesystem,
+  PermissionError,
+  type WorkspaceFilesystem,
+} from '@mastra/core/workspace';
 
 async function canonicalPath(filename: string): Promise<string> {
   try {
@@ -46,4 +51,24 @@ export async function assertLocalPath(
     })
   )
     throw new PermissionError(filename, 'access outside the workspace');
+}
+
+/** Resolve local mounts too, including destinations that have not been created. */
+export async function assertWorkspacePath(
+  filesystem: WorkspaceFilesystem,
+  filename: string,
+): Promise<void> {
+  if (filesystem instanceof LocalFilesystem)
+    return assertLocalPath(filesystem, filename);
+  if (filesystem instanceof CompositeFilesystem) {
+    const absolute = path.posix.resolve('/', filename);
+    const mount = filesystem.getMountPathForPath(absolute);
+    const mounted = mount ? filesystem.mounts.get(mount) : undefined;
+    if (!mount || !mounted)
+      throw new PermissionError(filename, 'access outside workspace mounts');
+    return assertWorkspacePath(
+      mounted,
+      absolute.slice(mount.length).replace(/^\/+/, '') || '.',
+    );
+  }
 }

@@ -6,7 +6,7 @@ import {
 } from '../../mastra/tools/automations.js';
 import type { KnowledgeService } from '../knowledge/service.js';
 import type { AudioService } from '../audio/service.js';
-import { createTranscribeTool } from '../../mastra/tools/transcribe.js';
+import { createTranscriptionsTool } from '../../mastra/tools/transcriptions.js';
 import {
   createReadFileTool,
   type ResolvedOcrModel,
@@ -16,6 +16,7 @@ import type { ToolsInput } from '@mastra/core/agent';
 import { z } from 'zod';
 import {
   enabledToolConfigSchema,
+  legacyToolIds,
   normalizeToolId,
   toolIdSchema,
   toolConfigSchemas,
@@ -128,12 +129,12 @@ export function parseToolConfig(id: string, input: unknown): ToolConfig {
         description,
         config: toolConfigSchemas.speech.parse(input),
       };
-    case 'transcribe':
+    case 'transcriptions':
       return {
         id,
         kind: id,
         description,
-        config: toolConfigSchemas.transcribe.parse(input),
+        config: toolConfigSchemas.transcriptions.parse(input),
       };
     case 'read_file':
       return {
@@ -159,7 +160,7 @@ async function buildTool(
 ) {
   const saved = await dependencies.loadConfig?.(id);
   const tool = parseToolConfig(id, {
-    ...(id === 'read_file' ? defaults.view_file : undefined),
+    ...(legacyToolIds[id] ? defaults[legacyToolIds[id]] : undefined),
     ...defaults[id],
     ...z.looseObject({}).parse(saved ?? {}),
   });
@@ -190,8 +191,8 @@ async function buildTool(
         recordAsset: dependencies.recordAsset,
         audio: dependencies.audio,
       });
-    case 'transcribe':
-      return createTranscribeTool(tool.config, dependencies.audio);
+    case 'transcriptions':
+      return createTranscriptionsTool(tool.config, dependencies.audio);
     case 'read_file':
       return createReadFileTool(tool.config, {
         resolveModel: dependencies.ocrModel,

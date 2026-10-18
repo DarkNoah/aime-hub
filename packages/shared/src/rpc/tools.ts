@@ -6,7 +6,7 @@ import {
   webFetchConfigSchema,
   imageGenConfigSchema,
   speechConfigSchema,
-  transcribeConfigSchema,
+  transcriptionsConfigSchema,
   readFileConfigSchema,
   enabledToolConfigSchema,
   toolIdSchema,
@@ -42,8 +42,8 @@ export const toolsContract = {
           body: speechConfigSchema,
         }),
         z.object({
-          params: z.object({ toolId: z.literal('transcribe') }),
-          body: transcribeConfigSchema,
+          params: z.object({ toolId: z.literal('transcriptions') }),
+          body: transcriptionsConfigSchema,
         }),
         z.object({
           params: z.object({ toolId: z.literal('read_file') }),

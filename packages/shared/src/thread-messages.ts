@@ -55,11 +55,10 @@ export function canContinueThread(
   return false;
 }
 
-function messageCreatedAt(message: UIMessage) {
+function messageCreatedAt(message: UIMessage, field = 'createdAt') {
   const metadata = message.metadata;
-  if (!metadata || typeof metadata !== 'object' || !('createdAt' in metadata))
-    return;
-  const value = metadata.createdAt;
+  if (!metadata || typeof metadata !== 'object' || !(field in metadata)) return;
+  const value = (metadata as Record<string, unknown>)[field];
   if (
     !(value instanceof Date) &&
     typeof value !== 'string' &&
@@ -78,7 +77,10 @@ export function sortThreadMessages(messages: UIMessage[]): UIMessage[] {
       .map((message) => {
         // Anchor undated live drafts to the latest preceding timestamp. A late
         // historical update must not pull a new draft back into older history.
-        const time = messageCreatedAt(message)?.time ?? latestTime;
+        const time =
+          messageCreatedAt(message, 'signalCreatedAt')?.time ??
+          messageCreatedAt(message)?.time ??
+          latestTime;
         latestTime = Math.max(latestTime, time);
         return { message, time };
       })

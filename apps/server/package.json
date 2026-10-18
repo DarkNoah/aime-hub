@@ -36,6 +36,8 @@
     "dotenv": "^17.4.2",
     "fast-glob": "^3.3.3",
     "fflate": "^0.8.3",
+    "ffmpeg-static": "^5.3.0",
+    "ffprobe-static": "^3.1.0",
     "gray-matter": "^4.0.3",
     "hono": "^4.13.13",
     "image-size": "^2.0.4",
@@ -58,6 +60,7 @@
   },
   "devDependencies": {
     "@orpc/zod": "1.15.4",
+    "@types/ffprobe-static": "^2.0.3",
     "@types/pg": "^8.15.0",
     "@types/web-push": "^3.6.4",
     "tsup": "^8.5.0"

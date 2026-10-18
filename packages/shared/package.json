@@ -16,6 +16,8 @@
     "./chat-attachments": "./src/chat-attachments.ts",
     "./browser": "./src/browser.ts",
     "./thread-messages": "./src/thread-messages.ts",
+    "./chat-turns": "./src/chat-turns.ts",
+    "./message-compression": "./src/message-compression.ts",
     "./projects": "./src/projects.ts",
     "./files": "./src/files.ts",
     "./assets": "./src/assets.ts",

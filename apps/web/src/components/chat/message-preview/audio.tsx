@@ -7,32 +7,6 @@ import { audioApi } from '@/components/audio/api';
 import { Badge } from '@/components/ui/badge';
 import type { PreviewPart } from './selection';
 
-export function TranscribePreview({ part }: { part: PreviewPart }) {
-  const { t } = useTranslation();
-  if (!isToolUIPart(part)) return null;
-  const output =
-    part.output && typeof part.output === 'object'
-      ? (part.output as Record<string, unknown>)
-      : undefined;
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <h3 className="text-sm font-medium">{t('tools.transcribe')}</h3>
-        {getStatusBadge(output?.isError ? 'output-error' : part.state)}
-      </div>
-      {output?.isError !== true &&
-      output?.ok !== false &&
-      typeof output?.text === 'string' ? (
-        <p className="text-sm leading-6 whitespace-pre-wrap [overflow-wrap:anywhere]">
-          {output.text}
-        </p>
-      ) : (
-        <ToolOutput output={part.output} errorText={part.errorText} />
-      )}
-    </div>
-  );
-}
-
 export function VoicesPreview({ part }: { part: PreviewPart }) {
   const { t } = useTranslation();
   if (!isToolUIPart(part)) return null;

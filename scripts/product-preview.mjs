@@ -65,6 +65,14 @@ const messages = [
     ],
   },
 ];
+const turn = {
+  id: messages[0].id,
+  user: messages[0],
+  assistant: messages[1],
+  toolCount: 0,
+  revision: 'preview',
+  assetRevision: '',
+};
 const model = {
   id: 'model',
   providerId: 'preview',
@@ -139,7 +147,18 @@ const server = await createServer({
             });
             if (url.pathname.endsWith('/messages'))
               res.write(
-                `event: snapshot\ndata: ${JSON.stringify({ thread: threads[0], messages, activeMessageId: null })}\n\n`,
+                `event: snapshot\ndata: ${JSON.stringify(
+                  url.searchParams.get('view') === 'summary'
+                    ? {
+                        thread: threads[0],
+                        turns: [turn],
+                        activeMessageId: null,
+                        activeTurnId: null,
+                        canContinue: false,
+                        history: { cursor: null, hasMore: false },
+                      }
+                    : { thread: threads[0], messages, activeMessageId: null },
+                )}\n\n`,
               );
             else if (url.pathname === '/api/threads/events')
               res.write(
@@ -177,6 +196,12 @@ const server = await createServer({
               }),
             );
           const route = url.pathname.replace('/api/rpc/', '');
+          if (route === 'threads/turn')
+            return res.end(
+              JSON.stringify({
+                json: { id: turn.id, revision: turn.revision, messages },
+              }),
+            );
           if (route in routes)
             return res.end(JSON.stringify({ json: routes[route] }));
           console.log(`Unconfigured preview request: ${url.pathname}`);

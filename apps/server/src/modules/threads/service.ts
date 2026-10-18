@@ -14,6 +14,17 @@ import type {
   ChatSessionEvent,
 } from './session.js';
 import { threadMessages } from './message-conversion.js';
+import type {
+  ChatTurnDetail,
+  ChatTurnPage,
+  ChatTurnSnapshot,
+} from '@aime/shared/chat-turns';
+import { groupTurns, summarizeTurn } from './turns.js';
+import {
+  readTurnPage,
+  readTurnDetail,
+  TURN_PAGE_SIZE,
+} from './turn-history.js';
 import type { Memory } from '@mastra/memory';
 import type { StorageThreadType } from '@mastra/core/memory';
 import type { WorkspaceFilesystem } from '@mastra/core/workspace';
@@ -66,6 +77,8 @@ type Subscription = {
   userId: string;
   active: boolean;
   listener: (snapshot: ThreadSnapshot<UIMessage>, initial: boolean) => void;
+  turnListener?: (snapshot: ChatTurnSnapshot, initial: boolean) => void;
+  turnRevisions?: Map<string, string>;
   revoked?: (code?: string) => void;
   speech?: (event: SpeechEvent) => void | Promise<void>;
   pending: Promise<void>;
@@ -86,6 +99,9 @@ type Runtime = {
   data: ThreadData;
   goal: ThreadGoal | null;
   messages: UIMessage[];
+  turnLocators: Map<string, string>;
+  historyCursor: string | null;
+  turnHistoryCurrent: boolean;
   changedMessages: Map<string, UIMessage>;
   removedMessageIds: Set<string>;
   activeMessageId: string | null;
@@ -226,7 +242,12 @@ export class ThreadService {
     await this.locked(id, async () => {
       runtime.thread = (await this.memory.getThreadById({ threadId: id }))!;
       runtime.data.reasoningEffort = dataOf(runtime.thread).reasoningEffort;
-      const history = await this.history(userId, id);
+      const history = await readTurnPage(this.memory, {
+        threadId: id,
+        resourceId: runtime.thread.resourceId,
+      });
+      for (const [turnId, cursor] of history.locators)
+        runtime.turnLocators.set(turnId, cursor);
       for (const message of history.messages) this.upsert(runtime, message);
       this.publish(runtime);
     });
@@ -414,6 +435,58 @@ export class ThreadService {
     };
   }
 
+  private turnSnapshot(
+    runtime: Runtime,
+    snapshot: ThreadSnapshot<UIMessage>,
+    initial: boolean,
+  ): ChatTurnSnapshot {
+    const state = {
+      thread: snapshot.thread,
+      activeMessageId: snapshot.activeMessageId,
+      usage: snapshot.usage,
+      goal: snapshot.goal,
+      backgroundTasks: snapshot.backgroundTasks,
+      backgroundTasksError: snapshot.backgroundTasksError,
+      commandSessions: snapshot.commandSessions,
+      toolInteractions: snapshot.toolInteractions,
+    };
+    // Native replay can include older, partial storage windows. The overview
+    // only publishes the complete recent window; older turns use cursor paging.
+    const turns = groupTurns(runtime.messages).slice(-TURN_PAGE_SIZE);
+    return {
+      ...state,
+      // Completed approvals belong in details, not every status event.
+      toolInteractions: state.toolInteractions?.filter(
+        (item) => !item.response,
+      ),
+      turns: turns.map((turn) =>
+        summarizeTurn(turn, runtime.turnLocators.get(turn.id)),
+      ),
+      removedTurnIds: snapshot.removedMessageIds,
+      activeTurnId:
+        turns.find((turn) =>
+          turn.messages.some((message) =>
+            threadMessageSourceIds(message).includes(
+              snapshot.activeMessageId ?? '',
+            ),
+          ),
+        )?.id ?? null,
+      canContinue: canContinueThread(
+        runtime.messages,
+        snapshot.thread,
+        runtime.data.toolInteractions,
+      ),
+      ...(initial
+        ? {
+            history: {
+              cursor: runtime.historyCursor,
+              hasMore: !!runtime.historyCursor,
+            },
+          }
+        : {}),
+    };
+  }
+
   private publish(runtime: Runtime, throttle = false) {
     const send = () => {
       runtime.broadcast = undefined;
@@ -424,6 +497,11 @@ export class ThreadService {
       };
       runtime.changedMessages.clear();
       runtime.removedMessageIds.clear();
+      const turnSnapshot = [...runtime.listeners].some(
+        (item) => item.turnListener,
+      )
+        ? this.turnSnapshot(runtime, snapshot, false)
+        : undefined;
       const signature = JSON.stringify(snapshot.thread);
       if (signature !== runtime.navigationSignature) {
         runtime.navigationSignature = signature;
@@ -438,7 +516,14 @@ export class ThreadService {
           });
       }
       for (const subscription of runtime.listeners)
-        void this.deliver(runtime, subscription, snapshot, false);
+        void this.deliver(
+          runtime,
+          subscription,
+          snapshot,
+          false,
+          undefined,
+          turnSnapshot,
+        );
     };
     if (throttle) {
       runtime.broadcast ??= setTimeout(send, 50);
@@ -454,6 +539,7 @@ export class ThreadService {
     snapshot: ThreadSnapshot<UIMessage> | null,
     initial: boolean,
     speech?: SpeechEvent,
+    turnSnapshot?: ChatTurnSnapshot,
   ) {
     // Serialize authorization and delivery so delayed membership reads cannot reorder SSE events.
     subscription.pending = subscription.pending
@@ -463,7 +549,25 @@ export class ThreadService {
         if (projectId) await this.projectAccess(subscription.userId, projectId);
         if (subscription.active) {
           if (speech) await subscription.speech?.(speech);
-          else if (snapshot) subscription.listener(snapshot, initial);
+          else if (snapshot && subscription.turnListener) {
+            const projected =
+              turnSnapshot ?? this.turnSnapshot(runtime, snapshot, initial);
+            const previous =
+              subscription.turnRevisions ?? new Map<string, string>();
+            const turns = projected.turns.filter(
+              (turn) =>
+                initial ||
+                previous.get(turn.id) !==
+                  `${turn.revision}:${turn.cursor ?? ''}`,
+            );
+            subscription.turnRevisions = new Map(
+              projected.turns.map((turn) => [
+                turn.id,
+                `${turn.revision}:${turn.cursor ?? ''}`,
+              ]),
+            );
+            subscription.turnListener({ ...projected, turns }, initial);
+          } else if (snapshot) subscription.listener(snapshot, initial);
         }
       })
       .catch(() => {
@@ -589,6 +693,7 @@ export class ThreadService {
         return;
       }
       if (event.type === 'reconcile') {
+        runtime.turnHistoryCurrent = false;
         const removed = new Set(event.removedMessageIds);
         runtime.messages = runtime.messages.filter(
           (message) => !removed.has(message.id),
@@ -661,9 +766,12 @@ export class ThreadService {
           if (event.status === 'running') runtime.goal.waitingForUser = false;
         }
         if (event.status !== 'running' && event.status !== 'pending') {
+          runtime.turnHistoryCurrent = false;
           runtime.data.activeId = null;
           runtime.activeMessageId = null;
-          runtime.messages = runtime.messages.slice(-80);
+          runtime.messages = groupTurns(runtime.messages)
+            .slice(-TURN_PAGE_SIZE)
+            .flatMap((turn) => turn.messages);
         }
       }
       await this.save(runtime);
@@ -756,12 +864,18 @@ export class ThreadService {
       data.error = 'RUN_INTERRUPTED';
       data.status = 'failed';
     }
-    const history = await this.history(userId, id);
+    const history = await readTurnPage(this.memory, {
+      threadId: id,
+      resourceId: thread.resourceId,
+    });
     const runtime: Runtime = {
       thread,
       data,
       goal: (await this.runner.getGoal?.(id)) ?? null,
       messages: history.messages,
+      turnLocators: history.locators,
+      historyCursor: history.cursor,
+      turnHistoryCurrent: true,
       changedMessages: new Map(),
       removedMessageIds: new Set(),
       queueCount: 0,
@@ -1157,6 +1271,61 @@ export class ThreadService {
     };
   }
 
+  async turnHistory(
+    userId: string,
+    id: string,
+    cursor?: string,
+  ): Promise<ChatTurnPage> {
+    const thread = await this.accessible(userId, id);
+    const page = await readTurnPage(
+      this.memory,
+      { threadId: id, resourceId: thread.resourceId },
+      cursor,
+    );
+    await this.accessible(userId, id);
+    return {
+      turns: groupTurns(page.messages).map((turn) =>
+        summarizeTurn(turn, page.locators.get(turn.id)),
+      ),
+      cursor: page.cursor,
+      hasMore: page.hasMore,
+    };
+  }
+
+  async turnDetail(
+    userId: string,
+    id: string,
+    turnId: string,
+    cursor?: string,
+  ): Promise<ChatTurnDetail> {
+    const thread = await this.accessible(userId, id);
+    const scope = { threadId: id, resourceId: thread.resourceId };
+    const live = groupTurns(this.runtimes.get(id)?.messages ?? []).find(
+      (turn) => turn.id === turnId,
+    );
+    let messages = live?.messages;
+    if (!messages && cursor)
+      messages = await readTurnDetail(this.memory, scope, turnId, cursor);
+    // A newly streamed turn has no stored locator yet. Recover after runtime expiry.
+    if (!messages) {
+      let before: string | undefined;
+      do {
+        const page = await readTurnPage(this.memory, scope, before);
+        messages = groupTurns(page.messages).find(
+          (turn) => turn.id === turnId,
+        )?.messages;
+        before = page.cursor ?? undefined;
+      } while (!messages && before);
+    }
+    if (!messages) throw new ThreadError('TURN_NOT_FOUND', 404);
+    await this.accessible(userId, id);
+    return {
+      id: turnId,
+      messages,
+      revision: summarizeTurn({ id: turnId, messages }).revision,
+    };
+  }
+
   updateThread(
     userId: string,
     id: string,
@@ -1387,6 +1556,7 @@ export class ThreadService {
   }
 
   private upsert(runtime: Runtime, message: UIMessage) {
+    runtime.turnHistoryCurrent = false;
     const previous = new Map(runtime.messages.map((item) => [item.id, item]));
     runtime.messages = mergeThreadMessages(runtime.messages, [
       structuredClone(message),
@@ -1583,13 +1753,36 @@ export class ThreadService {
     listener: (snapshot: ThreadSnapshot<UIMessage>, initial: boolean) => void,
     revoked?: (code?: string) => void,
     speech?: (event: SpeechEvent) => void | Promise<void>,
+    turnListener?: (snapshot: ChatTurnSnapshot, initial: boolean) => void,
   ) {
     return this.scopeLocked(userId, id, async () => {
       const runtime = await this.runtime(userId, id);
+      if (turnListener && !runtime.turnHistoryCurrent) {
+        // Refresh persisted boundaries on reconnect, then overlay unsaved live parts.
+        const page = await readTurnPage(this.memory, {
+          threadId: id,
+          resourceId: runtime.thread.resourceId,
+        });
+        const turns = groupTurns(
+          mergeThreadMessages(page.messages, runtime.messages),
+        );
+        const visible = turns.slice(-TURN_PAGE_SIZE);
+        runtime.messages = visible.flatMap((turn) => turn.messages);
+        runtime.turnLocators = new Map([
+          ...runtime.turnLocators,
+          ...page.locators,
+        ]);
+        runtime.historyCursor =
+          turns.length > visible.length
+            ? (runtime.turnLocators.get(visible[0]!.id) ?? page.cursor)
+            : page.cursor;
+        runtime.turnHistoryCurrent = true;
+      }
       clearTimeout(runtime.expiry);
       const subscription: Subscription = {
         userId,
         listener,
+        turnListener,
         revoked,
         speech,
         active: true,

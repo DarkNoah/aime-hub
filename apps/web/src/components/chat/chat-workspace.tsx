@@ -99,6 +99,7 @@ export function ChatWorkspace({
   messages = EMPTY_MESSAGES,
   loading = false,
   hasEarlier = false,
+  assetRevision: turnAssetRevision,
   threadId,
   projectId,
 }: {
@@ -106,6 +107,7 @@ export function ChatWorkspace({
   messages?: UIMessage[];
   loading?: boolean;
   hasEarlier?: boolean;
+  assetRevision?: string;
   threadId?: string;
   projectId?: string;
 }) {
@@ -129,20 +131,22 @@ export function ChatWorkspace({
   // Drop the selection immediately when disabled or access is revoked. Keep chat mounted.
   if (view.startsWith('plugin:') && !activePlugin) setView('files');
   // Only completed generation changes refresh the gallery, not every text delta.
-  const assetRevision = messages
-    .flatMap((message) =>
-      message.parts.flatMap((part) =>
-        (part.type === 'tool-image_gen' ||
-          part.type === 'tool-speech' ||
-          (part.type === 'dynamic-tool' &&
-            (part.toolName === 'image_gen' || part.toolName === 'speech'))) &&
-        'state' in part &&
-        part.state === 'output-available'
-          ? [part.toolCallId]
-          : [],
-      ),
-    )
-    .join(',');
+  const assetRevision =
+    turnAssetRevision ??
+    messages
+      .flatMap((message) =>
+        message.parts.flatMap((part) =>
+          (part.type === 'tool-image_gen' ||
+            part.type === 'tool-speech' ||
+            (part.type === 'dynamic-tool' &&
+              (part.toolName === 'image_gen' || part.toolName === 'speech'))) &&
+          'state' in part &&
+          part.state === 'output-available'
+            ? [part.toolCallId]
+            : [],
+        ),
+      )
+      .join(',');
   const [selection, setSelection] = useState<MessagePreviewSelection | null>(
     null,
   );
@@ -395,6 +399,8 @@ export function ChatWorkspace({
     />
   ) : (
     <ChatRawMessages
+      key={threadId ?? 'new'}
+      threadId={threadId}
       messages={messages}
       loading={loading}
       hasEarlier={hasEarlier}

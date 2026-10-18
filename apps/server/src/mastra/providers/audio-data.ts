@@ -18,11 +18,10 @@ export function audioMimeType(data: Buffer) {
   throw new Error('Unsupported reference audio');
 }
 
-/** Read actual non-streaming WAV metadata; reject empty/truncated responses. */
+/** Read WAV metadata; callers enforce size policy separately from format validation. */
 export function wavMetadata(data: Buffer) {
   if (
     data.length < 44 ||
-    data.length > 50_000_000 ||
     data.toString('ascii', 0, 4) !== 'RIFF' ||
     data.toString('ascii', 8, 12) !== 'WAVE'
   )

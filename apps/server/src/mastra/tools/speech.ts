@@ -19,6 +19,7 @@ import { supportsSpeechStreaming } from '../providers/speech-model.js';
 
 export class SpeechGenerationError extends Error {}
 export type ResolvedSpeechModel = { reference: string; model: SpeechModel };
+const cancellationMessage = 'Speech generation was cancelled.';
 
 export function createSpeechTool(
   config: SpeechConfig = defaultSpeechConfig,
@@ -77,6 +78,7 @@ export function createSpeechTool(
         ),
     }),
     outputSchema: z.union([
+      z.literal(cancellationMessage),
       z.object({
         duration: z.number(),
         file_path: z.string(),
@@ -100,6 +102,7 @@ export function createSpeechTool(
       },
       context,
     ) => {
+      if (context?.abortSignal?.aborted) return cancellationMessage;
       const voiceId = voice?.trim() || undefined;
       const voiceUser =
         voiceId && dependencies.audio ? audioUser(context) : undefined;
@@ -158,7 +161,6 @@ export function createSpeechTool(
         };
       };
       if (play_immediately) {
-        context?.abortSignal?.throwIfAborted();
         const playback = context?.requestContext?.get('speechPlayback');
         if (!(playback instanceof SpeechPlayback))
           throw new SpeechGenerationError(
@@ -265,10 +267,9 @@ export function createSpeechTool(
           sample_rate: metadata.sampleRate,
         };
       } catch (error) {
+        if (context?.abortSignal?.aborted) return cancellationMessage;
         const message = signal.aborted
-          ? context?.abortSignal?.aborted
-            ? 'Speech generation was cancelled.'
-            : 'Speech generation timed out. Try again or increase the tool timeout.'
+          ? 'Speech generation timed out. Try again or increase the tool timeout.'
           : error instanceof SpeechGenerationError
             ? error.message
             : 'Speech generation failed. Check the selected speech model, its supported options and workspace write access.';
@@ -278,7 +279,7 @@ export function createSpeechTool(
     // Audio stays in the workspace; model history contains only the compact result.
     toModelOutput: (output) => ({
       type: 'text',
-      value: JSON.stringify(output),
+      value: typeof output === 'string' ? output : JSON.stringify(output),
     }),
   });
 }

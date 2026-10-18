@@ -58,6 +58,7 @@ import { buildTools, type ToolService } from '../tools/service.js';
 import { CommandSandbox } from '../../mastra/tools/command/sandbox.js';
 import { agentEnvironment } from './agent-environment.js';
 import { AgentsMDProcessor } from '../../mastra/processors/agents-md.js';
+import { IncompleteToolCallsProcessor } from '../../mastra/processors/incomplete-tool-calls.js';
 import { AttachmentProcessor } from './attachment-processor.js';
 import { AttachmentMediaReader } from './attachment-media.js';
 import {
@@ -296,6 +297,7 @@ export function createChatRunner(
           // response ID rotation and observation context injection remain intact.
           inputProcessors: [
             compaction,
+            new IncompleteToolCallsProcessor(),
             new AgentsMDProcessor(commands.workingDirectory),
             new AttachmentProcessor(attachmentMedia, () =>
               inputModalities(resolved),
@@ -314,6 +316,7 @@ export function createChatRunner(
                 : Promise.resolve(resolved);
             return {
               inputProcessors: [
+                new IncompleteToolCallsProcessor(),
                 new AttachmentProcessor(attachmentMedia, async () =>
                   inputModalities(await childModel()),
                 ),

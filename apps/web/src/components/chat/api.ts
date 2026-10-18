@@ -34,14 +34,40 @@ export const chatApi = {
     api.threads.removeArchived({ params: { threadId } }),
   run: (threadId: string, input: RunInput) =>
     api.threads.run({ params: { threadId }, body: input }),
-  history: (
+  history: async (
     threadId: string,
     page = 0,
     anchor?: string,
     signal?: AbortSignal,
+  ) => {
+    const result = await api.threads.history(
+      { params: { threadId }, query: { page, anchor, view: 'full' } },
+      { signal },
+    );
+    if (!('messages' in result)) throw new Error('Expected complete history');
+    return result;
+  },
+  turnHistory: async (
+    threadId: string,
+    cursor: string,
+    signal?: AbortSignal,
+  ) => {
+    const result = await api.threads.history(
+      { params: { threadId }, query: { view: 'summary', cursor } },
+      { signal },
+    );
+    if (!('turns' in result))
+      throw new Error('Expected conversation summaries');
+    return result;
+  },
+  turn: (
+    threadId: string,
+    turnId: string,
+    cursor?: string,
+    signal?: AbortSignal,
   ) =>
-    api.threads.history(
-      { params: { threadId }, query: { page, anchor } },
+    api.threads.turn(
+      { params: { threadId, turnId }, query: { cursor } },
       { signal },
     ),
   stopSpeech: (threadId: string) =>

@@ -5,6 +5,7 @@ import type { VoiceStore } from '../../../modules/audio/voices.js';
 import { validatePath } from '../../../modules/files/paths.js';
 import { maxReferenceAudioBytes } from '../../providers/audio-data.js';
 import { requestWebResource } from '../../web/request.js';
+import { ThreadError } from '../../../modules/threads/errors.js';
 
 export function audioUser(context?: ToolExecutionContext) {
   const userId = context?.requestContext?.get('userId');
@@ -21,13 +22,15 @@ export async function readAudioReference(
     voices?: VoiceStore;
     signal: AbortSignal;
     request?: typeof requestWebResource;
+    maxBytes?: number;
   },
 ) {
   options.signal.throwIfAborted();
+  const maxBytes = options.maxBytes ?? maxReferenceAudioBytes;
   if (/^https?:\/\//i.test(path)) {
     const response = await (options.request ?? requestWebResource)(path, {
       signal: options.signal,
-      maxBytes: maxReferenceAudioBytes,
+      maxBytes,
     });
     if (response.status !== 200) throw new Error('Reference download failed');
     return { audio: response.body, text: undefined };
@@ -50,10 +53,11 @@ export async function readAudioReference(
   validatePath(path);
   // The workspace provider enforces containment, including symlink escapes.
   const stat = await filesystem.stat(path);
-  if (stat.type !== 'file' || stat.size > maxReferenceAudioBytes)
-    throw new Error('Invalid audio size');
+  if (stat.type !== 'file') throw new ThreadError('AUDIO_INVALID');
+  if (stat.size > maxBytes) throw new ThreadError('AUDIO_TOO_LARGE', 413);
+  options.signal.throwIfAborted();
   const audio = Buffer.from(await filesystem.readFile(path));
-  if (audio.length > maxReferenceAudioBytes)
-    throw new Error('Invalid audio size');
+  options.signal.throwIfAborted();
+  if (audio.length > maxBytes) throw new ThreadError('AUDIO_TOO_LARGE', 413);
   return { audio, text: undefined };
 }

@@ -1,5 +1,47 @@
 import { z } from 'zod';
 
+export const transcriptionFormats = [
+  'json',
+  'text',
+  'srt',
+  'verbose_json',
+  'vtt',
+] as const;
+export type TranscriptionFormat = (typeof transcriptionFormats)[number];
+export const transcriptionCancellationMessage =
+  'Speech recognition was cancelled.';
+export const transcriptionFileExtensions: Record<TranscriptionFormat, string> =
+  {
+    json: 'json',
+    text: 'txt',
+    srt: 'srt',
+    verbose_json: 'json',
+    vtt: 'vtt',
+  };
+
+export const transcriptionExcerptLimit = 2_000;
+const transcriptionOmission = '\n… [middle omitted] …\n';
+
+/** A display/model excerpt, never a replacement for a saved transcription. */
+export function transcriptionExcerpt(output: unknown) {
+  const text =
+    typeof output === 'string' ? output : (JSON.stringify(output) ?? '');
+  const characters = Array.from(text);
+  if (characters.length <= transcriptionExcerptLimit)
+    return { text, truncated: false };
+  const budget =
+    transcriptionExcerptLimit - Array.from(transcriptionOmission).length;
+  const head = Math.ceil(budget / 2);
+  const tail = Math.floor(budget / 2);
+  return {
+    text:
+      characters.slice(0, head).join('') +
+      transcriptionOmission +
+      characters.slice(-tail).join(''),
+    truncated: true,
+  };
+}
+
 export const speechFormats = [
   'mp3',
   'opus',
