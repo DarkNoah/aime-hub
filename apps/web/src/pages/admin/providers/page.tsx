@@ -174,7 +174,8 @@ export function AdminProvidersPage() {
       )}
       <ModelDefaultsSection
         revision={revision}
-        disabled={pending || !!action}
+        providers={providers.data ?? []}
+        disabled={pending || !!action || !providers.data}
         onPendingChange={setDefaultsPending}
       />
       <section

@@ -111,10 +111,19 @@ export const defaultModelTypes = {
   rerankModel: 'rerank',
   speechModel: 'speech',
   asrModel: 'asr',
+  ocrModel: 'ocr',
 } as const;
 export const defaultModelKeys = Object.keys(defaultModelTypes) as Array<
   keyof typeof defaultModelTypes
 >;
+
+export const defaultWebProviderTools = {
+  webSearchProviderId: 'web_search',
+  webFetchProviderId: 'web_fetch',
+} as const;
+export const defaultWebProviderKeys = Object.keys(
+  defaultWebProviderTools,
+) as Array<keyof typeof defaultWebProviderTools>;
 
 export function modelSupportsType(
   model: { modelType?: ModelType; modalitiesOutput: readonly string[] },
@@ -197,6 +206,9 @@ export const modelDefaultsSchema = z
     rerankModel: z.string().min(3).max(512).nullable().default(null),
     speechModel: z.string().min(3).max(512).nullable().default(null),
     asrModel: z.string().min(3).max(512).nullable().default(null),
+    ocrModel: z.string().min(3).max(512).nullable().default(null),
+    webSearchProviderId: z.string().min(1).max(128).nullable().default(null),
+    webFetchProviderId: z.string().min(1).max(128).nullable().default(null),
     thinkingMode: z.enum(thinkingLevels),
   })
   .strict();
@@ -258,6 +270,9 @@ export const emptyModelDefaults: ModelDefaults = {
   rerankModel: null,
   speechModel: null,
   asrModel: null,
+  ocrModel: null,
+  webSearchProviderId: null,
+  webFetchProviderId: null,
   thinkingMode: 'medium',
 };
 export function modelReference(providerId: string, id: string) {

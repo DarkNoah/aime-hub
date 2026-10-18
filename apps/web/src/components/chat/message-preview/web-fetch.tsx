@@ -129,9 +129,9 @@ export function WebFetchPreview({ part }: { part: PreviewPart }) {
                 })}
               </Badge>
             )}
-            {result.fallback && (
+            {/* {result.fallback && (
               <Badge variant="outline">{t('chat.webFetch.fallback')}</Badge>
-            )}
+            )} */}
             {result.truncated && (
               <Badge variant="secondary">{t('chat.webFetch.truncated')}</Badge>
             )}

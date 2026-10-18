@@ -28,6 +28,7 @@ import { PaddleOCRProvider } from '../apps/server/src/mastra/providers/paddleocr
 import { createApp } from '../apps/server/src/app.js';
 import { createApiClient } from '../apps/web/src/lib/rpc.js';
 import { agentInputSchema } from '@aime/shared/agents';
+import { emptyModelDefaults, type ModelDefaults } from '@aime/shared/providers';
 
 const provider = {
   id: 'search-provider',
@@ -59,16 +60,7 @@ function fixture() {
   let current = { ...provider };
   const providers: ConstructorParameters<typeof ToolService>[1] = {
     async getDefaults() {
-      return {
-        defaultModel: null,
-        fastModel: null,
-        imageModel: null,
-        embeddingModel: null,
-        rerankModel: null,
-        speechModel: null,
-        asrModel: null,
-        thinkingMode: 'medium',
-      };
+      return { ...emptyModelDefaults };
     },
     async getModel(reference) {
       if (reference === 'ocr/PaddleOCR-VL')
@@ -568,6 +560,85 @@ test('web fetch settings validate Jina AI credentials, persist limits and indepe
   assert.deepEqual(
     Object.keys(await f.service.buildTools(toolIds)),
     toolIds.filter((id) => id !== 'web_fetch'),
+  );
+});
+
+test('web tools inherit current system defaults, prefer explicit settings and retain local fallbacks', async (t) => {
+  const f = fixture();
+  let defaults: ModelDefaults = {
+    ...emptyModelDefaults,
+    webSearchProviderId: 'system',
+    webFetchProviderId: 'system',
+  };
+  t.mock.method(f.providers, 'getDefaults', async () => defaults);
+  const resolved: string[] = [];
+  t.mock.method(f.providers, 'getProvider', async (id: string) => {
+    resolved.push(id);
+    return { ...provider, id, type: 'deepseek' };
+  });
+  t.mock.method(DeepSeekProvider.prototype, 'webSearch', async () => []);
+  t.mock.method(
+    DeepSeekProvider.prototype,
+    'webFetch',
+    async (url: string) => ({ url, content: '# Web' }),
+  );
+  t.mock.method(LocalProvider.prototype, 'webSearch', async () => []);
+  t.mock.method(LocalProvider.prototype, 'webFetch', async (url: string) => ({
+    url,
+    content: '# Local',
+  }));
+  // A saved null selection inherits the system setting too.
+  await f.service.update('web_search', defaultWebSearchConfig);
+  await f.service.update('web_fetch', defaultWebFetchConfig);
+  const tools = await f.service.buildTools(['web_search', 'web_fetch']);
+  const search = tools.web_search;
+  const fetch = tools.web_fetch;
+  assert.ok('execute' in search && search.execute);
+  assert.ok('execute' in fetch && fetch.execute);
+  assert.equal(
+    (await search.execute({ query: 'query' }, {})).provider,
+    'system',
+  );
+  assert.equal(
+    (await fetch.execute({ url: 'https://1.1.1.1/article' }, {})).provider,
+    'system',
+  );
+  assert.deepEqual(resolved, ['system', 'system']);
+  defaults = {
+    ...defaults,
+    webSearchProviderId: 'next',
+    webFetchProviderId: 'next',
+  };
+  assert.equal((await search.execute({ query: 'query' }, {})).provider, 'next');
+  await f.service.update('web_search', {
+    ...defaultWebSearchConfig,
+    providerId: 'explicit',
+  });
+  await f.service.update('web_fetch', {
+    ...defaultWebFetchConfig,
+    providerId: 'explicit',
+  });
+  const explicit = await f.service.buildTools(['web_search', 'web_fetch']);
+  assert.ok('execute' in explicit.web_search && explicit.web_search.execute);
+  assert.ok('execute' in explicit.web_fetch && explicit.web_fetch.execute);
+  assert.equal(
+    (await explicit.web_search.execute({ query: 'query' }, {})).provider,
+    'explicit',
+  );
+  assert.equal(
+    (await explicit.web_fetch.execute({ url: 'https://1.1.1.1/article' }, {}))
+      .provider,
+    'explicit',
+  );
+  defaults = {
+    ...emptyModelDefaults,
+    webSearchProviderId: null,
+    webFetchProviderId: null,
+  };
+  assert.equal((await search.execute({ query: 'query' }, {})).fallback, true);
+  assert.equal(
+    (await fetch.execute({ url: 'https://1.1.1.1/article' }, {})).fallback,
+    true,
   );
 });
 

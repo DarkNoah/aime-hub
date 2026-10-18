@@ -92,6 +92,38 @@ export function fuseRanks(
   );
 }
 
+export function mergeVectorRanks(
+  lists: {
+    embeddingModel: string | null;
+    vectorDimension: number | null;
+    hits: RankedChunk[];
+  }[],
+  topK: number,
+): { mode: 'vector'; hits: RankedChunk[] }[] {
+  // Cosine scores are comparable across indexes using the same embedding space.
+  // Rank their union once, so every knowledge base does not get a separate #1.
+  const groups = new Map<string, Map<string, RankedChunk>>();
+  for (const { embeddingModel, vectorDimension, hits } of lists) {
+    if (!embeddingModel || !vectorDimension) continue;
+    const key = JSON.stringify([embeddingModel, vectorDimension]);
+    const group = groups.get(key) ?? new Map<string, RankedChunk>();
+    for (const hit of hits) {
+      if (!Number.isFinite(hit.score)) continue;
+      const previous = group.get(hit.id);
+      if (!previous || hit.score > previous.score) group.set(hit.id, hit);
+    }
+    groups.set(key, group);
+  }
+  // Different embedding spaces remain separate recall routes. Their raw scores
+  // must not be compared; the shared reranker decides the final cross-base order.
+  return [...groups.values()].map((group) => ({
+    mode: 'vector',
+    hits: [...group.values()]
+      .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+      .slice(0, topK),
+  }));
+}
+
 // Bound the whole model/index stage, including clients that ignore AbortSignal.
 export async function withSearchTimeout<T>(
   run: (signal: AbortSignal) => Promise<T>,
@@ -155,8 +187,8 @@ export async function rerankKnowledge(
     })),
     query,
     scorer: { getRelevanceScore: async (_query, text) => scores.get(text)! },
-    // Rerank scores may be negative or exceed 1. Mastra orders them without
-    // normalization; only that ranking contributes to the final RRF score.
+    // Rerank scores may be negative or exceed 1. They determine final order;
+    // recall RRF is retained only for diagnostics and failure fallback.
     options: {
       topK: hits.length,
       weights: { semantic: 1, vector: 0, position: 0 },
@@ -173,24 +205,12 @@ export async function rerankKnowledge(
   });
 }
 
-export function fuseRerankRanks(hits: KnowledgeHit[]): KnowledgeHit[] {
-  // Call after merging model groups into a single ranking. Group-local ranks
-  // would incorrectly give every model's first result a global rank of one.
-  return hits
-    .map((hit, rank) => {
-      if (hit.scores?.rerank === undefined) return hit;
-      const rerankRrf = reciprocalRankScore(rank);
-      const score = hit.scores.rrf + rerankRrf;
-      return {
-        ...hit,
-        score,
-        scores: { ...hit.scores, rrf: score, rerankRrf },
-      };
-    })
-    .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
-}
-
 export function rerankFailureReason(error: unknown) {
+  if (
+    error instanceof Error &&
+    error.message === 'KNOWLEDGE_RERANK_MODEL_CONFLICT'
+  )
+    return 'model_conflict' as const;
   if (
     error instanceof Error &&
     (error.message === 'KNOWLEDGE_SEARCH_TIMEOUT' ||

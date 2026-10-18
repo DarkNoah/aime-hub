@@ -16,6 +16,9 @@ import {
   providerModelTypes,
   defaultModelKeys,
   defaultModelTypes,
+  defaultWebProviderKeys,
+  defaultWebProviderTools,
+  providerSupportsWebTool,
   modelSupportsType,
   modelTypeSchema,
 } from '@aime/shared/providers';
@@ -157,7 +160,9 @@ export class ProviderService {
         modelId === undefined
           ? settings[key]?.startsWith(`${providerId}/`)
           : settings[key] === modelReference(providerId, modelId),
-      )
+      ) ||
+      (modelId === undefined &&
+        defaultWebProviderKeys.some((key) => settings[key] === providerId))
     )
       throw new ProviderError('MODEL_IN_USE', 409);
   }
@@ -290,7 +295,12 @@ export class ProviderService {
   }
 
   private async resolveDefaultModel(
-    key: 'embeddingModel' | 'rerankModel' | 'speechModel' | 'asrModel',
+    key:
+      | 'embeddingModel'
+      | 'rerankModel'
+      | 'speechModel'
+      | 'asrModel'
+      | 'ocrModel',
     reference?: string,
   ) {
     const ref = reference ?? (await this.getDefaults())[key];
@@ -335,13 +345,12 @@ export class ProviderService {
     );
     return provider.transcriptionModel(modelId);
   }
-  async getOcrModel(reference: string) {
-    const model = await this.getModel(reference);
-    if (!model.enabled || !modelSupportsType(model, 'ocr'))
-      throw new ProviderError('INVALID_MODEL');
-    return (await this.getProviderInstance(model.providerId)).ocrModel(
-      model.id,
+  async getOcrModel(reference?: string) {
+    const { provider, modelId } = await this.resolveDefaultModel(
+      'ocrModel',
+      reference,
     );
+    return provider.ocrModel(modelId);
   }
   // Server-only persisted configuration, including credentials, for model clients.
   async getProvider(id: string) {
@@ -401,6 +410,19 @@ export class ProviderService {
     await this.write(async (manager) => {
       const provider = await this.requireProvider(manager, id);
       if (input.enabled === false) await this.assertUnused(manager, id);
+      const defaults = await this.defaults(manager);
+      if (
+        defaultWebProviderKeys.some(
+          (key) =>
+            defaults[key] === id &&
+            (!providerSupportsWebTool(
+              input.type ?? provider.type,
+              defaultWebProviderTools[key],
+            ) ||
+              (input.apiKey !== undefined && !input.apiKey.trim())),
+        )
+      )
+        throw new ProviderError('MODEL_IN_USE', 409);
       if (
         input.type &&
         input.type !== provider.type &&
@@ -531,11 +553,25 @@ export class ProviderService {
         });
         if (
           !provider ||
-          providerGroup(provider.type) !== 'languageModel' ||
+          !providerModelTypes(provider.type).includes(defaultModelTypes[key]) ||
           !model ||
           !modelSupportsType(model, defaultModelTypes[key])
         )
           throw new ProviderError('INVALID_MODEL');
+      }
+      for (const key of defaultWebProviderKeys) {
+        const id = input[key];
+        if (!id) continue;
+        const provider = await manager.findOne(Provider, {
+          where: { id, enabled: true },
+          select: { id: true, type: true, enabled: true, apiKey: true },
+        });
+        if (
+          !provider ||
+          !provider.apiKey?.trim() ||
+          !providerSupportsWebTool(provider.type, defaultWebProviderTools[key])
+        )
+          throw new ProviderError('INVALID_TOOL_PROVIDER');
       }
       await manager.save(Setting, { id: settingsId, value: input });
       return input;

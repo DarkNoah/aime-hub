@@ -240,23 +240,25 @@ export const knowledgeHitSchema = z.object({
   name: z.string(),
   text: z.string(),
   sourceUrl: z.string().nullable(),
+  // Final sorting score: rerank on success, recall RRF otherwise.
   score: z.number(),
   // Keep keyword for previously stored tool messages.
   mode: z.enum(['vector', 'keyword', 'bm25', 'hybrid']),
   scores: z
     .object({
+      // Recall fusion score, retained unchanged after reranking.
       rrf: z.number(),
       vector: z.number().optional(),
       bm25: z.number().optional(),
       rerank: z.number().optional(),
-      // Contribution from the rerank ranking, already included in rrf.
-      rerankRrf: z.number().optional(),
     })
     .optional(),
   fallbacks: z.array(z.enum(['vector', 'rerank'])).optional(),
   fallbackReasons: z
     .object({
-      rerank: z.enum(['timeout', 'invalid_response', 'failed']).optional(),
+      rerank: z
+        .enum(['timeout', 'invalid_response', 'failed', 'model_conflict'])
+        .optional(),
     })
     .optional(),
 });

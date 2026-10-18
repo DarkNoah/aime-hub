@@ -20,6 +20,7 @@ const errorKeys = {
   PROVIDER_HAS_MODELS: 'errors.providerHasModels',
   PROVIDER_CONFIG_ONLY: 'errors.providerConfigOnly',
   INVALID_MODEL: 'errors.invalidModel',
+  INVALID_TOOL_PROVIDER: 'errors.invalidWebProvider',
   UPSTREAM_ERROR: 'errors.providerUpstream',
   INVALID_URL: 'errors.providerUrl',
   RATE_LIMITED: 'errors.rateLimit',

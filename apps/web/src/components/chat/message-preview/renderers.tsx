@@ -28,6 +28,7 @@ import { SpeechPreview } from './speech';
 import { TranscribePreview, VoicesPreview } from './audio';
 import { LspPreview } from './lsp';
 import { BrowserPreview } from './browser';
+import { SkillPreview } from './skill';
 import type { PreviewPart } from './selection';
 import { getToolName } from '../tool-renderers/registry';
 
@@ -121,6 +122,8 @@ const previewRenderers: Partial<Record<string, ComponentType<PreviewProps>>> = {
   'tool:write_file': WriteFilePreview,
   'tool:grep': GrepPreview,
   'tool:read_file': ReadFileToolPreview,
+  'tool:skill': SkillPreview,
+  'tool:skill_read': SkillPreview,
   'tool:view_file': ViewFilePreview,
   'tool:exec': ExecPreview,
   'tool:task_write': TaskPreview,

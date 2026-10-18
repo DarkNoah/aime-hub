@@ -9,7 +9,7 @@ export function createWebFetchTool(
   config: WebFetchConfig = defaultWebFetchConfig,
   dependencies: {
     resolveProvider?: (
-      id: string,
+      id: string | null,
     ) => Promise<Pick<BaseProvider, 'id' | 'webFetch'>>;
     fallbackProvider?: Pick<BaseProvider, 'id' | 'webFetch'>;
     validateUrl?: typeof publicWebAddress;
@@ -54,7 +54,7 @@ export function createWebFetchTool(
         ]);
         await (dependencies.validateUrl ?? publicWebAddress)(url, signal);
         abortSignal?.throwIfAborted();
-        if (config.providerId && dependencies.resolveProvider) {
+        if (dependencies.resolveProvider) {
           try {
             const provider = await dependencies.resolveProvider(
               config.providerId,

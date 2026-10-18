@@ -155,10 +155,10 @@ export function createReadFileTool(
             'INVALID_PAGE_RANGES',
             'page_ranges applies to PDF files only.',
           );
-        if (!dependencies.resolveModel || !config.model)
+        if (!dependencies.resolveModel)
           throw new ReadFileError(
             'OCR_NOT_CONFIGURED',
-            'Select a MinerU or PaddleOCR model in the read_file tool settings.',
+            'Select an OCR model in read_file tool settings or set the default OCR model.',
           );
         const { model, reference } = await dependencies.resolveModel(
           config.model,

@@ -51,7 +51,7 @@ import { ThreadError } from '../threads/errors.js';
 import { validateKnowledgeFile } from './parse.js';
 import {
   fuseRanks,
-  fuseRerankRanks,
+  mergeVectorRanks,
   KNOWLEDGE_RERANK_TIMEOUT_MS,
   rerankFailureReason,
   rerankKnowledge,
@@ -1042,6 +1042,8 @@ export class KnowledgeService {
       (async () => {
         const results: {
           baseId: string;
+          embeddingModel: string | null;
+          vectorDimension: number | null;
           hits: RankedChunk[];
           failed: boolean;
         }[] = [];
@@ -1050,6 +1052,8 @@ export class KnowledgeService {
             ...(await Promise.all(
               bases.slice(i, i + 3).map(async (base) => ({
                 baseId: base.id,
+                embeddingModel: base.embeddingModel,
+                vectorDimension: base.vectorDimension,
                 ...(await this.vectorCandidates(
                   base,
                   query,
@@ -1066,11 +1070,11 @@ export class KnowledgeService {
         return results;
       })(),
     ]);
-    // One lexical corpus and per-index vector rankings (models may differ).
+    // One lexical corpus and one vector ranking per embedding space.
     // The same chunk receives one contribution from each matching recall route.
     const fused = fuseRanks([
       { mode: 'bm25', hits: bm25 },
-      ...vectors.map(({ hits }) => ({ mode: 'vector' as const, hits })),
+      ...mergeVectorRanks(vectors, candidateLimit),
     ]);
     const failedBases = new Set(
       vectors.filter((v) => v.failed).map((v) => v.baseId),
@@ -1092,63 +1096,47 @@ export class KnowledgeService {
         fallbacks: failedBases.has(hit.baseId) ? ['vector' as const] : [],
       }));
     if (!hits.length) return [];
-    const byBase = new Map(bases.map((base) => [base.id, base.rerankModel]));
-    const groups = new Map<string | null, KnowledgeHit[]>();
-    for (const hit of hits) {
-      const model = byBase.get(hit.baseId) ?? null;
-      const group = groups.get(model) ?? [];
-      group.push(hit);
-      groups.set(model, group);
+    let ranked: KnowledgeHit[];
+    try {
+      ranked = await withSearchTimeout(async (signal) => {
+        // A single base keeps its explicit model (including disabled reranking).
+        // Cross-base searches need one model to score the entire candidate set.
+        let model =
+          bases.length === 1
+            ? bases[0]!.rerankModel
+            : (await this.providers.getDefaults()).rerankModel;
+        if (bases.length > 1 && !model) {
+          const models = new Set(
+            bases.flatMap((base) =>
+              base.rerankModel ? [base.rerankModel] : [],
+            ),
+          );
+          if (models.size > 1)
+            throw new Error('KNOWLEDGE_RERANK_MODEL_CONFLICT');
+          model = models.values().next().value ?? null;
+        }
+        if (!model) return hits;
+        return rerankKnowledge(
+          hits,
+          query,
+          await this.providers.getRerankModel(model),
+          signal,
+        );
+      }, KNOWLEDGE_RERANK_TIMEOUT_MS);
+    } catch (error) {
+      // Keep the complete recall order on any failure; never mix rerank scores
+      // with recall RRF scores or partially boost successful knowledge bases.
+      ranked = hits.map((hit) => ({
+        ...hit,
+        fallbacks: [...(hit.fallbacks ?? []), 'rerank' as const],
+        fallbackReasons: { rerank: rerankFailureReason(error) },
+      }));
     }
-    const deadline = Date.now() + KNOWLEDGE_RERANK_TIMEOUT_MS;
-    const entries = [...groups];
-    const rankedGroups: KnowledgeHit[][] = [];
-    for (let i = 0; i < entries.length; i += 3) {
-      rankedGroups.push(
-        ...(await Promise.all(
-          entries.slice(i, i + 3).map(async ([model, candidates]) => {
-            if (!model) return candidates;
-            try {
-              if (Date.now() >= deadline)
-                throw new Error('KNOWLEDGE_SEARCH_TIMEOUT');
-              return await withSearchTimeout(
-                async (signal) =>
-                  rerankKnowledge(
-                    candidates,
-                    query,
-                    await this.providers.getRerankModel(model),
-                    signal,
-                  ),
-                Math.max(1, deadline - Date.now()),
-              );
-            } catch (error) {
-              return candidates.map((hit) => ({
-                ...hit,
-                fallbacks: [...(hit.fallbacks ?? []), 'rerank' as const],
-                fallbackReasons: { rerank: rerankFailureReason(error) },
-              }));
-            }
-          }),
-        )),
-      );
-    }
-    // Different rerank models have incomparable score scales. Reorder each
-    // model's candidates within the slots that RRF assigned to that group.
-    const positions = new Map<string | null, number>();
-    const ranked = new Map(
-      entries.map(([model], i) => [model, rankedGroups[i]!]),
-    );
-    const merged = hits.map((hit) => {
-      const model = byBase.get(hit.baseId) ?? null;
-      const position = positions.get(model) ?? 0;
-      positions.set(model, position + 1);
-      return ranked.get(model)![position]!;
-    });
     return (
       await this.hydrateHits(
         userId,
         baseIds,
-        fuseRerankRanks(merged),
+        ranked,
         projectId,
         tags,
         metadata,

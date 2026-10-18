@@ -3,9 +3,11 @@ import { useTranslation } from 'react-i18next';
 import { Gauge } from 'lucide-react';
 import {
   Context,
-  ContextIcon,
   ContextTrigger,
   ContextContent,
+  ContextContentHeader,
+  ContextContentBody,
+  ContextContentFooter,
 } from '@/components/ai-elements/context';
 import { Button } from '@/components/ui/button';
 import { formatTokens } from './format-tokens';
@@ -28,52 +30,89 @@ export function ChatContextUsage({ usage }: { usage: ChatUsage }) {
       })
     : '—';
   const progressLabel = t('chat.usage.contextProgress', { percent });
+  const breakdown = [
+    ['input', usage.inputTokens],
+    ['output', usage.outputTokens],
+    ['reasoning', usage.reasoningTokens],
+    ['cache', usage.cachedInputTokens],
+    ['cacheWrite', usage.cacheCreationInputTokens],
+  ] as const;
   return (
     <Context usedTokens={usedTokens} maxTokens={hasLimit ? maxTokens : 1}>
-      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+      {hasProgress ? (
+        <ContextTrigger
+          size="sm"
+          className="size-7 gap-0 p-0 text-xs text-muted-foreground [&>span]:hidden @xl/chat:w-auto @xl/chat:gap-1.5 @xl/chat:px-2 @xl/chat:[&>span]:inline"
+          aria-label={progressLabel}
+        />
+      ) : (
         <ContextTrigger>
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            className="size-7 gap-0 p-0 text-xs text-muted-foreground @xl/chat:w-auto @xl/chat:gap-1.5 @xl/chat:px-2"
-            aria-label={hasProgress ? progressLabel : t('chat.usage.title')}
+            className="size-7 p-0 text-muted-foreground"
+            aria-label={t('chat.usage.title')}
           >
-            <span className="hidden font-mono tabular-nums @xl/chat:inline">
-              {formatTokens(usage.totalTokens, i18n.language)}
-            </span>
-            {hasProgress ? (
-              <ContextIcon
-                aria-label={progressLabel}
-                aria-valuetext={percent}
-              />
-            ) : (
-              <Gauge className="size-4" />
-            )}
+            <Gauge className="size-4" />
           </Button>
         </ContextTrigger>
-      </div>
+      )}
       <ContextContent
         side="top"
         align="end"
-        className="w-52 min-w-0 max-w-[calc(100vw-2rem)] p-3"
+        className="w-72 min-w-0 max-w-[calc(100vw-2rem)]"
       >
         {hasProgress ? (
-          <div className="space-y-1 text-xs">
-            <div className="flex items-center justify-between gap-3">
-              <span>{t('chat.usage.context')}</span>
-              <span className="font-mono tabular-nums">{percent}</span>
-            </div>
-            <p className="font-mono tabular-nums text-muted-foreground">
-              {formatTokens(usedTokens, i18n.language)} /{' '}
-              {formatTokens(maxTokens, i18n.language)}
-            </p>
-          </div>
+          <ContextContentHeader
+            aria-label={progressLabel}
+            title={`${usedTokens.toLocaleString(i18n.language)} / ${maxTokens.toLocaleString(i18n.language)} tokens`}
+          />
         ) : (
-          <p className="text-xs text-muted-foreground">
-            {t(hasLimit ? 'chat.usage.unavailable' : 'chat.usage.unknownLimit')}
-          </p>
+          <ContextContentHeader>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                hasLimit ? 'chat.usage.unavailable' : 'chat.usage.unknownLimit',
+              )}
+            </p>
+          </ContextContentHeader>
         )}
+        {breakdown.some(([, tokens]) => tokens !== undefined) && (
+          <ContextContentBody className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              {t('chat.usage.latestStep')}
+            </p>
+            {breakdown.map(([key, tokens]) =>
+              tokens === undefined ? null : (
+                <div
+                  key={key}
+                  className="flex items-center justify-between gap-3 text-xs"
+                >
+                  <span className="text-muted-foreground">
+                    {t(`chat.usage.${key}`)}
+                  </span>
+                  <span
+                    className="font-mono tabular-nums"
+                    title={tokens.toLocaleString(i18n.language)}
+                  >
+                    {formatTokens(tokens, i18n.language)}
+                  </span>
+                </div>
+              ),
+            )}
+          </ContextContentBody>
+        )}
+        <ContextContentFooter>
+          <span className="text-muted-foreground">
+            {t('chat.usage.consumed')}
+          </span>
+          <span
+            className="font-mono tabular-nums"
+            title={usage.consumedTokens?.toLocaleString(i18n.language)}
+          >
+            {formatTokens(usage.consumedTokens, i18n.language)} tokens
+          </span>
+        </ContextContentFooter>
       </ContextContent>
     </Context>
   );

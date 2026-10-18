@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { InstalledSkill, SkillContent } from '@aime/shared/skills';
 import type { TranslationKey } from '@/i18n/config';
-import { MessageResponse } from '@/components/ai-elements/message';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -15,6 +14,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { getSkillApi, skillErrorKey, type SkillScope } from './api';
+import { SkillMarkdown } from './skill-markdown';
 
 export function SkillPreviewDialog({
   scope,
@@ -30,9 +30,6 @@ export function SkillPreviewDialog({
   const [data, setData] = useState<SkillContent>();
   const [error, setError] = useState<TranslationKey>();
   const [revision, setRevision] = useState(0);
-  const frontmatter = data?.content.match(
-    /^\uFEFF?---[ \t]*\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/,
-  );
   useEffect(() => {
     const controller = new AbortController();
     void client
@@ -88,16 +85,7 @@ export function SkillPreviewDialog({
                 viewportProps={{ className: '[&>div]:block!' }}
               >
                 <div className="min-w-0 space-y-5 px-5 pb-6 sm:px-6">
-                  {frontmatter ? (
-                    <pre className="rounded-lg border bg-muted/40 p-4 font-mono text-xs leading-6 break-words whitespace-pre-wrap text-muted-foreground">
-                      {frontmatter[1]}
-                    </pre>
-                  ) : null}
-                  <MessageResponse mode="static" renderEnhancedLinks={false}>
-                    {frontmatter
-                      ? data.content.slice(frontmatter[0].length)
-                      : data.content}
-                  </MessageResponse>
+                  <SkillMarkdown content={data.content} />
                 </div>
               </ScrollArea>
             </TabsContent>

@@ -200,11 +200,12 @@ export class ToolService {
     return { ...provider, apiKey: provider.apiKey! };
   }
 
-  private async ocrModel(reference: string | null): Promise<ResolvedOcrModel> {
+  private async ocrModel(selected: string | null): Promise<ResolvedOcrModel> {
+    const reference = selected ?? (await this.providers.getDefaults()).ocrModel;
     if (!reference)
       throw new ReadFileError(
         'OCR_NOT_CONFIGURED',
-        'Select a MinerU or PaddleOCR model in the read_file tool settings.',
+        'Select an OCR model in read_file tool settings or set the default OCR model.',
       );
     try {
       const model = await this.providers.getModel(reference);
@@ -219,7 +220,7 @@ export class ToolService {
     } catch {
       throw new ReadFileError(
         'OCR_UNAVAILABLE',
-        'The OCR model is unavailable. Select an enabled MinerU or PaddleOCR model in the read_file tool settings.',
+        'The OCR model is unavailable. Select an enabled OCR model in read_file tool settings or update the default OCR model.',
       );
     }
   }
@@ -257,7 +258,10 @@ export class ToolService {
     }
   }
 
-  private async searchProvider(id: string, timeoutMs: number) {
+  private async searchProvider(selected: string | null, timeoutMs: number) {
+    const id =
+      selected ?? (await this.providers.getDefaults()).webSearchProviderId;
+    if (!id) throw new ProviderError('INVALID_TOOL_PROVIDER');
     const provider = await this.configuredProvider(id, 'web_search');
     if (provider.type === 'deepseek')
       return new DeepSeekProvider({ ...provider, timeoutMs });
@@ -268,7 +272,10 @@ export class ToolService {
     });
   }
 
-  private async fetchProvider(id: string, timeoutMs: number) {
+  private async fetchProvider(selected: string | null, timeoutMs: number) {
+    const id =
+      selected ?? (await this.providers.getDefaults()).webFetchProviderId;
+    if (!id) throw new ProviderError('INVALID_TOOL_PROVIDER');
     const provider = await this.configuredProvider(id, 'web_fetch');
     if (provider.type === 'deepseek')
       return new DeepSeekProvider({ ...provider, timeoutMs });

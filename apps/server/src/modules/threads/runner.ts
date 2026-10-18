@@ -9,6 +9,7 @@ import {
   type AgentRuntimeOptions,
 } from '../../mastra/agents/factory.js';
 import type { AgentService } from '../agents/service.js';
+import { loadLocalAgents } from '../agents/local.js';
 import { fallbackAgentId, getAgent } from '../../mastra/agents/index.js';
 import { AgentError } from '../agents/errors.js';
 import type {
@@ -84,7 +85,7 @@ export function createChatRunner(
   tools?: Pick<ToolService, 'buildTools'>,
   agents?: Pick<AgentService, 'getConfig' | 'getAgent'>,
   usage?: Pick<UsageService, 'record'> &
-    Partial<Pick<UsageService, 'latestThreadUsage'>>,
+    Partial<Pick<UsageService, 'latestThreadUsage' | 'threadConsumedTokens'>>,
   environmentVariables?: Pick<EnvironmentVariableService, 'getEnv'>,
   getMemoryConfig?: ResolveMemoryConfig,
 ): ChatRunner {
@@ -133,6 +134,9 @@ export function createChatRunner(
       return `${config.id}:${config.source === 'database' ? config.versionId : 'code'}`;
     },
     getGoal: (threadId) => readThreadGoal(storage, threadId),
+    getConsumedTokens: usage?.threadConsumedTokens
+      ? (threadId) => usage.threadConsumedTokens!(threadId)
+      : undefined,
     async clearGoal(threadId) {
       const store = await storage.getStore('threadState');
       await store?.deleteState({ threadId, type: 'goal' });
@@ -280,6 +284,8 @@ export function createChatRunner(
           selection.modalitiesInput ??
           (selection.supportsImages ? ['text', 'image'] : ['text']);
         const agent = await createAgent(config.id, {
+          localSubagents: () =>
+            loadLocalAgents(workspaceRoot, userId, projectId),
           versionId:
             config.source === 'database' ? config.versionId : undefined,
           mastra,

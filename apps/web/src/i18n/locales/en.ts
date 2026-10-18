@@ -159,6 +159,8 @@ export const en = {
   'knowledge.rerankTimeout': 'Rerank timed out; keeping recall RRF order',
   'knowledge.rerankInvalid':
     'Invalid rerank response; keeping recall RRF order',
+  'knowledge.rerankModelConflict':
+    'Rerank model conflict; keeping recall RRF order',
   'knowledge.vector': 'Semantic search',
   'knowledge.modelHint':
     'New bases preselect system embedding and rerank defaults, then save independent model choices. Later default changes do not alter this base. Models can be changed; without an embedding model, use BM25 only.',
@@ -199,7 +201,7 @@ export const en = {
   'knowledge.deleteDocument': 'Archive {{name}}',
   'knowledge.loadMore': 'Load more',
   'knowledge.searchHint':
-    'Search enabled, ready sources with vector and BM25 recall. The configured rerank model ranks the candidates, then all three rankings are fused with RRF. Vector and rerank failures degrade gracefully.',
+    'Search enabled, ready sources with vector and BM25 recall. RRF selects candidates, then the configured rerank model determines final order. Without a rerank model or if reranking fails, recall RRF order is used.',
   'knowledge.query': 'Enter a question or keywords',
   'knowledge.search': 'Search',
   'knowledge.searching': 'Searching…',
@@ -863,8 +865,9 @@ export const en = {
   'tools.configureViewFile': 'Configure file reading',
   'tools.enableViewFile': 'Enable file reading',
   'tools.ocrModel': 'OCR model',
-  'tools.selectOcrModel': 'No OCR model (text reading only)',
-  'tools.ocrModelHint': 'Optionally select an enabled MinerU or PaddleOCR model for images and PDFs. Text reading needs no model.',
+  'tools.selectOcrModel': 'Use default OCR model',
+  'tools.ocrModelHint':
+    'Uses the system OCR default when no model is selected. Text reading works without OCR. Supports MinerU and PaddleOCR.',
   'tools.ocrProviderHint':
     'Text supports line ranges; images and PDFs use OCR. Other binary files return media or metadata. PDF page selection depends on the provider endpoint.',
   'tools.invalidOcrModel':
@@ -955,9 +958,9 @@ export const en = {
   'tools.enableFetch': 'Enable web fetch',
   'tools.fetchProvider': 'Reader provider',
   'tools.fetchProviderHint':
-    'Choose an enabled DeepSeek or Jina AI provider with an API key, or extract pages locally.',
+    'Uses the system web fetch provider when none is selected, or local extraction if no default is configured.',
   'tools.invalidFetchProvider':
-    'Select an enabled DeepSeek or Jina AI provider with an API key, or choose local extraction.',
+    'Select an enabled DeepSeek or Jina AI provider with an API key, or use the system default.',
   'tools.missingFetchProvider': 'Provider unavailable · local fallback',
   'tools.localFetch': 'Local extraction (no API key)',
   'tools.fetchFallbackHint':
@@ -990,11 +993,11 @@ export const en = {
   'tools.provider': 'Search provider',
   'tools.sogou': 'Sogou (no API key)',
   'tools.providerHint':
-    'Choose an enabled DeepSeek or SerpAPI provider with an API key from provider management, or use Sogou directly.',
+    'Uses the system search provider when none is selected, or Sogou if no default is configured.',
   'tools.missingProvider': 'Provider unavailable · Sogou fallback',
   'tools.unavailable': 'Disabled or missing API key',
   'tools.invalidProvider':
-    'Select an enabled DeepSeek or SerpAPI provider with an API key, or choose Sogou.',
+    'Select an enabled DeepSeek or SerpAPI provider with an API key, or use the system default.',
   'tools.numResults': 'Maximum results',
   'tools.numResultsHint': '1–20 results; the engine may return fewer.',
   'tools.timeout': 'Timeout (seconds)',
@@ -1803,6 +1806,14 @@ export const en = {
   'chat.grep.contextLine': 'Context: line {{line}}',
   'chat.grep.matchLine': 'Match: line {{line}}, column {{column}}',
   'chat.readFile.offset': 'From line {{line}}',
+  'chat.skill.activate': 'Load skill',
+  'chat.skill.read': 'Read skill file',
+  'chat.skill.name': 'Skill',
+  'chat.skill.path': 'File',
+  'chat.skill.lines': 'Lines {{start}}–{{end}} of {{total}}',
+  'chat.skill.endLine': 'Through line {{line}}',
+  'chat.skill.empty': 'The tool returned no content.',
+  'chat.skill.waiting': 'Waiting for skill content…',
   'chat.webFetch.source': 'Source page',
   'chat.webFetch.openLink': 'Open the original page in a new tab',
   'chat.webFetch.linkUnavailable': 'Link unavailable',
@@ -1857,6 +1868,7 @@ export const en = {
   'chat.usage.cache': 'Cache read (included in input)',
   'chat.usage.cacheWrite': 'Cache write (included in input)',
   'chat.usage.total': 'Total tokens',
+  'chat.usage.consumed': 'Conversation total',
   'chat.usage.unknownLimit': 'Context limit is not configured',
   'chat.usage.unavailable': 'Token usage is unavailable from the provider',
   'chat.searchThreads': 'Search chat titles…',
@@ -2517,9 +2529,29 @@ export const en = {
   'modelSelector.noResults': 'No matching models',
   'modelSelector.searchHint': 'Try another search or clear the search field.',
   'modelSelector.emptyHint': 'There are no models to choose from.',
+  'defaults.autoSave': 'Auto-save',
+  'defaults.ocrModel': 'Document recognition (OCR)',
+  'defaults.webSearchProviderId': 'Web search',
+  'defaults.webFetchProviderId': 'Web fetch',
+  'defaults.group.conversation': 'Chat & reasoning',
+  'defaults.group.conversationHint': 'Conversations, quick tasks and reasoning',
+  'defaults.group.media': 'Image & audio',
+  'defaults.group.mediaHint': 'Image generation, speech and transcription',
+  'defaults.group.knowledge': 'Knowledge & documents',
+  'defaults.group.knowledgeHint':
+    'Embeddings, reranking and document recognition',
+  'defaults.group.web': 'Web services',
+  'defaults.group.webHint': 'Find information and read web pages',
+  'defaults.searchHint': 'DeepSeek or SerpAPI, with Sogou as the fallback.',
+  'defaults.fetchHint':
+    'DeepSeek or Jina AI, with local extraction as the fallback.',
+  'defaults.providerUnavailable': 'Provider unavailable',
+  'errors.invalidWebProvider':
+    'Select an enabled provider with an API key that supports this web service.',
+  'tools.defaultWebProvider': 'Use system default',
   'defaults.title': 'Default model configuration',
   'defaults.hint':
-    'Changes are saved automatically. Each selector shows enabled models of the matching type. Change defaults before disabling or deleting a referenced provider or model.',
+    'Set defaults for each task. Changes save automatically; individual tool settings take priority.',
   'defaults.defaultModel': 'Default model',
   'defaults.fastModel': 'Fast model',
   'defaults.imageModel': 'Image generation model',

@@ -8,12 +8,36 @@ import {
   modelInputSchema,
   modelReference,
   providerInputSchema,
+  normalizeModelDefaults,
+  modelDefaultsSchema,
 } from '@aime/shared/providers';
 import { ProviderService } from '../apps/server/src/modules/providers/service.js';
 import { CreateProviderTables1780000001000 } from '../packages/db/src/migrations/1780000001000-create-provider-tables.js';
 import { ProviderModelType1780000013000 } from '../packages/db/src/migrations/1780000013000-provider-model-type.js';
 import { ProviderOcrModel1780000020000 } from '../packages/db/src/migrations/1780000020000-provider-ocr-model.js';
 import { ProviderAsrModel1780000023000 } from '../packages/db/src/migrations/1780000023000-provider-asr-model.js';
+
+test('legacy default settings acquire empty OCR and web defaults without losing existing choices', () => {
+  const old = {
+    defaultModel: 'provider/chat',
+    fastModel: null,
+    imageModel: null,
+    thinkingMode: 'on',
+  };
+  assert.deepEqual(normalizeModelDefaults(old), {
+    ...emptyModelDefaults,
+    defaultModel: 'provider/chat',
+    thinkingMode: 'medium',
+  });
+  const configured = {
+    ...emptyModelDefaults,
+    ocrModel: 'ocr/org/model',
+    webSearchProviderId: 'search',
+    webFetchProviderId: 'fetch',
+  };
+  assert.deepEqual(modelDefaultsSchema.parse(configured), configured);
+  assert.deepEqual(normalizeModelDefaults(configured), configured);
+});
 
 test(
   'PostgreSQL PaddleOCR sync, resolution, edits and OCR type isolation',
@@ -144,6 +168,56 @@ test(
       service.setDefaults({ ...emptyModelDefaults, defaultModel: ref }),
       { code: 'INVALID_MODEL' },
     );
+    const defaults = { ...emptyModelDefaults, ocrModel: ref };
+    await service.setDefaults(defaults);
+    assert.deepEqual(await service.getDefaults(), defaults);
+    assert.equal((await service.getOcrModel()).modelId, model.modelId);
+    for (const mutation of [
+      () => service.updateModel(provider.id, model.modelId, { enabled: false }),
+      () => service.deleteModel(provider.id, model.modelId),
+      () => service.updateProvider(provider.id, { enabled: false }),
+      () => service.deleteProvider(provider.id),
+    ])
+      await assert.rejects(mutation(), { code: 'MODEL_IN_USE' });
+    const web = await service.createProvider(
+      providerInputSchema.parse({
+        name: 'Web defaults',
+        type: 'deepseek',
+        baseUrl: 'https://api.deepseek.com',
+        apiKey: 'synthetic-key',
+      }),
+    );
+    const webDefaults = {
+      ...defaults,
+      webSearchProviderId: web.id,
+      webFetchProviderId: web.id,
+    };
+    await service.setDefaults(webDefaults);
+    assert.deepEqual(await service.getDefaults(), webDefaults);
+    for (const mutation of [
+      () => service.updateProvider(web.id, { enabled: false }),
+      () => service.updateProvider(web.id, { type: 'openai' }),
+      () => service.updateProvider(web.id, { apiKey: '' }),
+      () => service.deleteProvider(web.id),
+    ])
+      await assert.rejects(mutation(), { code: 'MODEL_IN_USE' });
+    for (const patch of [
+      { webSearchProviderId: provider.id },
+      { webFetchProviderId: 'missing' },
+    ])
+      await assert.rejects(service.setDefaults({ ...webDefaults, ...patch }), {
+        code: 'INVALID_TOOL_PROVIDER',
+      });
+    await service.setDefaults(emptyModelDefaults);
+    await service.updateProvider(web.id, { enabled: false });
+    await assert.rejects(service.setDefaults(webDefaults), {
+      code: 'INVALID_TOOL_PROVIDER',
+    });
+    await service.updateProvider(web.id, { enabled: true, apiKey: '' });
+    await assert.rejects(service.setDefaults(webDefaults), {
+      code: 'INVALID_TOOL_PROVIDER',
+    });
+    await service.deleteProvider(web.id);
     await service.updateModel(provider.id, model.modelId, {
       displayName: 'My parser',
       enabled: false,

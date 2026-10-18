@@ -12,7 +12,6 @@ type ToolDefinition = {
   missingProvider: TranslationKey;
   fallbackHint: TranslationKey;
   localLabel: TranslationKey;
-  localId: string;
 };
 
 export const toolDefinitions = {
@@ -46,8 +45,7 @@ export const toolDefinitions = {
     invalidProvider: 'tools.invalidProvider',
     missingProvider: 'tools.missingProvider',
     fallbackHint: 'tools.fallbackHint',
-    localLabel: 'tools.sogou',
-    localId: 'sogou',
+    localLabel: 'tools.defaultWebProvider',
   },
   web_fetch: {
     title: 'tools.webFetch',
@@ -59,8 +57,7 @@ export const toolDefinitions = {
     invalidProvider: 'tools.invalidFetchProvider',
     missingProvider: 'tools.missingFetchProvider',
     fallbackHint: 'tools.fetchFallbackHint',
-    localLabel: 'tools.localFetch',
-    localId: 'local',
+    localLabel: 'tools.defaultWebProvider',
   },
 } satisfies Record<
   Exclude<

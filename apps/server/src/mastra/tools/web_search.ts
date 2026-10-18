@@ -14,7 +14,7 @@ export function createWebSearchTool(
   config: WebSearchConfig = defaultWebSearchConfig,
   dependencies: {
     resolveProvider?: (
-      id: string,
+      id: string | null,
     ) => Promise<Pick<BaseProvider, 'id' | 'webSearch'>>;
     fallbackProvider?: Pick<BaseProvider, 'id' | 'webSearch'>;
   } = {},
@@ -47,7 +47,7 @@ export function createWebSearchTool(
         message: 'Web search was cancelled.',
       });
       if (options.abortSignal?.aborted) return aborted();
-      if (config.providerId && dependencies.resolveProvider) {
+      if (dependencies.resolveProvider) {
         try {
           const provider = await dependencies.resolveProvider(
             config.providerId,

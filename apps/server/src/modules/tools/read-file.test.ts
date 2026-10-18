@@ -21,6 +21,7 @@ import {
 import { AgentFSFilesystem } from '@mastra/agentfs';
 import type { DataSource } from 'typeorm';
 import { defaultReadFileConfig } from '@aime/shared/tools';
+import { emptyModelDefaults } from '@aime/shared/providers';
 import { createReadFileTool } from '../../mastra/tools/read_file.js';
 import type { OcrOptions } from '../../mastra/providers/ocr-model.js';
 import { PaddleOCRProvider } from '../../mastra/providers/paddleocr.js';
@@ -537,4 +538,60 @@ test('saved OCR settings select MinerU or PaddleOCR and override caller defaults
     await buildTools(['read_file'], { read_file: { enabled: false } }),
     {},
   );
+});
+
+test('read_file inherits the default OCR model, preserves explicit selections and reports missing defaults', async (t) => {
+  const w = await workspace(t);
+  let selected: string | null = null;
+  let defaultReference: string | null = 'ocr/PaddleOCR-VL';
+  const resolved: string[] = [];
+  const providers = {
+    getDefaults: async () => ({
+      ...emptyModelDefaults,
+      ocrModel: defaultReference,
+    }),
+    getModel: async (reference: string) => {
+      resolved.push(reference);
+      return {
+        id: reference.split('/')[1],
+        providerId: 'ocr',
+        enabled: true,
+        modelType: 'ocr',
+        modalitiesOutput: ['text'],
+      };
+    },
+    getProviderInstance: async () => ({
+      type: 'paddleocr',
+      ocrModel: (modelId: string) => ({
+        provider: 'paddleocr',
+        modelId,
+        doOCR: async () => ({ markdown: '# Default OCR' }),
+      }),
+    }),
+  } as unknown as ConstructorParameters<typeof ToolService>[1];
+  const database = {
+    getRepository: () => ({
+      findOneBy: async () => ({
+        value: { ...defaultReadFileConfig, model: selected },
+      }),
+    }),
+  } as unknown as DataSource;
+  const service = new ToolService(database, providers);
+  async function read() {
+    const tools = await service.buildTools(['read_file']);
+    return runnable(tools.read_file as ReturnType<typeof createReadFileTool>)(
+      { path: 'image.png' },
+      w,
+    );
+  }
+  let result = await read();
+  assert.equal(result.ok, true);
+  assert.equal(result.model, defaultReference);
+  selected = 'ocr/explicit';
+  result = await read();
+  assert.equal(result.model, selected);
+  assert.deepEqual(resolved, ['ocr/PaddleOCR-VL', 'ocr/explicit']);
+  selected = null;
+  defaultReference = null;
+  assert.equal((await read()).code, 'OCR_NOT_CONFIGURED');
 });

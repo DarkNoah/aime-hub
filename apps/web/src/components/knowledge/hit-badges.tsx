@@ -7,13 +7,13 @@ export function KnowledgeHitBadges({ hit }: { hit: KnowledgeHit }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Badge variant="secondary">{t(`knowledge.${hit.mode}`)}</Badge>
-      {hit.scores && (
-        <Badge variant="outline">{`RRF ${hit.scores.rrf.toFixed(4)}`}</Badge>
-      )}
       {hit.scores?.rerank !== undefined && (
         <Badge variant="outline">
           {`Rerank ${hit.scores.rerank.toFixed(3)}`}
         </Badge>
+      )}
+      {hit.scores && (
+        <Badge variant="outline">{`RRF ${hit.scores.rrf.toFixed(4)}`}</Badge>
       )}
       {hit.fallbacks?.map((stage) => (
         <Badge key={stage} variant="outline">
@@ -22,9 +22,11 @@ export function KnowledgeHitBadges({ hit }: { hit: KnowledgeHit }) {
               ? 'knowledge.vectorFallback'
               : hit.fallbackReasons?.rerank === 'timeout'
                 ? 'knowledge.rerankTimeout'
-                : hit.fallbackReasons?.rerank === 'invalid_response'
-                  ? 'knowledge.rerankInvalid'
-                  : 'knowledge.rerankFallback',
+                : hit.fallbackReasons?.rerank === 'model_conflict'
+                  ? 'knowledge.rerankModelConflict'
+                  : hit.fallbackReasons?.rerank === 'invalid_response'
+                    ? 'knowledge.rerankInvalid'
+                    : 'knowledge.rerankFallback',
           )}
         </Badge>
       ))}

@@ -61,11 +61,11 @@ type ToolDependencies = {
   pluginTools?: () => Promise<ToolsInput>;
   loadConfig?: (id: string) => Promise<unknown>;
   searchProvider?: (
-    id: string,
+    id: string | null,
     timeoutMs: number,
   ) => Promise<Pick<BaseProvider, 'id' | 'webSearch'>>;
   fetchProvider?: (
-    id: string,
+    id: string | null,
     timeoutMs: number,
   ) => Promise<Pick<BaseProvider, 'id' | 'webFetch'>>;
   imageModel?: (reference: string | null) => Promise<ResolvedImageModel>;

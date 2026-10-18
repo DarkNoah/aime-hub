@@ -108,6 +108,7 @@ export interface ChatRunner {
   resolveSettings?(settings: ChatSettings): Promise<ChatSettings>;
   sessionKey?(settings: ChatSettings): Promise<string>;
   getGoal?(threadId: string): Promise<ThreadGoal | null>;
+  getConsumedTokens?(threadId: string): Promise<number | undefined>;
   clearGoal?(threadId: string): Promise<void>;
   projectFilesystem?(
     userId: string,
@@ -619,7 +620,11 @@ export class ThreadService {
         this.release(runtime);
         return;
       }
-      if (event.type === 'usage') runtime.data.usage = event.usage;
+      if (event.type === 'usage')
+        runtime.data.usage = await this.withConsumedTokens(
+          runtime.thread.id,
+          event.usage,
+        );
       else if (event.type === 'interaction') {
         const pending = { ...event.interaction, settings: event.settings };
         runtime.data.toolInteractions = [
@@ -728,11 +733,24 @@ export class ThreadService {
     return runtime.session;
   }
 
+  private async withConsumedTokens(id: string, usage: ChatUsage) {
+    if (!this.runner.getConsumedTokens) return usage;
+    let consumedTokens: number | undefined;
+    try {
+      consumedTokens = await this.runner.getConsumedTokens(id);
+    } catch {
+      // Accounting availability must not interrupt the chat.
+      console.error('Failed to read conversation token usage', id);
+    }
+    return { ...usage, consumedTokens };
+  }
+
   private async runtime(userId: string, id: string) {
     const thread = await this.accessible(userId, id);
     const cached = this.runtimes.get(id);
     if (cached) return cached;
     const data = dataOf(thread);
+    if (data.usage) data.usage = await this.withConsumedTokens(id, data.usage);
     if (data.activeId) {
       data.activeId = null;
       data.error = 'RUN_INTERRUPTED';

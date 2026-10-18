@@ -253,13 +253,15 @@ export type ThreadBackgroundTask = {
   // Only the latest output chunk is retained; this is not an unbounded event log.
   lastOutput?: unknown;
 };
-// Usage from the latest completed LLM step, not a sum across context windows.
+// Context counts describe the latest completed LLM step.
 export type ChatUsage = {
   model: string;
   maxTokens: number | null;
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  // Sum of reported usage records for this conversation, across steps and models.
+  consumedTokens?: number;
   reasoningTokens?: number;
   cachedInputTokens?: number;
   cacheCreationInputTokens?: number;

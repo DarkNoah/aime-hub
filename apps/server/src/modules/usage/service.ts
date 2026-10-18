@@ -72,6 +72,15 @@ export class UsageService {
     return rows[0];
   }
 
+  async threadConsumedTokens(threadId: string): Promise<number | undefined> {
+    const rows: { totalTokens: number | null }[] = await this.database.query(
+      `SELECT sum(total_tokens)::float8 AS "totalTokens" FROM usage_records
+       WHERE thread_id = $1`,
+      [threadId],
+    );
+    return rows[0]?.totalTokens ?? undefined;
+  }
+
   async summary(input: UsageQuery): Promise<UsageSummary> {
     const { where, params } = filters(input);
     return this.database.transaction('REPEATABLE READ', async (manager) => {

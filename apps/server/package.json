@@ -36,6 +36,7 @@
     "dotenv": "^17.4.2",
     "fast-glob": "^3.3.3",
     "fflate": "^0.8.3",
+    "gray-matter": "^4.0.3",
     "hono": "^4.13.13",
     "image-size": "^2.0.4",
     "linkedom": "^0.18.13",

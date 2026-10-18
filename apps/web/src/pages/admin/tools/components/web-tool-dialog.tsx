@@ -26,13 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { WebProviderSelector } from '@/components/web-provider-selector';
 import { toolErrorKey } from '../api';
 import { toolDefinitions } from '../definitions';
 
@@ -53,9 +47,7 @@ export function WebToolDialog({
   const definition = toolDefinitions[tool.id];
   const isSearch = tool.id === 'web_search';
   const [enabled, setEnabled] = useState(tool.config.enabled);
-  const [providerId, setProviderId] = useState(
-    tool.config.providerId ?? definition.localId,
-  );
+  const [providerId, setProviderId] = useState(tool.config.providerId);
   const [limit, setLimit] = useState(
     String(
       tool.id === 'web_search' ? tool.config.numResults : tool.config.maxChars,
@@ -72,9 +64,6 @@ export function WebToolDialog({
   const choices = providers.filter((provider) =>
     providerSupportsWebTool(provider.type, tool.id),
   );
-  const missing =
-    providerId !== definition.localId &&
-    !choices.some((provider) => provider.id === providerId);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -83,7 +72,7 @@ export function WebToolDialog({
       isSearch ? webSearchConfigSchema : webFetchConfigSchema
     ).safeParse({
       enabled,
-      providerId: providerId === definition.localId ? null : providerId,
+      providerId,
       ...(isSearch
         ? { numResults: Number(limit) }
         : { maxChars: Number(limit) }),
@@ -101,7 +90,7 @@ export function WebToolDialog({
     }
     if (
       enabled &&
-      providerId !== definition.localId &&
+      providerId !== null &&
       !choices.some(
         (provider) =>
           provider.id === providerId && provider.enabled && provider.hasApiKey,
@@ -184,42 +173,17 @@ export function WebToolDialog({
                 <Label htmlFor="search-provider">
                   {t(definition.provider)}
                 </Label>
-                <Select
+                <WebProviderSelector
+                  id="search-provider"
+                  tool={tool.id}
+                  providers={providers}
                   value={providerId}
                   onValueChange={setProviderId}
+                  noneLabel={t('tools.defaultWebProvider')}
                   disabled={pending}
-                >
-                  <SelectTrigger
-                    id="search-provider"
-                    className="w-full"
-                    aria-invalid={!!errors.providerId}
-                    aria-describedby="search-provider-hint"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={definition.localId}>
-                      {t(definition.localLabel)}
-                    </SelectItem>
-                    {missing ? (
-                      <SelectItem value={providerId} disabled>
-                        {t(definition.missingProvider)}
-                      </SelectItem>
-                    ) : null}
-                    {choices.map((provider) => (
-                      <SelectItem
-                        key={provider.id}
-                        value={provider.id}
-                        disabled={!provider.enabled || !provider.hasApiKey}
-                      >
-                        {provider.name}
-                        {!provider.enabled || !provider.hasApiKey
-                          ? ` · ${t('tools.unavailable')}`
-                          : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  invalid={!!errors.providerId}
+                  describedBy="search-provider-hint"
+                />
                 <p
                   id="search-provider-hint"
                   className={
