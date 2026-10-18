@@ -3,6 +3,7 @@ import { CompositeFilesystem, LocalFilesystem } from '@mastra/core/workspace';
 import { isAbsolute, relative } from 'node:path';
 import type { VoiceStore } from '../../../modules/audio/voices.js';
 import { validatePath } from '../../../modules/files/paths.js';
+import { assertWorkspacePath } from '../../../modules/files/workspace-access.js';
 import { maxReferenceAudioBytes } from '../../providers/audio-data.js';
 import { requestWebResource } from '../../web/request.js';
 import { ThreadError } from '../../../modules/threads/errors.js';
@@ -51,7 +52,7 @@ export async function readAudioReference(
   )
     path = path.slice(1);
   validatePath(path);
-  // The workspace provider enforces containment, including symlink escapes.
+  await assertWorkspacePath(filesystem, path);
   const stat = await filesystem.stat(path);
   if (stat.type !== 'file') throw new ThreadError('AUDIO_INVALID');
   if (stat.size > maxBytes) throw new ThreadError('AUDIO_TOO_LARGE', 413);

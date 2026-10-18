@@ -223,7 +223,7 @@ test('nonstreaming speech emits one complete file only after generation; no chat
     resolveModel: async () => ({ reference: 'local/buffered', model }),
   });
   await tool.execute!(
-    { input: 'fallback', play_immediately: true },
+    { input: 'fallback', voice: 'alloy', play_immediately: true },
     { requestContext, observe },
   );
   await delay(0);
@@ -241,7 +241,7 @@ test('nonstreaming speech emits one complete file only after generation; no chat
   await assert.rejects(
     () =>
       tool.execute!(
-        { input: 'no session', play_immediately: true },
+        { input: 'no session', voice: 'alloy', play_immediately: true },
         { observe },
       ),
     /active chat session/,
@@ -699,7 +699,11 @@ test(
       recordAsset: async () => assert.fail('Playback must not save an asset'),
     });
     const result = await tool.execute!(
-      { input: '你好，现在测试边生成边返回语音。', play_immediately: true },
+      {
+        input: '你好，现在测试边生成边返回语音。',
+        voice: 'zh-female',
+        play_immediately: true,
+      },
       { requestContext, observe },
     );
     const returnedMs = Date.now() - started;

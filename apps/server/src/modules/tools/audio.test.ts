@@ -369,7 +369,7 @@ test('speech uses one voice field for provider presets, including without a loca
       voice_id: 'preset-test',
     });
     assert.ok(legacyInput.issues);
-    for (const voice of ['preset-test', 'provider:custom/preset', '']) {
+    for (const voice of ['preset-test', 'provider:custom/preset']) {
       const result = await tool.execute!(
         { input: 'Hello', voice },
         { ...context(), workspace },
@@ -378,7 +378,7 @@ test('speech uses one voice field for provider presets, including without a loca
       assert.equal(received.at(-1), voice || undefined);
     }
   }
-  assert.equal(received.length, 6);
+  assert.equal(received.length, 4);
   assert.equal(f.transcriptions.length, 0);
 });
 

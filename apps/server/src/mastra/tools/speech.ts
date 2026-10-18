@@ -10,16 +10,35 @@ import type { GeneratedAssetInput } from '@aime/shared/assets';
 import { defaultSpeechConfig, type SpeechConfig } from '@aime/shared/tools';
 import { speechFormats, speechMediaTypes } from '@aime/shared/audio';
 import { speechMetadata } from '../../modules/audio/speech-metadata.js';
+import { normalizeVoiceAudio } from '../../modules/audio/convert.js';
 import { validatePath } from '../../modules/files/paths.js';
 import { ThreadError } from '../../modules/threads/errors.js';
 import type { AudioService } from '../../modules/audio/service.js';
-import { audioUser } from './audio/context.js';
+import { audioUser, readAudioReference } from './audio/context.js';
 import { SpeechPlayback } from '../../modules/audio/playback.js';
-import { supportsSpeechStreaming } from '../providers/speech-model.js';
+import {
+  supportsSpeechReferences,
+  supportsSpeechStreaming,
+  type SpeechProviderOptions,
+} from '../providers/speech-model.js';
 
 export class SpeechGenerationError extends Error {}
 export type ResolvedSpeechModel = { reference: string; model: SpeechModel };
 const cancellationMessage = 'Speech generation was cancelled.';
+
+function voiceSelectionError(input: {
+  voice?: string;
+  reference_audio?: string;
+  reference_text?: string;
+}) {
+  const voice = input.voice?.trim();
+  const audio = input.reference_audio?.trim();
+  const text = input.reference_text?.trim();
+  if (voice && (audio || text))
+    return 'Choose either voice or reference_audio with reference_text, not both.';
+  if (!voice && (!audio || !text))
+    return 'Provide voice, or both reference_audio and reference_text.';
+}
 
 export function createSpeechTool(
   config: SpeechConfig = defaultSpeechConfig,
@@ -33,50 +52,72 @@ export function createSpeechTool(
   return createTool({
     id: 'speech',
     description:
-      'Generate an audio file in the conversation workspace using OpenAI-style speech fields. The model is selected in tool settings. voice first matches a saved personal or shared voice from list_voices; otherwise it is passed as the provider voice ID. To clone a voice, first save its audio and accurate transcript in the voice library, then pass its ID as voice. Saved-voice cloning requires a compatible Xinference model. With play_immediately=true, enqueue playback and return immediately; audio is sent to the frontend without saving a file. Streaming-capable models emit audio chunks; other models emit completed audio. Otherwise returns duration in seconds, file_path and sample_rate in Hz.',
-    inputSchema: z.strictObject({
-      input: z.string().trim().min(1).describe('Text to convert to speech'),
-      voice: z
-        .string()
-        .trim()
-        .optional()
-        .describe(
-          'Saved voice ID from list_voices, or the selected provider’s voice ID. Saved voices take precedence. Omit for the model default.',
-        ),
-      instructions: z
-        .string()
-        .trim()
-        .optional()
-        .describe(
-          'Voice design or delivery instructions, when supported by the model',
-        ),
-      response_format: z
-        .enum(speechFormats)
-        .optional()
-        .describe(
-          'Audio file format, when supported by the model. Defaults to wav. PCM is raw 24 kHz, 16-bit little-endian mono audio.',
-        ),
-      speed: z
-        .number()
-        .min(0.25)
-        .max(4)
-        .optional()
-        .describe('Speech rate, default 1. Some models ignore this parameter.'),
-      play_immediately: z
-        .boolean()
-        .optional()
-        .describe(
-          'Start playback in the current chat and return immediately. Uses streaming when supported; otherwise plays the completed audio. No file is saved; save_path and response_format are ignored. Defaults to false.',
-        ),
-      save_path: z
-        .string()
-        .trim()
-        .min(1)
-        .optional()
-        .describe(
-          'New workspace-relative path ending in the response_format extension. Existing files are never overwritten. Defaults to outputs/audio/<random>.<response_format>.',
-        ),
-    }),
+      'Generate speech using either voice or both reference_audio and reference_text; choose exactly one source, never omit both. The model is selected in tool settings. voice first matches a saved personal or shared voice from list_voices; otherwise it is passed as the provider voice ID. To clone a voice directly, pass reference_audio and its accurate transcript as reference_text without saving it to the voice library. Reference-audio cloning requires a compatible Xinference or OpenAI-compatible model supporting reference_audio and reference_text. With play_immediately=true, enqueue playback and return immediately; audio is sent to the frontend without saving a file. Streaming-capable models emit audio chunks; other models emit completed audio. Otherwise save audio in the conversation workspace and return duration in seconds, file_path and sample_rate in Hz.',
+    inputSchema: z
+      .strictObject({
+        input: z.string().trim().min(1).describe('Text to convert to speech'),
+        voice: z
+          .string()
+          .trim()
+          .optional()
+          .describe(
+            'Saved voice ID from list_voices, or the selected provider’s voice ID. Saved voices take precedence. Required unless reference_audio and reference_text are provided; do not combine with them.',
+          ),
+        reference_audio: z
+          .string()
+          .trim()
+          .optional()
+          .describe(
+            'Reference audio for voice cloning: conversation workspace path, audioPath from list_voices, or public HTTP(S) audio URL. Provide reference_text with it and omit voice.',
+          ),
+        reference_text: z
+          .string()
+          .trim()
+          .optional()
+          .describe(
+            'Accurate transcript of reference_audio, not the new speech input. Required together with reference_audio; omit when using voice.',
+          ),
+        instructions: z
+          .string()
+          .trim()
+          .optional()
+          .describe(
+            'Voice design or delivery instructions, when supported by the model',
+          ),
+        response_format: z
+          .enum(speechFormats)
+          .optional()
+          .describe(
+            'Audio file format, when supported by the model. Defaults to wav. PCM is raw 24 kHz, 16-bit little-endian mono audio.',
+          ),
+        speed: z
+          .number()
+          .min(0.25)
+          .max(4)
+          .optional()
+          .describe(
+            'Speech rate, default 1. Some models ignore this parameter.',
+          ),
+        play_immediately: z
+          .boolean()
+          .optional()
+          .describe(
+            'Start playback in the current chat and return immediately. Uses streaming when supported; otherwise plays the completed audio. No file is saved; save_path and response_format are ignored. Defaults to false.',
+          ),
+        save_path: z
+          .string()
+          .trim()
+          .min(1)
+          .optional()
+          .describe(
+            'New workspace-relative path ending in the response_format extension. Existing files are never overwritten. Defaults to outputs/audio/<random>.<response_format>.',
+          ),
+      })
+      .superRefine((input, context) => {
+        const message = voiceSelectionError(input);
+        if (message)
+          context.addIssue({ code: 'custom', message, path: ['voice'] });
+      }),
     outputSchema: z.union([
       z.literal(cancellationMessage),
       z.object({
@@ -94,6 +135,8 @@ export function createSpeechTool(
       {
         input,
         voice,
+        reference_audio,
+        reference_text,
         instructions,
         response_format = 'wav',
         speed,
@@ -103,15 +146,24 @@ export function createSpeechTool(
       context,
     ) => {
       if (context?.abortSignal?.aborted) return cancellationMessage;
+      const selectionError = voiceSelectionError({
+        voice,
+        reference_audio,
+        reference_text,
+      });
+      if (selectionError) throw new SpeechGenerationError(selectionError);
       const voiceId = voice?.trim() || undefined;
+      const referenceAudio = reference_audio?.trim();
       const voiceUser =
         voiceId && dependencies.audio ? audioUser(context) : undefined;
       const prepare = async (signal: AbortSignal) => {
+        signal.throwIfAborted();
         if (!dependencies.resolveModel)
           throw new SpeechGenerationError(
             'Speech model is not configured. Select a model in speech tool settings or set the default speech model.',
           );
         const resolved = await dependencies.resolveModel(config.model);
+        signal.throwIfAborted();
         let savedReference: { audio: Buffer; text: string } | undefined;
         if (voiceId && dependencies.audio) {
           try {
@@ -129,14 +181,56 @@ export function createSpeechTool(
           }
         }
         if (
-          savedReference &&
-          (typeof resolved.model === 'string' ||
-            resolved.model.provider !== 'xinference')
+          (savedReference || referenceAudio) &&
+          !supportsSpeechReferences(resolved.model)
         )
           throw new SpeechGenerationError(
-            'Saved-voice cloning is currently supported by Xinference speech models. Select a compatible model or use a provider voice ID.',
+            'Reference-audio cloning requires a compatible Xinference or OpenAI-compatible speech model. Select a compatible model or use a provider voice ID.',
           );
+        if (referenceAudio) {
+          try {
+            const reference = await readAudioReference(
+              referenceAudio,
+              context,
+              {
+                voices: dependencies.audio?.voices,
+                signal,
+              },
+            );
+            savedReference = {
+              audio: await normalizeVoiceAudio(reference.audio, signal),
+              text: reference_text!.trim(),
+            };
+          } catch {
+            signal.throwIfAborted();
+            throw new SpeechGenerationError(
+              'Could not read reference_audio. Check the audio format, file path or public URL, and access permissions.',
+            );
+          }
+        }
         signal.throwIfAborted();
+        const provider =
+          typeof resolved.model === 'string'
+            ? undefined
+            : resolved.model.provider;
+        const providerOptions: SpeechProviderOptions = {};
+        if (provider === 'xinference') {
+          providerOptions.xinference = {
+            timeoutMs: config.timeoutMs,
+            ...(savedReference
+              ? {
+                  promptSpeech: savedReference.audio.toString('base64'),
+                  promptSpeechMediaType: 'audio/wav',
+                  kwargs: { prompt_text: savedReference.text },
+                }
+              : {}),
+          };
+        } else if (savedReference && provider) {
+          providerOptions[provider] = {
+            reference_audio: savedReference.audio.toString('base64'),
+            reference_text: savedReference.text,
+          };
+        }
         return {
           model: resolved.model,
           reference: resolved.reference,
@@ -145,18 +239,7 @@ export function createSpeechTool(
             voice: savedReference ? undefined : voiceId,
             instructions,
             speed,
-            providerOptions: {
-              xinference: {
-                timeoutMs: config.timeoutMs,
-                ...(savedReference
-                  ? {
-                      promptSpeech: savedReference.audio.toString('base64'),
-                      promptSpeechMediaType: 'audio/wav',
-                      kwargs: { prompt_text: savedReference.text },
-                    }
-                  : {}),
-              },
-            },
+            providerOptions,
           },
         };
       };

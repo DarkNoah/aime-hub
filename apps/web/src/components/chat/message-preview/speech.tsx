@@ -23,8 +23,8 @@ const settings: [string, TranslationKey][] = [
   ['language', 'chat.speech.language'],
   ['speed', 'chat.speech.speed'],
   ['instructions', 'chat.speech.instruct'],
-  ['ref_audio', 'chat.speech.referenceAudio'],
-  ['ref_text', 'chat.speech.referenceText'],
+  ['reference_audio', 'chat.speech.referenceAudio'],
+  ['reference_text', 'chat.speech.referenceText'],
 ];
 
 export function SpeechPreview({
@@ -64,7 +64,11 @@ export function SpeechPreview({
         ? (input.voice ?? input.voice_id)
         : key === 'instructions'
           ? (input.instructions ?? input.instruct)
-          : input[key];
+          : key === 'reference_audio'
+            ? (input.reference_audio ?? input.ref_audio)
+            : key === 'reference_text'
+              ? (input.reference_text ?? input.ref_text)
+              : input[key];
     return (typeof value === 'string' && value.trim()) ||
       (typeof value === 'number' && Number.isFinite(value))
       ? [{ key, label, value: key === 'speed' ? `${value}×` : String(value) }]

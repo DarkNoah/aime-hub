@@ -9,9 +9,16 @@ import {
 } from '../web/request.js';
 import { allowAllNetworks } from '../../modules/network/policy.js';
 import type {
+  ReferenceSpeechModel,
   SpeechModelSettings,
+  SpeechProviderOptions,
   StreamingSpeechModel,
 } from './speech-model.js';
+
+const referenceOptions = z.object({
+  reference_audio: z.string().optional(),
+  reference_text: z.string().optional(),
+});
 
 /** Standard speech generation; PCM streaming is an explicit provider capability. */
 export function createSpeechModel(
@@ -44,10 +51,23 @@ export function createSpeechModel(
       AbortSignal.timeout(provider.timeoutMs ?? 300000),
       ...(signal ? [signal] : []),
     ]);
-  const model: Exclude<SpeechModel, string> = {
+  const voiceBody = (
+    voice?: string,
+    providerOptions?: SpeechProviderOptions,
+  ) => {
+    const reference = referenceOptions.parse(
+      providerOptions?.[provider.type] ?? {},
+    );
+    return {
+      voice: reference.reference_audio ? undefined : voice || defaultVoice,
+      ...reference,
+    };
+  };
+  const model: ReferenceSpeechModel = {
     specificationVersion: 'v3',
     provider: provider.type,
     modelId,
+    supportsReferenceAudio: true,
     doGenerate: async ({
       text,
       voice,
@@ -55,6 +75,7 @@ export function createSpeechModel(
       speed,
       outputFormat,
       abortSignal,
+      providerOptions,
     }) => {
       const signal = signalFor(abortSignal);
       const format = z.enum(speechFormats).parse(outputFormat ?? 'wav');
@@ -66,7 +87,7 @@ export function createSpeechModel(
         body: JSON.stringify({
           model: modelId,
           input: text,
-          voice: voice || defaultVoice,
+          ...voiceBody(voice, providerOptions),
           instructions,
           speed,
           response_format: format,
@@ -93,7 +114,7 @@ export function createSpeechModel(
   const result: StreamingSpeechModel = {
     ...model,
     streamSpeech: async (
-      { text, voice, instructions, speed, abortSignal },
+      { text, voice, instructions, speed, abortSignal, providerOptions },
       onChunk,
     ) => {
       const signal = signalFor(abortSignal);
@@ -107,7 +128,7 @@ export function createSpeechModel(
           body: JSON.stringify({
             model: modelId,
             input: text,
-            voice: voice || defaultVoice,
+            ...voiceBody(voice, providerOptions),
             instructions,
             speed,
             response_format: 'pcm',

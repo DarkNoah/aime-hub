@@ -115,7 +115,7 @@ async function fixture(t: test.TestContext, lateSuccess = false) {
     ),
   };
   const inputs = {
-    speech: { input: 'Hello', save_path: 'cancelled.wav' },
+    speech: { input: 'Hello', voice: 'alloy', save_path: 'cancelled.wav' },
     transcriptions: {
       file: voice.audioPath,
       response_format: 'json' as const,
@@ -188,7 +188,7 @@ for (const name of ['speech', 'transcriptions'] as const) {
           assert.equal(parseSpeechOutput(output), null);
           assert.equal(
             await f.tools.speech.execute!(
-              { input: 'Hello', play_immediately: true },
+              { input: 'Hello', voice: 'alloy', play_immediately: true },
               context,
             ),
             message,
