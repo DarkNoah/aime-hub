@@ -85,7 +85,7 @@ export function knowledgeRouter(service?: KnowledgeService) {
       ),
     ),
     document: p.document.handler(({ context, input }) =>
-      kb().document(context.userId, input.id),
+      kb().document(context.userId, input.id, true),
     ),
     retry: p.retry.handler(({ context, input }) =>
       kb().retry(context.userId, input.id),

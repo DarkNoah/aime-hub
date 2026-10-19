@@ -14,7 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import type { EntryAction } from './entry-actions';
 import type { FileManagerState } from './use-file-manager';
-import { validName } from './state';
+import { validName, withinPath } from './state';
 import { fileErrorKey } from './api';
 
 export function EntryDialog({
@@ -35,6 +35,11 @@ export function EntryDialog({
     null,
   );
   const deleting = action.operation === 'delete';
+  const saving = state.edits.isSaving(action.entry.path);
+  const hasEdits = Object.entries(state.edits.drafts).some(
+    ([path, draft]) =>
+      withinPath(path, action.entry.path) && draft.text !== draft.base.text,
+  );
   const label = t(`files.${action.operation}`);
   return (
     <Dialog
@@ -47,7 +52,7 @@ export function EntryDialog({
         <form
           onSubmit={async (event) => {
             event.preventDefault();
-            if (busy) return;
+            if (busy || saving) return;
             if (!deleting && !validName(name)) {
               setError('files.invalidName');
               return;
@@ -89,6 +94,11 @@ export function EntryDialog({
                 : action.entry.path || t('files.root')}
             </DialogDescription>
           </DialogHeader>
+          {deleting && hasEdits && (
+            <p className="mt-3 text-sm text-destructive">
+              {t('files.deleteEdits')}
+            </p>
+          )}
           {!deleting && (
             <div className="my-5 space-y-2">
               <Label htmlFor="file-entry-name">{t('files.name')}</Label>
@@ -128,7 +138,7 @@ export function EntryDialog({
             <Button
               type="submit"
               variant={deleting ? 'destructive' : 'default'}
-              disabled={busy}
+              disabled={busy || saving}
             >
               {busy ? t('files.working') : label}
             </Button>

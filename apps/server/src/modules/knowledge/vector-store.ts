@@ -26,6 +26,7 @@ export type StoredChunk = {
   attributes: KnowledgeMetadata;
   name: string;
   sourceUrl: string | null;
+  inputType?: 'image' | null;
 };
 
 type ChunkOptions = {
@@ -132,6 +133,7 @@ export class KnowledgeVectorStore {
         JSON.stringify({
           documentId: chunk.documentId,
           attributes: chunk.attributes,
+          inputType: chunk.inputType,
         }),
       ];
       const extra = fields.map((field) => {
@@ -160,7 +162,7 @@ export class KnowledgeVectorStore {
       return `${quoteIdentifier(field.name)}=$${values.length}`;
     });
     await m.query(
-      `UPDATE ${this.table(base.vectorIndex)} SET metadata=$2::jsonb${extra.length ? ', ' + extra.join(', ') : ''} WHERE document_id=$1`,
+      `UPDATE ${this.table(base.vectorIndex)} SET metadata=metadata || $2::jsonb${extra.length ? ', ' + extra.join(', ') : ''} WHERE document_id=$1`,
       values,
     );
   }
@@ -221,7 +223,7 @@ export class KnowledgeVectorStore {
     values.push(options.limit ?? 500);
     return this.database.query(
       `SELECT c.vector_id AS id, c.document_id AS "documentId", c.position, c.chunk AS text, c.document_version AS version,
-      d.metadata AS attributes, d.name, d.source_url AS "sourceUrl"
+      d.metadata AS attributes, d.name, d.source_url AS "sourceUrl", c.metadata->>'inputType' AS "inputType"
       FROM ${this.table(base.vectorIndex)} c JOIN knowledge_documents d ON d.id=c.document_id
       WHERE ${where.join(' AND ')} ORDER BY c.vector_id LIMIT $${values.length}`,
       values,

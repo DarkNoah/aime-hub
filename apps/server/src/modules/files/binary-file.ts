@@ -23,6 +23,23 @@ function checkSize(size: number) {
     throw new ThreadError('FILE_TOO_LARGE', 413);
 }
 
+export function inspectImageFile(data: Uint8Array, fileName: string) {
+  try {
+    const image = imageSize(data);
+    const format = imageFormats[image.type ?? ''];
+    if (!format) throw new Error('Unsupported image');
+    return {
+      fileName: `${basename(fileName, extname(fileName))}${format[1]}`,
+      mimeType: format[0],
+      kind: 'image' as const,
+      width: image.width,
+      height: image.height,
+    };
+  } catch {
+    throw new ThreadError('FILE_INVALID_FORMAT');
+  }
+}
+
 /** Use the same filesystem permissions as the native read tool. */
 export async function readBinaryWorkspaceFile(
   filesystem: WorkspaceFilesystem,
@@ -81,24 +98,15 @@ export async function readBinaryWorkspaceFile(
       size: data.length,
       mimeType: 'application/pdf',
       kind: 'pdf' as const,
+      width: undefined,
+      height: undefined,
       data,
     };
   }
-  try {
-    const image = imageSize(data);
-    const format = imageFormats[image.type ?? ''];
-    if (!format) throw new Error('Unsupported image');
-    return {
-      path,
-      fileName: `${basename(path, extname(path))}${format[1]}`,
-      size: data.length,
-      mimeType: format[0],
-      kind: 'image' as const,
-      width: image.width,
-      height: image.height,
-      data,
-    };
-  } catch {
-    throw new ThreadError('FILE_INVALID_FORMAT');
-  }
+  return {
+    ...inspectImageFile(data, path),
+    path,
+    size: data.length,
+    data,
+  };
 }

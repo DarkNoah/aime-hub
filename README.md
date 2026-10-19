@@ -118,11 +118,13 @@ pnpm dev
 
 ### 可选运行依赖
 
-网页读取的浏览器兜底需要对应版本的 Chromium，可在源码环境执行：
+聊天浏览器和网页读取的浏览器兜底共用 `playwright-extra` + stealth 启动器，降低常见自动化特征；网页读取仍使用独立的临时浏览器，不共享用户登录数据。两者需要对应版本的 Chromium，可在源码环境执行：
 
 ```sh
 pnpm --filter @aime/server exec playwright-core install chromium
 ```
+
+stealth 无法保证通过所有网站的检测；网站直接打开的弹窗，其首次请求和页面脚本可能早于插件注入。
 
 Linux 还需安装 Playwright 所需的系统库。项目默认使用本地文件系统；选择 AgentFS 工作区时，需安装 `agentfs` CLI，并提供 Linux FUSE 或 macOS NFS 挂载支持。Docker 服务镜像已包含 Chromium、AgentFS 和相关工具，Linux 宿主机仍需提供 `/dev/fuse`。
 

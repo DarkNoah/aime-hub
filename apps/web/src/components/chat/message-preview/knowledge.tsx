@@ -61,6 +61,18 @@ const managementSchema = z.union([
     baseId: z.string(),
     name: z.string(),
     content: z.string(),
+    image: z
+      .object({
+        data: z.string(),
+        mimeType: z.enum([
+          'image/png',
+          'image/jpeg',
+          'image/webp',
+          'image/gif',
+          'image/bmp',
+        ]),
+      })
+      .optional(),
     nextOffset: z.number().nullable(),
     version: z.number().optional(),
     metadata: z.record(z.string(), z.json()).optional(),
@@ -160,6 +172,13 @@ export function KnowledgeManagementPreview({ part }: { part: PreviewPart }) {
                 <Badge variant="outline">v{data.version}</Badge>
               )}
               <MetadataBadges metadata={data.metadata} />
+              {data.image && (
+                <img
+                  src={`data:${data.image.mimeType};base64,${data.image.data}`}
+                  alt={data.name}
+                  className="max-h-96 max-w-full rounded-lg object-contain"
+                />
+              )}
               <p className="whitespace-pre-wrap text-sm leading-6 [overflow-wrap:anywhere]">
                 {data.content}
               </p>

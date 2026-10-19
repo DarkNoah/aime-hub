@@ -5,6 +5,10 @@ import {
   type ToolResponse,
 } from '@aime/shared/threads';
 import { ThreadError } from './errors.js';
+import {
+  INTELLIGENT_UI_TOOL,
+  parseIntelligentUiResponse,
+} from '@aime/shared/intelligent-ui';
 
 /** Validate before consuming a suspension so a malformed response remains retryable. */
 export function validateToolResponse(
@@ -16,6 +20,13 @@ export function validateToolResponse(
   if ((interaction.kind === 'suspended') !== (response.action === 'resume'))
     throw new ThreadError('VALIDATION_ERROR', 400);
   if (response.action !== 'resume') return;
+  if (interaction.toolName === INTELLIGENT_UI_TOOL) {
+    try {
+      parseIntelligentUiResponse(response.data);
+    } catch {
+      throw new ThreadError('VALIDATION_ERROR', 400);
+    }
+  }
   if (interaction.resumeSchema !== undefined) {
     try {
       const schema =

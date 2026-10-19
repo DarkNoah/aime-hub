@@ -39,7 +39,11 @@ const languages: Record<string, BundledLanguage> = {
   toml: 'toml',
 };
 
-export default function TextPreview({ data, line }: PreviewRendererProps) {
+export default function TextPreview({
+  data,
+  line,
+  wrap = false,
+}: PreviewRendererProps) {
   const { text = '', path } = data;
   const { t } = useTranslation();
   const target = useRef<HTMLDivElement>(null);
@@ -82,7 +86,12 @@ export default function TextPreview({ data, line }: PreviewRendererProps) {
           {t('files.previewLimit')}
         </p>
       )}
-      <div className="w-max min-w-full py-3 font-mono text-xs leading-6">
+      <div
+        className={cn(
+          'min-w-full py-3 font-mono text-xs leading-6',
+          wrap ? 'w-full' : 'w-max',
+        )}
+      >
         {shown.map((value, index) => (
           <div
             key={index}
@@ -95,7 +104,14 @@ export default function TextPreview({ data, line }: PreviewRendererProps) {
             >
               {index + 1}
             </span>
-            <code className="whitespace-pre pr-5">
+            <code
+              className={cn(
+                'pr-5',
+                wrap
+                  ? 'min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]'
+                  : 'whitespace-pre',
+              )}
+            >
               {tokens?.[index]
                 ? tokens[index].map((token, i) => (
                     <span
@@ -116,7 +132,7 @@ export default function TextPreview({ data, line }: PreviewRendererProps) {
           </div>
         ))}
       </div>
-      <ScrollBar orientation="horizontal" />
+      {!wrap && <ScrollBar orientation="horizontal" />}
     </ScrollArea>
   );
 }

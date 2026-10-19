@@ -47,6 +47,8 @@
     "officeparser": "^8.1.1",
     "pg": "^8.16.0",
     "playwright-core": "1.64.0",
+    "playwright-extra": "4.3.6",
+    "puppeteer-extra-plugin-stealth": "2.11.2",
     "quickjs-emscripten": "0.31.0",
     "reflect-metadata": "^0.2.2",
     "typeorm": "0.3.31",

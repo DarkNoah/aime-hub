@@ -170,13 +170,13 @@ export const en = {
   'knowledge.saving': 'Saving…',
   'knowledge.import': 'Add sources',
   'knowledge.importHint':
-    'Upload documents, paste text or enter a webpage URL. Sources become searchable after processing.',
+    'Upload documents or images, paste text or enter a webpage URL. Sources become searchable after processing.',
   'knowledge.file': 'Files',
   'knowledge.text': 'Text',
   'knowledge.url': 'URL',
-  'knowledge.chooseFiles': 'Select documents (multiple supported)',
+  'knowledge.chooseFiles': 'Select documents or images (multiple supported)',
   'knowledge.formats':
-    'TXT, Markdown, HTML, JSON, CSV, PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP and RTF. Up to 10 MB per file. Scanned PDFs require OCR first.',
+    'TXT, Markdown, HTML, JSON, CSV, PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP, RTF, PNG, JPG, WebP, GIF and BMP. Images require an image-capable embedding model and a compatible multimodal endpoint. Up to 10 MB per file. Scanned PDFs require OCR first.',
   'knowledge.content': 'Content',
   'knowledge.optionalName': 'Name (optional)',
   'knowledge.uploading': 'Uploading:',
@@ -230,6 +230,12 @@ export const en = {
     'No text extracted. Scanned documents require OCR first.',
   'knowledge.errorParse':
     'Parsing failed. Check the file or webpage availability.',
+  'knowledge.errorImageModel':
+    'Images require an embedding model with image input enabled. Enable image input in the provider model and select it for this knowledge base.',
+  'knowledge.errorImageEmbed':
+    'Image embedding failed. Check that the embeddings endpoint supports Jina-format image input.',
+  'knowledge.rerankImageUnsupported':
+    'Image candidates: retained recall RRF order',
   'knowledge.errorEmbed':
     'Embedding failed. Check model settings and availability, then retry.',
   'knowledge.errorIndex':
@@ -964,6 +970,15 @@ export const en = {
   'agents.tool.exec': 'JavaScript tool orchestration',
   'agents.tool.sleep': 'Wait',
   'agents.tool.ask_user': 'Ask user',
+  'agents.tool.IntelligentUI': 'IntelligentUI',
+  'chat.intelligentUi.preparing': 'Preparing panel',
+  'chat.intelligentUi.display': 'Interactive display',
+  'chat.intelligentUi.skipped': 'Skipped',
+  'chat.intelligentUi.skip': 'Skip',
+  'chat.intelligentUi.hint': 'Complete the panel to send your result and continue.',
+  'chat.intelligentUi.result': 'Submitted data',
+  'chat.intelligentUi.invalidData': 'Submit a JSON object with at most 60,000 characters.',
+  'chat.intelligentUi.missingHtml': 'The panel has no HTML content.',
   'agents.tool.task_write': 'Create task',
   'agents.tool.task_update': 'Update task',
   'agents.tool.task_complete': 'Complete task',
@@ -1382,6 +1397,26 @@ export const en = {
   'files.previewLimit':
     'Preview is limited to 512 KB / 10,000 lines. Download to view the full file.',
   'files.textPreview': 'File contents',
+  'files.textEditor': 'Edit file contents',
+  'files.wordWrap': 'Word wrap',
+  'files.edit': 'Edit file',
+  'files.save': 'Save',
+  'files.saving': 'Saving…',
+  'files.saveShortcut': 'Save (⌘/Ctrl + S)',
+  'files.contentSaved': 'File contents saved.',
+  'files.unsaved': 'Unsaved',
+  'files.discard': 'Discard changes',
+  'files.discardTitle': 'Discard unsaved changes?',
+  'files.discardHint':
+    'Your changes to this file have not been saved. Discarding them cannot be undone.',
+  'files.keepEditing': 'Keep editing',
+  'files.leaveEdits': 'There are unsaved file changes. Leave this page?',
+  'files.deleteEdits': 'This will also discard unsaved changes in these files.',
+  'files.changed':
+    'The file was changed elsewhere. Your draft is retained. Copy any changes you need, then reload the file before editing again.',
+  'files.notEditable': 'This file cannot be edited as complete UTF-8 text.',
+  'files.editLimit':
+    'Editable text is limited to 512 KB. Reduce the content and try again.',
   'files.previewMode': 'File preview mode',
   'files.renderedPreview': 'Preview',
   'files.sourcePreview': 'Source',

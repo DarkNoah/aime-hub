@@ -8,7 +8,8 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { join } from 'node:path';
-import { chromium, type BrowserContext, type Cookie } from 'playwright-core';
+import type { BrowserContext, Cookie } from 'playwright-core';
+import { chromium } from '../../../lib/browser.js';
 import { ThreadPageManager } from './page-manager.js';
 
 /** One persistent Chromium context per user; profiles never live in chat workspaces. */

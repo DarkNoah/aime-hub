@@ -10,6 +10,7 @@ import { fileErrorKey } from './api';
 import { createWorkspaceFileClient } from './workspace-client';
 import { parentPath, renameTabs, withinPath, type FileTab } from './state';
 import { useFileUploads } from './use-file-uploads';
+import { useFileEdits } from './use-file-edits';
 
 type Directory = Partial<FileListing> & {
   loading?: boolean;
@@ -22,6 +23,7 @@ export function useFileManager(
   scope: FileScope = 'thread',
 ) {
   const [client] = useState(() => createWorkspaceFileClient(undefined, scope));
+  const edits = useFileEdits(client);
   const [available, setAvailable] = useState(!!threadId);
   if (threadId && !available) setAvailable(true);
   useLayoutEffect(() => {
@@ -131,6 +133,8 @@ export function useFileManager(
     [loadDirectory],
   );
   function closeTab(path: string) {
+    if (edits.isSaving(path)) return;
+    edits.discard(path);
     const index = tabs.findIndex((tab) => tab.path === path);
     const next = tabs.filter((tab) => tab.path !== path);
     setTabs(next);
@@ -160,7 +164,10 @@ export function useFileManager(
   }
   async function mutate(input: FileMutation) {
     if (!available) return;
+    if (edits.isSaving(input.path)) throw new Error('File save in progress');
     const result = await client.mutate(input);
+    if (input.operation === 'rename') edits.move(input.path, result.path);
+    else if (input.operation === 'delete') edits.move(input.path);
     setCurrentDirectory((previous) => {
       if (!withinPath(previous, input.path)) return previous;
       if (input.operation === 'rename')
@@ -230,6 +237,7 @@ export function useFileManager(
     setRevision((value) => value + 1);
   }
   return {
+    edits,
     client,
     scope,
     uploads,

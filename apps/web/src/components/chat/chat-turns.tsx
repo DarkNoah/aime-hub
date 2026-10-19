@@ -8,6 +8,10 @@ import {
   type ChatTurnSummary,
 } from '@aime/shared/chat-turns';
 import type { ToolInteraction, ToolResponse } from '@aime/shared/threads';
+import {
+  isCompletedIntelligentUiPart,
+  isIntelligentUiPart,
+} from '@aime/shared/intelligent-ui';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChatMessage, ChatMessages } from './chat-messages';
@@ -174,7 +178,17 @@ const ChatTurnRow = memo(function ChatTurnRow({
           <ChatMessages
             showAllReasoning
             hideUserMessages
-            messages={detail.messages}
+            messages={detail.messages
+              .map((message) => ({
+                ...message,
+                parts: message.parts.filter(
+                  // Pending panels remain in the actionable interaction area.
+                  (part) =>
+                    !isIntelligentUiPart(part) ||
+                    isCompletedIntelligentUiPart(part),
+                ),
+              }))
+              .filter((message) => message.parts.length)}
             threadId={threadId}
             running={streaming}
             activeMessageId={activeMessageId}

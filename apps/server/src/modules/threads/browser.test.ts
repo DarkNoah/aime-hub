@@ -318,11 +318,13 @@ test(
     const { createBrowserDriver } = await import('./browser/session.js');
     const root = await mkdtemp(join(tmpdir(), 'browser-profile-test-'));
     const hits: string[] = [];
+    const userAgents = new Map<string, string | undefined>();
     const server = createServer((req, res) => {
       hits.push(req.url ?? '');
+      userAgents.set(req.url ?? '', req.headers['user-agent']);
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.end(
-        `<html><head><title>${req.url}</title></head><body style="background:#fff"><input aria-label="text"><a href="/popup" target="_blank">Popup</a></body></html>`,
+        `<html><head><title>${req.url}</title><script>document.documentElement.dataset.webdriver = String(navigator.webdriver); document.documentElement.dataset.userAgent = navigator.userAgent;</script></head><body style="background:#fff"><input aria-label="text"><a href="/popup" target="_blank">Popup</a></body></html>`,
       );
     });
     await new Promise<void>((resolve, reject) => {
@@ -355,6 +357,22 @@ test(
       b.goto({ url: `${origin}/b` }, 'b'),
       c.goto({ url: `${origin}/c` }, 'c'),
     ]);
+    const assertStealth = async (page: ReturnType<typeof ma.getPage>) => {
+      const identity = await page.evaluate(() => ({
+        webdriver: document.documentElement.dataset.webdriver,
+        userAgent: document.documentElement.dataset.userAgent,
+      }));
+      assert.notEqual(identity.webdriver, 'true');
+      assert.ok(identity.userAgent);
+      assert.doesNotMatch(identity.userAgent, /HeadlessChrome/, page.url());
+      assert.equal(
+        identity.userAgent,
+        userAgents.get(new URL(page.url()).pathname),
+      );
+    };
+    await Promise.all(
+      [ma, mb, mc].map((manager) => assertStealth(manager.getPage())),
+    );
     await ma.getPage().evaluate(async () => {
       document.cookie = 'session_login=alice; path=/';
       document.cookie = 'persistent_login=alice; path=/; max-age=86400';
@@ -477,6 +495,9 @@ test(
     });
     await frameReceived;
     await a.goto({ url: `${origin}/a-final` }, 'a');
+    // Upstream injects popup evasions after creation; only subsequent
+    // navigations are covered, not the popup's first request/document.
+    await assertStealth(popup);
     assert.deepEqual(urls, []);
     const driverB = createBrowserDriver('b', owner);
     await mb.getPage().locator('input').focus();
@@ -533,6 +554,7 @@ test(
     );
     assert.equal(hits.length, hitsBeforeRestart);
     await fresh.goto({ url: `${origin}/fresh` }, 'fresh');
+    await assertStealth(mf.getPage());
     const cookie = await mf.getPage().evaluate(() => document.cookie);
     assert.match(cookie, /session_login=alice/);
     assert.match(cookie, /persistent_login=alice/);

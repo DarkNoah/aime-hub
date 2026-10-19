@@ -3,6 +3,7 @@ import { validateMetadata } from './fields.js';
 import { archiveVersion, versionSummary } from './versions.js';
 import { tagFilter } from './tags.js';
 import { randomUUID } from 'node:crypto';
+import { extname } from 'node:path';
 import { In, type DataSource, type EntityManager } from 'typeorm';
 import {
   KnowledgeBaseRecord as Base,
@@ -26,6 +27,8 @@ import {
   knowledgeVersionInputSchema,
   knowledgeTagsSchema,
   knowledgeMetadataSchema,
+  knowledgeImageFileAccept,
+  type KnowledgeDocumentDetail,
   type KnowledgeMetadata,
   type KnowledgeTags,
   type KnowledgeVersionDetail,
@@ -93,7 +96,10 @@ export class KnowledgeService {
     readonly vectors: PgVector,
     readonly providers: Pick<
       ProviderService,
-      'getEmbeddingModel' | 'getRerankModel' | 'getDefaults'
+      | 'getEmbeddingModel'
+      | 'getRerankModel'
+      | 'getImageEmbeddingModel'
+      | 'getDefaults'
     >,
     projects: ProjectThreadAccess,
   ) {
@@ -585,14 +591,24 @@ export class KnowledgeService {
     if (!doc) throw new ThreadError('KNOWLEDGE_NOT_FOUND', 404);
     return doc;
   }
-  async document(userId: string, id: string) {
+  async document(
+    userId: string,
+    id: string,
+    includeImage = false,
+  ): Promise<KnowledgeDocumentDetail> {
     const d = await this.findDocument(id, this.database.manager, true);
     const { base } = await this.access(userId, d.baseId);
+    const readImage =
+      includeImage &&
+      d.sourceType === 'file' &&
+      knowledgeImageFileAccept
+        .split(',')
+        .includes(extname(d.sourceName ?? d.name).toLowerCase());
     const detail = await this.database
       .getRepository(Document)
       .createQueryBuilder('d')
       .withDeleted()
-      .addSelect('d.content')
+      .addSelect(readImage ? ['d.content', 'd.sourceData'] : ['d.content'])
       .addSelect(
         "CASE WHEN d.source_type = 'text' AND d.content = '' THEN convert_from(d.source_data, 'UTF8') ELSE d.content END",
         'd_content',
@@ -607,12 +623,26 @@ export class KnowledgeService {
             includeArchived: true,
           })
         : [];
+    let image: KnowledgeDocumentDetail['image'];
+    if (readImage && detail.sourceType === 'file' && detail.sourceData) {
+      const info = validateKnowledgeFile(
+        detail.sourceName ?? detail.name,
+        detail.sourceData,
+      );
+      if (info)
+        image = {
+          data: detail.sourceData.toString('base64'),
+          mimeType: info.mimeType,
+        };
+    }
     return {
       ...documentSummary(detail),
       content: detail.content,
       chunks: chunks.map(({ id, text, position }) => ({ id, text, position })),
+      ...(image ? { image } : {}),
     };
   }
+
   private async mutateDocument<T>(
     userId: string,
     id: string,
@@ -1008,6 +1038,7 @@ export class KnowledgeService {
             baseId: base.id,
             baseName: base.name,
             metadata: c.attributes,
+            inputType: c.inputType,
           })),
         ),
       )
@@ -1116,6 +1147,8 @@ export class KnowledgeService {
           model = models.values().next().value ?? null;
         }
         if (!model) return hits;
+        if (hits.some((hit) => hit.inputType === 'image'))
+          throw new Error('KNOWLEDGE_RERANK_IMAGE_UNSUPPORTED');
         return rerankKnowledge(
           hits,
           query,

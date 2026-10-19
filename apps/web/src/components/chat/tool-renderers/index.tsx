@@ -5,6 +5,7 @@ import {
 } from '../chat-tool-interaction';
 import { getToolName, isSpecialTool, type SpecialToolName } from './registry';
 import { SubmitPlan } from './submit-plan';
+import { IntelligentUI } from './intelligent-ui';
 
 const renderers: Record<
   SpecialToolName,
@@ -12,6 +13,7 @@ const renderers: Record<
 > = {
   ask_user: ChatToolInteraction,
   submit_plan: SubmitPlan,
+  IntelligentUI,
 };
 
 export function ChatToolRenderer(props: ToolInteractionProps) {

@@ -7,6 +7,7 @@ import {
   searchWorkspaceFiles,
 } from './workspace-files.js';
 import { fileError } from './paths.js';
+import { saveWorkspaceFile } from './save.js';
 
 export function fileRouter(service?: ThreadService) {
   const p = rpc.files.use(async ({ next }) => {
@@ -17,6 +18,14 @@ export function fileRouter(service?: ThreadService) {
     }
   });
   return p.router({
+    save: p.save.handler(({ context, input }) =>
+      required(service).withWorkspaceFiles(
+        context.userId,
+        input.params.threadId,
+        (root) => saveWorkspaceFile(root, input.body),
+        input.query.scope,
+      ),
+    ),
     resolve: p.resolve.handler(({ context, input }) =>
       required(service).resolveWorkspaceFile(
         context.userId,

@@ -1,4 +1,5 @@
 import { constants } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { lstat, mkdir, open, opendir, rename, rm } from 'node:fs/promises';
 import { basename, dirname, extname, join } from 'node:path';
 import type {
@@ -8,10 +9,12 @@ import type {
 } from '@aime/shared/files';
 import { ThreadError } from '../threads/errors.js';
 import { filePath, validatePath } from './paths.js';
-import { fileMediaTypes } from '@aime/shared/files';
+import { fileMediaTypes, FILE_TEXT_LIMIT } from '@aime/shared/files';
 
-export const TEXT_LIMIT = 512 * 1024;
+export const TEXT_LIMIT = FILE_TEXT_LIMIT;
 export const media = fileMediaTypes;
+export const textVersion = (buffer: Uint8Array) =>
+  createHash('sha256').update(buffer).digest('hex');
 
 export function decodeText(buffer: Buffer, partial = false) {
   if (
@@ -20,9 +23,12 @@ export function decodeText(buffer: Buffer, partial = false) {
   )
     return null;
   try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(buffer, {
-      stream: partial,
-    });
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+      buffer,
+      {
+        stream: partial,
+      },
+    );
   } catch {
     return null;
   }
@@ -87,6 +93,9 @@ export async function previewFile(
           mime: 'text/plain; charset=utf-8',
           text,
           truncated,
+          ...(!truncated
+            ? { version: textVersion(buffer.subarray(0, bytesRead)) }
+            : {}),
         };
   } finally {
     await handle.close();
@@ -95,47 +104,12 @@ export async function previewFile(
 
 // Serialize mutations across project conversations sharing a directory.
 const locks = new Map<string, Promise<unknown>>();
-export function mutateFile(root: string, input: FileMutation) {
+export function withFileLock<T>(
+  root: string,
+  action: () => Promise<T>,
+): Promise<T> {
   const previous = locks.get(root) ?? Promise.resolve();
-  const result = previous
-    .catch(() => undefined)
-    .then(async () => {
-      validatePath(input.path);
-      if (input.operation === 'create') {
-        const parent = dirname(input.path);
-        const directory = await filePath(
-          root,
-          parent === '.' ? '' : parent,
-          true,
-        );
-        const target = join(directory, basename(input.path));
-        if (input.kind === 'directory') await mkdir(target);
-        else await (await open(target, 'wx')).close();
-        return { path: input.path };
-      }
-      const source = await filePath(root, input.path);
-      if (input.operation === 'delete') {
-        await rm(source, { recursive: true, force: false });
-        return { path: input.path };
-      }
-      validatePath(input.name);
-      if (input.name.includes('/')) throw new ThreadError('FILE_INVALID_PATH');
-      const nextPath =
-        input.path.slice(0, input.path.length - basename(input.path).length) +
-        input.name;
-      if (input.path === nextPath) return { path: nextPath };
-      const destination = join(dirname(source), input.name);
-      // Never knowingly replace an existing entry (including dangling symlinks).
-      const existing = await lstat(destination).catch(
-        (error: NodeJS.ErrnoException) => {
-          if (error.code !== 'ENOENT') throw error;
-          return null;
-        },
-      );
-      if (existing) throw new ThreadError('FILE_EXISTS', 409);
-      await rename(source, destination);
-      return { path: nextPath };
-    });
+  const result = previous.catch(() => undefined).then(action);
   locks.set(root, result);
   void result
     .finally(() => {
@@ -143,4 +117,44 @@ export function mutateFile(root: string, input: FileMutation) {
     })
     .catch(() => undefined);
   return result;
+}
+
+export function mutateFile(root: string, input: FileMutation) {
+  return withFileLock(root, async () => {
+    validatePath(input.path);
+    if (input.operation === 'create') {
+      const parent = dirname(input.path);
+      const directory = await filePath(
+        root,
+        parent === '.' ? '' : parent,
+        true,
+      );
+      const target = join(directory, basename(input.path));
+      if (input.kind === 'directory') await mkdir(target);
+      else await (await open(target, 'wx')).close();
+      return { path: input.path };
+    }
+    const source = await filePath(root, input.path);
+    if (input.operation === 'delete') {
+      await rm(source, { recursive: true, force: false });
+      return { path: input.path };
+    }
+    validatePath(input.name);
+    if (input.name.includes('/')) throw new ThreadError('FILE_INVALID_PATH');
+    const nextPath =
+      input.path.slice(0, input.path.length - basename(input.path).length) +
+      input.name;
+    if (input.path === nextPath) return { path: nextPath };
+    const destination = join(dirname(source), input.name);
+    // Never knowingly replace an existing entry (including dangling symlinks).
+    const existing = await lstat(destination).catch(
+      (error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') throw error;
+        return null;
+      },
+    );
+    if (existing) throw new ThreadError('FILE_EXISTS', 409);
+    await rename(source, destination);
+    return { path: nextPath };
+  });
 }

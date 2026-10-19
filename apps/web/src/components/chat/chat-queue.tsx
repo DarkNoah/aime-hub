@@ -81,7 +81,7 @@ export function ChatQueue({
     <Queue
       aria-label={t('chat.queued', { count: items.length })}
       aria-busy={pending}
-      className="mx-3 -mb-3 gap-0 rounded-b-none rounded-t-xl border-b-0 bg-muted/50 px-1.5 pt-1 pb-3 shadow-none"
+      className="mx-3 -mb-3 min-w-0 gap-0 rounded-b-none rounded-t-xl border-b-0 bg-muted/50 px-1.5 pt-1 pb-3 shadow-none"
     >
       <div className="flex items-center justify-between gap-2 px-2 py-1">
         <Badge variant="secondary" className="text-xs">
@@ -99,7 +99,10 @@ export function ChatQueue({
           {t('chat.clearQueue')}
         </Button>
       </div>
-      <ScrollArea className="[&_[data-slot=scroll-area-viewport]]:max-h-36">
+      <ScrollArea
+        className="min-w-0 max-w-full"
+        viewportProps={{ className: 'max-h-36 [&>div]:block!' }}
+      >
         <ul
           className="overscroll-contain"
           onDragLeave={(event) => {

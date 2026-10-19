@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { procedure, threadId } from './base.js';
 import {
   fileMutationSchema,
+  fileSaveSchema,
   fileScopeSchema,
   type FileListing,
   type FilePreview,
@@ -11,6 +12,20 @@ import {
 } from '../files.js';
 
 export const filesContract = {
+  save: procedure
+    .route({
+      method: 'PUT',
+      path: '/threads/{threadId}/files/content',
+      inputStructure: 'detailed',
+    })
+    .input(
+      z.object({
+        params: z.object({ threadId }),
+        query: z.object({ scope: fileScopeSchema.default('thread') }),
+        body: fileSaveSchema,
+      }),
+    )
+    .output(type<FilePreview>()),
   resolve: procedure
     .route({
       method: 'GET',

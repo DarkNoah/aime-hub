@@ -33,7 +33,7 @@ export function ThreadStatusBadge({
 }) {
   const { t } = useTranslation();
   const label = t(`chat.status.${status}`);
-  if(status == 'success'){
+  if(status == 'success' || status == 'pending') {
     return null;
   }
   return (

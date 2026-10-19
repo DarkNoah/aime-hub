@@ -83,6 +83,18 @@ export function DocumentSheet({
               </TabsList>
               <TabsContent value="content" className="min-h-0 flex-1">
                 <ScrollArea className="h-full">
+                  {doc.image && (
+                    <img
+                      src={`data:${doc.image.mimeType};base64,${doc.image.data}`}
+                      alt={doc.name}
+                      className="mb-4 max-h-[65vh] max-w-full rounded-lg object-contain"
+                    />
+                  )}
+                  {doc.image && doc.error && (
+                    <p role="alert" className="mb-4 text-sm text-destructive">
+                      {t(knowledgeError(doc.error))}
+                    </p>
+                  )}
                   <div className="whitespace-pre-wrap pr-4 text-sm leading-7 [overflow-wrap:anywhere]">
                     {doc.content ||
                       t(

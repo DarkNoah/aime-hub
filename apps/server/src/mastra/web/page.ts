@@ -111,7 +111,7 @@ export async function readBrowserPage(
   request = requestWebResource,
 ): Promise<WebFetchResult> {
   signal.throwIfAborted();
-  const { chromium } = await import('playwright-core');
+  const { chromium } = await import('../../lib/browser.js');
   const browser = await chromium.launch({ headless: true, timeout: timeoutMs });
   const close = () => {
     void browser.close().catch(() => {});
@@ -122,7 +122,6 @@ export async function readBrowserPage(
     const context = await browser.newContext({
       serviceWorkers: 'block',
       acceptDownloads: false,
-      userAgent: headers['user-agent'],
     });
     await context.routeWebSocket('**/*', (socket) => socket.close());
     // Isolated browser reads use the same pinned public-network path as direct requests.
@@ -137,7 +136,26 @@ export async function readBrowserPage(
         return;
       }
       try {
-        const response = await request(requestInfo.url(), { signal, headers });
+        // Keep HTTP identity aligned with stealth's navigator values. Only
+        // forward these public headers, never page cookies or credentials.
+        const browserHeaders = await requestInfo.allHeaders();
+        const requestHeaders: Record<string, string> = {
+          accept: headers.accept,
+        };
+        for (const name of [
+          'accept',
+          'user-agent',
+          'accept-language',
+          'sec-ch-ua',
+          'sec-ch-ua-mobile',
+          'sec-ch-ua-platform',
+        ]) {
+          if (browserHeaders[name]) requestHeaders[name] = browserHeaders[name];
+        }
+        const response = await request(requestInfo.url(), {
+          signal,
+          headers: requestHeaders,
+        });
         const responseHeaders = { ...response.headers };
         for (const name of [
           'content-encoding',

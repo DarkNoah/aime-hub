@@ -1,4 +1,4 @@
-import type { FileMutation, FileScope } from '@aime/shared/files';
+import type { FileMutation, FileSave, FileScope } from '@aime/shared/files';
 import { filesApi } from './api.js';
 import type { UploadOptions } from './upload.js';
 
@@ -24,6 +24,7 @@ export function createWorkspaceFileClient(
     search: (query: string, signal?: AbortSignal) =>
       api.search(accessThread(), query, signal, scope),
     mutate: (input: FileMutation) => api.mutate(accessThread(), input, scope),
+    save: (input: FileSave) => api.save(accessThread(), input, scope),
     // Capture the access thread once so every chunk uses the same upload session.
     upload: (directory: string, file: File, options: UploadOptions) =>
       api.upload(accessThread(), directory, file, options, scope),

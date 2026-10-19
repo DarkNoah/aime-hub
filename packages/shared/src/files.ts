@@ -15,6 +15,15 @@ export type FileEntry = {
   isMount?: boolean;
 };
 export type FileListing = { entries: FileEntry[]; truncated: boolean };
+export const FILE_TEXT_LIMIT = 512 * 1024;
+export const fileSaveSchema = z
+  .object({
+    path: z.string().min(1).max(2048),
+    text: z.string().max(FILE_TEXT_LIMIT),
+    version: z.string().min(1),
+  })
+  .strict();
+export type FileSave = z.infer<typeof fileSaveSchema>;
 export type FilePreview = {
   path: string;
   size: number;
@@ -23,6 +32,7 @@ export type FilePreview = {
   mime: string;
   text?: string;
   truncated?: boolean;
+  version?: string;
 };
 
 export const fileMediaTypes: Record<string, [FilePreview['kind'], string]> = {

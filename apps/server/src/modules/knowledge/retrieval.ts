@@ -154,6 +154,10 @@ export async function rerankKnowledge(
 ): Promise<KnowledgeHit[]> {
   // One provider batch, adapted to Mastra's per-passage RelevanceScoreProvider.
   signal.throwIfAborted();
+  // Current rerank providers only accept text. Preserve the complete recall
+  // order for mixed candidates instead of scoring image labels as their contents.
+  if (hits.some((hit) => hit.inputType === 'image'))
+    throw new Error('KNOWLEDGE_RERANK_IMAGE_UNSUPPORTED');
   const documents = [...new Set(hits.map((hit) => hit.text))];
   const { ranking } = await rerank({
     model,
@@ -206,6 +210,11 @@ export async function rerankKnowledge(
 }
 
 export function rerankFailureReason(error: unknown) {
+  if (
+    error instanceof Error &&
+    error.message === 'KNOWLEDGE_RERANK_IMAGE_UNSUPPORTED'
+  )
+    return 'image_unsupported' as const;
   if (
     error instanceof Error &&
     error.message === 'KNOWLEDGE_RERANK_MODEL_CONFLICT'

@@ -5,7 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { embedMany } from 'ai';
-import { KnowledgeBaseRecord as Base } from '@aime/db';
+import {
+  KnowledgeBaseRecord as Base,
+  KnowledgeDocumentRecord as Document,
+} from '@aime/db';
+import { ThreadError } from '../threads/errors.js';
+import { createKnowledgeEmbedder } from './embedding.js';
 import { activeKnowledgeIndex, type KnowledgeService } from './service.js';
 import { vectorTableName, type StoredChunk } from './vector-store.js';
 import { withSearchTimeout } from './retrieval.js';
@@ -54,9 +59,10 @@ export async function rebuildKnowledge(service: KnowledgeService, id: string) {
     const file = await open(path, 'wx', 0o600);
     let completed = 0;
     try {
-      const model = job.embeddingModel
-        ? await providers.getEmbeddingModel(job.embeddingModel)
-        : null;
+      const embedChunks = createKnowledgeEmbedder(
+        providers,
+        job.embeddingModel,
+      );
       let after = '';
       while (true) {
         const chunks = await service.store.chunks(claimed, {
@@ -64,19 +70,21 @@ export async function rebuildKnowledge(service: KnowledgeService, id: string) {
           limit: 32,
         });
         if (!chunks.length) break;
-        let batchVectors: number[][] | null = null;
-        if (model) {
-          const { embeddings } = await withSearchTimeout(
-            (signal) =>
-              embedMany({
-                model,
-                values: chunks.map((c) => c.text),
-                maxParallelCalls: 2,
-                maxRetries: 0,
-                abortSignal: signal,
-              }),
-            180_000,
-          );
+        const batchVectors = await embedChunks(chunks, async (documentId) => {
+          const doc = await database
+            .getRepository(Document)
+            .createQueryBuilder('d')
+            .addSelect('d.sourceData')
+            .where('d.id = :documentId AND d.base_id = :baseId', {
+              documentId,
+              baseId: id,
+            })
+            .getOne();
+          if (!doc) throw new Error('Image source unavailable');
+          return { name: doc.sourceName ?? doc.name, data: doc.sourceData };
+        });
+        if (batchVectors) {
+          const embeddings = batchVectors;
           dimension ??= embeddings[0]?.length ?? null;
           if (
             !dimension ||
@@ -87,7 +95,6 @@ export async function rebuildKnowledge(service: KnowledgeService, id: string) {
             )
           )
             throw new Error('Invalid embeddings');
-          batchVectors = embeddings;
         }
         const batch: VectorBatch = { chunks, vectors: batchVectors };
         await file.writeFile(JSON.stringify(batch) + '\n');
@@ -101,11 +108,11 @@ export async function rebuildKnowledge(service: KnowledgeService, id: string) {
         );
         if (!updated.length) throw new Error('Rebuild superseded');
       }
-      if (model && dimension === null) {
+      if (job.embeddingModel && dimension === null) {
         const result = await withSearchTimeout(
-          (signal) =>
+          async (signal) =>
             embedMany({
-              model,
+              model: await providers.getEmbeddingModel(job.embeddingModel!),
               values: ['dimension probe'],
               maxRetries: 0,
               abortSignal: signal,
@@ -184,7 +191,7 @@ export async function rebuildKnowledge(service: KnowledgeService, id: string) {
       });
       await m.save(Base, base);
     });
-  } catch {
+  } catch (error) {
     // Failure preserves the current model/index; the worker will clean any shadow index.
     await database.transaction(async (m) => {
       const base = await m.findOne(Base, {
@@ -198,7 +205,11 @@ export async function rebuildKnowledge(service: KnowledgeService, id: string) {
           after: Date.now() + 60_000,
         });
       if (base.rebuild?.attempt === attempt)
-        base.rebuild = { ...base.rebuild, status: 'failed', error: stage };
+        base.rebuild = {
+          ...base.rebuild,
+          status: 'failed',
+          error: error instanceof ThreadError ? error.code : stage,
+        };
       await m.save(Base, base);
     });
   } finally {

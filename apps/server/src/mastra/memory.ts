@@ -54,7 +54,7 @@ export async function resolveMemoryConfig(
           semanticRecall: {
             topK: 3,
             messageRange: 2,
-            scope: 'thread',
+            scope: 'resource',
           },
         },
       } satisfies ChatMemoryConfig;

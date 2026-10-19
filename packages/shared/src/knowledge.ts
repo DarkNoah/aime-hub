@@ -91,8 +91,8 @@ export const knowledgeBaseUpdateSchema = knowledgeBaseInputSchema
   .partial()
   .extend({ enabled: z.boolean().optional() });
 export const maxKnowledgeFileBytes = 10 * 1024 * 1024;
-export const knowledgeFileAccept =
-  '.txt,.md,.markdown,.html,.htm,.json,.csv,.pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.rtf';
+export const knowledgeImageFileAccept = '.png,.jpg,.jpeg,.webp,.gif,.bmp';
+export const knowledgeFileAccept = `.txt,.md,.markdown,.html,.htm,.json,.csv,.pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.rtf,${knowledgeImageFileAccept}`;
 export const knowledgeSourceSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('text'),
@@ -209,6 +209,7 @@ export type KnowledgeDocument = {
 };
 export type KnowledgeDocumentDetail = KnowledgeDocument & {
   content: string;
+  image?: { data: string; mimeType: string };
   chunks: { id: string; text: string; position: number }[];
 };
 export type KnowledgeVersion = {
@@ -239,6 +240,7 @@ export const knowledgeHitSchema = z.object({
   documentId: z.string(),
   name: z.string(),
   text: z.string(),
+  inputType: z.literal('image').nullable().optional(),
   sourceUrl: z.string().nullable(),
   // Final sorting score: rerank on success, recall RRF otherwise.
   score: z.number(),
@@ -257,7 +259,13 @@ export const knowledgeHitSchema = z.object({
   fallbackReasons: z
     .object({
       rerank: z
-        .enum(['timeout', 'invalid_response', 'failed', 'model_conflict'])
+        .enum([
+          'timeout',
+          'invalid_response',
+          'failed',
+          'model_conflict',
+          'image_unsupported',
+        ])
         .optional(),
     })
     .optional(),

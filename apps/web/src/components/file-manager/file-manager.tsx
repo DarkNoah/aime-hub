@@ -42,6 +42,7 @@ import { FilePreview } from './file-preview';
 import type { FileManagerState } from './use-file-manager';
 import { UploadDropZone } from './upload-drop-zone';
 import { UploadList } from './upload-list';
+import { DiscardEditsDialog } from './discard-edits-dialog';
 
 export default function FileManager({
   state,
@@ -145,6 +146,7 @@ function FileManagerPane({
 }) {
   const { t } = useTranslation();
   const [action, setAction] = useState<EntryAction | null>(null);
+  const [closing, setClosing] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const uploadDirectory = useRef('');
@@ -492,13 +494,24 @@ function FileManagerPane({
                           <span className="truncate">
                             {tab.path.split('/').at(-1)}
                           </span>
+                          {state.edits.isDirty(tab.path) && (
+                            <span
+                              className="size-1.5 shrink-0 rounded-full bg-primary"
+                              aria-label={t('files.unsaved')}
+                            />
+                          )}
                         </TabsTrigger>
                         <Button
                           variant="ghost"
                           size="icon-sm"
                           className="mr-1 size-6 shrink-0"
                           aria-label={t('files.closeFile', { name: tab.path })}
-                          onClick={() => state.closeTab(tab.path)}
+                          disabled={state.edits.get(tab.path)?.saving}
+                          onClick={() => {
+                            if (state.edits.isDirty(tab.path))
+                              setClosing(tab.path);
+                            else state.closeTab(tab.path);
+                          }}
                         >
                           <X className="size-3" />
                         </Button>
@@ -514,6 +527,7 @@ function FileManagerPane({
                     path={activeTab.path}
                     line={activeTab.line}
                     revision={revision}
+                    edits={state.edits}
                   />
                 </TabsContent>
               </Tabs>
@@ -538,6 +552,14 @@ function FileManagerPane({
           onClose={() => setAction(null)}
         />
       )}
+      <DiscardEditsDialog
+        open={closing !== null}
+        onCancel={() => setClosing(null)}
+        onDiscard={() => {
+          if (closing) state.closeTab(closing);
+          setClosing(null);
+        }}
+      />
     </section>
   );
 }

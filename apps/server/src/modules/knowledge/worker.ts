@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { embedMany } from 'ai';
+import { createKnowledgeEmbedder } from './embedding.js';
 import {
   KnowledgeBaseRecord as Base,
   KnowledgeDocumentRecord as Document,
@@ -110,7 +110,7 @@ export class KnowledgeWorker {
     let staged: string[] = [];
     const indexName = activeKnowledgeIndex(base);
     try {
-      const { content, texts } = await parseKnowledgeSource(doc);
+      const { content, texts, inputType } = await parseKnowledgeSource(doc);
       parsedContent = content;
       const chunks: StoredChunk[] = texts.map((text, position) => ({
         id: randomUUID(),
@@ -121,35 +121,22 @@ export class KnowledgeWorker {
         attributes: doc.metadata,
         name: doc.name,
         sourceUrl: doc.sourceUrl,
+        inputType,
       }));
-      let embeddings: number[][] | null = null;
-      if (base.embeddingModel) {
-        stage = 'KNOWLEDGE_EMBED_FAILED';
-        const model = await providers.getEmbeddingModel(base.embeddingModel);
-        embeddings = [];
-        const signal = AbortSignal.timeout(180_000);
-        for (let i = 0; i < texts.length; i += 32) {
-          const batch = await embedMany({
-            model,
-            values: texts.slice(i, i + 32),
-            maxParallelCalls: 2,
-            abortSignal: signal,
-            maxRetries: 1,
-          });
-          embeddings.push(...batch.embeddings);
-        }
-        const dimension = embeddings[0]?.length;
-        if (
-          !dimension ||
-          embeddings.length !== chunks.length ||
-          embeddings.some(
-            (e) => e.length !== dimension || e.some((v) => !Number.isFinite(v)),
-          )
-        )
-          throw new Error('Invalid embeddings');
-        if (base.vectorDimension && base.vectorDimension !== dimension)
-          throw new ThreadError('KNOWLEDGE_DIMENSION_CHANGED');
-      }
+      stage =
+        inputType === 'image'
+          ? 'KNOWLEDGE_IMAGE_EMBED_FAILED'
+          : 'KNOWLEDGE_EMBED_FAILED';
+      const embeddings = await createKnowledgeEmbedder(
+        providers,
+        base.embeddingModel,
+        1,
+      )(chunks, async () => ({
+        name: doc.sourceName ?? doc.name,
+        data: doc.sourceData,
+      }));
+      if (embeddings && base.vectorDimension !== embeddings[0]?.length)
+        throw new ThreadError('KNOWLEDGE_DIMENSION_CHANGED');
       stage = 'KNOWLEDGE_INDEX_FAILED';
       staged = chunks.map((c) => c.id);
       for (let i = 0; i < chunks.length; i += 64)

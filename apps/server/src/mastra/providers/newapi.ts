@@ -12,6 +12,7 @@ import { createSpeechModel } from './openai-compatible-speech.js';
 import { createTranscriptionModel } from './openai-compatible-transcription.js';
 import {
   createEmbeddingModel,
+  createImageEmbeddingModel,
   createRerankModel,
 } from './openai-compatible-retrieval.js';
 import { allowAllNetworks } from '../../modules/network/policy.js';
@@ -97,6 +98,14 @@ export class NewApiProvider extends BaseProvider {
 
   textEmbeddingModel(modelId: string) {
     return createEmbeddingModel(
+      { ...this.provider, baseUrl: this.baseUrl, type: this.type },
+      modelId,
+      this.request,
+    );
+  }
+
+  imageEmbeddingModel(modelId: string) {
+    return createImageEmbeddingModel(
       { ...this.provider, baseUrl: this.baseUrl, type: this.type },
       modelId,
       this.request,

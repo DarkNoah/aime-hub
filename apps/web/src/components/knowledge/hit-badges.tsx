@@ -20,13 +20,15 @@ export function KnowledgeHitBadges({ hit }: { hit: KnowledgeHit }) {
           {t(
             stage === 'vector'
               ? 'knowledge.vectorFallback'
-              : hit.fallbackReasons?.rerank === 'timeout'
-                ? 'knowledge.rerankTimeout'
-                : hit.fallbackReasons?.rerank === 'model_conflict'
-                  ? 'knowledge.rerankModelConflict'
-                  : hit.fallbackReasons?.rerank === 'invalid_response'
-                    ? 'knowledge.rerankInvalid'
-                    : 'knowledge.rerankFallback',
+              : hit.fallbackReasons?.rerank === 'image_unsupported'
+                ? 'knowledge.rerankImageUnsupported'
+                : hit.fallbackReasons?.rerank === 'timeout'
+                  ? 'knowledge.rerankTimeout'
+                  : hit.fallbackReasons?.rerank === 'model_conflict'
+                    ? 'knowledge.rerankModelConflict'
+                    : hit.fallbackReasons?.rerank === 'invalid_response'
+                      ? 'knowledge.rerankInvalid'
+                      : 'knowledge.rerankFallback',
           )}
         </Badge>
       ))}

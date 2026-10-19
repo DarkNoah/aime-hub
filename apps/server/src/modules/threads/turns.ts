@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { isToolUIPart, type UIMessage } from 'ai';
+import { isCompletedIntelligentUiPart } from '@aime/shared/intelligent-ui';
 import {
   hasChatTurnDetails,
   type ChatTurnSummary,
@@ -50,7 +51,9 @@ export function summarizeTurn(
   cursor?: string,
 ): ChatTurnSummary {
   let user: UIMessage | null = null;
-  let assistant: UIMessage | null = null;
+  let assistantMessage: UIMessage | null = null;
+  let finalText: UIMessage['parts'][number] | undefined;
+  const overview: UIMessage['parts'] = [];
   let finishedAt: number | undefined;
   const tools = new Set<string>();
   const assets = new Set<string>();
@@ -60,22 +63,15 @@ export function summarizeTurn(
       continue;
     }
     for (const part of message.parts) {
+      if (isCompletedIntelligentUiPart(part)) {
+        assistantMessage ??= message;
+        overview.push(part);
+      }
       if (part.type === 'text' && part.text.trim()) {
-        assistant = {
-          id: message.id,
-          role: 'assistant',
-          ...(timestamp(message.metadata) !== undefined
-            ? {
-                metadata: {
-                  createdAt: new Date(
-                    timestamp(message.metadata)!,
-                  ).toISOString(),
-                },
-              }
-            : {}),
-          // The overview displays partial text too; the running indicator is separate.
-          parts: [{ type: 'text', text: part.text, state: 'done' }],
-        };
+        assistantMessage = message;
+        // The overview displays partial text too; the running indicator is separate.
+        finalText = { type: 'text', text: part.text, state: 'done' };
+        overview.push(finalText);
         finishedAt = timestamp(part.providerMetadata?.mastra);
       }
       if (isToolUIPart(part)) {
@@ -90,6 +86,20 @@ export function summarizeTurn(
       }
     }
   }
+  const createdAt = timestamp(assistantMessage?.metadata);
+  const assistant: UIMessage | null = assistantMessage
+    ? {
+        id: assistantMessage.id,
+        role: 'assistant',
+        ...(createdAt !== undefined
+          ? { metadata: { createdAt: new Date(createdAt).toISOString() } }
+          : {}),
+        // Keep panels at their original positions while omitting intermediate text.
+        parts: overview.filter(
+          (part) => part.type !== 'text' || part === finalText,
+        ),
+      }
+    : null;
   const startedAt = timestamp(user?.metadata);
   return {
     id: turn.id,

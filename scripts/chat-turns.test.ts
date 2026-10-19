@@ -107,3 +107,86 @@ test('live snapshots replace summaries in place and remove reconciled turns', ()
     ['a', 'c', 'replacement'],
   );
 });
+
+test('IntelligentUI remains in the overview without adding an empty details section', () => {
+  const panel = {
+    type: 'tool-IntelligentUI',
+    toolCallId: 'panel',
+    state: 'output-available',
+    input: { html: '<p>Weather</p>' },
+    output: { rendered: true },
+  } as const;
+  const messages = [
+    {
+      id: 'assistant',
+      role: 'assistant',
+      parts: [panel, { type: 'text', text: 'Forecast ready.' }],
+    },
+  ] as UIMessage[];
+  const summary = summarizeTurn({ id: 'turn', messages });
+  assert.equal(summary.hasDetails, false);
+  assert.equal(summary.toolCount, 1);
+  assert.deepEqual(summary.assistant?.parts, [
+    panel,
+    { type: 'text', text: 'Forecast ready.', state: 'done' },
+  ]);
+  const pending = summarizeTurn({
+    id: 'pending',
+    messages: [
+      {
+        id: 'assistant',
+        role: 'assistant',
+        parts: [
+          {
+            type: panel.type,
+            toolCallId: panel.toolCallId,
+            input: panel.input,
+            state: 'input-available',
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(
+    pending.assistant,
+    null,
+    'pending panels render from the actionable interaction exactly once',
+  );
+});
+
+test('overview preserves panel order around final text across parts and messages', () => {
+  const before = {
+    type: 'tool-IntelligentUI',
+    toolCallId: 'before',
+    state: 'output-available',
+    input: { html: '<p>Before</p>' },
+    output: { rendered: true },
+  } as const;
+  const after = { ...before, toolCallId: 'after' };
+  const final = { type: 'text', text: 'Final reply', state: 'done' } as const;
+  const intermediate = { type: 'text', text: 'Preparing report' } as const;
+  const parts = [intermediate, before, final, after];
+  for (const messages of [
+    [{ id: 'assistant', role: 'assistant' as const, parts }],
+    parts.map((part, index) => ({
+      id: 'assistant-' + index,
+      role: 'assistant' as const,
+      parts: [part],
+    })),
+  ]) {
+    const summary = summarizeTurn({ id: 'turn', messages });
+    assert.deepEqual(summary.assistant?.parts, [before, final, after]);
+    assert.equal(
+      summary.hasDetails,
+      true,
+      'intermediate text is still in details',
+    );
+    assert.equal(summary.toolCount, 2);
+  }
+  const panelOnly = summarizeTurn({
+    id: 'panel-only',
+    messages: [{ id: 'assistant', role: 'assistant', parts: [before, after] }],
+  });
+  assert.deepEqual(panelOnly.assistant?.parts, [before, after]);
+  assert.equal(panelOnly.hasDetails, false);
+});

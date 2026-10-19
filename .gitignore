@@ -58,3 +58,7 @@ plugins/vibe-quant/**/__pycache__/
 !apps/server/src/modules/threads/runner-incomplete-tool-calls.test.ts
 !apps/server/src/modules/threads/turn-history.test.ts
 !scripts/chat-turns.test.ts
+!apps/server/src/modules/knowledge/images.test.ts
+!scripts/web-fetch.test.ts
+!apps/server/src/modules/threads/intelligent-ui.test.ts
+!scripts/intelligent-ui-browser.test.mjs

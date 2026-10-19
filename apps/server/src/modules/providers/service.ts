@@ -313,6 +313,7 @@ export class ProviderService {
       modelId: model.id,
       modelName: model.name,
       metadata: model.metadata,
+      modalitiesInput: model.modalitiesInput,
     };
   }
 
@@ -330,6 +331,14 @@ export class ProviderService {
       reference,
     );
     return provider.rerankingModel(modelId);
+  }
+
+  async getImageEmbeddingModel(reference?: string) {
+    const { provider, modelId, modalitiesInput } =
+      await this.resolveDefaultModel('embeddingModel', reference);
+    return modalitiesInput.includes('image')
+      ? provider.imageEmbeddingModel(modelId)
+      : null;
   }
 
   async getSpeechModel(reference?: string) {

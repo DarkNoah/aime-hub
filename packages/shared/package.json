@@ -8,6 +8,7 @@
     "./providers": "./src/providers.ts",
     "./knowledge": "./src/knowledge.ts",
     "./tools": "./src/tools.ts",
+    "./intelligent-ui": "./src/intelligent-ui.ts",
     "./agents": "./src/agents.ts",
     "./mcp": "./src/mcp.ts",
     "./automations": "./src/automations.ts",

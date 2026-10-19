@@ -65,7 +65,8 @@ export function ImportDialog({
       : document
         ? document.sourceType === 'url'
           ? 'url'
-          : document.sourceType === 'file' && !document.content
+          : document.sourceType === 'file' &&
+              (!document.content || document.image)
             ? 'file'
             : 'text'
         : 'file',

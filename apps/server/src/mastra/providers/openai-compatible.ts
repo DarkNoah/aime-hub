@@ -7,6 +7,7 @@ import { createSpeechModel } from './openai-compatible-speech.js';
 import { createTranscriptionModel } from './openai-compatible-transcription.js';
 import {
   createEmbeddingModel,
+  createImageEmbeddingModel,
   createRerankModel,
 } from './openai-compatible-retrieval.js';
 import { requestWebResource } from '../web/request.js';
@@ -67,6 +68,14 @@ export class OpenAICompatibleProvider extends BaseProvider {
 
   rerankModel(modelId: string) {
     return createRerankModel(
+      { ...this.provider, type: this.type },
+      modelId,
+      this.requestResource,
+    );
+  }
+
+  imageEmbeddingModel(modelId: string) {
+    return createImageEmbeddingModel(
       { ...this.provider, type: this.type },
       modelId,
       this.requestResource,

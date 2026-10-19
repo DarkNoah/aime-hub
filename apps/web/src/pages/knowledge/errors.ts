@@ -17,6 +17,8 @@ const errors: Record<string, TranslationKey> = {
   KNOWLEDGE_EMPTY_CONTENT: 'knowledge.errorEmpty',
   KNOWLEDGE_PARSE_FAILED: 'knowledge.errorParse',
   KNOWLEDGE_EMBED_FAILED: 'knowledge.errorEmbed',
+  KNOWLEDGE_IMAGE_MODEL_REQUIRED: 'knowledge.errorImageModel',
+  KNOWLEDGE_IMAGE_EMBED_FAILED: 'knowledge.errorImageEmbed',
   KNOWLEDGE_INDEX_FAILED: 'knowledge.errorIndex',
   KNOWLEDGE_DIMENSION_CHANGED: 'knowledge.errorDimension',
   KNOWLEDGE_LIMIT: 'knowledge.errorLimit',

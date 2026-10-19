@@ -4,16 +4,30 @@ import { OfficeParser, type SupportedFileType } from 'officeparser';
 import { readWebPage } from '../../mastra/web/page.js';
 import {
   knowledgeFileAccept,
+  knowledgeImageFileAccept,
   maxKnowledgeFileBytes,
   type KnowledgeSource,
 } from '@aime/shared/knowledge';
 import { ThreadError } from '../threads/errors.js';
+import { inspectImageFile } from '../files/binary-file.js';
+
+const imageExtensions = new Set(knowledgeImageFileAccept.split(','));
 
 export function validateKnowledgeFile(name: string, data: Buffer) {
   if (!knowledgeFileAccept.split(',').includes(extname(name).toLowerCase()))
     throw new ThreadError('KNOWLEDGE_FILE_TYPE', 400);
   if (!data.length || data.length > maxKnowledgeFileBytes)
     throw new ThreadError('KNOWLEDGE_TOO_LARGE', 413);
+  if (imageExtensions.has(extname(name).toLowerCase())) {
+    try {
+      const image = inspectImageFile(data, name);
+      if (!imageExtensions.has(extname(image.fileName)))
+        throw new Error('Unsupported knowledge image');
+      return image;
+    } catch {
+      throw new ThreadError('KNOWLEDGE_FILE_TYPE', 400);
+    }
+  }
 }
 
 export async function parseKnowledgeSource(source: {
@@ -37,9 +51,13 @@ export async function parseKnowledgeSource(source: {
     format = 'markdown';
   } else {
     const fileName = source.sourceName ?? source.name;
-    validateKnowledgeFile(fileName, source.sourceData);
+    const image = validateKnowledgeFile(fileName, source.sourceData);
     const ext = extname(fileName).toLowerCase();
-    if (ext === '.txt' || ext === '.json') {
+    if (image) {
+      // One image is one vector. This label is for display, never text embedding.
+      const content = `[Image: ${source.name}]`;
+      return { content, texts: [content], inputType: 'image' as const };
+    } else if (ext === '.txt' || ext === '.json') {
       content = new TextDecoder('utf-8', { fatal: true }).decode(
         source.sourceData,
       );

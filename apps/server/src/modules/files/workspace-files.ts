@@ -20,6 +20,7 @@ import {
   mutateFile,
   previewFile,
   TEXT_LIMIT,
+  textVersion,
 } from './service.js';
 import { searchFiles } from './search.js';
 
@@ -115,6 +116,7 @@ export async function previewWorkspaceFile(
         mime: 'text/plain; charset=utf-8',
         text,
         truncated,
+        ...(!truncated ? { version: textVersion(buffer) } : {}),
       };
 }
 

@@ -1,10 +1,12 @@
-import type { FileMutation, FileScope } from '@aime/shared/files';
+import type { FileMutation, FileSave, FileScope } from '@aime/shared/files';
 import { chatErrorKey } from '../chat/api.js';
 import { api, apiErrorCode } from '../../lib/rpc.js';
 import { uploadFile } from './upload.js';
 
 const base = (id: string) => `/api/threads/${encodeURIComponent(id)}/files`;
 export const filesApi = {
+  save: (threadId: string, input: FileSave, scope: FileScope = 'thread') =>
+    api.files.save({ params: { threadId }, query: { scope }, body: input }),
   upload: uploadFile,
   resolve: (threadId: string, path: string, signal?: AbortSignal) =>
     api.files.resolve({ params: { threadId }, query: { path } }, { signal }),
@@ -56,6 +58,12 @@ export const filesApi = {
 export function fileErrorKey(error: unknown) {
   if (apiErrorCode(error)) {
     switch (apiErrorCode(error)) {
+      case 'FILE_CHANGED':
+        return 'files.changed';
+      case 'FILE_NOT_EDITABLE':
+        return 'files.notEditable';
+      case 'FILE_TEXT_TOO_LARGE':
+        return 'files.editLimit';
       case 'FILE_UPLOAD_TOO_LARGE':
         return 'files.uploadTooLarge';
       case 'FILE_UPLOAD_LIMIT':

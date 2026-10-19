@@ -28,6 +28,7 @@ export async function consumeSessionStream(
   onTurnFinished: (messageIds: string[]) => Promise<void>,
 ) {
   const streamedMessageIds = new Set<string>();
+  const restoredInteractions = new Set<string>();
   let segment:
     | {
         controller: ReadableStreamDefaultController<ChunkType>;
@@ -94,6 +95,23 @@ export async function consumeSessionStream(
       const chunk = raw as ChunkType | AgentSignalDataPart | ThreadHistoryChunk;
       if (chunk.type === 'thread-history') {
         for (const message of threadMessages(chunk.payload.messages)) {
+          for (const part of message.parts) {
+            if (
+              part.type !== 'data-tool-call-suspended' &&
+              part.type !== 'data-tool-call-approval'
+            )
+              continue;
+            const data = part.data;
+            if (
+              data &&
+              typeof data === 'object' &&
+              'runId' in data &&
+              'toolCallId' in data
+            )
+              restoredInteractions.add(
+                String(data.runId) + ':' + String(data.toolCallId),
+              );
+          }
           messages.set(message.id, structuredClone(message));
           emit({ type: 'message', message, active: false });
         }
@@ -110,6 +128,24 @@ export async function consumeSessionStream(
         continue;
       }
       const native = chunk as ChunkType;
+      // Initial history can replay a start and OM status before the saved HITL
+      // marker. It is still the same pending interaction, not a new suspension.
+      if (native.type === 'step-start') {
+        for (const key of restoredInteractions)
+          if (key.startsWith(native.runId + ':'))
+            restoredInteractions.delete(key);
+      }
+      if (
+        native.type === 'tool-call-suspended' ||
+        native.type === 'tool-call-approval'
+      ) {
+        if (
+          restoredInteractions.delete(
+            native.runId + ':' + native.payload.toolCallId,
+          )
+        )
+          continue;
+      }
       // A new subscription replays pending HITL markers before the resumed run.
       // Service metadata already contains those; only a fresh start is live.
       if (!started && native.type !== 'start') continue;

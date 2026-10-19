@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { ProviderConfig } from './base-provider.js';
 import { requestWebResource, webUrl } from '../web/request.js';
 import { allowAllNetworks } from '../../modules/network/policy.js';
+import type { ImageEmbeddingModel } from './image-embedding-model.js';
 
 type RetrievalProviderConfig = ProviderConfig & { type: string };
 type RequestOptions = {
@@ -133,6 +134,41 @@ export function createEmbeddingModel(
         usage: data.usage ? { tokens: data.usage.prompt_tokens } : undefined,
         warnings: [],
         response,
+      };
+    },
+  };
+}
+
+/** Jina's multimodal extension to /embeddings; enabled by model image capability. */
+export function createImageEmbeddingModel(
+  provider: RetrievalProviderConfig,
+  modelId: string,
+  request = requestWebResource,
+): ImageEmbeddingModel {
+  const requestJson = createRequest(provider, modelId, request);
+  return {
+    doEmbedImages: async ({ images, abortSignal }) => {
+      if (!images.length) return { embeddings: [] };
+      const { data } = await requestJson('embeddings', embeddingResponse, {
+        abortSignal,
+        body: {
+          model: modelId,
+          input: images.map(({ data, mimeType }) => ({
+            image: `data:${mimeType};base64,${Buffer.from(data).toString('base64')}`,
+          })),
+          encoding_format: 'float',
+        },
+      });
+      if (
+        data.data.length !== images.length ||
+        new Set(data.data.map((item) => item.index)).size !== images.length ||
+        data.data.some((item) => item.index >= images.length)
+      )
+        throw new Error('Invalid image embedding indices');
+      return {
+        embeddings: data.data
+          .sort((a, b) => a.index - b.index)
+          .map((item) => item.embedding),
       };
     },
   };

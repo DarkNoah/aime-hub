@@ -12,6 +12,7 @@ import type {
 import type { ModelInput } from '@aime/shared/providers';
 import { z } from 'zod';
 import type { OcrModel } from './ocr-model.js';
+import type { ImageEmbeddingModel } from './image-embedding-model.js';
 export type { OcrModel, OcrInput, OcrOptions, OcrResult } from './ocr-model.js';
 
 export type WebFetchResult = {
@@ -75,6 +76,11 @@ export abstract class BaseProvider {
 
   embeddingModel(modelId: string): EmbeddingModel {
     return this.textEmbeddingModel(modelId);
+  }
+
+  imageEmbeddingModel(modelId: string): ImageEmbeddingModel | null {
+    void modelId;
+    return null;
   }
 
   rerankingModel(modelId: string): RerankingModel {

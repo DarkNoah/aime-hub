@@ -33,7 +33,8 @@ export function useToolResponse({
     disabled || pending || !!response || !interaction || !onRespond;
 
   async function submit(action: ResponseAction) {
-    if (unavailable || sending.current || !interaction || !onRespond) return;
+    if (unavailable || sending.current || !interaction || !onRespond)
+      return false;
     sending.current = true;
     setPending(true);
     setError(undefined);
@@ -46,10 +47,12 @@ export function useToolResponse({
       await onRespond(interaction.id, value);
       setSubmitted(value);
       toast.success(t('chat.toolInteraction.sent'));
+      return true;
     } catch (cause) {
       const key = chatErrorKey(cause);
       setError(key);
       toast.error(t(key));
+      return false;
     } finally {
       sending.current = false;
       setPending(false);
