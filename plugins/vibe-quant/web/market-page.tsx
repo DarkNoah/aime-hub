@@ -10,6 +10,11 @@ import {
   DialogTitle,
   Input,
   ScrollArea,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Switch,
 } from '@app/plugin-ui';
 import {
@@ -24,6 +29,7 @@ import {
 import { toast } from 'sonner';
 import {
   DURATIONS,
+  durationLabel,
   KIND_LABELS,
   type Bar,
   type Instrument,
@@ -34,7 +40,15 @@ import {
   type WatchItem,
 } from '../shared';
 import { MarketChart } from './chart';
+import {
+  intradayBars,
+  parseChartPeriod,
+  readChartPeriod,
+  saveChartPeriod,
+} from './chart-period';
 import { OrderBookPanel } from './order-book';
+import { IndicatorControls } from './indicators/indicator-controls';
+import { useIndicators } from './indicators/use-indicators';
 
 const ENGINE_NAMES = { tqsdk: 'TqSdk', tushare: 'Tushare', tdx: '通达信' };
 const STATE_LABELS = {
@@ -75,9 +89,10 @@ const timeText = (value?: string | null) =>
         timeZone: 'Asia/Shanghai',
         hour12: false,
       })
-    : '尚未写入';
+    : '暂无';
 
 export function MarketPage({ pluginId }: PluginPageProps) {
+  const indicators = useIndicators();
   const [list, setList] = useState<WatchItem[]>([]);
   const [selected, setSelected] = useState('');
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -95,14 +110,16 @@ export function MarketPage({ pluginId }: PluginPageProps) {
   const [searchError, setSearchError] = useState('');
   const [busy, setBusy] = useState('');
   const busyRef = useRef(false);
-  const [duration, setDuration] = useState<number>(60);
+  const [period, setPeriod] = useState(readChartPeriod);
+  const isIntraday = period === 'intraday';
+  const duration = isIntraday ? 60 : period;
   const [bars, setBars] = useState<Bar[]>([]);
   const [barsIdentity, setBarsIdentity] = useState('');
   const [barsError, setBarsError] = useState('');
   const [barsLoading, setBarsLoading] = useState(false);
   const [olderLoading, setOlderLoading] = useState(false);
   const [hasOlder, setHasOlder] = useState(true);
-  const identity = `${status?.engine ?? ''}:${selected}:${duration}`;
+  const identity = `${status?.engine ?? ''}:${selected}:${period}`;
   const identityRef = useRef(identity);
   identityRef.current = identity;
   useEffect(() => {
@@ -193,24 +210,40 @@ export function MarketPage({ pluginId }: PluginPageProps) {
     setBarsLoading(true);
     async function poll() {
       try {
-        const data = await pluginRequest<Bar[]>(
-          pluginId,
-          `/bars?symbol=${encodeURIComponent(selected)}&duration=${duration}`,
-          { signal: controller.signal },
-        );
+        const [data, daily] = await Promise.all([
+          pluginRequest<Bar[]>(
+            pluginId,
+            `/bars?symbol=${encodeURIComponent(selected)}&duration=${duration}`,
+            { signal: controller.signal },
+          ),
+          isIntraday
+            ? pluginRequest<Bar[]>(
+                pluginId,
+                `/bars?symbol=${encodeURIComponent(selected)}&duration=86400`,
+                { signal: controller.signal },
+              )
+            : Promise.resolve([] as Bar[]),
+        ]);
         if (!controller.signal.aborted) {
           setBars((current) =>
-            [
-              ...new Map(
-                [...current, ...data].map((bar) => [bar.time, bar]),
-              ).values(),
-            ].sort((a, b) => a.time - b.time),
+            isIntraday
+              ? intradayBars(data, daily)
+              : [
+                  ...new Map(
+                    [...current, ...data].map((bar) => [bar.time, bar]),
+                  ).values(),
+                ].sort((a, b) => a.time - b.time),
           );
           setBarsIdentity(identity);
           setBarsError('');
         }
       } catch {
-        if (!controller.signal.aborted) setBarsError('K 线读取失败，正在重试');
+        if (!controller.signal.aborted)
+          setBarsError(
+            isIntraday
+              ? '分时行情读取失败，正在重试'
+              : 'K 线读取失败，正在重试',
+          );
       }
       if (!controller.signal.aborted) {
         setBarsLoading(false);
@@ -222,7 +255,15 @@ export function MarketPage({ pluginId }: PluginPageProps) {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [pluginId, selected, duration, status?.engine, retry]);
+  }, [pluginId, selected, duration, isIntraday, status?.engine, retry]);
+  function changePeriod(value: string) {
+    const next = parseChartPeriod(value);
+    setPeriod(next);
+    if (!saveChartPeriod(next))
+      toast.error('浏览器未能保存视图周期，本次选择仅在当前页面生效', {
+        id: 'chart-period-storage-error',
+      });
+  }
   async function mutate(
     symbol: string,
     action: 'add' | 'delete' | 'toggle',
@@ -276,7 +317,7 @@ export function MarketPage({ pluginId }: PluginPageProps) {
     }
   }
   async function loadOlder() {
-    if (olderLoading || !bars.length) return;
+    if (isIntraday || olderLoading || !bars.length) return;
     setOlderLoading(true);
     const key = identity;
     try {
@@ -301,13 +342,6 @@ export function MarketPage({ pluginId }: PluginPageProps) {
   }
   const item = list.find((entry) => entry.symbol === selected);
   const currentQuote = quotes.find((entry) => entry.symbol === selected);
-  const delta = change(currentQuote);
-  const deltaColor =
-    delta == null || delta === 0
-      ? 'text-muted-foreground'
-      : delta > 0
-        ? 'text-red-600 dark:text-red-400'
-        : 'text-emerald-700 dark:text-emerald-400';
   return (
     <div className="space-y-4" data-page-width="full">
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -327,10 +361,13 @@ export function MarketPage({ pluginId }: PluginPageProps) {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline">
             {status ? ENGINE_NAMES[status.engine] : '连接引擎'}
           </Badge>
+          {status?.clickhouseReadOnly && (
+            <Badge variant="outline">行情不落库</Badge>
+          )}
           <Badge
             variant={
               status?.state === 'error' || error ? 'destructive' : 'secondary'
@@ -391,36 +428,82 @@ export function MarketPage({ pluginId }: PluginPageProps) {
               list.map((entry) => {
                 const q = quotes.find((value) => value.symbol === entry.symbol);
                 const d = change(q);
+                const underlying = q?.underlying || entry.underlying;
+                const isSelected = selected === entry.symbol;
+                const changeColor =
+                  d == null || d === 0
+                    ? 'text-muted-foreground'
+                    : d > 0
+                      ? 'text-red-600 dark:text-red-400'
+                      : 'text-emerald-700 dark:text-emerald-400';
                 return (
-                  <button
+                  <div
                     key={entry.symbol}
-                    aria-pressed={selected === entry.symbol}
-                    onClick={() => setSelected(entry.symbol)}
-                    className={`flex w-full items-center justify-between gap-3 border-b px-4 py-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring ${selected === entry.symbol ? 'bg-accent' : 'hover:bg-muted/60'}`}
+                    className={`border-b ${isSelected ? 'bg-accent' : ''}`}
                   >
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium">
-                        {entry.name}
+                    <button
+                      aria-pressed={isSelected}
+                      onClick={() => setSelected(entry.symbol)}
+                      className={`w-full px-4 py-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring ${isSelected ? '' : 'hover:bg-muted/60'}`}
+                    >
+                      <span className="flex items-center justify-between gap-3">
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-medium">
+                            {entry.name}
+                          </span>
+                          <span className="mt-1 block truncate font-mono text-[11px] text-muted-foreground">
+                            {entry.symbol}
+                          </span>
+                          <span className="mt-1 block text-[11px] text-muted-foreground">
+                            {KIND_LABELS[entry.kind]}
+                            {!entry.enabled && ' · 已暂停'}
+                          </span>
+                        </span>
+                        <span
+                          className={`shrink-0 text-right tabular-nums ${changeColor}`}
+                        >
+                          <span className="block text-sm">
+                            {price(q?.last)}
+                          </span>
+                          <span className="mt-1 block text-xs">
+                            {d == null
+                              ? '等待行情'
+                              : `${d > 0 ? '+' : ''}${d.toFixed(2)}%`}
+                          </span>
+                        </span>
                       </span>
-                      <span className="mt-1 block truncate font-mono text-[11px] text-muted-foreground">
-                        {entry.symbol}
-                      </span>
-                      <span className="mt-1 block text-[11px] text-muted-foreground">
-                        {KIND_LABELS[entry.kind]}
-                        {!entry.enabled && ' · 已暂停'}
-                      </span>
-                    </span>
-                    <span className="shrink-0 text-right tabular-nums">
-                      <span className="block text-sm">{price(q?.last)}</span>
-                      <span
-                        className={`mt-1 block text-xs ${d == null || d === 0 ? 'text-muted-foreground' : d > 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}
-                      >
-                        {d == null
-                          ? '等待行情'
-                          : `${d > 0 ? '+' : ''}${d.toFixed(2)}%`}
-                      </span>
-                    </span>
-                  </button>
+                      {underlying && (
+                        <span className="mt-2 block break-all text-[11px] text-muted-foreground">
+                          当前标的：
+                          <span className="font-mono">{underlying}</span>
+                        </span>
+                      )}
+                    </button>
+                    {isSelected && (
+                      <div className="flex items-center justify-between gap-3 px-4 pb-3">
+                        <label className="flex items-center gap-2 text-xs">
+                          <Switch
+                            checked={entry.enabled}
+                            disabled={!!busy}
+                            onCheckedChange={(enabled) =>
+                              void mutate(entry.symbol, 'toggle', enabled)
+                            }
+                            aria-label={`${entry.name} 自动同步`}
+                          />
+                          自动同步
+                        </label>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={`移除 ${entry.name} 自选`}
+                          disabled={!!busy}
+                          onClick={() => void mutate(entry.symbol, 'delete')}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 );
               })
             ) : (
@@ -440,100 +523,67 @@ export function MarketPage({ pluginId }: PluginPageProps) {
         <section className="min-w-0">
           {item ? (
             <>
-              <div className="flex flex-wrap items-start justify-between gap-4 border-b p-5">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-lg font-semibold">{item.name}</h2>
-                    <Badge variant="outline">{KIND_LABELS[item.kind]}</Badge>
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {item.symbol}
-                    </span>
+              <div className="@container/chart-toolbar border-b px-3 py-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-2">
+                    <Select value={String(period)} onValueChange={changePeriod}>
+                      <SelectTrigger
+                        size="sm"
+                        className="w-24 shrink-0 text-xs"
+                        aria-label="视图周期"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent position="popper" align="start">
+                        <SelectItem value="intraday">分时图</SelectItem>
+                        {DURATIONS.map((value) => (
+                          <SelectItem key={value} value={String(value)}>
+                            {durationLabel(value)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <IndicatorControls
+                      preferences={indicators.preferences}
+                      onVisibleChange={indicators.setVisible}
+                      onParametersChange={indicators.setParameters}
+                    />
                   </div>
-                  <div className="mt-2 flex items-baseline gap-3">
-                    <span
-                      className={`text-3xl font-semibold tabular-nums ${deltaColor}`}
+                  {!isIntraday && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="ml-auto"
+                      disabled={!hasOlder || !bars.length || olderLoading}
+                      onClick={() => void loadOlder()}
+                      aria-label={
+                        olderLoading
+                          ? '加载中'
+                          : hasOlder
+                            ? '更早行情'
+                            : '已到最早'
+                      }
                     >
-                      {price(currentQuote?.last)}
-                    </span>
-                    <span className={`text-sm tabular-nums ${deltaColor}`}>
-                      {delta == null
-                        ? '等待首次报价'
-                        : `${delta > 0 ? '+' : ''}${delta.toFixed(2)}%`}
-                    </span>
-                  </div>
-                  {currentQuote?.underlying && (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      当前标的：{currentQuote.underlying}
-                    </p>
+                      <ArrowLeft className="size-3" />
+                      <span className="hidden @min-[540px]/chart-toolbar:inline">
+                        {olderLoading
+                          ? '加载中'
+                          : hasOlder
+                            ? '更早行情'
+                            : '已到最早'}
+                      </span>
+                    </Button>
                   )}
                 </div>
-                <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-2 text-xs">
-                    <Switch
-                      checked={item.enabled}
-                      disabled={!!busy}
-                      onCheckedChange={(enabled) =>
-                        void mutate(item.symbol, 'toggle', enabled)
-                      }
-                      aria-label="自动同步"
-                    />
-                    自动同步
-                  </label>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`移除 ${item.name} 自选`}
-                    disabled={!!busy}
-                    onClick={() => void mutate(item.symbol, 'delete')}
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
-                </div>
-              </div>
-              <dl className="grid grid-cols-3 gap-x-5 gap-y-3 border-b px-5 py-3 text-xs sm:grid-cols-6">
-                {[
-                  ['今开', price(currentQuote?.open)],
-                  ['最高', price(currentQuote?.high)],
-                  ['最低', price(currentQuote?.low)],
-                  ['昨收', price(currentQuote?.preClose)],
-                  ['成交量', quantity(currentQuote?.volume)],
-                  ['持仓量', quantity(currentQuote?.openInterest)],
-                ].map(([label, value]) => (
-                  <div key={label}>
-                    <dt className="text-muted-foreground">{label}</dt>
-                    <dd className="mt-1 font-medium tabular-nums">{value}</dd>
-                  </div>
-                ))}
-              </dl>
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
-                <div className="flex flex-wrap gap-1" aria-label="K 线周期">
-                  {DURATIONS.map((value) => (
-                    <Button
-                      key={value}
-                      size="sm"
-                      variant={duration === value ? 'secondary' : 'ghost'}
-                      aria-pressed={duration === value}
-                      onClick={() => setDuration(value)}
-                    >
-                      {value === 86400 ? '日线' : `${value / 60}分`}
-                    </Button>
-                  ))}
-                </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={!hasOlder || !bars.length || olderLoading}
-                  onClick={() => void loadOlder()}
-                >
-                  <ArrowLeft className="mr-1 size-3" />
-                  {olderLoading ? '加载中' : hasOlder ? '更早行情' : '已到最早'}
-                </Button>
               </div>
               <div className="relative min-w-0">
                 <MarketChart
                   bars={barsIdentity === identity ? bars : []}
                   identity={identity}
+                  duration={duration}
+                  intraday={isIntraday}
                   priceTick={item.priceTick}
+                  indicators={indicators.preferences}
                 />
                 {!bars.length && (
                   <div className="absolute inset-0 flex items-center justify-center px-8 text-center">
@@ -541,8 +591,10 @@ export function MarketPage({ pluginId }: PluginPageProps) {
                       <ChartCandlestick className="mx-auto mb-3 size-8 text-muted-foreground" />
                       <p className="text-sm font-medium">
                         {barsLoading
-                          ? '正在读取 K 线…'
-                          : barsError || '等待行情写入'}
+                          ? isIntraday
+                            ? '正在读取分时行情…'
+                            : '正在读取 K 线…'
+                          : barsError || '等待行情数据'}
                       </p>
                       <p className="mt-2 text-xs leading-5 text-muted-foreground">
                         {status?.state === 'error'
@@ -565,8 +617,10 @@ export function MarketPage({ pluginId }: PluginPageProps) {
                 <ChartCandlestick className="mx-auto mb-5 size-10 text-primary/70" />
                 <h2 className="text-lg font-medium">从关注的标的开始</h2>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  添加自选后，行情和 K
-                  线会自动同步并持续保存。切换不同周期，查看价格与成交量。
+                  {status?.clickhouseReadOnly
+                    ? '添加自选后，查询历史数据并展示实时行情。实时数据不写入 ClickHouse。'
+                    : '添加自选后，行情和 K 线会自动同步并持续保存。'}
+                  切换不同周期，查看价格与成交量。
                 </p>
                 <Button className="mt-5" onClick={() => setSearchOpen(true)}>
                   <Search className="mr-2 size-4" />
@@ -577,17 +631,47 @@ export function MarketPage({ pluginId }: PluginPageProps) {
           )}
         </section>
         {item && (
-          <OrderBookPanel
-            book={orderBooks.find((book) => book.symbol === selected)}
-            symbol={selected}
-            priceTick={item.priceTick}
-          />
+          <aside
+            aria-label="行情概览与盘口"
+            className="min-w-0 border-t lg:col-span-2 xl:col-span-1 xl:border-t-0 xl:border-l"
+          >
+            <dl
+              aria-label="行情概览"
+              className="grid grid-cols-2 gap-x-4 gap-y-4 border-b p-4 text-xs sm:grid-cols-3 xl:grid-cols-2"
+            >
+              {[
+                ['今开', price(currentQuote?.open)],
+                ['最高', price(currentQuote?.high)],
+                ['最低', price(currentQuote?.low)],
+                ['昨收', price(currentQuote?.preClose)],
+                ['成交量', quantity(currentQuote?.volume)],
+                ['持仓量', quantity(currentQuote?.openInterest)],
+              ].map(([label, value]) => (
+                <div key={label} className="min-w-0">
+                  <dt className="text-muted-foreground">{label}</dt>
+                  <dd className="mt-1 break-all font-medium tabular-nums">
+                    {value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <OrderBookPanel
+              book={orderBooks.find((book) => book.symbol === selected)}
+              symbol={selected}
+              priceTick={item.priceTick}
+            />
+          </aside>
         )}
       </div>
       <footer className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <span>
-          {status?.message ?? '正在连接同步服务'} · 最近入库{' '}
-          {timeText(status?.lastWriteAt)}
+          {status?.message ?? '正在连接同步服务'} ·{' '}
+          {status?.clickhouseReadOnly ? '最近接收' : '最近入库'}{' '}
+          {timeText(
+            status?.clickhouseReadOnly
+              ? status.lastReceivedAt
+              : status?.lastWriteAt,
+          )}
         </span>
         <span>
           开市前 {status?.beforeOpenMinutes ?? '—'} 分钟 / 休市后{' '}

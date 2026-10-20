@@ -16,3 +16,19 @@ export {
   DialogFooter,
 } from '../../../apps/web/src/components/ui/dialog';
 export { PageHeader } from '../../../apps/web/src/components/page-header';
+export {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from '../../../apps/web/src/components/ui/dropdown-menu';
+export {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from '../../../apps/web/src/components/ui/select';

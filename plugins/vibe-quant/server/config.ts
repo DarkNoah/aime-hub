@@ -17,6 +17,7 @@ const schema = z
     clickhouseDatabase: z.string().regex(/^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/),
     clickhouseUser: z.string().min(1),
     clickhousePassword: z.string().min(1),
+    clickhouseReadOnly: z.boolean().default(false),
     tqUser: z.string().default(''),
     tqPassword: z.string().default(''),
     tushareToken: z.string().default(''),
@@ -26,6 +27,7 @@ const schema = z
     flushSeconds: z.number().int().min(1).max(60),
     pollSeconds: z.number().int().min(2).max(300),
     historyBars: z.number().int().min(100).max(8000),
+    historyTicks: z.number().int().min(1).max(10000).default(10000),
     maxSubscriptions: z.number().int().min(1).max(500),
   })
   .superRefine((value, ctx) => {

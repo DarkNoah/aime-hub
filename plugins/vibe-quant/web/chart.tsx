@@ -2,36 +2,49 @@ import { useEffect, useRef } from 'react';
 import {
   CandlestickSeries,
   ColorType,
+  LineSeries,
   createChart,
-  HistogramSeries,
   type IChartApi,
   type ISeriesApi,
+  type PriceFormat,
   type UTCTimestamp,
 } from 'lightweight-charts';
-import type { Bar } from '../shared';
+import { MONTH_DURATION, type Bar } from '../shared';
+import { IndicatorRenderer } from './indicators/renderer';
+import type { IndicatorPreferences } from './indicators/types';
 
 export function MarketChart({
   bars,
   identity,
+  duration,
+  intraday = false,
   priceTick,
+  indicators,
 }: {
   bars: Bar[];
   identity: string;
+  duration: number;
+  intraday?: boolean;
   priceTick: number;
+  indicators: IndicatorPreferences;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const chart = useRef<IChartApi | null>(null);
-  const candles = useRef<ISeriesApi<'Candlestick'> | null>(null);
-  const volume = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const prices = useRef<ISeriesApi<'Candlestick'> | ISeriesApi<'Line'> | null>(
+    null,
+  );
+  const indicatorRenderer = useRef<IndicatorRenderer | null>(null);
   const previous = useRef<Bar[]>([]);
+  const fitAfterIndicators = useRef(false);
   useEffect(() => {
     if (!container.current) return;
     const formatter = new Intl.DateTimeFormat('zh-CN', {
       timeZone: 'Asia/Shanghai',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
+      year: duration >= 86400 ? 'numeric' : undefined,
+      month: intraday ? undefined : '2-digit',
+      day: intraday || duration === MONTH_DURATION ? undefined : '2-digit',
+      hour: duration < 86400 ? '2-digit' : undefined,
+      minute: duration < 86400 ? '2-digit' : undefined,
       hour12: false,
     });
     const api = createChart(container.current, {
@@ -43,7 +56,7 @@ export function MarketChart({
       },
       rightPriceScale: { borderVisible: false },
       timeScale: {
-        timeVisible: true,
+        timeVisible: duration < 86400,
         secondsVisible: false,
         borderVisible: false,
         rightOffset: 5,
@@ -78,50 +91,58 @@ export function MarketChart({
       attributeFilter: ['class'],
     });
     const tick = priceTick > 0 ? priceTick : 0.01;
-    candles.current = api.addSeries(CandlestickSeries, {
-      upColor: '#cc3e4d',
-      downColor: '#248659',
-      borderVisible: false,
-      wickUpColor: '#cc3e4d',
-      wickDownColor: '#248659',
-      priceFormat: {
-        type: 'price',
-        minMove: tick,
-        precision: Math.min(
-          8,
-          Math.max(0, (String(tick).split('.')[1] ?? '').length),
-        ),
-      },
-    });
-    volume.current = api.addSeries(
-      HistogramSeries,
-      { priceFormat: { type: 'volume' }, priceScaleId: '' },
-      1,
-    );
-    api.panes()[1].setHeight(110);
+    const priceFormat: PriceFormat = {
+      type: 'price',
+      minMove: tick,
+      precision: Math.min(
+        8,
+        Math.max(0, (String(tick).split('.')[1] ?? '').length),
+      ),
+    };
+    prices.current = intraday
+      ? api.addSeries(LineSeries, {
+          color: '#3b82f6',
+          lineWidth: 2,
+          title: '分时',
+          priceFormat,
+        })
+      : api.addSeries(CandlestickSeries, {
+          upColor: '#cc3e4d',
+          downColor: '#248659',
+          borderVisible: false,
+          wickUpColor: '#cc3e4d',
+          wickDownColor: '#248659',
+          priceFormat,
+        });
+    api.panes()[0].setStretchFactor(3);
+    indicatorRenderer.current = new IndicatorRenderer(api, priceFormat);
     previous.current = [];
+    fitAfterIndicators.current = false;
     return () => {
       observer.disconnect();
+      indicatorRenderer.current?.dispose();
+      indicatorRenderer.current = null;
       api.remove();
       chart.current = null;
-      candles.current = null;
-      volume.current = null;
+      prices.current = null;
       previous.current = [];
+      fitAfterIndicators.current = false;
     };
-  }, [identity, priceTick]);
+  }, [identity, priceTick, duration, intraday]);
   useEffect(() => {
-    if (!candles.current || !volume.current || !bars.length) return;
-    const candle = (bar: Bar) => ({
+    if (!prices.current) return;
+    if (!bars.length) {
+      prices.current.setData([]);
+      previous.current = [];
+      return;
+    }
+    const point = (bar: Bar) => ({
       time: bar.time as UTCTimestamp,
       open: bar.open,
       high: bar.high,
       low: bar.low,
       close: bar.close,
-    });
-    const histogram = (bar: Bar) => ({
-      time: bar.time as UTCTimestamp,
-      value: bar.volume,
-      color: bar.close >= bar.open ? '#cc3e4d80' : '#24865980',
+      value: bar.close,
     });
     const old = previous.current;
     const oldByTime = new Map(old.map((bar) => [bar.time, bar]));
@@ -143,35 +164,44 @@ export function MarketChart({
             );
           })(),
       );
-    if (!old.length || historicalChanged) {
+    const newSession = intraday && old[0]?.time !== bars[0].time;
+    if (!old.length || historicalChanged || newSession) {
       const range = chart.current?.timeScale().getVisibleLogicalRange();
-      candles.current.setData(bars.map(candle));
-      volume.current.setData(bars.map(histogram));
-      if (!old.length) chart.current?.timeScale().fitContent();
+      prices.current.setData(bars.map(point));
+      if (!old.length || newSession) fitAfterIndicators.current = true;
       else if (range) {
         const prependCount = bars.filter(
           (bar) => bar.time < old[0].time,
         ).length;
-        chart.current
-          ?.timeScale()
-          .setVisibleLogicalRange({
-            from: range.from + prependCount,
-            to: range.to + prependCount,
-          });
+        chart.current?.timeScale().setVisibleLogicalRange({
+          from: range.from + prependCount,
+          to: range.to + prependCount,
+        });
       }
     } else {
       for (const bar of bars.filter((value) => value.time >= lastTime!)) {
-        candles.current.update(candle(bar));
-        volume.current.update(histogram(bar));
+        prices.current.update(point(bar));
       }
     }
     previous.current = bars;
-  }, [bars, identity, priceTick]);
+  }, [bars, identity, priceTick, intraday]);
+  useEffect(() => {
+    indicatorRenderer.current?.update(bars, indicators);
+    // Fit only after all series drop the previous session's timestamps.
+    if (fitAfterIndicators.current) {
+      chart.current?.timeScale().fitContent();
+      fitAfterIndicators.current = false;
+    }
+  }, [bars, indicators, identity, priceTick, intraday]);
   return (
     <div
       ref={container}
       className="h-[440px] min-w-0 flex-1 lg:h-[560px]"
-      aria-label="TradingView K 线与成交量图表"
+      aria-label={
+        intraday
+          ? 'TradingView 分时走势与技术指标图表'
+          : 'TradingView K 线与技术指标图表'
+      }
     />
   );
 }

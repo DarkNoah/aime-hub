@@ -52,19 +52,80 @@ export interface Bar {
   close: number;
   volume: number;
 }
+/** SDK market snapshot, not an individual execution. UInt64 values use decimal strings. */
+export interface Tick {
+  symbol: string;
+  tickId: string;
+  timeNs: string;
+  tradingDay: string;
+  receivedAt: number;
+  last: number | null;
+  volume: number | null;
+  amount: number | null;
+  openInterest: number | null;
+  bid: number | null;
+  bidVolume: number | null;
+  ask: number | null;
+  askVolume: number | null;
+  priceTick: number | null;
+  volumeMultiple: number | null;
+  volumeUnit: 'source';
+}
+export interface TickVolumeValidation {
+  symbol: string;
+  tradingDay: string;
+  checkedAt: string;
+  state: 'empty' | 'partial' | 'consistent' | 'warning';
+  message: string;
+  rows: number;
+  firstTimeNs: string | null;
+  lastTimeNs: string | null;
+  baselineVolume: number | null;
+  lastVolume: number | null;
+  observedVolume: number;
+  gapVolume: number;
+  sequenceGaps: number;
+  volumeRegressions: number;
+  amountRegressions: number;
+  invalidRows: number;
+  checkedMinutes: number;
+  mismatchedMinutes: number;
+  uncheckedMinutes: number;
+}
 export interface SyncStatus {
   engine: Engine;
   state: 'starting' | 'syncing' | 'closed' | 'idle' | 'error' | 'standby';
   message: string;
   updatedAt: string | null;
   lastWriteAt: string | null;
+  lastReceivedAt: string | null;
+  clickhouseReadOnly: boolean;
   subscriptions: number;
   active: number;
   catalogCount: number;
   beforeOpenMinutes: number;
   afterCloseMinutes: number;
+  tickValidation?: TickVolumeValidation[];
+  tickValidationError?: string | null;
 }
-export const DURATIONS = [60, 300, 900, 1800, 3600, 86400] as const;
+// API identifier for calendar months, not a fixed 30-day aggregation window.
+export const MONTH_DURATION = 2592000;
+export const DURATIONS = [
+  60,
+  180,
+  300,
+  900,
+  1800,
+  3600,
+  86400,
+  MONTH_DURATION,
+] as const;
+export const durationLabel = (duration: number) =>
+  duration === MONTH_DURATION
+    ? '月线'
+    : duration === 86400
+      ? '日线'
+      : `${duration / 60} 分钟`;
 export const KIND_LABELS: Record<InstrumentKind, string> = {
   stock: '股票 / 指数',
   future: '期货',

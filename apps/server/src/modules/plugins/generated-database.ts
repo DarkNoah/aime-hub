@@ -73,6 +73,16 @@ export const pluginDatabases: {
           multiline: true,
         },
         {
+          key: 'clickhouseReadOnly',
+          label: '不写入行情数据',
+          description:
+            '开启后查询 ClickHouse 历史数据，实时行情、盘口和 K 线仅在内存中展示；自选、合约目录和运行状态仍保存到 ClickHouse。',
+          group: 'ClickHouse',
+          required: false,
+          type: 'boolean',
+          default: false,
+        },
+        {
           key: 'clickhouseUrl',
           label: 'ClickHouse HTTP 地址',
           group: 'ClickHouse',
@@ -130,7 +140,9 @@ export const pluginDatabases: {
         },
         {
           key: 'flushSeconds',
-          label: '批量写入间隔（秒）',
+          label: '行情处理间隔（秒）',
+          description:
+            '关闭“不写入行情数据”时批量入库；开启时更新实时展示数据。',
           group: '同步策略',
           required: false,
           type: 'number',
@@ -160,6 +172,20 @@ export const pluginDatabases: {
           default: 1000,
           min: 100,
           max: 8000,
+          integer: true,
+        },
+        {
+          key: 'historyTicks',
+          label: '首次订阅回补 Tick 数量',
+          description:
+            'TqSdk 最近 Tick 窗口，持续增量保存；超过窗口的断线缺口无法自动补齐。开启“不写入行情数据”时不采集 Tick。',
+          group: '同步策略',
+          visibleWhen: { field: 'engine', equals: 'tqsdk' },
+          required: false,
+          type: 'number',
+          default: 10000,
+          min: 1,
+          max: 10000,
           integer: true,
         },
         {

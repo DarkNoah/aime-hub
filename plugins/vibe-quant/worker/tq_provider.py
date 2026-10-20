@@ -2,6 +2,7 @@ import time
 from datetime import datetime, timedelta
 from common import TZ, DURATIONS, bar, emit, in_session, instrument, quote, timestamp
 from order_book import tq_book
+from ticks import TickCollector, tick_targets
 
 KINDS = {'STOCK': 'stock', 'FUND': 'stock', 'INDEX': 'stock', 'FUTURE': 'future', 'OPTION': 'option', 'CONT': 'continuous'}
 
@@ -34,6 +35,7 @@ def run(config):
         quotes = api.get_quote_list(symbols) if symbols else []
         serials = {(symbol, duration): api.get_kline_serial(symbol, duration, data_length=config['historyBars'])
                    for symbol in symbols for duration in DURATIONS}
+        ticks = None if config.get('clickhouseReadOnly', False) else TickCollector(api, config.get('historyTicks', 10000))
         initialized = set()
         calendar = {}
         calendar_day = None
@@ -63,6 +65,18 @@ def run(config):
                     if value:
                         changed_quotes.append(value)
                         initialized.add((symbol, 'quote'))
+            if ticks is not None:
+                targets = tick_targets(symbols, quotes)
+                for symbol in targets:
+                    # A continuous watch subscribes to actual-contract ticks.
+                    # Retain matching minute bars for volume reconciliation.
+                    if (symbol, 60) not in serials:
+                        serials[(symbol, 60)] = api.get_kline_serial(symbol, 60, data_length=config['historyBars'])
+                for symbol, item in zip(symbols, quotes):
+                    if symbol in active and item.ins_class == 'CONT':
+                        active.add(item.underlying_symbol)
+                # Process every changed tick window, including late close data.
+                ticks.collect(targets, received_at)
             for (symbol, duration), frame in serials.items():
                 key = (symbol, duration)
                 if not api.is_serial_ready(frame):
@@ -83,7 +97,7 @@ def run(config):
                 emit('data', quotes=changed_quotes, bars=[], orderBooks=books)
             if time.monotonic() - last_status > 2:
                 state = 'syncing' if active else 'closed' if symbols else 'idle'
-                emit('status', state=state, message='实时订阅已连接' if active else '休市，等待下个同步窗口' if symbols else '添加自选后自动订阅', active=len(active))
+                emit('status', state=state, message='实时订阅已连接' if active else '休市，等待下个同步窗口' if symbols else '添加自选后自动订阅', active=len(active.intersection(symbols)))
                 last_status = time.monotonic()
     finally:
         api.close()

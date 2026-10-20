@@ -6,6 +6,7 @@ import { Hono } from 'hono';
 import type { PluginHttpEnv } from '@app/plugin-sdk/server';
 import createServer from '../server/index.js';
 import database from '../server/database.js';
+import { ClickHouseClient } from '../server/clickhouse-client.js';
 import { MarketStore } from '../server/clickhouse.js';
 import { parseConfig } from '../server/config.js';
 import { createPluginRuntime } from '../../../apps/server/src/modules/plugins/runtime.js';
@@ -155,10 +156,111 @@ test(
 );
 
 test(
-  'real PostgreSQL API enforces ownership, deduplicated limits, toggles and search',
+  'real ClickHouse SELECT-only account displays live data without creating tables or inserting rows',
+  { skip: process.env.QUANT_INTEGRATION !== '1' },
+  async () => {
+    const admin = async (query: string) => {
+      const url = new URL(config.clickhouseUrl);
+      url.searchParams.set('query', query);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'X-ClickHouse-User': config.clickhouseUser,
+          'X-ClickHouse-Key': config.clickhousePassword,
+        },
+      });
+      assert.equal(response.status, 200);
+      return (await response.text()).trim();
+    };
+    const user = `reader_${randomUUID().replaceAll('-', '')}`;
+    const symbol = `TEST.${randomUUID()}`;
+    const bar = {
+      symbol,
+      time: Math.floor(Date.now() / 1000) - 120,
+      duration: 60,
+      open: 10,
+      high: 12,
+      low: 9,
+      close: 11,
+      volume: 100,
+    };
+    const writer = new MarketStore(parseConfig(config));
+    await writer.initialize();
+    await writer.write('tqsdk', [], [bar]);
+    await admin(
+      `CREATE USER ${user} IDENTIFIED BY 'local-read-only' SETTINGS readonly = 1`,
+    );
+    try {
+      await admin(`GRANT SELECT ON vibe_quant.* TO ${user}`);
+      const reader = new MarketStore(
+        parseConfig({
+          ...config,
+          clickhouseUser: user,
+          clickhousePassword: 'local-read-only',
+          clickhouseReadOnly: true,
+        }),
+      );
+      await reader.initialize();
+      const live = { ...bar, close: 12 };
+      const next = { ...bar, time: bar.time + 60 };
+      const book: OrderBook = {
+        symbol,
+        snapshotId: randomUUID(),
+        sourceTime: null,
+        receivedAt: Date.now() / 1000,
+        timePrecision: 'unknown',
+        bidPrices: [10],
+        bidVolumes: [20],
+        askPrices: [12],
+        askVolumes: [30],
+        volumeUnit: 'source',
+        underlying: '',
+      };
+      const quote = {
+        symbol,
+        time: bar.time,
+        last: 12,
+        preClose: 10,
+        open: 10,
+        high: 12,
+        low: 9,
+        volume: 100,
+        amount: 1200,
+        openInterest: null,
+        bid: 10,
+        ask: 12,
+        underlying: '',
+      };
+      await reader.write('tqsdk', [quote], [live, next], [book]);
+      assert.deepEqual(await reader.bars('tqsdk', symbol, 60), [live, next]);
+      assert.deepEqual(await reader.bars('tqsdk', symbol, 60, next.time), [
+        live,
+      ]);
+      assert.deepEqual(await reader.quotes('tqsdk', [symbol]), [quote]);
+      assert.deepEqual(await reader.orderBooks('tqsdk', [symbol]), [book]);
+      assert.deepEqual(await writer.bars('tqsdk', symbol, 60), [bar]);
+      assert.deepEqual(await writer.quotes('tqsdk', [symbol]), []);
+      assert.deepEqual(await writer.orderBooks('tqsdk', [symbol]), []);
+      assert.equal(
+        await admin(
+          `SELECT count() FROM vibe_quant.bars WHERE symbol = '${symbol}'`,
+        ),
+        '1',
+      );
+    } finally {
+      await admin(`DROP USER ${user}`);
+    }
+  },
+);
+
+test(
+  'PostgreSQL legacy migration and ClickHouse API enforce ownership, limits, toggles and search',
   { skip: process.env.QUANT_INTEGRATION !== '1' || !process.env.DATABASE_URL },
   async () => {
     const schema = `quant_test_${randomUUID().replaceAll('-', '')}`;
+    const apiConfig = { ...config, clickhouseDatabase: schema };
+    const clickhouse = new ClickHouseClient(parseConfig(apiConfig));
+    await clickhouse.request(`CREATE DATABASE ${schema}`);
     const admin = await new DataSource({
       type: 'postgres',
       url: process.env.DATABASE_URL,
@@ -207,7 +309,7 @@ test(
           'INSERT INTO plugin_vibe_quant_instruments (engine,symbol,metadata) VALUES ($1,$2,$3)',
           ['tqsdk', item.symbol, item],
         );
-      await plugin.onEnable!({ config });
+      await plugin.onEnable!({ config: apiConfig });
       const app = new Hono<PluginHttpEnv>();
       app.use('*', async (c, next) => {
         c.set('userId', c.req.header('x-user') ?? 'alice');
@@ -233,7 +335,7 @@ test(
       );
       assert.equal((await request('/watchlist', 'bob')).status, 200);
       assert.deepEqual(await (await request('/watchlist', 'bob')).json(), []);
-      const store = new MarketStore(parseConfig(config));
+      const store = new MarketStore(parseConfig(apiConfig));
       await store.write(
         'tqsdk',
         [],
@@ -267,6 +369,30 @@ test(
         (await request('/bars?symbol=SSE.000852', 'bob')).status,
         404,
       );
+      assert.equal(
+        (
+          await request(
+            '/ticks/validation?symbol=SSE.000852&tradingDay=2026-10-19',
+            'bob',
+          )
+        ).status,
+        404,
+      );
+      assert.equal(
+        (
+          await request(
+            '/ticks/validation?symbol=SSE.000852&tradingDay=2026-02-30',
+            'alice',
+          )
+        ).status,
+        400,
+      );
+      const tickCheck = await request(
+        '/ticks/validation?symbol=SSE.000852&tradingDay=2026-10-19',
+        'alice',
+      );
+      assert.equal(tickCheck.status, 200);
+      assert.equal((await tickCheck.json()).state, 'empty');
       assert.equal(
         (await request('/watchlist', 'bob', 'POST', { symbol: 'SSE.000852' }))
           .status,
@@ -330,7 +456,8 @@ test(
         'another user cannot delete my records',
       );
     } finally {
-      await plugin.onDisable!({ config });
+      await plugin.onDisable!({ config: apiConfig });
+      await clickhouse.request(`DROP DATABASE ${schema}`);
       await db.destroy();
       await admin.query(`DROP SCHEMA "${schema}" CASCADE`);
       await admin.destroy();

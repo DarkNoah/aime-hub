@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { QueryRunner } from 'typeorm';
+import { randomUUID } from 'node:crypto';
 import type { PluginContext } from '@app/plugin-sdk/server';
 import type {
   Bar,
@@ -10,24 +10,32 @@ import type {
   OrderBook,
   Quote,
   SyncStatus,
+  Tick,
 } from '../shared.js';
 import type { QuantConfig } from './config.js';
 import { MarketStore } from './clickhouse.js';
+import { StateStore } from './state-store.js';
 import { ensurePython } from './python.js';
 
 type Event =
   | { type: 'catalog'; instruments: Instrument[] }
   | { type: 'catalog_complete'; symbols: string[] }
-  | { type: 'data'; quotes: Quote[]; bars: Bar[]; orderBooks?: OrderBook[] }
+  | {
+      type: 'data';
+      quotes: Quote[];
+      bars: Bar[];
+      orderBooks?: OrderBook[];
+      ticks?: Tick[];
+    }
   | {
       type: 'status';
       state: SyncStatus['state'];
       message: string;
       active: number;
     };
-const LOCK = 179210001;
 
 export class SyncWorker {
+  private readonly instanceId = randomUUID();
   private controller?: AbortController;
   private task?: Promise<void>;
   private child?: ChildProcessWithoutNullStreams;
@@ -38,10 +46,15 @@ export class SyncWorker {
   private lastOutputAt = 0;
   private pythonPath?: string;
   private status: SyncStatus;
+  private tickChecks = new Map<
+    string,
+    { tradingDay: string; nextCheck: number }
+  >();
   constructor(
     private readonly context: PluginContext,
     readonly config: QuantConfig,
     readonly store: MarketStore,
+    readonly state: StateStore,
     private readonly preparePython = (signal: AbortSignal) =>
       ensurePython(context.runtime, signal),
   ) {
@@ -51,12 +64,17 @@ export class SyncWorker {
       message: '正在连接行情引擎',
       updatedAt: null,
       lastWriteAt: null,
+      lastReceivedAt: null,
+      clickhouseReadOnly: config.clickhouseReadOnly,
       subscriptions: 0,
       active: 0,
       catalogCount: 0,
       beforeOpenMinutes: config.beforeOpenMinutes,
       afterCloseMinutes: config.afterCloseMinutes,
     };
+  }
+  getStatus(): SyncStatus {
+    return { ...this.status };
   }
   start() {
     this.controller = new AbortController();
@@ -135,7 +153,8 @@ export class SyncWorker {
             ? event.instruments.length
             : event.quotes.length +
               event.bars.length +
-              (event.orderBooks?.length ?? 0);
+              (event.orderBooks?.length ?? 0) +
+              (event.ticks?.length ?? 0);
         this.pending.push(event);
         this.pendingRows += count;
         // Backpressure bounds memory while retaining the queued batch for retries.
@@ -165,13 +184,16 @@ export class SyncWorker {
   }
   private async saveStatus() {
     this.status.updatedAt = new Date().toISOString();
-    await this.context.database.query(
-      `INSERT INTO plugin_vibe_quant_status (id, payload) VALUES (1, $1::jsonb)
-       ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = now()`,
-      [JSON.stringify(this.status)],
-    );
+    await this.state.saveStatus(this.instanceId, this.status);
   }
-  private async prepare(signal: AbortSignal, runner: QueryRunner) {
+  private async renewLease() {
+    if (
+      !this.config.clickhouseReadOnly &&
+      !(await this.state.acquireLease(this.config.engine, this.instanceId))
+    )
+      throw new Error('WRITER_LEASE_LOST');
+  }
+  private async prepare(signal: AbortSignal) {
     this.status.state = 'starting';
     this.status.message =
       '正在准备插件专属 Python 环境，首次安装可能需要几分钟';
@@ -183,8 +205,7 @@ export class SyncWorker {
     let heartbeat: Promise<void> | undefined;
     const timer = setInterval(() => {
       if (heartbeat) return;
-      heartbeat = runner
-        .query('SELECT 1')
+      heartbeat = this.renewLease()
         .then(() => this.saveStatus())
         .catch(abort)
         .finally(() => {
@@ -207,25 +228,22 @@ export class SyncWorker {
     const quotes: Quote[] = [];
     const orderBooks: OrderBook[] = [];
     const bars = new Map<string, Bar>();
+    const ticks = new Map<string, Tick>();
     for (const event of batch) {
       if (event.type === 'catalog') {
-        await this.context.database.query(
-          `INSERT INTO plugin_vibe_quant_instruments (engine, symbol, metadata)
-          SELECT $1, item->>'symbol', item FROM jsonb_array_elements($2::jsonb) item
-          ON CONFLICT (engine, symbol) DO UPDATE SET metadata = EXCLUDED.metadata, updated_at = now()`,
-          [this.config.engine, JSON.stringify(event.instruments)],
-        );
+        await this.state.saveCatalog(this.config.engine, event.instruments);
       } else if (event.type === 'catalog_complete') {
-        await this.context.database.query(
-          `UPDATE plugin_vibe_quant_instruments SET metadata = jsonb_set(metadata, '{expired}', 'true')
-          WHERE engine = $1 AND NOT (symbol = ANY($2::text[]))`,
-          [this.config.engine, event.symbols],
-        );
+        await this.state.completeCatalog(this.config.engine, event.symbols);
       } else if (event.type === 'data') {
         quotes.push(...event.quotes);
         orderBooks.push(...(event.orderBooks ?? []));
         for (const bar of event.bars)
           bars.set(`${bar.symbol}:${bar.duration}:${bar.time}`, bar);
+        for (const tick of event.ticks ?? [])
+          ticks.set(
+            `${tick.symbol}:${tick.tradingDay}:${tick.timeNs}:${tick.tickId}`,
+            tick,
+          );
       }
     }
     await this.store.write(
@@ -233,9 +251,27 @@ export class SyncWorker {
       quotes,
       [...bars.values()],
       orderBooks,
+      this.instanceId,
+      [...ticks.values()],
     );
-    if (quotes.length || bars.size || orderBooks.length)
-      this.status.lastWriteAt = new Date().toISOString();
+    if (!this.config.clickhouseReadOnly) {
+      for (const tick of ticks.values()) {
+        const previous = this.tickChecks.get(tick.symbol);
+        if (!previous || tick.tradingDay > previous.tradingDay)
+          this.tickChecks.set(tick.symbol, {
+            tradingDay: tick.tradingDay,
+            nextCheck: 0,
+          });
+      }
+      // Retain only bounded latest-contract diagnostics across watchlist changes.
+      while (this.tickChecks.size > this.config.maxSubscriptions * 2)
+        this.tickChecks.delete(this.tickChecks.keys().next().value!);
+    }
+    if (quotes.length || bars.size || orderBooks.length || ticks.size) {
+      this.status.lastReceivedAt = new Date().toISOString();
+      if (!this.config.clickhouseReadOnly)
+        this.status.lastWriteAt = this.status.lastReceivedAt;
+    }
     this.pending.splice(0, count);
     this.pendingRows = this.pending.reduce(
       (total, event) =>
@@ -245,42 +281,65 @@ export class SyncWorker {
           : event.type === 'data'
             ? event.quotes.length +
               event.bars.length +
-              (event.orderBooks?.length ?? 0)
+              (event.orderBooks?.length ?? 0) +
+              (event.ticks?.length ?? 0)
             : 0),
       0,
     );
     if (this.pendingRows < 50_000) this.child?.stdout.resume();
   }
+  private async checkTickVolumes() {
+    if (this.config.clickhouseReadOnly || this.config.engine !== 'tqsdk')
+      return;
+    // One symbol per processing cycle keeps large watchlists from blocking ingestion.
+    const entry = [...this.tickChecks].find(
+      ([, check]) => check.nextCheck <= Date.now(),
+    );
+    if (!entry) return;
+    const [symbol, check] = entry;
+    check.nextCheck = Date.now() + 60_000;
+    // Move it to the tail so a slow validation cannot starve later symbols.
+    this.tickChecks.delete(symbol);
+    this.tickChecks.set(symbol, check);
+    try {
+      const result = await this.store.validateTickVolumes(
+        this.config.engine,
+        symbol,
+        check.tradingDay,
+      );
+      this.status.tickValidation = [
+        ...(this.status.tickValidation ?? []).filter(
+          (item) => item.symbol !== symbol && this.tickChecks.has(item.symbol),
+        ),
+        result,
+      ];
+      this.status.tickValidationError = null;
+    } catch {
+      // Data is already committed; a diagnostic failure must not replay/restart collection.
+      this.status.tickValidationError = 'Tick 成交量校验暂不可用，稍后重试';
+    }
+  }
   private async run(signal: AbortSignal) {
-    let runner: QueryRunner | undefined;
     let leader = false;
     try {
       while (!signal.aborted) {
         try {
           await this.context.assertEnabled();
-          if (!runner) {
-            runner = this.context.database.createQueryRunner();
-            await runner.connect();
-          }
-          if (!leader)
-            leader = (
-              await runner.query('SELECT pg_try_advisory_lock($1) AS locked', [
-                LOCK,
-              ])
-            )[0].locked;
+          leader =
+            this.config.clickhouseReadOnly ||
+            (await this.state.acquireLease(
+              this.config.engine,
+              this.instanceId,
+            ));
           if (leader) {
-            // Probe the same session before each iteration. Losing it must stop the old producer.
-            await runner.query('SELECT 1');
-            if (!this.pythonPath) await this.prepare(signal, runner);
+            if (!this.pythonPath) await this.prepare(signal);
             await this.flush();
-            const rows: { symbol: string }[] =
-              await this.context.database.query(
-                `SELECT DISTINCT w.symbol FROM plugin_vibe_quant_watchlist w
-              JOIN plugin_vibe_quant_instruments i ON i.symbol = w.symbol AND i.engine = $1
-              WHERE w.enabled AND NOT COALESCE((i.metadata->>'expired')::boolean, false) ORDER BY w.symbol LIMIT $2`,
-                [this.config.engine, this.config.maxSubscriptions],
-              );
-            const symbols = rows.map((row) => row.symbol);
+            await this.checkTickVolumes();
+            const symbols = await this.state.subscriptions(this.config.engine);
+            if (symbols.length > this.config.maxSubscriptions)
+              throw new Error('SUBSCRIPTION_LIMIT');
+            if (this.config.clickhouseReadOnly)
+              this.store.retainSymbols(this.config.engine, symbols);
             const tradingDate = new Date().toLocaleDateString('sv-SE', {
               timeZone: 'Asia/Shanghai',
             });
@@ -306,51 +365,35 @@ export class SyncWorker {
             )
               this.launch(symbols);
             this.status.subscriptions = symbols.length;
-            const [{ count }] = await this.context.database.query(
-              'SELECT count(*)::int AS count FROM plugin_vibe_quant_instruments WHERE engine = $1',
-              [this.config.engine],
+            this.status.catalogCount = await this.state.catalogCount(
+              this.config.engine,
             );
-            this.status.catalogCount = count;
-            this.status.updatedAt = new Date().toISOString();
-            await this.context.database.query(
-              `INSERT INTO plugin_vibe_quant_status (id, payload) VALUES (1, $1::jsonb)
-              ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = now()`,
-              [JSON.stringify(this.status)],
-            );
+            await this.saveStatus();
+          } else {
+            await this.stopChild();
+            this.status.state = 'standby';
+            this.status.message = '共享 ClickHouse 的另一服务正在写入行情';
+            this.status.active = 0;
+            await this.saveStatus();
           }
         } catch {
           this.status.state = 'error';
           this.status.message = this.pythonPath
-            ? '同步或写入失败，保留待写批次并重试'
+            ? '行情处理失败，保留待处理批次并重试'
             : 'Python 环境准备失败，请检查宿主 Python 3.9+、venv 及依赖下载网络；30 秒后重试';
           if (leader) {
             try {
-              this.status.updatedAt = new Date().toISOString();
-              await this.context.database.query(
-                `INSERT INTO plugin_vibe_quant_status (id, payload) VALUES (1, $1::jsonb)
-                ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload, updated_at = now()`,
-                [JSON.stringify(this.status)],
-              );
+              await this.saveStatus();
             } catch {
               /* Database outage is shown as a stale heartbeat by readers. */
             }
           }
-          // Never continue producing after a lock/database failure.
           await this.stopChild();
-          if (runner) {
-            try {
-              if (leader)
-                await runner.query('SELECT pg_advisory_unlock($1)', [LOCK]);
-            } catch {
-              /* Connection may already have been lost. */
-            }
-            try {
-              await runner.release();
-            } catch {
-              /* A broken pool client is already released. */
-            }
+          if (leader && !this.config.clickhouseReadOnly) {
+            await this.state
+              .releaseLease(this.config.engine, this.instanceId)
+              .catch(() => {});
           }
-          runner = undefined;
           leader = false;
           if (!this.pythonPath)
             await delay(30_000, undefined, { signal }).catch(() => {});
@@ -366,14 +409,10 @@ export class SyncWorker {
       } catch {
         /* Last uncommitted updates are recovered by bounded history on restart. */
       }
-      if (runner) {
-        try {
-          if (leader)
-            await runner.query('SELECT pg_advisory_unlock($1)', [LOCK]);
-        } finally {
-          await runner.release();
-        }
-      }
+      if (leader && !this.config.clickhouseReadOnly)
+        await this.state
+          .releaseLease(this.config.engine, this.instanceId)
+          .catch(() => {});
     }
   }
 }

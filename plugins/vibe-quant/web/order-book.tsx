@@ -43,10 +43,7 @@ export function OrderBookPanel({
       : value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
 
   return (
-    <aside
-      aria-label="买卖盘口"
-      className="min-w-0 border-t lg:col-span-2 xl:col-span-1 xl:border-t-0 xl:border-l"
-    >
+    <section aria-label="买卖盘口" className="min-w-0">
       <div className="flex items-center justify-between border-b px-4 py-4">
         <h2 className="text-sm font-medium">买卖盘口</h2>
         <Badge variant="outline">
@@ -57,7 +54,7 @@ export function OrderBookPanel({
         <>
           <table className="w-full text-xs tabular-nums">
             <caption className="sr-only">
-              {symbol} 最近保存的买卖委托价格与数量
+              {symbol} 最近接收的买卖委托价格与数量
             </caption>
             <thead>
               <tr className="text-muted-foreground">
@@ -116,9 +113,9 @@ export function OrderBookPanel({
         <p className="p-4 text-xs leading-6 text-muted-foreground">
           {isIndex
             ? '指数没有可交易的委托盘口。选择股票、期货或期权查看买卖档位。'
-            : '等待盘口入库。档位数量取决于数据源、标的和行情权限。'}
+            : '等待盘口数据。档位数量取决于数据源、标的和行情权限。'}
         </p>
       )}
-    </aside>
+    </section>
   );
 }

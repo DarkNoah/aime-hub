@@ -5,14 +5,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { PluginContext } from '@app/plugin-sdk/server';
+import type { StateStore } from '../server/state-store.js';
 import type { MarketStore } from '../server/clickhouse.js';
 import { parseConfig } from '../server/config.js';
 import { SyncWorker } from '../server/worker.js';
-import type { OrderBook } from '../shared.js';
+import type { OrderBook, Tick } from '../shared.js';
 
-for (const depthOnly of [false, true])
+for (const { depthOnly, readOnly, tickOnly } of [
+  { depthOnly: false, readOnly: false, tickOnly: false },
+  { depthOnly: true, readOnly: false, tickOnly: false },
+  { depthOnly: false, readOnly: true, tickOnly: false },
+  { depthOnly: false, readOnly: false, tickOnly: true },
+])
   test(
-    `managed process retries ${depthOnly ? 'depth-only' : 'bar and depth'} batches and releases its producer lock on stop`,
+    `managed process retries ${tickOnly ? 'tick-only' : depthOnly ? 'depth-only' : 'bar and depth'} batches in ${readOnly ? 'read-only' : 'writer'} mode`,
     { timeout: 15000 },
     async () => {
       const dir = await mkdtemp(join(tmpdir(), 'quant-worker-'));
@@ -24,7 +30,7 @@ let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{
 const emit=v=>process.stdout.write(JSON.stringify(v)+'\\n');
 emit({type:'catalog',instruments:[{symbol:'SSE.000852',name:'fixture',kind:'stock'}]});
 emit({type:'catalog_complete'});
-emit({type:'data',quotes:[],bars:${depthOnly ? '[]' : "[{symbol:'SSE.000852',time:100,duration:60,open:1,high:2,low:1,close:2,volume:10}]"},orderBooks:[{snapshotId:'fixed-retry-id',symbol:'SSE.600000',receivedAt:100,sourceTime:null,timePrecision:'unknown',bidPrices:[10],bidVolumes:[25],askPrices:[11],askVolumes:[20],volumeUnit:'source',underlying:''}]});
+emit({type:'data',quotes:[],bars:${depthOnly || tickOnly ? '[]' : "[{symbol:'SSE.000852',time:100,duration:60,open:1,high:2,low:1,close:2,volume:10}]"},orderBooks:${tickOnly ? '[]' : "[{snapshotId:'fixed-retry-id',symbol:'SSE.600000',receivedAt:100,sourceTime:null,timePrecision:'unknown',bidPrices:[10],bidVolumes:[25],askPrices:[11],askVolumes:[20],volumeUnit:'source',underlying:''}]"},ticks:${tickOnly ? "[{symbol:'CFFEX.IM2611',tickId:'42',timeNs:'1792373400000000123',tradingDay:'2026-10-19',volume:50}]" : '[]'}});
 emit({type:'status',state:'syncing',message:'fixture',active:1});
 setInterval(()=>emit({type:'status',state:'syncing',message:'fixture',active:1}),200);
 });
@@ -33,8 +39,9 @@ setInterval(()=>emit({type:'status',state:'syncing',message:'fixture',active:1})
       );
       let writes = 0;
       let attempts = 0;
-      let releases = 0;
       let unlocked = 0;
+      let locks = 0;
+      let checks = 0;
       const snapshotIds: string[] = [];
       const statuses: { lastWriteAt?: string }[] = [];
       const context = {
@@ -46,50 +53,66 @@ setInterval(()=>emit({type:'status',state:'syncing',message:'fixture',active:1})
         },
         assertEnabled: async () => {},
         database: {
-          createQueryRunner: () => ({
-            connect: async () => {},
-            release: async () => {
-              releases++;
-            },
-            query: async (sql: string) => {
-              if (sql.includes('pg_try_advisory_lock'))
-                return [{ locked: true }];
-              if (sql.includes('pg_advisory_unlock')) unlocked++;
-              return [];
-            },
-          }),
-          query: async (sql: string, params: unknown[]) => {
-            if (sql.includes('INSERT INTO plugin_vibe_quant_status'))
-              statuses.push(JSON.parse(params[0] as string));
-            return sql.includes('SELECT DISTINCT w.symbol')
-              ? [{ symbol: 'SSE.000852' }]
-              : sql.includes('SELECT count')
-                ? [{ count: 1 }]
-                : [];
+          query: async () => {
+            throw new Error('Runtime state must not use PostgreSQL');
           },
         },
       } as unknown as PluginContext;
+      const state = {
+        acquireLease: async () => {
+          locks++;
+          return true;
+        },
+        releaseLease: async () => {
+          unlocked++;
+        },
+        saveCatalog: async () => {},
+        completeCatalog: async () => {},
+        subscriptions: async () => ['SSE.000852'],
+        catalogCount: async () => 1,
+        saveStatus: async (_id: string, status: object) => {
+          statuses.push({ ...status });
+        },
+      } as unknown as StateStore;
       const store = {
+        retainSymbols: () => {},
         write: async (
           _engine: string,
           _quotes: unknown[],
           bars: unknown[],
           books: OrderBook[],
+          _ownerId: string,
+          ticks: Tick[],
         ) => {
-          if (!books.length) return;
-          assert.equal(bars.length, depthOnly ? 0 : 1);
+          if (!books.length && !ticks.length) return;
+          assert.equal(bars.length, depthOnly || tickOnly ? 0 : 1);
           attempts++;
-          snapshotIds.push(books[0].snapshotId);
+          snapshotIds.push(
+            tickOnly
+              ? ticks[0].timeNs + ':' + ticks[0].tickId
+              : books[0].snapshotId,
+          );
           if (attempts === 1) throw new Error('simulated storage outage');
-          writes += books.length;
+          writes += books.length + ticks.length;
+        },
+        validateTickVolumes: async (
+          _engine: string,
+          symbol: string,
+          tradingDay: string,
+        ) => {
+          checks++;
+          return { symbol, tradingDay, state: 'partial', rows: 1 };
         },
       } as unknown as MarketStore;
       const config = parseConfig({
-        engine: 'tdx',
+        engine: tickOnly ? 'tqsdk' : 'tdx',
+        tqUser: 'fixture',
+        tqPassword: 'fixture',
         clickhouseUrl: 'http://localhost:8123',
         clickhouseDatabase: 'test',
         clickhouseUser: 'test',
         clickhousePassword: 'test',
+        clickhouseReadOnly: readOnly,
         tdxServers: '192.0.2.1:7709',
         beforeOpenMinutes: 5,
         afterCloseMinutes: 10,
@@ -102,6 +125,7 @@ setInterval(()=>emit({type:'status',state:'syncing',message:'fixture',active:1})
         context,
         config,
         store,
+        state,
         async () => executable,
       );
       try {
@@ -109,20 +133,47 @@ setInterval(()=>emit({type:'status',state:'syncing',message:'fixture',active:1})
         for (let i = 0; i < 60 && !writes; i++) await delay(100);
         assert.ok(writes > 0, 'batch survives failed storage write');
         assert.ok(attempts >= 2);
+        if (tickOnly) {
+          assert.equal(
+            checks,
+            1,
+            'periodic validation runs after a committed tick-only batch',
+          );
+          assert.equal(worker.getStatus().tickValidation?.[0].state, 'partial');
+        }
         assert.equal(
           snapshotIds[0],
           snapshotIds[1],
           'retry retains snapshot identity',
         );
-        assert.ok(
-          statuses.some((status) => status.lastWriteAt),
-          'depth-only writes update heartbeat',
-        );
+        if (readOnly) {
+          assert.equal(worker.getStatus().clickhouseReadOnly, true);
+          assert.ok(worker.getStatus().lastReceivedAt);
+          assert.equal(worker.getStatus().lastWriteAt, null);
+          assert.ok(
+            statuses.length > 0,
+            'market-only mode still persists its own heartbeat',
+          );
+        } else {
+          assert.ok(
+            statuses.some((status) => status.lastWriteAt),
+            'depth-only writes update heartbeat',
+          );
+        }
       } finally {
         await worker.stop();
         await rm(dir, { recursive: true, force: true });
       }
-      assert.ok(releases > 0);
-      assert.ok(unlocked > 0);
+      if (readOnly) {
+        assert.equal(
+          locks,
+          0,
+          'each read-only process collects its own live data',
+        );
+        assert.equal(unlocked, 0);
+      } else {
+        assert.ok(locks > 0);
+        assert.ok(unlocked > 0);
+      }
     },
   );

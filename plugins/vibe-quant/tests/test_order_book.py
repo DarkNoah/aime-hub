@@ -84,7 +84,8 @@ class OrderBookTest(unittest.TestCase):
              patch.object(tq_provider, 'emit', lambda kind, **payload: events.append((kind, payload))):
             with self.assertRaises(StopIteration):
                 tq_provider.run(dict(tqUser='fixture', tqPassword='fixture', symbols=['KQ.m@CFFEX.IM'],
-                                     historyBars=100, beforeOpenMinutes=5, afterCloseMinutes=10))
+                                     historyBars=100, beforeOpenMinutes=5, afterCloseMinutes=10,
+                                     clickhouseReadOnly=True))
         data = [payload for kind, payload in events if kind == 'data']
         self.assertEqual([event['quotes'] for event in data], [[], []])
         books = [event['orderBooks'][0] for event in data]
