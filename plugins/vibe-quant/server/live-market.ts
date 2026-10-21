@@ -80,12 +80,15 @@ export class LiveMarket {
     before: number,
     saved: Bar[],
     limit = 1000,
+    after?: number,
   ) {
     const merged = new Map(saved.map((row) => [row.time, row]));
     const live = this.engines.get(engine)?.get(symbol)?.bars.get(duration);
     if (live)
       for (const row of live.values())
-        if (row.time < before) merged.set(row.time, row);
-    return [...merged.values()].sort((a, b) => a.time - b.time).slice(-limit);
+        if (row.time < before && (after === undefined || row.time > after))
+          merged.set(row.time, row);
+    const bars = [...merged.values()].sort((a, b) => a.time - b.time);
+    return after === undefined ? bars.slice(-limit) : bars.slice(0, limit);
   }
 }

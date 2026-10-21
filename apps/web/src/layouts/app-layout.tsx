@@ -66,7 +66,9 @@ function LayoutContent() {
   const location = useLocation();
   const { projectId } = useParams({ strict: false });
   const isProject = location.pathname.startsWith('/projects');
+  const isGroupChat = /(?:^|\/)group-chats(?:\/|$)/.test(location.pathname);
   const isChat =
+    isGroupChat ||
     location.pathname.startsWith('/threads') ||
     /^\/projects\/[^/]+\/threads(?:\/|$)/.test(location.pathname);
   const pluginId = location.pathname.match(/^\/(?:admin\/)?p\/([^/]+)/)?.[1];
@@ -74,20 +76,23 @@ function LayoutContent() {
     (plugin) => plugin.id === pluginId,
   )?.name;
   const title =
-    (location.pathname === '/knowledge'
-      ? 'nav.knowledge'
-      : location.pathname === '/automations'
-        ? 'nav.automations'
-        : location.pathname === '/skills'
-          ? 'nav.skills'
-          : location.pathname === '/settings'
-            ? 'nav.personalSettings'
-            : isProject
-              ? 'nav.projects'
-              : isChat
-                ? 'nav.chats'
-                : adminNavigation.find((item) => item.to === location.pathname)
-                    ?.label) ?? 'nav.home';
+    (isGroupChat && !isProject
+      ? 'groupChat.heading'
+      : location.pathname === '/knowledge'
+        ? 'nav.knowledge'
+        : location.pathname === '/automations'
+          ? 'nav.automations'
+          : location.pathname === '/skills'
+            ? 'nav.skills'
+            : location.pathname === '/settings'
+              ? 'nav.personalSettings'
+              : isProject
+                ? 'nav.projects'
+                : isChat
+                  ? 'nav.chats'
+                  : adminNavigation.find(
+                      (item) => item.to === location.pathname,
+                    )?.label) ?? 'nav.home';
 
   useEffect(() => {
     const desktop = window.matchMedia('(min-width: 768px)');

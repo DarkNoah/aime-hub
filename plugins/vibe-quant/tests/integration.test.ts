@@ -238,7 +238,9 @@ test(
       ]);
       assert.deepEqual(await reader.quotes('tqsdk', [symbol]), [quote]);
       assert.deepEqual(await reader.orderBooks('tqsdk', [symbol]), [book]);
-      assert.deepEqual(await writer.bars('tqsdk', symbol, 60), [bar]);
+      assert.deepEqual(await writer.bars('tqsdk', symbol, 60), [
+        { ...bar, amount: null },
+      ]);
       assert.deepEqual(await writer.quotes('tqsdk', [symbol]), []);
       assert.deepEqual(await writer.orderBooks('tqsdk', [symbol]), []);
       assert.equal(

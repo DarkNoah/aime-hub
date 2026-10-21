@@ -48,6 +48,7 @@ plugins/vibe-quant/**/__pycache__/
 !scripts/paddleocr.test.ts
 !scripts/paddleocr-settings.test.ts
 !apps/server/src/modules/tools/read-file.test.ts
+!apps/server/src/modules/tools/extract.test.ts
 !scripts/tool-config.test.ts
 !scripts/file-preview.test.ts
 !scripts/chat-workspace-attachments.test.ts
@@ -62,3 +63,6 @@ plugins/vibe-quant/**/__pycache__/
 !scripts/web-fetch.test.ts
 !apps/server/src/modules/threads/intelligent-ui.test.ts
 !scripts/intelligent-ui-browser.test.mjs
+
+!scripts/group-chats.test.ts
+!scripts/group-chats-browser.test.mjs

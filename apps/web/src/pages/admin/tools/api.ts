@@ -17,6 +17,8 @@ export function toolErrorKey(error: unknown, toolId?: ToolId): TranslationKey {
       return 'tools.invalidImageModel';
     case 'INVALID_OCR_MODEL':
       return 'tools.invalidOcrModel';
+    case 'INVALID_EXTRACTION_MODEL':
+      return 'tools.invalidExtractModel';
     case 'NOT_FOUND':
     case 'INVALID_TOOL_PROVIDER':
       return toolId === 'web_fetch'

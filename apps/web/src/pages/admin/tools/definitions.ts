@@ -15,6 +15,11 @@ type ToolDefinition = {
 };
 
 export const toolDefinitions = {
+  extract: {
+    title: 'tools.extract',
+    description: 'tools.extractDescription',
+    configure: 'tools.configureExtract',
+  },
   read_file: {
     title: 'tools.viewFile',
     description: 'tools.viewFileDescription',
@@ -62,11 +67,11 @@ export const toolDefinitions = {
 } satisfies Record<
   Exclude<
     ConfigurableToolId,
-    'image_gen' | 'speech' | 'transcriptions' | 'read_file'
+    'image_gen' | 'speech' | 'transcriptions' | 'read_file' | 'extract'
   >,
   ToolDefinition
 > &
   Record<
-    'image_gen' | 'speech' | 'transcriptions' | 'read_file',
+    'image_gen' | 'speech' | 'transcriptions' | 'read_file' | 'extract',
     Pick<ToolDefinition, 'title' | 'description' | 'configure'>
   >;

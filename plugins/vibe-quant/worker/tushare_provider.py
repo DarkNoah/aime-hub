@@ -105,9 +105,9 @@ class Provider:
                 bars = []
                 for row in rows:
                     when = datetime.strptime(row['trade_date'], '%Y%m%d').replace(tzinfo=TZ).timestamp()
-                    # Historical daily APIs use lots; the real-time APIs above use shares.
+                    # Historical daily APIs use lots and thousand yuan; real-time uses shares and yuan.
                     row = {**row, 'vol': float(row['vol']) * 100}
-                    value = bar(symbol, 86400, when, row, 'vol')
+                    value = bar(symbol, 86400, when, row, 'vol', amount_scale=1000)
                     if value:
                         bars.append(value)
                 emit('data', quotes=[], bars=bars)

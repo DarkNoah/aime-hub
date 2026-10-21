@@ -77,13 +77,20 @@ export function IndicatorSettingsDialog({
         >
           <ScrollArea viewportProps={{ className: 'max-h-[55dvh]' }}>
             <div className="grid gap-4 p-5">
-              {definition.parameters.map((parameter) => {
+              {definition.parameters.map((parameter, index) => {
                 const id = `${formId}-${parameter.key}`;
                 return (
                   <div
                     key={parameter.key}
                     className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] items-center gap-x-4 gap-y-1"
                   >
+                    {parameter.group &&
+                      parameter.group !==
+                        definition.parameters[index - 1]?.group && (
+                        <p className="col-span-2 mb-1 border-b pb-2 text-xs font-semibold text-muted-foreground">
+                          {parameter.group}
+                        </p>
+                      )}
                     <Label htmlFor={id}>{parameter.label}</Label>
                     {parameter.type === 'select' ? (
                       <Select
@@ -110,15 +117,56 @@ export function IndicatorSettingsDialog({
                         }
                       />
                     ) : parameter.type === 'color' ? (
-                      <Input
-                        id={id}
-                        type="color"
-                        value={String(draft[parameter.key])}
-                        onChange={(event) =>
-                          change(parameter.key, event.target.value)
-                        }
-                        className="w-full cursor-pointer p-1"
-                      />
+                      <div className="flex items-center gap-2">
+                        <Input
+                          id={id}
+                          type="color"
+                          value={String(draft[parameter.key]).slice(0, 7)}
+                          onChange={(event) =>
+                            change(
+                              parameter.key,
+                              event.target.value +
+                                (parameter.alpha
+                                  ? String(draft[parameter.key]).slice(7)
+                                  : ''),
+                            )
+                          }
+                          className="w-full cursor-pointer p-1"
+                        />
+                        {parameter.alpha && (
+                          <Input
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={1}
+                            aria-label={`${parameter.label} 不透明度百分比`}
+                            title="不透明度 0–100%"
+                            className="w-20 shrink-0"
+                            value={Math.round(
+                              (parseInt(
+                                String(draft[parameter.key]).slice(7),
+                                16,
+                              ) /
+                                255) *
+                                100,
+                            )}
+                            onChange={(event) => {
+                              const value = event.target.valueAsNumber;
+                              if (!Number.isFinite(value)) return;
+                              const alpha = Math.round(
+                                (Math.min(100, Math.max(0, value)) / 100) * 255,
+                              )
+                                .toString(16)
+                                .padStart(2, '0');
+                              change(
+                                parameter.key,
+                                String(draft[parameter.key]).slice(0, 7) +
+                                  alpha,
+                              );
+                            }}
+                          />
+                        )}
+                      </div>
                     ) : (
                       <Input
                         id={id}

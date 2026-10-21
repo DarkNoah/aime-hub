@@ -80,7 +80,7 @@ class Provider:
                     for row in rows:
                         when = timestamp(row['datetime'])
                         if when and duration < 86400:
-                            when -= duration  # TDX timestamps label bar end; chart labels bar start.
+                            when -= duration  # TDX labels bar ends; storage uses bar starts.
                         if when and duration == 86400:
                             when = datetime.fromtimestamp(when, TZ).replace(hour=0, minute=0, second=0).timestamp()
                         value = bar(symbol, duration, when, {**row, 'vol': row['vol'] * 100}, 'vol')

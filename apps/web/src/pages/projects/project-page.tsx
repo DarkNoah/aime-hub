@@ -61,7 +61,8 @@ export function ProjectPage() {
   const location = useLocation();
   if (
     location.pathname.endsWith('/automations') ||
-    location.pathname.endsWith('/knowledge')
+    location.pathname.endsWith('/knowledge') ||
+    location.pathname.includes('/group-chats')
   )
     return <Outlet />;
   const chat = location.pathname.startsWith(`/projects/${projectId}/threads`);
@@ -197,6 +198,15 @@ function ProjectSession({
         description={t('projects.dashboardHint')}
         actions={
           <>
+            <Button asChild variant="outline">
+              <Link
+                to="/projects/$projectId/group-chats"
+                params={{ projectId }}
+              >
+                <Users />
+                {t('groupChat.heading')}
+              </Link>
+            </Button>
             <Button asChild variant="outline">
               <Link
                 to="/projects/$projectId/automations"

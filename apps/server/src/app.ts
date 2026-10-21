@@ -1,3 +1,7 @@
+import type { GroupChatService } from './modules/group-chats/service.js';
+import { groupChatRouter } from './modules/group-chats/rpc.js';
+import type { UserService } from './modules/users/service.js';
+import { userRouter } from './modules/users/rpc.js';
 import { knowledgeRouter } from './modules/knowledge/rpc.js';
 import type { KnowledgeService } from './modules/knowledge/service.js';
 import { pluginRoutes } from './modules/plugins/routes.js';
@@ -60,6 +64,8 @@ export function createApp(
     models: LanguageModelService;
     webOrigin: WebOrigins;
     projects?: ProjectService;
+    groupChats?: GroupChatService;
+    users?: UserService;
     assets?: AssetService;
   },
   skills?: { service: SkillService; webOrigin: WebOrigins },
@@ -108,6 +114,8 @@ export function createApp(
     app.route('/api/plugins', pluginRoutes(auth, plugins, webOrigins));
   if (audio) app.route('/api/audio', audioRoutes(auth, audio, webOrigins));
   const router = rpc.router({
+    groupChats: groupChatRouter(chat?.groupChats),
+    users: userRouter(chat?.users),
     knowledge: knowledgeRouter(knowledge),
     usage: usageRouter(usage?.service),
     providers: providerRouter(providers?.service),

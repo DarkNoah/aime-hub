@@ -13,6 +13,7 @@
     "./mcp": "./src/mcp.ts",
     "./automations": "./src/automations.ts",
     "./notifications": "./src/notifications.ts",
+    "./group-chats": "./src/group-chats.ts",
     "./threads": "./src/threads.ts",
     "./chat-attachments": "./src/chat-attachments.ts",
     "./browser": "./src/browser.ts",

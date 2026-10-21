@@ -8,6 +8,11 @@ import type { KnowledgeService } from '../knowledge/service.js';
 import type { AudioService } from '../audio/service.js';
 import { createTranscriptionsTool } from '../../mastra/tools/transcriptions.js';
 import {
+  createExtractTool,
+  type ResolvedExtractionModel,
+} from '../../mastra/tools/extract.js';
+import { normalizeTranscriptionAudio } from '../audio/convert.js';
+import {
   createReadFileTool,
   type ResolvedOcrModel,
 } from '../../mastra/tools/read_file.js';
@@ -26,6 +31,7 @@ import {
   type ImageGenConfig,
   type SpeechConfig,
   type ReadFileConfig,
+  type ExtractConfig,
 } from '@aime/shared/tools';
 import * as applicationTools from '../../mastra/tools/index.js';
 import { createExecTool } from '../../mastra/tools/exec.js';
@@ -51,6 +57,7 @@ export type ToolDefaultConfigs = Partial<
   image_gen?: Partial<ImageGenConfig>;
   speech?: Partial<SpeechConfig>;
   read_file?: Partial<ReadFileConfig>;
+  extract?: Partial<ExtractConfig>;
 };
 type ToolDependencies = {
   audio?: AudioService;
@@ -72,6 +79,9 @@ type ToolDependencies = {
   imageModel?: (reference: string | null) => Promise<ResolvedImageModel>;
   speechModel?: (reference: string | null) => Promise<ResolvedSpeechModel>;
   ocrModel?: (reference: string | null) => Promise<ResolvedOcrModel>;
+  extractionModel?: (
+    reference: string | null,
+  ) => Promise<ResolvedExtractionModel>;
   recordAsset?: AssetService['record'];
 };
 
@@ -101,6 +111,13 @@ export function parseToolConfig(id: string, input: unknown): ToolConfig {
   if (!tool) throw new Error(`Unknown tool ID: ${id}`);
   const description = tool.description?.split('\n')[0] ?? id;
   switch (id) {
+    case 'extract':
+      return {
+        id,
+        kind: id,
+        description,
+        config: toolConfigSchemas.extract.parse(input),
+      };
     case 'web_search':
       return {
         id,
@@ -166,6 +183,46 @@ async function buildTool(
   });
   if (!tool.config.enabled) return undefined;
   switch (tool.kind) {
+    case 'extract':
+      return createExtractTool(tool.config, {
+        resolveModel: dependencies.extractionModel,
+        resolveOcr: dependencies.ocrModel
+          ? async () => {
+              const settings = parseToolConfig('read_file', {
+                ...defaults.read_file,
+                ...z
+                  .looseObject({})
+                  .parse((await dependencies.loadConfig?.('read_file')) ?? {}),
+              });
+              return dependencies.ocrModel!(
+                settings.kind === 'read_file' ? settings.config.model : null,
+              );
+            }
+          : undefined,
+        transcribe: dependencies.audio
+          ? async (data, signal) => {
+              const settings = parseToolConfig('transcriptions', {
+                ...defaults.transcriptions,
+                ...z
+                  .looseObject({})
+                  .parse(
+                    (await dependencies.loadConfig?.('transcriptions')) ?? {},
+                  ),
+              });
+              signal.throwIfAborted();
+              const bytes = await normalizeTranscriptionAudio(data, signal);
+              const result = await dependencies.audio!.transcriptions(bytes, {
+                response_format: 'json',
+                signal,
+                model:
+                  settings.kind === 'transcriptions'
+                    ? (settings.config.model ?? undefined)
+                    : undefined,
+              });
+              return typeof result === 'string' ? result : result.text;
+            }
+          : undefined,
+      });
     case 'web_search':
       return createWebSearchTool(tool.config, {
         resolveProvider: dependencies.searchProvider

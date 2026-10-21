@@ -18,6 +18,8 @@ import {
 import type { ToolsInput } from '@mastra/core/agent';
 import type { AssetService } from '../assets/service.js';
 import type { ProviderService } from '../providers/service.js';
+import type { ResolvedExtractionModel } from '../../mastra/tools/extract.js';
+import { ExtractionError } from './extract/source.js';
 import { ProviderError } from '../providers/network.js';
 import { SerpApiProvider } from '../../mastra/providers/serpapi.js';
 import { JinaAIProvider } from '../../mastra/providers/jina-ai.js';
@@ -96,7 +98,15 @@ export class ToolService {
     this.requireTool(id);
     const tool = parseToolConfig(id, input);
     const { config } = tool;
-    if (tool.kind === 'image_gen') {
+    if (tool.kind === 'extract') {
+      if (tool.config.enabled && tool.config.model) {
+        try {
+          await this.extractionModel(tool.config.model);
+        } catch {
+          throw new ProviderError('INVALID_EXTRACTION_MODEL');
+        }
+      }
+    } else if (tool.kind === 'image_gen') {
       if (tool.config.enabled && tool.config.model) {
         try {
           await this.imageModel(tool.config.model);
@@ -182,6 +192,36 @@ export class ToolService {
     } catch {
       throw new ImageGenerationError(
         'The image generation model is unavailable. Select an enabled model with image output in tool settings or update the default image generation model.',
+      );
+    }
+  }
+
+  private async extractionModel(
+    selected: string | null,
+  ): Promise<ResolvedExtractionModel> {
+    const reference =
+      selected ?? (await this.providers.getDefaults()).defaultModel;
+    if (!reference)
+      throw new ExtractionError(
+        '请在抽取工具设置或系统默认模型中配置语言模型。',
+      );
+    try {
+      const model = await this.providers.getModel(reference);
+      if (!model.enabled || !modelSupportsType(model, 'language'))
+        throw new Error('Invalid language model');
+      const provider = await this.providers.getProviderInstance(
+        model.providerId,
+      );
+      return {
+        reference,
+        model: provider.languageModel(
+          model.id,
+        ) as ResolvedExtractionModel['model'],
+        modalitiesInput: model.modalitiesInput,
+      };
+    } catch {
+      throw new ExtractionError(
+        '抽取模型不可用，请选择已启用的语言模型。图片内容需要视觉模型或 OCR。',
       );
     }
   }
@@ -316,6 +356,7 @@ export class ToolService {
         imageModel: (reference) => this.imageModel(reference),
         speechModel: (reference) => this.speechModel(reference),
         ocrModel: (reference) => this.ocrModel(reference),
+        extractionModel: (reference) => this.extractionModel(reference),
         recordAsset: this.assets
           ? (input) => this.assets!.record(input)
           : undefined,

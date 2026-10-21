@@ -51,7 +51,15 @@ export interface Bar {
   low: number;
   close: number;
   volume: number;
+  /** Per-candle turnover in yuan; absent/null when the source or stored history lacks it. */
+  amount?: number | null;
 }
+export interface BarWindow {
+  bars: Bar[];
+  targetTime: number | null;
+}
+export const BAR_PAGE_SIZE = 200;
+export const BAR_JUMP_RADIUS = 100;
 /** SDK market snapshot, not an individual execution. UInt64 values use decimal strings. */
 export interface Tick {
   symbol: string;

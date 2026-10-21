@@ -35,7 +35,10 @@ function validParameter(
     case 'select':
       return parameter.options.some((option) => option.value === value);
     case 'color':
-      return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+      return (
+        typeof value === 'string' &&
+        (parameter.alpha ? /^#[0-9a-f]{8}$/i : /^#[0-9a-f]{6}$/i).test(value)
+      );
     case 'boolean':
       return typeof value === 'boolean';
   }

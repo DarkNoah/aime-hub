@@ -11,8 +11,11 @@ import {
   type UTCTimestamp,
 } from 'lightweight-charts';
 import type { Bar } from '../../shared';
+import { barLabelTime } from '../chart-time';
 import { INDICATORS } from './registry';
+import { IndicatorDrawingPrimitive } from './drawing-primitive';
 import type {
+  IndicatorOverlay,
   IndicatorPlot,
   IndicatorPreference,
   IndicatorPreferences,
@@ -26,28 +29,42 @@ interface Instance {
   pane: IPaneApi<Time>;
   plots: Map<string, PlotSeries>;
   preference?: IndicatorPreference;
+  primitive?: IndicatorDrawingPrimitive;
+  overlay?: IndicatorOverlay;
 }
 
 /** Reconcile series in place so visibility/settings never recreate the price chart. */
 export class IndicatorRenderer {
   private instances = new Map<string, Instance>();
   private previousBars: readonly Bar[] | undefined;
+  private coloredCandles = false;
+  private warningKey = '';
 
   constructor(
     private chart: IChartApi,
     private priceFormat: PriceFormat,
+    private duration: number,
+    private prices: ISeriesApi<'Candlestick'> | ISeriesApi<'Line'>,
+    private onWarnings?: (warnings: string[]) => void,
   ) {}
 
   update(bars: readonly Bar[], preferences: IndicatorPreferences) {
     const range = this.chart.timeScale().getVisibleLogicalRange();
+    const definitions = INDICATORS.filter(
+      (definition) =>
+        preferences[definition.id]?.visible &&
+        (!definition.requiresCandles ||
+          this.prices.seriesType() === 'Candlestick'),
+    );
     for (const [id, instance] of this.instances) {
-      if (preferences[id]?.visible) continue;
+      if (definitions.some((definition) => definition.id === id)) continue;
+      if (instance.primitive) this.prices.detachPrimitive(instance.primitive);
       for (const plot of instance.plots.values())
         this.chart.removeSeries(plot.api);
       this.instances.delete(id);
     }
     let subIndex = 1;
-    for (const definition of INDICATORS) {
+    for (const definition of definitions) {
       const preference = preferences[definition.id];
       if (!preference?.visible) continue;
       let instance = this.instances.get(definition.id);
@@ -69,6 +86,18 @@ export class IndicatorRenderer {
       if (this.previousBars === bars && instance.preference === preference)
         continue;
       const plots = definition.render(bars, preference.parameters);
+      if (definition.renderOverlay) {
+        instance.overlay = definition.renderOverlay(
+          bars,
+          preference.parameters,
+          this.duration,
+        );
+        if (!instance.primitive) {
+          instance.primitive = new IndicatorDrawingPrimitive();
+          this.prices.attachPrimitive(instance.primitive);
+        }
+        instance.primitive.setDrawings(instance.overlay.drawings);
+      }
       const format: PriceFormat =
         definition.priceFormat === 'volume'
           ? { type: 'volume', precision: 0, minMove: 1 }
@@ -108,6 +137,41 @@ export class IndicatorRenderer {
       instance.pane.setPreserveEmptyPane(false);
       instance.preference = preference;
     }
+    const instances = [...this.instances.values()];
+    const warnings = instances.flatMap(
+      (instance) => instance.overlay?.warnings ?? [],
+    );
+    const warningKey = JSON.stringify(warnings);
+    if (this.warningKey !== warningKey) {
+      this.warningKey = warningKey;
+      this.onWarnings?.(warnings);
+    }
+    const colors = instances.map((instance) => instance.overlay?.candleColors);
+    const hasColors = colors.some((values) =>
+      values?.some((value) => value !== undefined),
+    );
+    // Replacing data also clears stale per-candle overrides when a layer is hidden.
+    if (
+      this.prices.seriesType() === 'Candlestick' &&
+      (hasColors || this.coloredCandles)
+    ) {
+      (this.prices as ISeriesApi<'Candlestick'>).setData(
+        bars.map((bar, index) => {
+          const color = colors
+            .map((values) => values?.[index])
+            .findLast((value) => value !== undefined);
+          return {
+            time: barLabelTime(bar.time, this.duration) as UTCTimestamp,
+            open: bar.open,
+            high: bar.high,
+            low: bar.low,
+            close: bar.close,
+            ...(color ? { color, borderColor: color, wickColor: color } : {}),
+          };
+        }),
+      );
+    }
+    this.coloredCandles = hasColors;
     this.previousBars = bars;
     if (range) this.chart.timeScale().setVisibleLogicalRange(range);
   }
@@ -137,13 +201,14 @@ export class IndicatorRenderer {
     series.api.setData(
       plot.data.map((point) => ({
         ...point,
-        time: point.time as UTCTimestamp,
+        time: barLabelTime(point.time, this.duration) as UTCTimestamp,
       })),
     );
   }
 
   dispose() {
     for (const instance of this.instances.values()) {
+      if (instance.primitive) this.prices.detachPrimitive(instance.primitive);
       for (const series of instance.plots.values())
         this.chart.removeSeries(series.api);
     }

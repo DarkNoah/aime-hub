@@ -1,14 +1,22 @@
 export type ChatDraftScope = {
   userId?: string;
   threadId?: string;
+  groupChatId?: string;
   projectId?: string;
 };
 
-export function chatDraftKey({ userId, threadId, projectId }: ChatDraftScope) {
+export function chatDraftKey({
+  userId,
+  threadId,
+  projectId,
+  groupChatId,
+}: ChatDraftScope) {
   if (!userId) return null;
-  const scope = threadId
-    ? ['thread', threadId]
-    : ['new', projectId ? ['project', projectId] : ['personal']];
+  const scope = groupChatId
+    ? ['group-chat', groupChatId]
+    : threadId
+      ? ['thread', threadId]
+      : ['new', projectId ? ['project', projectId] : ['personal']];
   return `chat-draft:v1:${JSON.stringify([userId, ...scope])}`;
 }
 

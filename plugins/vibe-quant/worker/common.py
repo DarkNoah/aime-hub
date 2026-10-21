@@ -84,10 +84,13 @@ def quote(symbol, when, row, mapping, underlying=''):
     return result if when and result['last'] is not None else None
 
 
-def bar(symbol, duration, when, row, volume='volume'):
+def bar(symbol, duration, when, row, volume='volume', amount_scale=1):
     values = {key: number(row.get(key)) for key in ('open', 'high', 'low', 'close')}
     if not when or any(value is None for value in values.values()):
         return None
     if values['low'] > min(values['open'], values['close']) or values['high'] < max(values['open'], values['close']):
         return None
-    return dict(symbol=symbol, duration=duration, time=int(when), **values, volume=number(row.get(volume)) or 0)
+    amount = number(row.get('amount'))
+    amount = amount * amount_scale if amount is not None and amount >= 0 else None
+    return dict(symbol=symbol, duration=duration, time=int(when), **values,
+                volume=number(row.get(volume)) or 0, amount=number(amount))

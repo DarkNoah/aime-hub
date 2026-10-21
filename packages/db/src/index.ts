@@ -1,3 +1,4 @@
+import { CreateGroupChats1780000024000 } from './migrations/1780000024000-create-group-chats.js';
 import {
   KnowledgeBaseRecord,
   KnowledgeDocumentRecord,
@@ -79,6 +80,7 @@ export function createDataSource(
       GeneratedAsset,
     ],
     migrations: [
+      CreateGroupChats1780000024000,
       ProviderAsrModel1780000023000,
       PluginConfiguration1780000022000,
       KnowledgeDocumentMetadata1780000021000,

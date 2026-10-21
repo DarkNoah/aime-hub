@@ -55,7 +55,7 @@ test('SMA waits for a full window; EMA seeds from the first price and resets acr
 });
 
 test('MA honors parameters, preserves warm-up times and recalculates revised/prepended bars', () => {
-  const parameters = { ...defaultParameters(maIndicator), period: 3 };
+  const parameters = { ...defaultParameters(maIndicator), period1: 3 };
   const data = bars([2, 4, 6, 8]);
   const [plot] = maIndicator.render(data, parameters);
   assert.deepEqual(plot.data, [
@@ -83,11 +83,64 @@ test('MA honors parameters, preserves warm-up times and recalculates revised/pre
   );
   assert.equal(
     maIndicator
-      .render(data, { ...parameters, period: 10 })[0]
+      .render(data, { ...parameters, period1: 10 })[0]
       .data.every((point) => point.value === undefined),
     true,
   );
   assert.deepEqual(maIndicator.render([], parameters)[0].data, []);
+});
+
+test('MA renders three independent 5/10/20 defaults and preserves old single-line preferences', () => {
+  const parameters = defaultParameters(maIndicator);
+  const data = bars(Array.from({ length: 25 }, (_, index) => index + 1));
+  const plots = maIndicator.render(data, parameters);
+  assert.deepEqual(
+    plots.map((plot) => plot.title),
+    ['SMA 5', 'SMA 10', 'SMA 20'],
+  );
+  assert.equal(new Set(plots.map((plot) => plot.id)).size, 3);
+  assert.equal(new Set(plots.map((plot) => plot.color)).size, 3);
+  for (const [index, period] of [5, 10, 20].entries()) {
+    assert.ok(
+      plots[index].data
+        .slice(0, period - 1)
+        .every((point) => point.value === undefined),
+    );
+    near(plots[index].data.at(-1)?.value, (26 - period + 25) / 2);
+  }
+  const changed = maIndicator.render(data, {
+    ...parameters,
+    period2: 7,
+    color2: '#123456',
+  });
+  assert.deepEqual(changed[0], plots[0]);
+  assert.deepEqual(changed[2], plots[2]);
+  assert.equal(changed[1].color, '#123456');
+  near(changed[1].data.at(-1)?.value, 22);
+  for (const key of ['period1', 'period2', 'period']) {
+    assert.ok(validateParameters(maIndicator, { ...parameters, [key]: 0 }));
+  }
+  const saved = parsePreferences(
+    JSON.stringify({
+      ma: {
+        visible: false,
+        parameters: {
+          period: 50,
+          color: '#123456',
+          method: 'ema',
+          priceSource: 'close',
+          lineWidth: 3,
+        },
+      },
+    }),
+  );
+  const restored = maIndicator.render(data, saved.ma.parameters);
+  assert.deepEqual(
+    restored.map((plot) => plot.title),
+    ['EMA 5', 'EMA 10', 'EMA 50'],
+  );
+  assert.equal(restored[2].color, '#123456');
+  assert.equal(saved.ma.visible, false);
 });
 
 test('all configured price sources read the current OHLC values', () => {

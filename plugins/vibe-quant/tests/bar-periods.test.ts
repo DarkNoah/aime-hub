@@ -18,6 +18,34 @@ const makeBar = (date: string, values: Partial<Bar> = {}): Bar => ({
   ...values,
 });
 
+test('derived turnover sums known bars and never presents a partial amount as a total', () => {
+  const first = makeBar('2026-10-19T09:30:00', { amount: 1000 });
+  const second = makeBar('2026-10-19T09:31:00', { amount: 2500 });
+  const third = makeBar('2026-10-19T09:32:00', { amount: 0 });
+  assert.equal(aggregateBars([first, second, third], 180)[0].amount, 3500);
+  for (const amount of [null, undefined]) {
+    assert.equal(
+      aggregateBars([first, { ...second, amount }, third], 180)[0].amount,
+      null,
+    );
+    assert.equal(
+      aggregateBars([{ ...first, amount }, second], 180)[0].amount,
+      null,
+    );
+  }
+  assert.equal(
+    aggregateBars(
+      [
+        makeBar('2026-10-01T00:00:00', { duration: 86400, amount: 1200 }),
+        makeBar('2026-10-02T00:00:00', { duration: 86400, amount: 2300 }),
+      ],
+      MONTH_DURATION,
+    )[0].amount,
+    3500,
+  );
+  assert.equal(first.amount, 1000);
+});
+
 test('3-minute bars preserve OHLCV and leave session breaks empty', () => {
   const bars = [
     makeBar('2026-10-19T09:30:00'),

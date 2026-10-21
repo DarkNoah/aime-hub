@@ -12,6 +12,7 @@ import {
   defaultSpeechConfig,
   defaultTranscriptionsConfig,
   defaultReadFileConfig,
+  defaultExtractConfig,
   webFetchConfigSchema,
   webSearchConfigSchema,
 } from '@aime/shared/tools';
@@ -334,6 +335,7 @@ test('persisted configuration controls new tool instances, without credentials i
       { id: 'speech', config: defaultSpeechConfig },
       { id: 'transcriptions', config: defaultTranscriptionsConfig },
       { id: 'read_file', config: defaultReadFileConfig },
+      { id: 'extract', config: defaultExtractConfig },
     ],
   );
   const saved = {

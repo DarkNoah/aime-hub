@@ -8,6 +8,7 @@ import {
   speechConfigSchema,
   transcriptionsConfigSchema,
   readFileConfigSchema,
+  extractConfigSchema,
   enabledToolConfigSchema,
   toolIdSchema,
   type ToolConfig,
@@ -25,6 +26,10 @@ export const toolsContract = {
     })
     .input(
       z.union([
+        z.object({
+          params: z.object({ toolId: z.literal('extract') }),
+          body: extractConfigSchema,
+        }),
         z.object({
           params: z.object({ toolId: z.literal('web_search') }),
           body: webSearchConfigSchema,

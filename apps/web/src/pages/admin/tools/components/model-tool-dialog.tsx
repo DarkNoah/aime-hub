@@ -10,6 +10,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Dialog,
@@ -29,7 +36,9 @@ export function ModelToolDialog({
 }: {
   tool: Extract<
     ToolConfig,
-    { kind: 'image_gen' | 'speech' | 'transcriptions' | 'read_file' }
+    {
+      kind: 'image_gen' | 'speech' | 'transcriptions' | 'read_file' | 'extract';
+    }
   >;
   onSaved: (tool: ToolConfig) => void;
   onClose: () => void;
@@ -39,55 +48,69 @@ export function ModelToolDialog({
   const speech = tool.kind === 'speech';
   const transcription = tool.kind === 'transcriptions';
   const ocr = tool.kind === 'read_file';
-  const labels = ocr
+  const extraction = tool.kind === 'extract';
+  const labels = extraction
     ? ({
-        configure: 'tools.configureViewFile',
-        enable: 'tools.enableViewFile',
-        model: 'tools.ocrModel',
-        defaultModel: 'tools.selectOcrModel',
-        modelHint: 'tools.ocrModelHint',
-        providerHint: 'tools.ocrProviderHint',
-        invalidModel: 'tools.invalidOcrModel',
+        configure: 'tools.configureExtract',
+        enable: 'tools.enableExtract',
+        model: 'tools.extractModel',
+        defaultModel: 'tools.defaultExtractModel',
+        modelHint: 'tools.extractModelHint',
+        providerHint: 'tools.extractProviderHint',
+        invalidModel: 'tools.invalidExtractModel',
       } satisfies Record<string, TranslationKey>)
-    : ({
-        configure: transcription
-          ? 'tools.configureTranscriptions'
-          : speech
-            ? 'tools.configureSpeech'
-            : 'tools.configureImage',
-        enable: transcription
-          ? 'tools.enableTranscriptions'
-          : speech
-            ? 'tools.enableSpeech'
-            : 'tools.enableImage',
-        model: transcription
-          ? 'defaults.asrModel'
-          : speech
-            ? 'defaults.speechModel'
-            : 'defaults.imageModel',
-        defaultModel: transcription
-          ? 'tools.defaultTranscriptionsModel'
-          : speech
-            ? 'tools.defaultSpeechModel'
-            : 'tools.defaultImageModel',
-        modelHint: transcription
-          ? 'tools.transcriptionsModelHint'
-          : speech
-            ? 'tools.speechModelHint'
-            : 'tools.imageModelHint',
-        providerHint: transcription
-          ? 'tools.transcriptionsProviderHint'
-          : speech
-            ? 'tools.speechProviderHint'
-            : 'tools.imageProviderHint',
-        invalidModel: transcription
-          ? 'tools.invalidTranscriptionsModel'
-          : speech
-            ? 'tools.invalidSpeechModel'
-            : 'tools.invalidImageModel',
-      } satisfies Record<string, TranslationKey>);
+    : ocr
+      ? ({
+          configure: 'tools.configureViewFile',
+          enable: 'tools.enableViewFile',
+          model: 'tools.ocrModel',
+          defaultModel: 'tools.selectOcrModel',
+          modelHint: 'tools.ocrModelHint',
+          providerHint: 'tools.ocrProviderHint',
+          invalidModel: 'tools.invalidOcrModel',
+        } satisfies Record<string, TranslationKey>)
+      : ({
+          configure: transcription
+            ? 'tools.configureTranscriptions'
+            : speech
+              ? 'tools.configureSpeech'
+              : 'tools.configureImage',
+          enable: transcription
+            ? 'tools.enableTranscriptions'
+            : speech
+              ? 'tools.enableSpeech'
+              : 'tools.enableImage',
+          model: transcription
+            ? 'defaults.asrModel'
+            : speech
+              ? 'defaults.speechModel'
+              : 'defaults.imageModel',
+          defaultModel: transcription
+            ? 'tools.defaultTranscriptionsModel'
+            : speech
+              ? 'tools.defaultSpeechModel'
+              : 'tools.defaultImageModel',
+          modelHint: transcription
+            ? 'tools.transcriptionsModelHint'
+            : speech
+              ? 'tools.speechModelHint'
+              : 'tools.imageModelHint',
+          providerHint: transcription
+            ? 'tools.transcriptionsProviderHint'
+            : speech
+              ? 'tools.speechProviderHint'
+              : 'tools.imageProviderHint',
+          invalidModel: transcription
+            ? 'tools.invalidTranscriptionsModel'
+            : speech
+              ? 'tools.invalidSpeechModel'
+              : 'tools.invalidImageModel',
+        } satisfies Record<string, TranslationKey>);
   const [enabled, setEnabled] = useState(tool.config.enabled);
   const [model, setModel] = useState(tool.config.model);
+  const [mode, setMode] = useState<'fast' | 'accurate'>(
+    tool.kind === 'extract' ? tool.config.mode : 'accurate',
+  );
   const [timeout, setTimeout] = useState(String(tool.config.timeoutMs / 1000));
   const [pending, setPending] = useState(false);
   const [errors, setErrors] = useState<
@@ -101,12 +124,15 @@ export function ModelToolDialog({
       enabled,
       model,
       timeoutMs: Number(timeout) * 1000,
+      ...(extraction ? { mode } : {}),
     });
     if (!parsed.success) {
       const next: typeof errors = {};
       for (const issue of parsed.error.issues) {
         if (issue.path[0] === 'timeoutMs')
-          next.timeout = 'tools.imageTimeoutHint';
+          next.timeout = extraction
+            ? 'tools.extractTimeoutHint'
+            : 'tools.imageTimeoutHint';
         else next.model = labels.invalidModel;
       }
       setErrors(next);
@@ -180,13 +206,15 @@ export function ModelToolDialog({
                   id="generation-model"
                   label={t(labels.model)}
                   modelType={
-                    ocr
-                      ? 'ocr'
-                      : transcription
-                        ? 'asr'
-                        : speech
-                          ? 'speech'
-                          : 'image'
+                    extraction
+                      ? 'language'
+                      : ocr
+                        ? 'ocr'
+                        : transcription
+                          ? 'asr'
+                          : speech
+                            ? 'speech'
+                            : 'image'
                   }
                   value={model}
                   onValueChange={setModel}
@@ -203,6 +231,35 @@ export function ModelToolDialog({
                   {t(errors.model ?? labels.modelHint)}
                 </p>
               </div>
+              {extraction && (
+                <div className="space-y-2">
+                  <Label htmlFor="extraction-mode">
+                    {t('tools.extractMode')}
+                  </Label>
+                  <Select
+                    value={mode}
+                    onValueChange={(value) =>
+                      setMode(value as 'fast' | 'accurate')
+                    }
+                    disabled={pending}
+                  >
+                    <SelectTrigger id="extraction-mode" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="accurate">
+                        {t('tools.extractAccurate')}
+                      </SelectItem>
+                      <SelectItem value="fast">
+                        {t('tools.extractFast')}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    {t('tools.extractModeHint')}
+                  </p>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="generation-timeout">{t('tools.timeout')}</Label>
                 <Input
@@ -224,7 +281,11 @@ export function ModelToolDialog({
                       : 'text-xs text-muted-foreground'
                   }
                 >
-                  {t('tools.imageTimeoutHint')}
+                  {t(
+                    extraction
+                      ? 'tools.extractTimeoutHint'
+                      : 'tools.imageTimeoutHint',
+                  )}
                 </p>
               </div>
               <p className="rounded-lg bg-muted/50 p-3 text-xs leading-5 text-muted-foreground">

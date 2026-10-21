@@ -5,6 +5,7 @@ import {
   Globe,
   ImagePlus,
   FileScan,
+  FileJson,
   AudioLines,
   Wrench,
   Settings2,
@@ -174,6 +175,8 @@ export function AdminToolsPage() {
                 <ItemMedia variant="icon">
                   {tool.kind === 'image_gen' ? (
                     <ImagePlus />
+                  ) : tool.kind === 'extract' ? (
+                    <FileJson />
                   ) : tool.kind === 'read_file' ? (
                     <FileScan />
                   ) : tool.kind === 'speech' ||
@@ -205,19 +208,22 @@ export function AdminToolsPage() {
                     {tool.id}
                   </code>
                   {tool.kind === 'image_gen' ||
+                  tool.kind === 'extract' ||
                   tool.kind === 'read_file' ||
                   tool.kind === 'speech' ||
                   tool.kind === 'transcriptions' ? (
                     <p className="mt-2 text-xs text-muted-foreground">
                       {tool.config.model ??
                         t(
-                          tool.kind === 'read_file'
-                            ? 'tools.selectOcrModel'
-                            : tool.kind === 'transcriptions'
-                              ? 'tools.defaultTranscriptionsModel'
-                              : tool.kind === 'speech'
-                                ? 'tools.defaultSpeechModel'
-                                : 'tools.defaultImageModel',
+                          tool.kind === 'extract'
+                            ? 'tools.defaultExtractModel'
+                            : tool.kind === 'read_file'
+                              ? 'tools.selectOcrModel'
+                              : tool.kind === 'transcriptions'
+                                ? 'tools.defaultTranscriptionsModel'
+                                : tool.kind === 'speech'
+                                  ? 'tools.defaultSpeechModel'
+                                  : 'tools.defaultImageModel',
                         )}{' '}
                       ·{' '}
                       {t('tools.imageSummary', {
@@ -282,6 +288,7 @@ export function AdminToolsPage() {
         </ItemGroup>
       ) : null}
       {selected?.kind === 'image_gen' ||
+      selected?.kind === 'extract' ||
       selected?.kind === 'read_file' ||
       selected?.kind === 'speech' ||
       selected?.kind === 'transcriptions' ? (

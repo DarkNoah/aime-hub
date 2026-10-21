@@ -8,6 +8,7 @@ interface ParameterBase {
   key: string;
   label: string;
   description?: string;
+  group?: string;
 }
 
 export type IndicatorParameter =
@@ -24,7 +25,7 @@ export type IndicatorParameter =
       default: string;
       options: readonly { value: string; label: string }[];
     })
-  | (ParameterBase & { type: 'color'; default: string })
+  | (ParameterBase & { type: 'color'; default: string; alpha?: boolean })
   | (ParameterBase & { type: 'boolean'; default: boolean });
 
 /** A missing value is a warm-up/whitespace point, never a fabricated zero. */
@@ -45,6 +46,31 @@ export interface IndicatorPlot {
   zeroLine?: boolean;
 }
 
+/** Native price-pane drawings; coordinates are indices in the loaded bar window. */
+export interface IndicatorDrawing {
+  id: string;
+  kind: 'line' | 'box' | 'label';
+  from: number;
+  to: number;
+  top: number;
+  bottom: number;
+  color: string;
+  style?: string;
+  border?: boolean;
+  extendRight?: boolean;
+  text?: string;
+  labelIndex?: number;
+  labelPrice?: number;
+  align?: 'above' | 'below' | 'left';
+  size?: string;
+}
+
+export interface IndicatorOverlay {
+  drawings: IndicatorDrawing[];
+  candleColors?: (string | undefined)[];
+  warnings?: string[];
+}
+
 export interface IndicatorDefinition {
   id: string;
   type: IndicatorType;
@@ -53,6 +79,7 @@ export interface IndicatorDefinition {
   source?: { name: string; url?: string };
   parameters: readonly IndicatorParameter[];
   defaultVisible: boolean;
+  requiresCandles?: boolean;
   priceFormat?: 'price' | 'volume' | 'oscillator';
   paneWeight?: number;
   validate?: (parameters: IndicatorParameters) => string | undefined;
@@ -60,6 +87,11 @@ export interface IndicatorDefinition {
     bars: readonly Bar[],
     parameters: IndicatorParameters,
   ) => IndicatorPlot[];
+  renderOverlay?: (
+    bars: readonly Bar[],
+    parameters: IndicatorParameters,
+    duration: number,
+  ) => IndicatorOverlay;
 }
 
 export interface IndicatorPreference {

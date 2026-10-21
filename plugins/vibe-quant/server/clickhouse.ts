@@ -1,9 +1,23 @@
-import type { Bar, Engine, OrderBook, Quote, Tick } from '../shared.js';
+import {
+  BAR_JUMP_RADIUS,
+  type BarWindow,
+  type Bar,
+  type Engine,
+  type OrderBook,
+  type Quote,
+  type Tick,
+} from '../shared.js';
 import type { QuantConfig } from './config.js';
 import { LiveMarket } from './live-market.js';
 import { ClickHouseClient, timeSql } from './clickhouse-client.js';
 import { tickColumns, validateTickVolumes } from './tick-validation.js';
-import { aggregateBars, derivedPeriod, periodStart } from './bar-periods.js';
+import { rebuildTickBars } from './tick-bars.js';
+import {
+  aggregateBars,
+  derivedPeriod,
+  nextPeriodStart,
+  periodStart,
+} from './bar-periods.js';
 
 /** Only identifiers validated by parseConfig are interpolated; values use CH parameters. */
 export class MarketStore extends ClickHouseClient {
@@ -28,8 +42,11 @@ export class MarketStore extends ClickHouseClient {
     ) ENGINE = ReplacingMergeTree(version) PARTITION BY toYYYYMM(toDateTime(time, 'Asia/Shanghai')) ORDER BY (engine, symbol, time)`);
     await this.request(`CREATE TABLE IF NOT EXISTS ${this.table('bars')} (
       engine LowCardinality(String), symbol LowCardinality(String), duration UInt32, time UInt64,
-      open Float64, high Float64, low Float64, close Float64, volume Float64, version UInt64
+      open Float64, high Float64, low Float64, close Float64, volume Float64, amount Nullable(Float64), version UInt64
     ) ENGINE = ReplacingMergeTree(version) PARTITION BY toYYYYMM(toDateTime(time, 'Asia/Shanghai')) ORDER BY (engine, symbol, duration, time)`);
+    await this.request(
+      `ALTER TABLE ${this.table('bars')} ADD COLUMN IF NOT EXISTS amount Nullable(Float64) AFTER volume`,
+    );
     // Separate receipt identity preserves depth-only changes even when source time
     // repeats or is unavailable. Retrying a batch keeps the same snapshot IDs.
     await this
@@ -97,7 +114,7 @@ export class MarketStore extends ClickHouseClient {
     const columns = {
       quotes:
         'time Float64, last Nullable(Float64), preClose Nullable(Float64), open Nullable(Float64), high Nullable(Float64), low Nullable(Float64), volume Nullable(Float64), amount Nullable(Float64), openInterest Nullable(Float64), bid Nullable(Float64), ask Nullable(Float64), underlying String',
-      bars: 'duration UInt32, time UInt64, open Float64, high Float64, low Float64, close Float64, volume Float64',
+      bars: 'duration UInt32, time UInt64, open Float64, high Float64, low Float64, close Float64, volume Float64, amount Nullable(Float64)',
       order_books:
         'snapshotId UUID, sourceTime Nullable(Float64), receivedAt Float64, timePrecision String, bidPrices Array(Nullable(Float64)), bidVolumes Array(Nullable(Float64)), askPrices Array(Nullable(Float64)), askVolumes Array(Nullable(Float64)), volumeUnit String, underlying String',
       ticks: tickColumns,
@@ -142,33 +159,103 @@ export class MarketStore extends ClickHouseClient {
     engine: Engine,
     symbol: string,
     duration: number,
-    before?: number,
+    query: number | { before?: number; after?: number; limit?: number } = {},
   ): Promise<Bar[]> {
-    const period = derivedPeriod(duration);
+    const {
+      before,
+      after,
+      limit: pageSize = 1000,
+    } = typeof query === 'number' ? { before: query } : query;
+    const forward = after !== undefined;
+    const period = derivedPeriod(duration, pageSize);
     const sourceDuration = period?.source ?? duration;
-    const limit = period?.limit ?? 1000;
+    const limit = period?.limit ?? pageSize;
     const boundary =
       before === undefined
         ? Math.floor(Date.now() / 1000) + 86400
         : period
           ? Math.max(0, periodStart(before, duration))
           : before;
+    // Derived periods must start at a full group when paging forward.
+    const lowerBoundary =
+      after === undefined
+        ? undefined
+        : period
+          ? nextPeriodStart(after, duration) - 1
+          : after;
     const text = await this.request(
-      `SELECT symbol, duration, toFloat64(time) AS time, open, high, low, close, volume
+      // The column matcher also reads older schemas through SELECT-only accounts.
+      `SELECT symbol, duration, toFloat64(time) AS time, open, high, low, close, COLUMNS('^(volume|amount)$')
       FROM ${this.table('bars')} FINAL WHERE engine = {engine:String} AND symbol = {symbol:String} AND duration = {duration:UInt32}
-      AND time < {before:UInt64} ORDER BY time DESC LIMIT {limit:UInt32} FORMAT JSON`,
+      AND time < {before:UInt64}
+      ${forward ? 'AND time > {after:UInt64}' : ''}
+      ORDER BY time ${forward ? 'ASC' : 'DESC'} LIMIT {limit:UInt32} FORMAT JSON`,
       {
         engine,
         symbol,
         duration: String(sourceDuration),
         before: String(boundary),
         limit: String(limit),
+        ...(lowerBoundary !== undefined
+          ? { after: String(lowerBoundary) }
+          : {}),
       },
     );
-    const saved: Bar[] = JSON.parse(text).data.reverse();
+    const saved: Bar[] = JSON.parse(text).data;
+    if (!forward) saved.reverse();
     const bars = this.config.clickhouseReadOnly
-      ? this.live.bars(engine, symbol, sourceDuration, boundary, saved, limit)
+      ? this.live.bars(
+          engine,
+          symbol,
+          sourceDuration,
+          boundary,
+          saved,
+          limit,
+          lowerBoundary,
+        )
       : saved;
-    return period ? aggregateBars(bars, duration) : bars;
+    const result = period
+      ? aggregateBars(bars, duration, pageSize, forward)
+      : bars;
+    return rebuildTickBars(this, engine, symbol, duration, result);
+  }
+
+  async barsAround(
+    engine: Engine,
+    symbol: string,
+    duration: number,
+    time: number,
+  ): Promise<BarWindow> {
+    const limit = BAR_JUMP_RADIUS + 1;
+    const [left, right] = await Promise.all([
+      this.bars(engine, symbol, duration, {
+        before: derivedPeriod(duration)
+          ? nextPeriodStart(time, duration)
+          : time + 1,
+        limit,
+      }),
+      this.bars(engine, symbol, duration, { after: time, limit }),
+    ]);
+    const bars = [...left, ...right];
+    if (!bars.length) return { bars, targetTime: null };
+    const previous = left.at(-1);
+    const next = right[0];
+    const containsTime =
+      previous &&
+      time <
+        (derivedPeriod(duration)
+          ? nextPeriodStart(previous.time, duration)
+          : previous.time + duration);
+    const usePrevious =
+      previous &&
+      (containsTime || !next || time - previous.time <= next.time - time);
+    const index = usePrevious ? left.length - 1 : left.length;
+    return {
+      bars: bars.slice(
+        Math.max(0, index - BAR_JUMP_RADIUS),
+        index + BAR_JUMP_RADIUS + 1,
+      ),
+      targetTime: bars[index].time,
+    };
   }
 }

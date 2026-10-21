@@ -55,6 +55,15 @@ class SessionsTest(unittest.TestCase):
         json.dumps(value, allow_nan=False)
         self.assertEqual(value['underlying'], '')
 
+    def test_bar_turnover_preserves_zero_and_normalizes_source_units(self):
+        row = dict(open=10, high=12, low=9, close=11, volume=100)
+        for amount in [0, 1234.5]:
+            self.assertEqual(bar('SSE.600000', 60, 1, dict(row, amount=amount))['amount'], amount)
+        self.assertEqual(bar('SSE.600000', 86400, 1, dict(row, amount=1234.5), amount_scale=1000)['amount'], 1234500)
+        for amount in [None, float('nan'), float('inf'), -1]:
+            self.assertIsNone(bar('SSE.600000', 60, 1, dict(row, amount=amount))['amount'])
+        self.assertIsNone(bar('SSE.600000', 60, 1, row)['amount'])
+
 
 if __name__ == '__main__':
     unittest.main()

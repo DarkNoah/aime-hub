@@ -11,6 +11,7 @@ export { imageGen } from './image_gen.js';
 export { speech } from './speech.js';
 export { transcriptions } from './transcriptions.js';
 export { readFile } from './read_file.js';
+export { extract } from './extract.js';
 export { listVoices } from './list_voices.js';
 export {
   askUserTool,

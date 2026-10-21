@@ -1,4 +1,41 @@
 export const en = {
+  'groupChat.heading': 'Bots',
+  'groupChat.create': 'Create Bots',
+  'groupChat.rename': 'Rename Bots',
+  'groupChat.delete': 'Delete Bots',
+  'groupChat.deleteHint':
+    'Bots and all its messages will be permanently deleted.',
+  'groupChat.title': 'Bots name',
+  'groupChat.personal': 'Personal',
+  'groupChat.project': 'Project',
+  'groupChat.personalHint':
+    'Your personal Bots space is private. Messages are saved automatically.',
+  'groupChat.projectHint':
+    'All project members share this Bots space. Membership follows the project.',
+  'groupChat.members': '{{count}} members',
+  'groupChat.unknownMember': 'Member',
+  'groupChat.you': 'You',
+  'groupChat.actions': 'Bots actions',
+  'groupChat.emptyRooms': 'No Bots yet',
+  'groupChat.emptyMessages': 'Send the first message',
+  'groupChat.projectMessageHint': 'Talk with your project members here.',
+  'groupChat.personalMessageHint':
+    'Capture your thoughts. Messages are saved here.',
+  'groupChat.placeholder': 'Write a message…',
+  'groupChat.sendHint': 'Enter to send · Shift + Enter for a new line',
+  'groupChat.send': 'Send message',
+  'groupChat.back': 'Back to Bots',
+  'groupChat.loadMore': 'Load more Bots',
+  'groupChat.saved': 'Bots saved',
+  'groupChat.deleted': 'Bots deleted',
+  'groupChat.unavailable':
+    'Bots does not exist or you no longer have access.',
+  'groupChat.invalid':
+    'Check your input. Messages can contain up to 20,000 characters.',
+  'groupChat.failed':
+    'Something went wrong. Try again; your draft has been kept.',
+  'groupChat.reconnecting': 'Message sync interrupted. Reconnecting…',
+
   'chat.voiceInput.start': 'Start voice input',
   'chat.voiceInput.stop': 'Stop voice input',
   'chat.voiceInput.downloading': 'Downloading speech model',
@@ -865,6 +902,27 @@ export const en = {
   'agents.tool.list_voices': 'List voices',
   'tools.transcriptions': 'Speech recognition',
   'agents.tool.read_file': 'Read file',
+  'agents.tool.extract': 'Extract file',
+  'tools.extract': 'Extract file',
+  'tools.extractDescription':
+    'Extract text, images, PDFs, Office documents and audio/video speech into JSON using a field schema.',
+  'tools.configureExtract': 'Configure file extraction',
+  'tools.enableExtract': 'Enable file extraction',
+  'tools.extractModel': 'Extraction model',
+  'tools.defaultExtractModel': 'Use conversation or system default model',
+  'tools.extractModelHint':
+    'Uses the requested conversation model, then the system default, when unset. Choose a language model with image input for visual extraction.',
+  'tools.extractProviderHint':
+    'Images use vision or OCR; PDFs use native model input, OCR or text parsing. Audio/video uses transcription settings and only the audio track of videos. Convert legacy DOC/XLS/PPT files first.',
+  'tools.invalidExtractModel':
+    'Select an available language model from an enabled provider.',
+  'tools.extractMode': 'Extraction mode',
+  'tools.extractTimeoutHint': '1–600 seconds; defaults to 600 seconds.',
+  'tools.extractAccurate': 'Accurate · Two passes',
+  'tools.extractFast': 'Fast · Direct JSON',
+  'tools.extractModeHint':
+    'Accurate mode gathers information before generating JSON (two model calls). Fast mode uses one call. Both validate the output schema.',
+  'chat.extract.loading': 'Reading the file and extracting JSON…',
   'tools.viewFile': 'Read file',
   'tools.viewFileDescription':
     'Read text and code files, or parse images and PDFs into Markdown using OCR.',

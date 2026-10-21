@@ -62,6 +62,11 @@ const ProjectAutomationsPage = lazy(() =>
 const WorkspacePage = lazy(() =>
   import('@/pages/workspace/page').then((m) => ({ default: m.WorkspacePage })),
 );
+const GroupChatsPage = lazy(() =>
+  import('@/pages/group-chats/page').then((m) => ({
+    default: m.GroupChatsPage,
+  })),
+);
 const ThreadsPage = lazy(() =>
   import('@/pages/threads/page').then((m) => ({ default: m.ThreadsPage })),
 );
@@ -190,6 +195,16 @@ const projectChatRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: 'threads',
 });
+const personalGroupChatRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: '/group-chats',
+  component: GroupChatsPage,
+});
+const projectGroupChatRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: 'group-chats',
+  component: GroupChatsPage,
+});
 const routeTree = rootRoute.addChildren([
   createRoute({
     getParentRoute: () => rootRoute,
@@ -211,6 +226,7 @@ const routeTree = rootRoute.addChildren([
     ]),
     sessionRoute.addChildren([
       layoutRoute.addChildren([
+        personalGroupChatRoute,
         createRoute({
           getParentRoute: () => layoutRoute,
           path: '/knowledge',
@@ -262,6 +278,7 @@ const routeTree = rootRoute.addChildren([
           component: ProjectsPage,
         }),
         projectRoute.addChildren([
+          projectGroupChatRoute,
           createRoute({
             getParentRoute: () => projectRoute,
             path: 'knowledge',

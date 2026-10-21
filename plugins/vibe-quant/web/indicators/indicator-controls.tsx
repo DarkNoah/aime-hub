@@ -28,10 +28,12 @@ export function IndicatorControls({
   preferences,
   onVisibleChange,
   onParametersChange,
+  intraday = false,
 }: {
   preferences: IndicatorPreferences;
   onVisibleChange: (id: string, visible: boolean) => void;
   onParametersChange: (id: string, parameters: IndicatorParameters) => void;
+  intraday?: boolean;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const definition = INDICATORS.find((indicator) => indicator.id === editing);
@@ -43,7 +45,9 @@ export function IndicatorControls({
             (indicator) => indicator.type === group.type,
           );
           const visible = indicators.filter(
-            (indicator) => preferences[indicator.id].visible,
+            (indicator) =>
+              preferences[indicator.id].visible &&
+              !(intraday && indicator.requiresCandles),
           ).length;
           return (
             <DropdownMenu key={group.type}>
@@ -81,13 +85,22 @@ export function IndicatorControls({
                     <div key={indicator.id} className="flex items-center gap-1">
                       <DropdownMenuCheckboxItem
                         className="min-w-0 flex-1"
-                        checked={preferences[indicator.id].visible}
+                        checked={
+                          preferences[indicator.id].visible &&
+                          !(intraday && indicator.requiresCandles)
+                        }
+                        disabled={intraday && indicator.requiresCandles}
                         onCheckedChange={(checked) =>
                           onVisibleChange(indicator.id, checked)
                         }
                         onSelect={(event) => event.preventDefault()}
                       >
                         {indicator.name}
+                        {intraday && indicator.requiresCandles && (
+                          <span className="ml-auto text-[10px] text-muted-foreground">
+                            仅 K 线
+                          </span>
+                        )}
                       </DropdownMenuCheckboxItem>
                       <DropdownMenuItem
                         asChild

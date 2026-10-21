@@ -117,19 +117,36 @@ export default function createServer(context: PluginContext): PluginServer {
   api.get('/bars', async (c) => {
     const symbol = symbolSchema.safeParse(c.req.query('symbol'));
     const duration = Number(c.req.query('duration') ?? 60);
-    const before = c.req.query('before')
-      ? Number(c.req.query('before'))
-      : undefined;
+    const timestamp = (name: string) =>
+      c.req.query(name) === undefined ? undefined : Number(c.req.query(name));
+    const before = timestamp('before');
+    const after = timestamp('after');
+    const around = timestamp('around');
+    const limit = Number(c.req.query('limit') ?? 1000);
     if (
       !symbol.success ||
       !DURATIONS.some((d) => d === duration) ||
-      (before !== undefined && (!Number.isSafeInteger(before) || before <= 0))
+      [before, after, around].some(
+        (value) =>
+          value !== undefined && (!Number.isSafeInteger(value) || value <= 0),
+      ) ||
+      [before, after, around].filter((value) => value !== undefined).length >
+        1 ||
+      !Number.isSafeInteger(limit) ||
+      limit < 1 ||
+      limit > 1000
     )
       return c.json({ code: 'VALIDATION_ERROR' }, 400);
     const owned = await state.owns(c.get('userId'), symbol.data);
     if (!owned) return c.json({ code: 'NOT_IN_WATCHLIST' }, 404);
     return c.json(
-      await store.bars(config.engine, symbol.data, duration, before),
+      around === undefined
+        ? await store.bars(config.engine, symbol.data, duration, {
+            before,
+            after,
+            limit,
+          })
+        : await store.barsAround(config.engine, symbol.data, duration, around),
     );
   });
   api.get('/ticks/validation', async (c) => {

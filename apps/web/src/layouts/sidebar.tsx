@@ -11,6 +11,7 @@ import {
   Home,
   LoaderCircle,
   LogOut,
+  MessagesSquare,
   Settings2,
   Sparkles,
   SquarePen,
@@ -141,6 +142,16 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             >
               <BookOpen className="size-4" />
               {t('nav.knowledge')}
+            </Link>
+            <Link
+              to="/group-chats"
+              className={linkClass}
+              activeProps={activeProps}
+              inactiveProps={inactiveProps}
+              onClick={onNavigate}
+            >
+              <MessagesSquare className="size-4" />
+              {t('groupChat.heading')}
             </Link>
             <PluginNavigation onNavigate={onNavigate} />
             <ThreadSidebar onNavigate={onNavigate} />

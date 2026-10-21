@@ -20,6 +20,8 @@ import {
 import {
   Activity,
   ArrowLeft,
+  ArrowRight,
+  LocateFixed,
   ChartCandlestick,
   Plus,
   Search,
@@ -31,7 +33,6 @@ import {
   DURATIONS,
   durationLabel,
   KIND_LABELS,
-  type Bar,
   type Instrument,
   type InstrumentKind,
   type OrderBook,
@@ -40,8 +41,9 @@ import {
   type WatchItem,
 } from '../shared';
 import { MarketChart } from './chart';
+import { DateJump } from './date-jump';
+import { useMarketBars } from './use-market-bars';
 import {
-  intradayBars,
   parseChartPeriod,
   readChartPeriod,
   saveChartPeriod,
@@ -56,7 +58,7 @@ const STATE_LABELS = {
   syncing: '同步中',
   closed: '休市',
   idle: '待订阅',
-  error: '同步异常',
+  error: '连接中',
   standby: '待命',
 };
 const price = (value?: number | null) =>
@@ -98,7 +100,7 @@ export function MarketPage({ pluginId }: PluginPageProps) {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [orderBooks, setOrderBooks] = useState<OrderBook[]>([]);
   const [status, setStatus] = useState<SyncStatus>();
-  const [error, setError] = useState('');
+  const [reconnecting, setReconnecting] = useState(false);
   const [listError, setListError] = useState('');
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
@@ -113,15 +115,16 @@ export function MarketPage({ pluginId }: PluginPageProps) {
   const [period, setPeriod] = useState(readChartPeriod);
   const isIntraday = period === 'intraday';
   const duration = isIntraday ? 60 : period;
-  const [bars, setBars] = useState<Bar[]>([]);
-  const [barsIdentity, setBarsIdentity] = useState('');
-  const [barsError, setBarsError] = useState('');
-  const [barsLoading, setBarsLoading] = useState(false);
-  const [olderLoading, setOlderLoading] = useState(false);
-  const [hasOlder, setHasOlder] = useState(true);
   const identity = `${status?.engine ?? ''}:${selected}:${period}`;
-  const identityRef = useRef(identity);
-  identityRef.current = identity;
+  const marketBars = useMarketBars({
+    pluginId,
+    symbol: selected,
+    duration,
+    intraday: isIntraday,
+    identity,
+    retry,
+  });
+  const { bars, loading: barsLoading } = marketBars;
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
@@ -159,10 +162,10 @@ export function MarketPage({ pluginId }: PluginPageProps) {
           setQuotes(data.quotes);
           setOrderBooks(data.orderBooks ?? []);
           setStatus(data.status);
-          setError('');
+          setReconnecting(false);
         }
       } catch {
-        if (!controller.signal.aborted) setError('行情连接中断，正在重试');
+        if (!controller.signal.aborted) setReconnecting(true);
       }
       if (!controller.signal.aborted)
         timer = setTimeout(() => void poll(), document.hidden ? 10000 : 2000);
@@ -199,63 +202,6 @@ export function MarketPage({ pluginId }: PluginPageProps) {
       clearTimeout(timer);
     };
   }, [pluginId, query, kind, searchOpen, retry]);
-  useEffect(() => {
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout>;
-    setBars([]);
-    setHasOlder(true);
-    setBarsError('');
-    setOlderLoading(false);
-    if (!selected) return;
-    setBarsLoading(true);
-    async function poll() {
-      try {
-        const [data, daily] = await Promise.all([
-          pluginRequest<Bar[]>(
-            pluginId,
-            `/bars?symbol=${encodeURIComponent(selected)}&duration=${duration}`,
-            { signal: controller.signal },
-          ),
-          isIntraday
-            ? pluginRequest<Bar[]>(
-                pluginId,
-                `/bars?symbol=${encodeURIComponent(selected)}&duration=86400`,
-                { signal: controller.signal },
-              )
-            : Promise.resolve([] as Bar[]),
-        ]);
-        if (!controller.signal.aborted) {
-          setBars((current) =>
-            isIntraday
-              ? intradayBars(data, daily)
-              : [
-                  ...new Map(
-                    [...current, ...data].map((bar) => [bar.time, bar]),
-                  ).values(),
-                ].sort((a, b) => a.time - b.time),
-          );
-          setBarsIdentity(identity);
-          setBarsError('');
-        }
-      } catch {
-        if (!controller.signal.aborted)
-          setBarsError(
-            isIntraday
-              ? '分时行情读取失败，正在重试'
-              : 'K 线读取失败，正在重试',
-          );
-      }
-      if (!controller.signal.aborted) {
-        setBarsLoading(false);
-        timer = setTimeout(() => void poll(), document.hidden ? 10000 : 3000);
-      }
-    }
-    void poll();
-    return () => {
-      controller.abort();
-      clearTimeout(timer);
-    };
-  }, [pluginId, selected, duration, isIntraday, status?.engine, retry]);
   function changePeriod(value: string) {
     const next = parseChartPeriod(value);
     setPeriod(next);
@@ -316,30 +262,6 @@ export function MarketPage({ pluginId }: PluginPageProps) {
       setBusy('');
     }
   }
-  async function loadOlder() {
-    if (isIntraday || olderLoading || !bars.length) return;
-    setOlderLoading(true);
-    const key = identity;
-    try {
-      const data = await pluginRequest<Bar[]>(
-        pluginId,
-        `/bars?symbol=${encodeURIComponent(selected)}&duration=${duration}&before=${bars[0].time}`,
-      );
-      if (identityRef.current !== key) return;
-      setBars((current) =>
-        [
-          ...new Map(
-            [...data, ...current].map((bar) => [bar.time, bar]),
-          ).values(),
-        ].sort((a, b) => a.time - b.time),
-      );
-      setHasOlder(data.length === 1000);
-    } catch {
-      toast.error('读取历史行情失败');
-    } finally {
-      if (identityRef.current === key) setOlderLoading(false);
-    }
-  }
   const item = list.find((entry) => entry.symbol === selected);
   const currentQuote = quotes.find((entry) => entry.symbol === selected);
   return (
@@ -368,32 +290,28 @@ export function MarketPage({ pluginId }: PluginPageProps) {
           {status?.clickhouseReadOnly && (
             <Badge variant="outline">行情不落库</Badge>
           )}
-          <Badge
-            variant={
-              status?.state === 'error' || error ? 'destructive' : 'secondary'
-            }
-          >
+          <Badge variant="secondary">
             <Activity className="mr-1 size-3" />
-            {error
-              ? '连接异常'
+            {reconnecting
+              ? '连接中'
               : status
                 ? STATE_LABELS[status.state]
                 : '连接中'}
           </Badge>
         </div>
       </header>
-      {(error || listError) && (
+      {listError && (
         <div
           role="alert"
           className="flex items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm"
         >
-          <span>{listError || error}</span>
+          <span>{listError}</span>
           <Button
             size="sm"
             variant="outline"
             onClick={() => setRetry((value) => value + 1)}
           >
-            重新连接
+            重试
           </Button>
         </div>
       )}
@@ -520,7 +438,7 @@ export function MarketPage({ pluginId }: PluginPageProps) {
             )}
           </ScrollArea>
         </aside>
-        <section className="min-w-0">
+        <section className="flex min-w-0 flex-col">
           {item ? (
             <>
               <div className="@container/chart-toolbar border-b px-3 py-2">
@@ -544,42 +462,23 @@ export function MarketPage({ pluginId }: PluginPageProps) {
                       </SelectContent>
                     </Select>
                     <IndicatorControls
+                      intraday={isIntraday}
                       preferences={indicators.preferences}
                       onVisibleChange={indicators.setVisible}
                       onParametersChange={indicators.setParameters}
                     />
                   </div>
-                  {!isIntraday && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="ml-auto"
-                      disabled={!hasOlder || !bars.length || olderLoading}
-                      onClick={() => void loadOlder()}
-                      aria-label={
-                        olderLoading
-                          ? '加载中'
-                          : hasOlder
-                            ? '更早行情'
-                            : '已到最早'
-                      }
-                    >
-                      <ArrowLeft className="size-3" />
-                      <span className="hidden @min-[540px]/chart-toolbar:inline">
-                        {olderLoading
-                          ? '加载中'
-                          : hasOlder
-                            ? '更早行情'
-                            : '已到最早'}
-                      </span>
-                    </Button>
-                  )}
                 </div>
               </div>
-              <div className="relative min-w-0">
+              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
                 <MarketChart
-                  bars={barsIdentity === identity ? bars : []}
-                  identity={identity}
+                  bars={bars}
+                  identity={`${identity}:${marketBars.windowRevision}`}
+                  drawingScope={identity}
+                  drawingSharedScope={`${status?.engine ?? ''}:${selected}`}
+                  targetTime={marketBars.targetTime}
+                  historical={marketBars.historical}
+                  onLoadMore={marketBars.loadMore}
                   duration={duration}
                   intraday={isIntraday}
                   priceTick={item.priceTick}
@@ -594,25 +493,81 @@ export function MarketPage({ pluginId }: PluginPageProps) {
                           ? isIntraday
                             ? '正在读取分时行情…'
                             : '正在读取 K 线…'
-                          : barsError || '等待行情数据'}
+                          : '等待行情数据'}
                       </p>
                       <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                        {status?.state === 'error'
-                          ? status.message
-                          : '首次订阅需要加载历史数据。请确认当前引擎具备此标的行情权限。'}
+                        首次订阅需要加载历史数据。请确认当前引擎具备此标的行情权限。
                       </p>
                     </div>
                   </div>
                 )}
               </div>
-              {barsError && !!bars.length && (
-                <p role="alert" className="px-5 py-2 text-xs text-destructive">
-                  {barsError}，当前显示上次成功读取的数据。
-                </p>
+              {!isIntraday && (
+                <div
+                  className="flex flex-wrap items-center gap-2 border-t px-3 py-2"
+                  aria-label="K 线导航"
+                >
+                  <DateJump
+                    key={identity}
+                    defaultTime={marketBars.targetTime ?? bars.at(-1)?.time}
+                    duration={duration}
+                    loading={barsLoading}
+                    onJump={marketBars.navigate}
+                  />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={barsLoading}
+                    onClick={() => void marketBars.navigate(null)}
+                  >
+                    <LocateFixed className="size-4" />
+                    最新行情
+                  </Button>
+                  <div className="ml-auto flex items-center gap-1">
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label="加载更早行情"
+                      disabled={
+                        barsLoading ||
+                        !bars.length ||
+                        !marketBars.hasBefore ||
+                        marketBars.beforeLoading
+                      }
+                      onClick={() => void marketBars.loadMore('before')}
+                    >
+                      <ArrowLeft className="size-4" />
+                    </Button>
+                    <span
+                      role="status"
+                      className="text-xs text-muted-foreground"
+                    >
+                      {marketBars.beforeLoading
+                        ? '正在加载更早行情…'
+                        : marketBars.afterLoading
+                          ? '正在加载后续行情…'
+                          : '拖动到边缘自动加载'}
+                    </span>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label="加载后续行情"
+                      disabled={
+                        barsLoading ||
+                        !bars.length ||
+                        !marketBars.hasAfter ||
+                        marketBars.afterLoading
+                      }
+                      onClick={() => void marketBars.loadMore('after')}
+                    >
+                      <ArrowRight className="size-4" />
+                    </Button>
+                  </div>
+                </div>
               )}
             </>
           ) : (
-            <div className="flex min-h-[500px] items-center justify-center p-8 text-center">
+            <div className="flex min-h-[500px] flex-1 items-center justify-center p-8 text-center">
               <div className="max-w-md">
                 <ChartCandlestick className="mx-auto mb-5 size-10 text-primary/70" />
                 <h2 className="text-lg font-medium">从关注的标的开始</h2>
@@ -665,8 +620,10 @@ export function MarketPage({ pluginId }: PluginPageProps) {
       </div>
       <footer className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <span>
-          {status?.message ?? '正在连接同步服务'} ·{' '}
-          {status?.clickhouseReadOnly ? '最近接收' : '最近入库'}{' '}
+          {reconnecting || status?.state === 'error'
+            ? '正在连接同步服务'
+            : (status?.message ?? '正在连接同步服务')}{' '}
+          · {status?.clickhouseReadOnly ? '最近接收' : '最近入库'}{' '}
           {timeText(
             status?.clickhouseReadOnly
               ? status.lastReceivedAt

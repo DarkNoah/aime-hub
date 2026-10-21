@@ -44,6 +44,9 @@ export const transcriptionsConfigSchema = speechConfigSchema;
 export const readFileConfigSchema = imageGenConfigSchema.extend({
   timeoutMs: z.number().int().min(1000).max(600000).default(600000),
 });
+export const extractConfigSchema = readFileConfigSchema.extend({
+  mode: z.enum(['fast', 'accurate']).default('accurate'),
+});
 export const toolConfigSchemas = {
   web_search: webSearchConfigSchema,
   web_fetch: webFetchConfigSchema,
@@ -51,6 +54,7 @@ export const toolConfigSchemas = {
   speech: speechConfigSchema,
   transcriptions: transcriptionsConfigSchema,
   read_file: readFileConfigSchema,
+  extract: extractConfigSchema,
 };
 export type ConfigurableToolId = keyof typeof toolConfigSchemas;
 export const toolIds = Object.keys(toolConfigSchemas) as ConfigurableToolId[];
@@ -61,6 +65,7 @@ export type ImageGenConfig = z.infer<typeof imageGenConfigSchema>;
 export type SpeechConfig = z.infer<typeof speechConfigSchema>;
 export type TranscriptionsConfig = z.infer<typeof transcriptionsConfigSchema>;
 export type ReadFileConfig = z.infer<typeof readFileConfigSchema>;
+export type ExtractConfig = z.infer<typeof extractConfigSchema>;
 export type ToolConfig = { description: string } & (
   | { id: 'web_search'; kind: 'web_search'; config: WebSearchConfig }
   | { id: 'web_fetch'; kind: 'web_fetch'; config: WebFetchConfig }
@@ -72,6 +77,7 @@ export type ToolConfig = { description: string } & (
       config: TranscriptionsConfig;
     }
   | { id: 'read_file'; kind: 'read_file'; config: ReadFileConfig }
+  | { id: 'extract'; kind: 'extract'; config: ExtractConfig }
   | {
       id: string;
       kind: 'builtin';
@@ -84,3 +90,4 @@ export const defaultImageGenConfig = imageGenConfigSchema.parse({});
 export const defaultSpeechConfig = speechConfigSchema.parse({});
 export const defaultTranscriptionsConfig = transcriptionsConfigSchema.parse({});
 export const defaultReadFileConfig = readFileConfigSchema.parse({});
+export const defaultExtractConfig = extractConfigSchema.parse({});

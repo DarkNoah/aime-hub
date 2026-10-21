@@ -1,3 +1,5 @@
+import { GroupChatService } from './modules/group-chats/service.js';
+import { UserService } from './modules/users/service.js';
 import { AudioService } from './modules/audio/service.js';
 import { PgVector } from '@mastra/pg';
 import { resolveMemoryConfig } from './mastra/memory.js';
@@ -125,6 +127,8 @@ const disposeChatRequestLogging = installChatRequestLogging(
   () => requestLoggingEnabled,
 );
 const projects = new ProjectService(database, { workspaceRoot });
+const groupChats = new GroupChatService(database);
+const users = new UserService(database, groupChats);
 const environmentVariables = new EnvironmentVariableService(database);
 const notifications = new NotificationService(
   new PgNotificationStore(pool),
@@ -234,7 +238,15 @@ const app = createApp(
     service: providers,
     webOrigin: env.WEB_ORIGINS,
   },
-  { threads, models, projects, assets, webOrigin: env.WEB_ORIGINS },
+  {
+    threads,
+    models,
+    projects,
+    assets,
+    groupChats,
+    users,
+    webOrigin: env.WEB_ORIGINS,
+  },
   { service: skills, webOrigin: env.WEB_ORIGINS },
   {
     service: environmentVariables,
