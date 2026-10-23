@@ -42,6 +42,7 @@ setInterval(()=>emit({type:'status',state:'syncing',message:'fixture',active:1})
       let unlocked = 0;
       let locks = 0;
       let checks = 0;
+      let liveBatches = 0;
       const snapshotIds: string[] = [];
       const statuses: { lastWriteAt?: string }[] = [];
       const context = {
@@ -85,6 +86,10 @@ setInterval(()=>emit({type:'status',state:'syncing',message:'fixture',active:1})
           ticks: Tick[],
         ) => {
           if (!books.length && !ticks.length) return;
+          assert.ok(
+            liveBatches > 0,
+            'SDK feed receives data before durable storage succeeds',
+          );
           assert.equal(bars.length, depthOnly || tickOnly ? 0 : 1);
           attempts++;
           snapshotIds.push(
@@ -127,12 +132,19 @@ setInterval(()=>emit({type:'status',state:'syncing',message:'fixture',active:1})
         store,
         state,
         async () => executable,
+        () => {
+          liveBatches++;
+        },
       );
       try {
         worker.start();
         for (let i = 0; i < 60 && !writes; i++) await delay(100);
         assert.ok(writes > 0, 'batch survives failed storage write');
         assert.ok(attempts >= 2);
+        assert.ok(
+          liveBatches >= 1,
+          'collector restarts may republish source data',
+        );
         if (tickOnly) {
           assert.equal(
             checks,

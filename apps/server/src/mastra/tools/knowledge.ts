@@ -1,3 +1,5 @@
+import { BuiltinTool, type ToolSettings } from '../../modules/tools/base.js';
+import type { ToolDependencies } from '../../modules/tools/types.js';
 import { createTool, type ToolExecutionContext } from '@mastra/core/tools';
 import { z } from 'zod';
 import { basename, extname, posix } from 'node:path';
@@ -466,4 +468,21 @@ export function createKnowledgeTools(service?: KnowledgeService) {
         }),
     }),
   };
+}
+
+const defaultKnowledgeTools = createKnowledgeTools();
+
+export class KnowledgeTool extends BuiltinTool {
+  constructor(
+    private readonly toolId: keyof ReturnType<typeof createKnowledgeTools>,
+  ) {
+    super(defaultKnowledgeTools[toolId]);
+  }
+
+  protected override create(
+    _config: ToolSettings<'builtin'>,
+    dependencies: ToolDependencies,
+  ) {
+    return createKnowledgeTools(dependencies.knowledge)[this.toolId];
+  }
 }

@@ -1,5 +1,11 @@
+import { BuiltinTool, type ToolSettings } from '../../modules/tools/base.js';
+import type {
+  ToolDependencies,
+  ToolDefaultConfigs,
+  ToolRegistryOptions,
+} from '../../modules/tools/types.js';
 import { randomUUID } from 'node:crypto';
-import type { ToolsInput } from '@mastra/core/agent';
+import type { RegisteredTool } from '../../modules/tools/types.js';
 import {
   standardSchemaToJSONSchema,
   toStandardSchema,
@@ -13,11 +19,7 @@ import {
   type NeedsApprovalFn,
   type ValidationError,
 } from '@mastra/core/tools';
-import {
-  createWorkspaceTools,
-  createSkillTools,
-  WORKSPACE_TOOLS,
-} from '@mastra/core/workspace';
+import { WORKSPACE_TOOLS } from '@mastra/core/workspace';
 import { z } from 'zod';
 import { ExecOutput, execOutputSchema } from './exec/output.js';
 import { runExec } from './exec/runtime.js';
@@ -25,7 +27,7 @@ import { createExecModules } from './exec/modules.js';
 import { execToolDescription } from './exec/declaration.js';
 
 type Dependencies = {
-  getTools: (context: ToolExecutionContext) => Promise<ToolsInput>;
+  getTools: (context: ToolExecutionContext) => Promise<RegisteredTool[]>;
 };
 
 /** The catalog is built at invocation time and respects global and Agent exclusions. */
@@ -79,31 +81,14 @@ Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.
       );
       try {
         signal.throwIfAborted();
-        const available = Promise.all([
+        const tools = await abortable(
           getTools({ ...context, abortSignal: signal }),
-          context.workspace
-            ? createWorkspaceTools(context.workspace, {
-                workspace: context.workspace,
-                requestContext: context.requestContext,
-              })
-            : {},
-          context.browser?.getTools() ?? {},
-        ]);
-        const [application, workspace, browser] = await abortable(
-          available,
           signal,
         );
-        const skills = context.workspace?.skills
-          ? createSkillTools(context.workspace.skills)
-          : {};
         const catalog = new Map<string, Tool<unknown, unknown>>();
-        for (const [id, candidate] of Object.entries({
-          ...skills,
-          ...browser,
-          ...workspace,
-          ...application,
-        })) {
+        for (const candidate of tools) {
           if (!candidate || typeof candidate !== 'object') continue;
+          const { id } = candidate;
           if (id === 'exec' || !('execute' in candidate) || !candidate.execute)
             continue;
           const name = id
@@ -119,15 +104,18 @@ Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.
           deadline,
           modules: createExecModules(
             { ...context, abortSignal: signal },
-            // The native read tool is hidden when the application owns read_file.
-            context.workspace?.getToolsConfig()?.[
-              WORKSPACE_TOOLS.FILESYSTEM.READ_FILE
-            ]?.name === 'read_file' &&
+            {
+              availableTools: new Set(tools.map((tool) => tool.id)),
+              // The native read tool is hidden when the application owns read_file.
+              ...(context.workspace?.getToolsConfig()?.[
+                WORKSPACE_TOOLS.FILESYSTEM.READ_FILE
+              ]?.name === 'read_file' &&
               context.workspace.getToolsConfig()?.[
                 WORKSPACE_TOOLS.FILESYSTEM.READ_FILE
               ]?.enabled === false
-              ? { readFileEnabled: !!application.read_file }
-              : {},
+                ? { readFileEnabled: catalog.has('read_file') }
+                : {}),
+            },
           ),
           catalog: [...catalog].map(([name, tool]) => {
             const inputSchema = tool.inputSchema
@@ -267,4 +255,34 @@ async function abortable<T>(
 }
 
 // The runtime builder supplies the current application and MCP catalogs.
-export const exec = createExecTool({ getTools: async () => ({}) });
+export const exec = createExecTool({ getTools: async () => [] });
+
+export class ExecTool extends BuiltinTool<'builtin'> {
+  constructor() {
+    super(exec, 'builtin');
+  }
+
+  protected override create(
+    _config: ToolSettings<'builtin'>,
+    dependencies: ToolDependencies,
+    options: ToolRegistryOptions,
+    defaults: ToolDefaultConfigs,
+  ) {
+    return createExecTool({
+      getTools: (context) => {
+        if (!dependencies.getTools)
+          throw new Error('Tool registry is unavailable');
+        return dependencies.getTools(
+          defaults,
+          { ...dependencies, context },
+          {
+            ...options,
+            ids: undefined,
+            includeRuntimeTools: true,
+            disabledTools: [...(options.disabledTools ?? []), 'exec'],
+          },
+        );
+      },
+    });
+  }
+}

@@ -1,3 +1,4 @@
+import { BuiltinTool } from '../../modules/tools/base.js';
 import { setTimeout } from 'node:timers/promises';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
@@ -31,10 +32,11 @@ export const sleep = createTool({
   // },
   execute: async ({ durationMs }, context) => {
     const startedAt = performance.now();
-    try{
+    try {
       await setTimeout(durationMs, undefined, { signal: context?.abortSignal });
-    }catch{ /* empty */ }
-
+    } catch {
+      /* empty */
+    }
 
     return {
       status: context?.abortSignal?.aborted === true ? 'aborted' : 'completed',
@@ -43,3 +45,13 @@ export const sleep = createTool({
     };
   },
 });
+
+export class SleepTool extends BuiltinTool {
+  constructor() {
+    super(sleep);
+  }
+
+  protected override create() {
+    return this.tool;
+  }
+}

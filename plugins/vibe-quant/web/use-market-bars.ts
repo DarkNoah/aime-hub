@@ -17,6 +17,7 @@ interface BarsView {
   historical: boolean;
   windowRevision: number;
   targetTime: number | null;
+  priceTick?: number;
 }
 
 const emptyView = (identity: string): BarsView => ({
@@ -36,6 +37,7 @@ const emptyView = (identity: string): BarsView => ({
 interface Session {
   view: BarsView;
   url: string;
+  dailyUrl: string;
   revision: number;
   disposed: boolean;
   navigating: boolean;
@@ -49,6 +51,8 @@ export function useMarketBars({
   intraday,
   identity,
   retry,
+  barsPath,
+  initialTime = null,
 }: {
   pluginId: string;
   symbol: string;
@@ -56,9 +60,13 @@ export function useMarketBars({
   intraday: boolean;
   identity: string;
   retry: number;
+  /** An authorized trade uses the same market history reader without requiring a watchlist entry. */
+  barsPath?: string;
+  initialTime?: number | null;
 }) {
   const [view, setView] = useState(() => emptyView(identity));
   const session = useRef<Session | null>(null);
+  const focus = useRef(initialTime);
 
   function commit(active: Session, changes: Partial<BarsView>) {
     if (active.disposed) return;
@@ -79,9 +87,12 @@ export function useMarketBars({
   }
 
   useEffect(() => {
+    const path = barsPath ?? `/bars?symbol=${encodeURIComponent(symbol)}`;
+    const url = `${path}${path.includes('?') ? '&' : '?'}`;
     const active: Session = {
       view: emptyView(identity),
-      url: `/bars?symbol=${encodeURIComponent(symbol)}&duration=${duration}`,
+      url: `${url}duration=${duration}`,
+      dailyUrl: `${url}duration=86400`,
       revision: 0,
       disposed: false,
       navigating: false,
@@ -100,10 +111,7 @@ export function useMarketBars({
               `${active.url}&limit=${intraday ? 1000 : BAR_PAGE_SIZE}`,
             ),
             intraday
-              ? request<Bar[]>(
-                  active,
-                  `/bars?symbol=${encodeURIComponent(symbol)}&duration=86400`,
-                )
+              ? request<Bar[]>(active, active.dailyUrl)
               : Promise.resolve([] as Bar[]),
           ]);
           if (!active.disposed && revision === active.revision) {
@@ -131,14 +139,29 @@ export function useMarketBars({
       if (!active.disposed)
         timer = setTimeout(() => void poll(), document.hidden ? 10000 : 3000);
     }
-    if (symbol) void poll();
+    if (symbol) {
+      if (initialTime !== null && focus.current !== null) {
+        commit(active, { historical: true });
+        void navigate(focus.current);
+      }
+      void poll();
+    }
     return () => {
       active.disposed = true;
       for (const controller of active.requests) controller.abort();
       clearTimeout(timer);
     };
     // Each identity owns its requests, pagination and polling lifetime.
-  }, [pluginId, symbol, duration, intraday, identity, retry]);
+  }, [
+    pluginId,
+    symbol,
+    duration,
+    intraday,
+    identity,
+    retry,
+    barsPath,
+    initialTime,
+  ]);
 
   function current() {
     const active = session.current;
@@ -149,9 +172,10 @@ export function useMarketBars({
 
   async function navigate(time: number | null): Promise<boolean> {
     const active = current();
-    if (!active || intraday || active.navigating) return false;
+    if (!active || active.navigating) return false;
     const revision = ++active.revision;
     active.navigating = true;
+    focus.current = time;
     for (const controller of active.requests) controller.abort();
     commit(active, {
       loading: true,
@@ -161,15 +185,17 @@ export function useMarketBars({
     });
     try {
       const result: BarWindow =
-        time === null
-          ? {
-              bars: await request<Bar[]>(
-                active,
-                `${active.url}&limit=${BAR_PAGE_SIZE}`,
-              ),
-              targetTime: null,
-            }
-          : await request<BarWindow>(active, `${active.url}&around=${time}`);
+        time !== null && intraday
+          ? await intradayWindow(active, time)
+          : time === null
+            ? {
+                bars: await request<Bar[]>(
+                  active,
+                  `${active.url}&limit=${BAR_PAGE_SIZE}`,
+                ),
+                targetTime: null,
+              }
+            : await request<BarWindow>(active, `${active.url}&around=${time}`);
       if (active.disposed || revision !== active.revision) return false;
       if (!result.bars.length) {
         toast.error('该标的暂无可用 K 线');
@@ -179,14 +205,17 @@ export function useMarketBars({
         bars: result.bars,
         targetTime: result.targetTime,
         historical: time !== null,
-        hasBefore: true,
-        hasAfter: time !== null,
+        hasBefore: !intraday,
+        hasAfter: !intraday && time !== null,
+        priceTick: result.priceTick ?? active.view.priceTick,
         windowRevision: active.view.windowRevision + 1,
       });
       return true;
     } catch {
-      if (!active.disposed && revision === active.revision)
+      if (!active.disposed && revision === active.revision) {
+        commit(active, { error: '行情跳转失败，请重试' });
         toast.error('行情跳转失败，请重试');
+      }
       return false;
     } finally {
       if (!active.disposed && revision === active.revision) {
@@ -194,6 +223,30 @@ export function useMarketBars({
         commit(active, { loading: false });
       }
     }
+  }
+
+  async function intradayWindow(
+    active: Session,
+    time: number,
+  ): Promise<BarWindow> {
+    const daily = await request<BarWindow>(
+      active,
+      `${active.dailyUrl}&around=${time}`,
+    );
+    const day = daily.bars.findLast((bar) => bar.time <= time) ?? daily.bars[0];
+    if (!day) return { bars: [], targetTime: null };
+    const end = daily.bars.find((bar) => bar.time > day.time)?.time;
+    const minutes = await request<Bar[]>(
+      active,
+      `${active.url}&after=${day.time - 1}&limit=1000`,
+    );
+    const bars = minutes.filter((bar) => end === undefined || bar.time < end);
+    return {
+      bars,
+      targetTime:
+        bars.findLast((bar) => bar.time <= time)?.time ?? bars[0]?.time ?? null,
+      priceTick: daily.priceTick,
+    };
   }
 
   async function loadMore(direction: PageDirection) {

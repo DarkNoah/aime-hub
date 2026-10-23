@@ -1,3 +1,5 @@
+import { BuiltinTool, type ToolSettings } from '../../modules/tools/base.js';
+import type { ToolDependencies } from '../../modules/tools/types.js';
 import { randomUUID } from 'node:crypto';
 import { createTool } from '@mastra/core/tools';
 import { generateImage, type ImageModel } from 'ai';
@@ -231,3 +233,19 @@ export function createImageGenTool(
 }
 
 export const imageGen = createImageGenTool();
+
+export class ImageGenTool extends BuiltinTool<'image_gen'> {
+  constructor() {
+    super(imageGen, 'image_gen');
+  }
+
+  protected override create(
+    config: ToolSettings<'image_gen'>,
+    dependencies: ToolDependencies,
+  ) {
+    return createImageGenTool(config, {
+      resolveModel: dependencies.imageModel,
+      recordAsset: dependencies.recordAsset,
+    });
+  }
+}

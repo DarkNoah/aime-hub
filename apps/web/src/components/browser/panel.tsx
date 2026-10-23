@@ -38,6 +38,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { BrowserScreencast } from './screencast';
 import { BrowserPanelOpenContext } from './layout-context';
 import { browserErrorKey, getBrowserResource } from './resource';
+import { useAuthSession } from '@/features/auth/session-context';
 
 export default function BrowserPanel({
   threadId,
@@ -84,8 +85,12 @@ export default function BrowserPanel({
 
 function BrowserContent({ threadId }: { threadId: string }) {
   const { t } = useTranslation();
+  const sessionId = useAuthSession().data?.session.id ?? '';
   const switchId = useId();
-  const resource = useMemo(() => getBrowserResource(threadId), [threadId]);
+  const resource = useMemo(
+    () => getBrowserResource(threadId, sessionId),
+    [threadId, sessionId],
+  );
   const state = useSyncExternalStore(resource.subscribe, resource.getSnapshot);
   const [interactive, setInteractive] = useState(true);
   const [draft, setDraft] = useState<string | null>(null);

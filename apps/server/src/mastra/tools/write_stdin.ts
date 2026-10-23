@@ -1,3 +1,4 @@
+import { BuiltinTool } from '../../modules/tools/base.js';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { commandSandbox } from './command/sandbox.js';
@@ -36,3 +37,13 @@ export const writeStdin = createTool({
       context.abortSignal,
     ),
 });
+
+export class WriteStdinTool extends BuiltinTool {
+  constructor() {
+    super(writeStdin);
+  }
+
+  protected override create() {
+    return this.tool;
+  }
+}

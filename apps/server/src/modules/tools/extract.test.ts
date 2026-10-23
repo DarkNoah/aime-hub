@@ -30,6 +30,7 @@ import {
 } from '../../mastra/tools/extract.js';
 import { createExecTool } from '../../mastra/tools/exec.js';
 import { OpenAICompatibleProvider } from '../../mastra/providers/openai-compatible.js';
+import { pdfFixture } from './file-content-fixtures.js';
 import { readExtractionSource } from './extract/source.js';
 import { maxBinaryFileBytes } from '../files/binary-file.js';
 import { ToolService, buildTools } from './service.js';
@@ -119,13 +120,10 @@ test('extract sends complete UTF-8 content through native Mastra structured outp
   }
 });
 
-test('image and PDF bytes reach the native model as media, including uploaded paths', async (t) => {
+test('image bytes reach the native model as media, including uploaded paths', async (t) => {
   const w = await workspace(t);
-  const pdf = Buffer.from('%PDF-1.4\n%%EOF');
-  await writeFile(join(w.directory, 'scan.pdf'), pdf);
   for (const [source, mime, bytes] of [
     ['/.uploads/image.png', 'image/png', png],
-    ['scan.pdf', 'application/pdf', pdf],
   ] as const) {
     const f = modelFixture();
     assert.deepEqual(
@@ -420,17 +418,17 @@ test('unsupported images without vision/OCR are explicit and source text is neve
     readExtractionSource(
       '/.uploads/image.png',
       w.workspace.filesystem,
-      ['text'],
+      { modalitiesInput: ['text'] },
       AbortSignal.timeout(1000),
       {},
     ),
-    /图片抽取需要/,
+    /图片.*OCR/,
   );
 });
 
-test('native Responses transport serializes images and PDF bytes as input media, never text', async (t) => {
+test('native Responses transport serializes image bytes as input_image and PDFs as Markdown', async (t) => {
   const w = await workspace(t);
-  const pdf = Buffer.from('%PDF-1.4\n%%EOF');
+  const pdf = pdfFixture();
   await writeFile(join(w.directory, 'scan.pdf'), pdf);
   const requests: Record<string, unknown>[] = [];
   const nativeFetch = globalThis.fetch;
@@ -487,8 +485,8 @@ test('native Responses transport serializes images and PDF bytes as input media,
   assert.ok(
     imageBody.includes(`data:image/png;base64,${png.toString('base64')}`),
   );
-  assert.match(pdfBody, /input_file/);
-  assert.ok(
-    pdfBody.includes(`data:application/pdf;base64,${pdf.toString('base64')}`),
-  );
+  assert.match(pdfBody, /input_text/);
+  assert.match(pdfBody, /First page content/);
+  assert.match(pdfBody, /Last page END/);
+  assert.doesNotMatch(pdfBody, /input_file|application\/pdf;base64/);
 });

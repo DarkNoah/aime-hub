@@ -1,0 +1,11 @@
+{
+  "range_minutes": 15,
+  "lookback": 14,
+  "multiplier": 1.0,
+  "reward_risk_ratio": 1.5,
+  "protection_trigger_r": 1.0,
+  "protection_points": 10.0,
+  "deadline": "14:45",
+  "max_entries_per_day": 1,
+  "quantity": 1
+}

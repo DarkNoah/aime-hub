@@ -5,6 +5,7 @@ import {
   ColorType,
   LineSeries,
   createChart,
+  createSeriesMarkers,
   type IChartApi,
   type ISeriesApi,
   type PriceFormat,
@@ -22,6 +23,15 @@ import { EMPTY_DRAWING_STATE, type Drawing } from './drawings/model';
 import { ChartReadout, type ChartReadoutHandle } from './chart-readout';
 import { pricePrecision } from './readout-format';
 import { barLabelTime, barStartTime } from './chart-time';
+import { tradeMarkers } from './trade-markers';
+import type { RiskLevelRecord, Trade, TradeReplay } from '../strategy-types';
+import { TradeRiskPrimitive } from './trade-risk-primitive';
+import { tradeRiskDrawings } from './trade-risk';
+import { exitMarkerLabel } from './trade-exit';
+import {
+  useVolumeProfile,
+  type VolumeProfileSource,
+} from './indicators/main/volume-profile/use-volume-profile';
 
 export function MarketChart({
   bars,
@@ -35,6 +45,11 @@ export function MarketChart({
   onLoadMore,
   drawingScope = identity,
   drawingSharedScope = drawingScope,
+  trade,
+  markerTimes,
+  riskLevels,
+  showDrawingTools = true,
+  volumeProfileSource,
 }: {
   bars: Bar[];
   identity: string;
@@ -47,6 +62,11 @@ export function MarketChart({
   onLoadMore?: (direction: PageDirection) => void;
   drawingScope?: string;
   drawingSharedScope?: string;
+  trade?: Trade;
+  markerTimes?: TradeReplay['markerTimes'];
+  riskLevels?: readonly RiskLevelRecord[];
+  showDrawingTools?: boolean;
+  volumeProfileSource?: VolumeProfileSource;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const readout = useRef<ChartReadoutHandle | null>(null);
@@ -55,6 +75,7 @@ export function MarketChart({
     null,
   );
   const indicatorRenderer = useRef<IndicatorRenderer | null>(null);
+  const riskRenderer = useRef<TradeRiskPrimitive | null>(null);
   const previous = useRef<Bar[]>([]);
   const fitAfterIndicators = useRef(false);
   const rangeAfterIndicators = useRef<{ from: number; to: number } | null>(
@@ -70,6 +91,30 @@ export function MarketChart({
   const drawingCache = useRef(new Map<string, Drawing[]>());
   const [drawingState, setDrawingState] = useState(EMPTY_DRAWING_STATE);
   const [indicatorWarnings, setIndicatorWarnings] = useState<string[]>([]);
+  const [profileViewport, setProfileViewport] = useState({
+    identity: '',
+    from: 0,
+    to: 0,
+  });
+  const viewport =
+    profileViewport.identity === identity
+      ? profileViewport
+      : { from: Math.max(0, bars.length - 200), to: bars.length - 1 };
+  const firstVisible =
+    bars[Math.max(0, Math.min(bars.length - 1, viewport.from))]?.time;
+  const lastVisible =
+    bars[Math.max(0, Math.min(bars.length - 1, viewport.to))]?.time;
+  const profile = useVolumeProfile(
+    volumeProfileSource,
+    indicators.volumeProfile,
+    firstVisible,
+    lastVisible === undefined ? undefined : lastVisible + duration,
+    duration,
+    historical,
+    intraday,
+    bars.length ? bars[bars.length - 1].time + duration : undefined,
+    identity,
+  );
   useEffect(() => {
     if (!container.current) return;
     const formatter = new Intl.DateTimeFormat('zh-CN', {
@@ -116,8 +161,20 @@ export function MarketChart({
     api.subscribeCrosshairMove(onCrosshairMove);
     let previousRange: LogicalRange | null = null;
     let edgeTimer: ReturnType<typeof setTimeout>;
+    let profileTimer: ReturnType<typeof setTimeout>;
     const pendingEdges = new Set<PageDirection>();
     const onRangeChange = (range: LogicalRange | null) => {
+      clearTimeout(profileTimer);
+      if (range)
+        profileTimer = setTimeout(() => {
+          const from = Math.floor(range.from),
+            to = Math.ceil(range.to);
+          setProfileViewport((old) =>
+            old.identity === identity && old.from === from && old.to === to
+              ? old
+              : { identity, from, to },
+          );
+        }, 150);
       const oldRange = previousRange;
       previousRange = range;
       const requestedByUser = userInput.current;
@@ -180,6 +237,8 @@ export function MarketChart({
           priceFormat,
         });
     api.panes()[0].setStretchFactor(3);
+    riskRenderer.current = new TradeRiskPrimitive();
+    prices.current.attachPrimitive(riskRenderer.current);
     indicatorRenderer.current = new IndicatorRenderer(
       api,
       priceFormat,
@@ -187,15 +246,17 @@ export function MarketChart({
       prices.current,
       setIndicatorWarnings,
     );
-    drawingController.current = new DrawingController(
-      api,
-      prices.current,
-      container.current,
-      drawingScope,
-      drawingSharedScope,
-      drawingCache.current,
-      setDrawingState,
-    );
+    drawingController.current = showDrawingTools
+      ? new DrawingController(
+          api,
+          prices.current,
+          container.current,
+          drawingScope,
+          drawingSharedScope,
+          drawingCache.current,
+          setDrawingState,
+        )
+      : null;
     previous.current = [];
     fitAfterIndicators.current = false;
     rangeAfterIndicators.current = null;
@@ -203,6 +264,7 @@ export function MarketChart({
     userInput.current = false;
     return () => {
       clearTimeout(edgeTimer);
+      clearTimeout(profileTimer);
       cancelAnimationFrame(updateFrame.current);
       api.timeScale().unsubscribeVisibleLogicalRangeChange(onRangeChange);
       api.unsubscribeCrosshairMove(onCrosshairMove);
@@ -211,6 +273,9 @@ export function MarketChart({
       drawingController.current = null;
       indicatorRenderer.current?.dispose();
       indicatorRenderer.current = null;
+      if (riskRenderer.current)
+        prices.current?.detachPrimitive(riskRenderer.current);
+      riskRenderer.current = null;
       api.remove();
       chart.current = null;
       prices.current = null;
@@ -224,6 +289,7 @@ export function MarketChart({
     intraday,
     drawingScope,
     drawingSharedScope,
+    showDrawingTools,
   ]);
   useEffect(() => {
     if (!prices.current) return;
@@ -304,7 +370,7 @@ export function MarketChart({
     drawingSharedScope,
   ]);
   useEffect(() => {
-    indicatorRenderer.current?.update(bars, indicators);
+    indicatorRenderer.current?.update(bars, indicators, profile.context);
     // Fit only after all series drop the previous session's timestamps.
     if (fitAfterIndicators.current) {
       chart.current?.timeScale().fitContent();
@@ -326,6 +392,7 @@ export function MarketChart({
   }, [
     bars,
     indicators,
+    profile.context,
     identity,
     priceTick,
     intraday,
@@ -334,6 +401,65 @@ export function MarketChart({
     historical,
     drawingScope,
     drawingSharedScope,
+  ]);
+  useEffect(() => {
+    const series = prices.current;
+    if (!series || !trade) return;
+    const markers = createSeriesMarkers(
+      series,
+      tradeMarkers(trade, bars, duration, priceTick, markerTimes),
+    );
+    const lines = [
+      series.createPriceLine({
+        price: trade.entry_price,
+        color: '#2563eb',
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: '入场',
+      }),
+      series.createPriceLine({
+        price: trade.exit_price,
+        color: '#d97706',
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: exitMarkerLabel(trade.exit_reason),
+      }),
+    ];
+    return () => {
+      markers.detach();
+      for (const line of lines) series.removePriceLine(line);
+    };
+  }, [
+    trade,
+    markerTimes,
+    bars,
+    duration,
+    identity,
+    priceTick,
+    intraday,
+    drawingScope,
+    drawingSharedScope,
+    showDrawingTools,
+  ]);
+  useEffect(() => {
+    riskRenderer.current?.setDrawings(
+      trade && riskLevels
+        ? tradeRiskDrawings(trade, riskLevels, bars, duration, priceTick)
+        : [],
+    );
+  }, [
+    trade,
+    riskLevels,
+    bars,
+    duration,
+    identity,
+    priceTick,
+    intraday,
+    drawingScope,
+    drawingSharedScope,
+    showDrawingTools,
   ]);
   return (
     <div className="relative flex min-h-[440px] min-w-0 flex-1 lg:min-h-[560px]">
@@ -344,13 +470,31 @@ export function MarketChart({
           bars={bars}
           priceTick={priceTick}
         />
+        {profile.enabled && (
+          <div
+            className="flex flex-wrap items-center gap-2 border-b px-3 py-1 text-xs text-muted-foreground"
+            role="status"
+          >
+            <Badge variant="outline" className="text-[10px]">
+              成交量分布
+            </Badge>
+            <span>
+              {profile.pending
+                ? '正在读取分笔…'
+                : `${profile.count} 段 · 通达信分笔 · 红：买入 / 绿：卖出 / 灰：中性`}
+            </span>
+            {!!indicators.volumeProfile?.parameters.showCurrent && (
+              <span>含未完成区间</span>
+            )}
+          </div>
+        )}
         {indicatorWarnings.length > 0 && (
           <div
             className="flex min-w-0 items-center gap-2 border-b px-3 py-1 text-xs text-muted-foreground"
             role="status"
           >
             <Badge variant="outline" className="shrink-0 text-[10px]">
-              SMC
+              指标
             </Badge>
             <span className="truncate" title={indicatorWarnings.join('\n')}>
               {indicatorWarnings.join(' ')}
@@ -398,7 +542,7 @@ export function MarketChart({
           <DrawingHint state={drawingState} />
         </div>
       </div>
-      {!!bars.length && (
+      {!!bars.length && showDrawingTools && (
         <DrawingToolbar
           key={drawingScope}
           state={drawingState}
@@ -407,6 +551,9 @@ export function MarketChart({
           onClear={() => drawingController.current?.clear()}
           onCrossPeriod={(value) =>
             drawingController.current?.setCrossPeriod(value)
+          }
+          onFibonacciOptions={(options) =>
+            drawingController.current?.setFibonacciOptions(options)
           }
         />
       )}

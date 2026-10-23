@@ -15,6 +15,7 @@ import { barLabelTime } from '../chart-time';
 import { INDICATORS } from './registry';
 import { IndicatorDrawingPrimitive } from './drawing-primitive';
 import type {
+  IndicatorContext,
   IndicatorOverlay,
   IndicatorPlot,
   IndicatorPreference,
@@ -31,6 +32,7 @@ interface Instance {
   preference?: IndicatorPreference;
   primitive?: IndicatorDrawingPrimitive;
   overlay?: IndicatorOverlay;
+  context?: IndicatorContext;
 }
 
 /** Reconcile series in place so visibility/settings never recreate the price chart. */
@@ -48,7 +50,11 @@ export class IndicatorRenderer {
     private onWarnings?: (warnings: string[]) => void,
   ) {}
 
-  update(bars: readonly Bar[], preferences: IndicatorPreferences) {
+  update(
+    bars: readonly Bar[],
+    preferences: IndicatorPreferences,
+    context?: IndicatorContext,
+  ) {
     const range = this.chart.timeScale().getVisibleLogicalRange();
     const definitions = INDICATORS.filter(
       (definition) =>
@@ -83,7 +89,11 @@ export class IndicatorRenderer {
           instance.pane.moveTo(subIndex);
         subIndex += 1;
       }
-      if (this.previousBars === bars && instance.preference === preference)
+      if (
+        this.previousBars === bars &&
+        instance.preference === preference &&
+        (definition.id !== 'volumeProfile' || instance.context === context)
+      )
         continue;
       const plots = definition.render(bars, preference.parameters);
       if (definition.renderOverlay) {
@@ -91,6 +101,7 @@ export class IndicatorRenderer {
           bars,
           preference.parameters,
           this.duration,
+          context,
         );
         if (!instance.primitive) {
           instance.primitive = new IndicatorDrawingPrimitive();
@@ -136,6 +147,7 @@ export class IndicatorRenderer {
       }
       instance.pane.setPreserveEmptyPane(false);
       instance.preference = preference;
+      instance.context = context;
     }
     const instances = [...this.instances.values()];
     const warnings = instances.flatMap(

@@ -18,10 +18,20 @@ const schema = z
     clickhouseUser: z.string().min(1),
     clickhousePassword: z.string().min(1),
     clickhouseReadOnly: z.boolean().default(false),
+    newsEnabled: z.boolean().default(true),
+    newsDatabase: z
+      .string()
+      .regex(/^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/)
+      .default('vibe_quant_news'),
+    newsPollSeconds: z.number().int().min(30).max(3600).default(120),
+    newsFetchConcurrency: z.number().int().min(1).max(8).default(3),
+    newsFailureThreshold: z.number().int().min(1).max(20).default(3),
     tqUser: z.string().default(''),
     tqPassword: z.string().default(''),
     tushareToken: z.string().default(''),
     tdxServers: z.string().default(''),
+    tdxTradeStockHost: z.ipv4().default('124.71.187.122'),
+    tdxTradeFutureHost: z.ipv4().default('116.205.143.214'),
     beforeOpenMinutes: z.number().int().min(0).max(120),
     afterCloseMinutes: z.number().int().min(0).max(120),
     flushSeconds: z.number().int().min(1).max(60),

@@ -2,6 +2,12 @@ import { parseHTML } from 'linkedom';
 import { Defuddle } from 'defuddle/node';
 import type { WebFetchResult } from '../providers/base-provider.js';
 import {
+  assertWechatResult,
+  assertWechatUrl,
+  isWechatUrl,
+  prepareWechatArticle,
+} from './wechat.js';
+import {
   requestWebResource,
   WebRequestError,
   webUrl,
@@ -12,7 +18,8 @@ export async function extractWebContent(
   html: string,
   url: string,
 ): Promise<WebFetchResult> {
-  const { document } = parseHTML(html);
+  const wechat = isWechatUrl(url) ? prepareWechatArticle(html, url) : undefined;
+  const { document } = wechat ?? parseHTML(html);
   // linkedom does not execute scripts or load resources. Keep metadata for Defuddle,
   // and normalize relative links against the final URL before conversion.
   let base = url;
@@ -44,14 +51,15 @@ export async function extractWebContent(
     }
   }
   const article = await Defuddle(document as unknown as Document, url, {
+    ...wechat?.options,
     markdown: true,
     // All network access stays in the bounded, cancellable request/browser stages.
     useAsync: false,
   });
   const markdown = article.content.trim();
   if (!markdown) throw new Error('No readable page content');
-  const title = article.title?.trim();
-  return {
+  const title = wechat?.title || article.title?.trim();
+  const result = {
     content:
       title && !markdown.startsWith(`# ${title}\n`) && markdown !== `# ${title}`
         ? `# ${title}\n\n${markdown}`
@@ -60,6 +68,8 @@ export async function extractWebContent(
     url,
     contentType: 'text/markdown',
   };
+  assertWechatResult(url, result);
+  return result;
 }
 
 const headers = {
@@ -77,13 +87,14 @@ export async function readWebPage(
   let current = webUrl(url).href;
   for (let count = 0; count <= 5; count++) {
     options.signal.throwIfAborted();
+    assertWechatUrl(current);
     const response = await request(current, { ...options, headers });
     if (redirects.has(response.status) && response.headers.location) {
       current = webUrl(new URL(response.headers.location, current).href).href;
       continue;
     }
     if (response.status < 200 || response.status >= 300)
-      throw new Error('Page request failed');
+      throw new Error(`ARTICLE_HTTP_${response.status}`);
     const type = response.headers['content-type']
       ?.split(';')[0]
       .trim()
@@ -95,7 +106,9 @@ export async function readWebPage(
       type === 'application/json'
     ) {
       if (!content.trim()) throw new Error('Page is empty');
-      return { content, url: current, contentType: type };
+      const result = { content, url: current, contentType: type };
+      assertWechatResult(url, result);
+      return result;
     }
     if (type && type !== 'text/html' && type !== 'application/xhtml+xml')
       throw new Error('Unsupported page format');
@@ -113,10 +126,12 @@ export async function readBrowserPage(
   signal.throwIfAborted();
   const { chromium } = await import('../../lib/browser.js');
   const browser = await chromium.launch({ headless: true, timeout: timeoutMs });
-  const close = () => {
-    void browser.close().catch(() => {});
+  let closing: Promise<void> | undefined;
+  const close = () => (closing ??= browser.close());
+  const onAbort = () => {
+    void close().catch(() => {});
   };
-  signal.addEventListener('abort', close, { once: true });
+  signal.addEventListener('abort', onAbort, { once: true });
   try {
     signal.throwIfAborted();
     const context = await browser.newContext({
@@ -178,7 +193,25 @@ export async function readBrowserPage(
       waitUntil: 'domcontentloaded',
       timeout: timeoutMs,
     });
-    if (!response?.ok()) throw new Error('Browser page request failed');
+    if (!response?.ok())
+      throw new Error(`ARTICLE_HTTP_${response?.status() ?? 0}`);
+    assertWechatUrl(page.url());
+    if (isWechatUrl(url)) {
+      await page
+        .waitForFunction(
+          () => {
+            const root = document.querySelector('#js_content');
+            return (
+              !!root &&
+              ((root.textContent?.trim().length ?? 0) >= 10 ||
+                !!root.querySelector('img[data-src], img[src]'))
+            );
+          },
+          undefined,
+          { timeout: Math.min(timeoutMs, 8000) },
+        )
+        .catch(() => {});
+    }
     await page
       .waitForLoadState('networkidle', { timeout: Math.min(timeoutMs, 5000) })
       .catch(() => {});
@@ -187,8 +220,13 @@ export async function readBrowserPage(
     if (Buffer.byteLength(html) > 5_000_000)
       throw new WebRequestError('TOO_LARGE');
     return extractWebContent(html, webUrl(page.url()).href);
+  } catch (error) {
+    // Browser shutdown interrupts pending Playwright operations. Preserve the
+    // caller's cancellation reason instead of reporting it as a page failure.
+    signal.throwIfAborted();
+    throw error;
   } finally {
-    signal.removeEventListener('abort', close);
-    await browser.close();
+    signal.removeEventListener('abort', onAbort);
+    await close();
   }
 }

@@ -37,6 +37,7 @@ import {
 } from '@aime/shared/thread-messages';
 import type {
   ChatSettings,
+  CreateThreadInput,
   QueuedMessage,
   UpdateQueuedMessage,
   ChatSkill,
@@ -385,6 +386,10 @@ export class ThreadService {
     return {
       id: thread.id,
       projectId: threadScope(thread.resourceId).projectId ?? null,
+      plugin:
+        typeof thread.metadata?.plugin === 'string'
+          ? thread.metadata.plugin
+          : undefined,
       createdBy:
         typeof thread.metadata?.createdBy === 'string'
           ? thread.metadata.createdBy
@@ -913,20 +918,14 @@ export class ThreadService {
     return runtime;
   }
 
-  createThread(
-    userId: string,
-    input: ChatSettings & { title?: string; projectId?: string },
-  ) {
+  createThread(userId: string, input: CreateThreadInput) {
     const create = () => this.create(userId, input);
     return input.projectId
       ? this.locked(`project:${input.projectId}`, create)
       : create();
   }
 
-  private async create(
-    userId: string,
-    input: ChatSettings & { title?: string; projectId?: string },
-  ) {
+  private async create(userId: string, input: CreateThreadInput) {
     if (input.projectId) await this.projectAccess(userId, input.projectId);
     input = { ...input, ...(await this.runner.resolveSettings?.(input)) };
     if (input.model) await this.runner.validate(userId, input, input.projectId);
@@ -944,6 +943,7 @@ export class ThreadService {
         model: input.model,
         agentId: input.agentId ?? null,
         createdBy: userId,
+        ...(input.plugin !== undefined ? { plugin: input.plugin } : {}),
         workspace,
         ...initialData(),
         reasoningEffort: input.reasoningEffort,
@@ -963,6 +963,7 @@ export class ThreadService {
     page = 0,
     projectId?: string,
     perPage = 10,
+    plugin?: string,
   ) {
     if (projectId) await this.projectAccess(userId, projectId);
     const threads = await this.listChatThreads(
@@ -975,14 +976,19 @@ export class ThreadService {
           new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
       );
     }
-    // Paginate visible chats so judge threads cannot create short or empty pages.
+    // Apply plugin filtering before pagination, within the authorized resource scope.
+    const visible = threads.filter((thread) =>
+      plugin === undefined
+        ? typeof thread.metadata?.plugin !== 'string'
+        : thread.metadata?.plugin === plugin,
+    );
     const start = page * perPage;
     return {
-      threads: threads
+      threads: visible
         .slice(start, start + perPage)
         .map((thread) => this.summary(thread, this.runtimes.get(thread.id))),
       page,
-      hasMore: start + perPage < threads.length,
+      hasMore: start + perPage < visible.length,
     };
   }
 

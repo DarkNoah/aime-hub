@@ -15,7 +15,7 @@ export type ChatUpload = {
   preview: string;
   status: 'queued' | 'uploading' | 'finishing' | 'done' | 'error';
   progress: number;
-  /** Locally created images are message parts only, never workspace uploads. */
+  /** Freehand drawings can be sent inline; edited message images are uploaded. */
   inlineOnly?: boolean;
   drawing?: TLEditorSnapshot;
   path?: string;
@@ -135,21 +135,23 @@ export class ChatUploadQueue {
     this.pump();
     return true;
   }
-  replaceInlineImage(
-    id: string,
-    file: File,
-    drawing: TLEditorSnapshot,
-  ): boolean {
+  replaceDrawing(id: string, file: File, drawing: TLEditorSnapshot): boolean {
     if (this.disposed) return false;
     const index = this.entries.findIndex(
-      (item) => item.id === id && item.inlineOnly,
+      (item) => item.id === id && item.drawing,
     );
     if (index < 0) return false;
     const previous = this.entries[index];
-    const replacement = this.inlineEntry(file, drawing, id);
+    const replacement = previous.inlineOnly
+      ? this.inlineEntry(file, drawing, id)
+      : this.uploadEntry(file, drawing, id);
     previous.controller.abort();
     if (previous.preview) URL.revokeObjectURL(previous.preview);
     this.entries[index] = replacement;
+    if (!this.active.has(previous))
+      void this.clean(previous).catch((error) =>
+        this.deps.onError(error, previous.file),
+      );
     this.emit();
     this.pump();
     return true;
@@ -158,8 +160,33 @@ export class ChatUploadQueue {
     this.snapshot = this.entries.map((entry) => ({ ...entry }));
     this.listeners.forEach((listener) => listener());
   }
-  add(files: File[] | FileList, reserved = 0) {
-    if (this.disposed) return;
+  private uploadEntry(
+    file: File,
+    drawing?: TLEditorSnapshot,
+    id = nanoid(),
+  ): Entry {
+    if (file.size > FILE_UPLOAD_MAX_SIZE)
+      throw new Error('File exceeds upload limit');
+    return {
+      id,
+      file,
+      drawing,
+      preview:
+        drawing || isInlineChatImage(file) ? URL.createObjectURL(file) : '',
+      // A replacement keeps its attachment ID but gets an independent upload directory.
+      directory: `.uploads/${nanoid()}`,
+      controller: new AbortController(),
+      status: 'queued',
+      progress: 0,
+    };
+  }
+  add(
+    files: File[] | FileList,
+    reserved = 0,
+    drawing?: TLEditorSnapshot,
+  ): boolean {
+    if (this.disposed) return false;
+    let added = false;
     for (const file of Array.from(files)) {
       const code =
         file.size > FILE_UPLOAD_MAX_SIZE
@@ -171,19 +198,12 @@ export class ChatUploadQueue {
         this.deps.onError({ code }, file);
         continue;
       }
-      const id = nanoid();
-      this.entries.push({
-        id,
-        file,
-        preview: isInlineChatImage(file) ? URL.createObjectURL(file) : '',
-        directory: `.uploads/${id}`,
-        controller: new AbortController(),
-        status: 'queued',
-        progress: 0,
-      });
+      this.entries.push(this.uploadEntry(file, drawing));
+      added = true;
     }
     this.emit();
     this.pump();
+    return added;
   }
   private pump() {
     if (this.disposed) return;
@@ -222,7 +242,7 @@ export class ChatUploadQueue {
       }
       entry.threadId = await this.deps.ensureThread();
       signal.throwIfAborted();
-      if (isInlineChatImage(entry.file))
+      if (isInlineChatImage(entry.file) && !entry.drawing)
         entry.image = {
           type: 'file',
           filename: entry.file.name,

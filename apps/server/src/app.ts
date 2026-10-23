@@ -47,6 +47,7 @@ import { automationRouter } from './modules/automations/rpc.js';
 import type { NotificationService } from './modules/notifications/service.js';
 import { notificationRouter } from './modules/notifications/rpc.js';
 import { notificationRoutes } from './modules/notifications/routes.js';
+import { realtimeRoutes } from './modules/realtime/routes.js';
 import { assetRouter } from './modules/assets/rpc.js';
 import type { AssetService } from './modules/assets/service.js';
 import type { McpService } from './modules/mcp/service.js';
@@ -148,6 +149,11 @@ export function createApp(
   });
   if (chat)
     app.route('/api/threads', threadRoutes(auth, chat.threads, webOrigins));
+  if (chat || notifications)
+    app.route(
+      '/api/realtime',
+      realtimeRoutes(auth, (request) => app.fetch(request), webOrigins),
+    );
   app.use('/api/*', async (c, next) => {
     const path = c.req.path;
     const threadRequest =

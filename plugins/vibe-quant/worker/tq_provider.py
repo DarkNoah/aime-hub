@@ -58,6 +58,7 @@ def run(config):
                     source_time = timestamp(item.datetime)
                     value = quote(symbol, source_time, item, {
                         'last': 'last_price', 'preClose': 'pre_close', 'openInterest': 'open_interest',
+                        'high': 'highest', 'low': 'lowest',
                         'bid': 'bid_price1', 'ask': 'ask_price1'}, item.underlying_symbol)
                     if source_time is not None and item.ins_class != 'INDEX':
                         books.append(tq_book(symbol, item, source_time, received_at))
@@ -65,16 +66,15 @@ def run(config):
                     if value:
                         changed_quotes.append(value)
                         initialized.add((symbol, 'quote'))
+            targets = tick_targets(symbols, quotes)
+            for symbol in targets:
+                # Actual-contract minute bars also serve SDK execution in read-only mode.
+                if (symbol, 60) not in serials:
+                    serials[(symbol, 60)] = api.get_kline_serial(symbol, 60, data_length=config['historyBars'])
+            for symbol, item in zip(symbols, quotes):
+                if symbol in active and item.ins_class == 'CONT':
+                    active.add(item.underlying_symbol)
             if ticks is not None:
-                targets = tick_targets(symbols, quotes)
-                for symbol in targets:
-                    # A continuous watch subscribes to actual-contract ticks.
-                    # Retain matching minute bars for volume reconciliation.
-                    if (symbol, 60) not in serials:
-                        serials[(symbol, 60)] = api.get_kline_serial(symbol, 60, data_length=config['historyBars'])
-                for symbol, item in zip(symbols, quotes):
-                    if symbol in active and item.ins_class == 'CONT':
-                        active.add(item.underlying_symbol)
                 # Process every changed tick window, including late close data.
                 ticks.collect(targets, received_at)
             for (symbol, duration), frame in serials.items():
@@ -90,11 +90,12 @@ def run(config):
                     if value:
                         changed_bars.append(value)
                 initialized.add(key)
+            # Publish observed main-contract mappings before their dependent bars.
+            if changed_quotes or books:
+                emit('data', quotes=changed_quotes, bars=[], orderBooks=books)
             # Bound JSONL records so the host can apply stream backpressure.
             for offset in range(0, len(changed_bars), 2000):
                 emit('data', quotes=[], bars=changed_bars[offset:offset + 2000])
-            if changed_quotes or books:
-                emit('data', quotes=changed_quotes, bars=[], orderBooks=books)
             if time.monotonic() - last_status > 2:
                 state = 'syncing' if active else 'closed' if symbols else 'idle'
                 emit('status', state=state, message='实时订阅已连接' if active else '休市，等待下个同步窗口' if symbols else '添加自选后自动订阅', active=len(active.intersection(symbols)))

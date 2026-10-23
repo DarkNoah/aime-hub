@@ -7,7 +7,22 @@ const outputSchema = z.object({
   mimeType: z.string().optional(),
   model: z.string().optional(),
   truncated: z.boolean().optional(),
-  content: z.array(z.object({ type: z.literal('text'), text: z.string() })),
+  format: z.enum(['markdown', 'text']).optional(),
+  startLine: z.number().optional(),
+  endLine: z.number().optional(),
+  totalLines: z.number().optional(),
+  nextOffset: z.number().optional(),
+  warnings: z.array(z.string()).optional(),
+  content: z.array(
+    z.discriminatedUnion('type', [
+      z.object({ type: z.literal('text'), text: z.string() }),
+      z.object({
+        type: z.literal('image'),
+        data: z.string(),
+        mimeType: z.string(),
+      }),
+    ]),
+  ),
 });
 
 export function parseViewFileOutput(value: unknown) {
@@ -23,6 +38,9 @@ export function parseViewFileOutput(value: unknown) {
   return {
     ...result.data,
     isError: !result.data.ok || result.data.isError === true,
-    text: result.data.content.map(({ text }) => text).join('\n\n'),
+    text: result.data.content
+      .filter((part) => part.type === 'text')
+      .map(({ text }) => text)
+      .join('\n\n'),
   };
 }

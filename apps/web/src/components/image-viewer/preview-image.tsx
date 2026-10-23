@@ -31,6 +31,7 @@ function PreviewImageContent({
 }: PreviewImageProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [dimensions, setDimensions] = useState<{
     width: number;
     height: number;
@@ -39,38 +40,48 @@ function PreviewImageContent({
 
   return (
     <>
-      <button
-        type="button"
-        aria-label={label}
-        title={label}
-        onClick={() => setOpen(true)}
-        className={cn(
-          'group relative mx-auto block max-w-full cursor-zoom-in rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-          containerClassName,
-        )}
+      <div
+        className={cn('relative mx-auto w-fit max-w-full', containerClassName)}
       >
-        <img
-          src={src}
-          alt={alt}
-          loading={loading}
-          referrerPolicy={referrerPolicy}
+        <button
+          type="button"
+          aria-label={label}
+          title={label}
+          disabled={failed}
+          onClick={() => setOpen(true)}
           className={cn(
-            'mx-auto max-h-[60vh] max-w-full rounded object-contain',
-            className,
+            'group relative mx-auto block max-w-full cursor-zoom-in rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+            'w-full disabled:cursor-default',
           )}
-          onError={onError}
-          onLoad={(event) => {
-            const image = event.currentTarget;
-            setDimensions({
-              width: image.naturalWidth,
-              height: image.naturalHeight,
-            });
-          }}
-        />
-        <span className="pointer-events-none absolute right-2 bottom-2 rounded-md border bg-background/90 p-1.5 text-foreground transition-colors group-hover:bg-background">
-          <Expand className="size-4" aria-hidden="true" />
-        </span>
-      </button>
+        >
+          <img
+            src={src}
+            alt={alt}
+            loading={loading}
+            referrerPolicy={referrerPolicy}
+            className={cn(
+              'mx-auto max-h-[60vh] max-w-full rounded object-contain',
+              className,
+            )}
+            onError={(event) => {
+              setFailed(true);
+              onError?.(event);
+            }}
+            onLoad={(event) => {
+              const image = event.currentTarget;
+              setDimensions({
+                width: image.naturalWidth,
+                height: image.naturalHeight,
+              });
+            }}
+          />
+          {!failed && (
+            <span className="pointer-events-none absolute right-2 bottom-2 rounded-md border bg-background/90 p-1.5 text-foreground transition-colors group-hover:bg-background">
+              <Expand className="size-4" aria-hidden="true" />
+            </span>
+          )}
+        </button>
+      </div>
       {open && (
         <Suspense fallback={null}>
           <ImageLightbox

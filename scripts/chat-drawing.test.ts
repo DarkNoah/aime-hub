@@ -47,6 +47,79 @@ function setup(image?: ChatUploadDependencies['image']) {
 }
 const drawing = () => new File(['hello'], 'drawing.png', { type: 'image/png' });
 
+test('edited images upload, keep their canvas, and send only a workspace reference', async () => {
+  const { queue, calls } = setup(async () => {
+    throw new Error('Edited images must not become inline base64');
+  });
+  const snapshot: NonNullable<ChatUpload['drawing']> = {
+    document: { store: {}, schema: { schemaVersion: 2, sequences: {} } },
+  };
+  assert.equal(queue.add([drawing()], 0, snapshot), true);
+  await setImmediate();
+  const first = queue.getSnapshot()[0];
+  assert.equal(first.status, 'done');
+  assert.equal(first.drawing, snapshot);
+  assert.equal(first.inlineOnly, undefined);
+  assert.equal(first.image, undefined);
+  assert.match(first.path!, /^\.uploads\//);
+  assert.deepEqual(calls, ['thread', 'prepare', 'upload', 'uploaded']);
+  const parts = chatUploadParts(queue.getSnapshot());
+  assert.equal(parts.length, 1);
+  assert.equal(parts[0].type, 'text');
+  assert.ok(parts[0].type === 'text' && parts[0].text.includes(first.path!));
+  assert.ok(runInputSchema.safeParse({ id: 'edited-image', parts }).success);
+  const displayed = splitMessageAttachments({
+    id: 'edited-image',
+    role: 'user',
+    parts,
+  });
+  assert.equal(displayed.attachments.length, 1);
+  assert.ok(displayed.attachments[0].workspacePath);
+  assert.equal(
+    queue.replaceDrawing(first.id, drawing(), structuredClone(snapshot)),
+    true,
+  );
+  await setImmediate();
+  const second = queue.getSnapshot()[0];
+  assert.equal(queue.getSnapshot().length, 1);
+  assert.equal(second.id, first.id);
+  assert.notEqual(second.path, first.path);
+  assert.equal(second.image, undefined);
+  assert.equal(calls.filter((value) => value === 'remove').length, 1);
+  queue.cancel(second.id);
+  await setImmediate();
+  assert.equal(calls.filter((value) => value === 'remove').length, 2);
+});
+
+test('edited uploads can exceed the inline image limit and retain a preview', async () => {
+  const { queue } = setup(async () => {
+    throw new Error('No inline conversion expected');
+  });
+  const snapshot: NonNullable<ChatUpload['drawing']> = {
+    document: { store: {}, schema: { schemaVersion: 2, sequences: {} } },
+  };
+  assert.equal(
+    queue.add(
+      [
+        new File([new Uint8Array(MAX_IMAGE_BYTES + 1)], 'edited.png', {
+          type: 'image/png',
+        }),
+      ],
+      0,
+      snapshot,
+    ),
+    true,
+  );
+  await setImmediate();
+  assert.equal(queue.getSnapshot()[0].status, 'done');
+  assert.match(queue.getSnapshot()[0].preview, /^blob:/);
+  assert.equal(
+    chatUploadParts(queue.getSnapshot()).some((part) => part.type === 'file'),
+    false,
+  );
+  queue.commit();
+});
+
 test('editing replaces the same attachment and keeps the canvas out of message parts', async () => {
   const { queue, calls } = setup();
   const first: NonNullable<ChatUpload['drawing']> = {
@@ -57,7 +130,7 @@ test('editing replaces the same attachment and keeps the canvas out of message p
   await setImmediate();
   const original = queue.getSnapshot()[0];
   assert.equal(original.drawing, first);
-  assert.equal(queue.replaceInlineImage(original.id, drawing(), second), true);
+  assert.equal(queue.replaceDrawing(original.id, drawing(), second), true);
   await setImmediate();
   const updated = queue.getSnapshot();
   assert.equal(updated.length, 1);
@@ -66,7 +139,7 @@ test('editing replaces the same attachment and keeps the canvas out of message p
   assert.equal(updated[0].drawing, second);
   assert.equal('drawing' in chatUploadParts(updated)[0], false);
   assert.equal('path' in chatUploadParts(updated)[0], false);
-  assert.equal(queue.replaceInlineImage('missing', drawing(), second), false);
+  assert.equal(queue.replaceDrawing('missing', drawing(), second), false);
   assert.deepEqual(calls, []);
   queue.commit();
 });

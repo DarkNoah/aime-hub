@@ -84,7 +84,7 @@ export class IndicatorDrawingPrimitive implements ISeriesPrimitive {
         }
         if (drawing.kind === 'line') {
           ctx.strokeStyle = drawing.color;
-          ctx.lineWidth = 1;
+          ctx.lineWidth = drawing.lineWidth ?? 1;
           ctx.setLineDash(
             drawing.style === 'dashed'
               ? [5, 4]

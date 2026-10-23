@@ -159,12 +159,22 @@ export class MarketStore extends ClickHouseClient {
     engine: Engine,
     symbol: string,
     duration: number,
-    query: number | { before?: number; after?: number; limit?: number } = {},
+    query:
+      | number
+      | {
+          before?: number;
+          after?: number;
+          limit?: number;
+          singleThread?: boolean;
+          rebuildTicks?: boolean;
+        } = {},
   ): Promise<Bar[]> {
     const {
       before,
       after,
       limit: pageSize = 1000,
+      singleThread = false,
+      rebuildTicks = true,
     } = typeof query === 'number' ? { before: query } : query;
     const forward = after !== undefined;
     const period = derivedPeriod(duration, pageSize);
@@ -189,7 +199,8 @@ export class MarketStore extends ClickHouseClient {
       FROM ${this.table('bars')} FINAL WHERE engine = {engine:String} AND symbol = {symbol:String} AND duration = {duration:UInt32}
       AND time < {before:UInt64}
       ${forward ? 'AND time > {after:UInt64}' : ''}
-      ORDER BY time ${forward ? 'ASC' : 'DESC'} LIMIT {limit:UInt32} FORMAT JSON`,
+      ORDER BY time ${forward ? 'ASC' : 'DESC'} LIMIT {limit:UInt32}
+      ${singleThread ? 'SETTINGS max_threads=1, max_block_size=1000' : ''} FORMAT JSON`,
       {
         engine,
         symbol,
@@ -217,7 +228,9 @@ export class MarketStore extends ClickHouseClient {
     const result = period
       ? aggregateBars(bars, duration, pageSize, forward)
       : bars;
-    return rebuildTickBars(this, engine, symbol, duration, result);
+    return rebuildTicks
+      ? rebuildTickBars(this, engine, symbol, duration, result)
+      : result;
   }
 
   async barsAround(

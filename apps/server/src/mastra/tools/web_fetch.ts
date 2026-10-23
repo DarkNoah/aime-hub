@@ -1,9 +1,12 @@
+import { BuiltinTool, type ToolSettings } from '../../modules/tools/base.js';
+import type { ToolDependencies } from '../../modules/tools/types.js';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { defaultWebFetchConfig, type WebFetchConfig } from '@aime/shared/tools';
 import type { BaseProvider } from '../providers/base-provider.js';
 import { LocalProvider } from '../providers/local.js';
 import { publicWebAddress } from '../web/request.js';
+import { assertWechatResult, WechatArticleError } from '../web/wechat.js';
 
 export function createWebFetchTool(
   config: WebFetchConfig = defaultWebFetchConfig,
@@ -33,18 +36,29 @@ export function createWebFetchTool(
       truncated: z.boolean().optional(),
       ok: z.boolean(),
       isError: z.boolean().optional(),
+      errorCode: z.string().optional(),
     }),
     execute: async ({ url }, context) => {
       const abortSignal = context?.abortSignal;
-      const failed = () => ({
+      const failed = (error?: unknown) => ({
         content: abortSignal?.aborted
-          ? 'Web fetch was cancelled.'
-          : 'Web fetch failed. Please try another URL or try again later.',
+          ? '用户中止了操作'
+          : error instanceof WechatArticleError
+            ? {
+                WECHAT_VERIFICATION_REQUIRED:
+                  '微信要求完成验证，未获取到文章正文。',
+                WECHAT_ARTICLE_UNAVAILABLE: '微信文章已删除、失效或限制访问。',
+                WECHAT_CONTENT_MISSING: '微信页面未包含可读取的文章正文。',
+              }[error.code]
+            : 'Web fetch failed. Please try another URL or try again later.',
         url,
         provider: 'none',
         fallback: false,
         ok: false,
         isError: true,
+        ...(error instanceof WechatArticleError
+          ? { errorCode: error.code }
+          : {}),
       });
       if (abortSignal?.aborted) return failed();
       try {
@@ -64,6 +78,7 @@ export function createWebFetchTool(
             abortSignal?.throwIfAborted();
             if (!result.content.trim())
               throw new Error('Reader returned empty content');
+            assertWechatResult(url, result);
             return {
               ...result,
               content: result.content.slice(0, config.maxChars),
@@ -80,6 +95,7 @@ export function createWebFetchTool(
         abortSignal?.throwIfAborted();
         if (!result.content.trim())
           throw new Error('Page returned empty content');
+        assertWechatResult(url, result);
         return {
           ...result,
           content: result.content.slice(0, config.maxChars),
@@ -88,11 +104,28 @@ export function createWebFetchTool(
           fallback: true,
           ok: true,
         };
-      } catch {
-        return failed();
+      } catch (error) {
+        return failed(error);
       }
     },
   });
 }
 
 export const webFetch = createWebFetchTool();
+
+export class WebFetchTool extends BuiltinTool<'web_fetch'> {
+  constructor() {
+    super(webFetch, 'web_fetch');
+  }
+
+  protected override create(
+    config: ToolSettings<'web_fetch'>,
+    dependencies: ToolDependencies,
+  ) {
+    return createWebFetchTool(config, {
+      resolveProvider: dependencies.fetchProvider
+        ? (id) => dependencies.fetchProvider!(id, config.timeoutMs)
+        : undefined,
+    });
+  }
+}

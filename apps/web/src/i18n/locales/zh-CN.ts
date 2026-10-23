@@ -846,22 +846,24 @@ export const zhCN = {
   'chat.extract.loading': '正在解析文件并抽取 JSON…',
   'tools.viewFile': '读取文件',
   'tools.viewFileDescription':
-    '读取文本和代码文件，或使用 OCR 将图片和 PDF 解析为 Markdown。',
+    '读取文本、Office 和 PDF 文档，转写音视频，并支持图片 OCR 或多模态读取。',
   'tools.configureViewFile': '配置文件读取',
   'tools.enableViewFile': '启用文件读取',
   'tools.ocrModel': 'OCR 模型',
   'tools.selectOcrModel': '使用系统默认 OCR 模型',
   'tools.ocrModelHint':
-    '未单独选择时使用系统默认 OCR 模型；均未配置时仍可读取文本。支持 MinerU 和 PaddleOCR。',
+    '未单独选择时使用系统默认 OCR 模型。文本、Office 和文字型 PDF 无需 OCR；图片及扫描件支持 MinerU 和 PaddleOCR。',
   'tools.ocrProviderHint':
-    '文本支持按行读取，图片和 PDF 使用 OCR，其他二进制文件返回媒体或元数据。PDF 页码选择取决于供应商接口能力。',
+    'PDF、Word 和演示文稿转为 Markdown，表格返回工作表样例。图片保留 OCR 文本，当前模型支持图片输入时同时附带图片。音视频使用语音转写工具所选模型或默认 ASR 模型。',
   'tools.invalidOcrModel':
     '请选择已启用供应商中的可用 MinerU 或 PaddleOCR 模型。',
   'chat.viewFile.loading': '正在解析文件…',
   'chat.viewFile.empty': '未识别到文字。',
   'chat.viewFile.truncated': '内容已截断',
   'chat.viewFile.truncatedHint':
-    '仅显示前 100,000 个字符，可将文件拆分后继续读取。',
+    '内容超过 100,000 字符的返回限制，仅展示部分内容。可拆分文件后继续读取。',
+  'chat.viewFile.continueHint':
+    '显示解析内容第 {{start}}–{{end}} 行，共 {{total}} 行。使用 offset={{offset}} 可继续读取。',
   'chat.viewFile.failed': '文件解析失败。',
   'tools.transcriptionsDescription':
     '识别音频或视频中的语音，支持 JSON、纯文本及 SRT/VTT 字幕；视频先转为 WAV。',
@@ -1145,6 +1147,8 @@ export const zhCN = {
     '新增第一个变量，开始管理它的名称、值和说明。',
   'nav.plugins': '插件管理',
   'plugins.sidebarLoading': '正在加载插件侧栏…',
+  'plugins.threadList': '{{name}} 聊天线程',
+  'plugins.newThread': '新建 {{name}} 聊天',
   'plugins.sidebarFailed': '插件侧栏加载失败，请刷新页面重试。',
   'plugins.title': '插件管理',
   'plugins.description':
@@ -1367,6 +1371,12 @@ export const zhCN = {
   'files.refreshPreview': '重新读取文件',
   'files.download': '下载文件',
   'imagePreview.open': '查看大图：{{name}}',
+  'imagePreview.edit': '编辑图片：{{name}}',
+  'imagePreview.editTitle': '编辑图片',
+  'imagePreview.editHint': '使用画笔、箭头或文字标注图片，完成后上传为附件。',
+  'imagePreview.editAdded': '编辑后的图片已加入上传队列',
+  'imagePreview.editLoadFailed':
+    '无法加载图片进行编辑，请重试或下载后重新上传。',
   'imagePreview.zoomIn': '放大',
   'imagePreview.zoomOut': '缩小',
   'imagePreview.enterFullscreen': '进入全屏',

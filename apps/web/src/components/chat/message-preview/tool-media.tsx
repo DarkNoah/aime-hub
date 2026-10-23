@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PreviewImage } from '@/components/image-viewer/preview-image';
+import { ImageEditButton } from '@/components/image-viewer/image-edit-button';
 import { AudioClip } from '@/components/audio/audio-clip';
 import type { ReadFileBlock } from './read-file-output';
 
@@ -37,6 +38,13 @@ export function ToolMedia({
         >
           {mediaType}
         </Badge>
+        {kind === 'image' && !failed && (
+          <ImageEditButton
+            src={source}
+            name={name}
+            referrerPolicy="no-referrer"
+          />
+        )}
         {source && (
           <Button
             asChild

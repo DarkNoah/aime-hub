@@ -1,3 +1,4 @@
+import { BuiltinTool } from '../../modules/tools/base.js';
 import { createTool } from '@mastra/core/tools';
 import { commandSandbox } from './command/sandbox.js';
 import { commandInputSchema, commandOutputSchema } from './command/schema.js';
@@ -10,3 +11,13 @@ export const execCommand = createTool({
   execute: async (input, context) =>
     (await commandSandbox(context)).exec(input, context.abortSignal),
 });
+
+export class ExecCommandTool extends BuiltinTool {
+  constructor() {
+    super(execCommand);
+  }
+
+  protected override create() {
+    return this.tool;
+  }
+}

@@ -1,13 +1,37 @@
 import type { DataSource, EntitySchema, MigrationInterface } from 'typeorm';
 import type { Hono } from 'hono';
 import type { BaseAgent } from '@aime/shared/agents';
-import type { Tool } from '@mastra/core/tools';
-// Mastra registries accept heterogeneous input/output schemas.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type PluginTool = Tool<any, any>;
+import type { PluginTool } from './tools.js';
+export { PluginTool } from './tools.js';
 import type { PluginConfig, PluginManifest } from './index.js';
 
 export type PluginHttpEnv = { Variables: { userId: string; isAdmin: boolean } };
+export interface PluginWebFetchResult {
+  content: string;
+  url: string;
+  title?: string;
+  provider: string;
+  fallback: boolean;
+  truncated?: boolean;
+  ok: boolean;
+}
+/** Complete article reader (browser first, no tool truncation) and guarded HTTP transport. */
+export interface PluginWebServices {
+  fetchContent(url: string, signal: AbortSignal): Promise<PluginWebFetchResult>;
+  request(
+    url: string,
+    options: {
+      signal: AbortSignal;
+      maxBytes?: number;
+      headers?: Record<string, string>;
+    },
+  ): Promise<{
+    url: string;
+    status: number;
+    headers: Record<string, string>;
+    body: Uint8Array;
+  }>;
+}
 export interface PluginRuntimeContext {
   readonly platform: NodeJS.Platform;
   readonly arch: string;
@@ -27,6 +51,7 @@ export interface PluginContext {
   readonly runtime: PluginRuntimeContext;
   /** Shared, initialized host connection. Do not initialize or destroy it. */
   readonly database: DataSource;
+  readonly web?: PluginWebServices;
   /** Checks persisted state and local readiness. Not available until onEnable completes. */
   assertEnabled(): Promise<void>;
 }
@@ -35,7 +60,7 @@ export interface PluginServer {
   api?: Hono<PluginHttpEnv>;
   /** IDs must start with plugin:{id}:. Model null inherits host model settings. */
   agents?: BaseAgent[];
-  /** IDs must start with plugin_{id with hyphens replaced by underscores}_. */
+  /** PluginTool subclasses; IDs start with plugin_{id with hyphens replaced by underscores}_. */
   tools?: PluginTool[];
   /** Starts this process's resources on activation/restart. Must be retry-safe. */
   onEnable?: (context: PluginLifecycleContext) => void | Promise<void>;

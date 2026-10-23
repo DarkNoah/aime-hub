@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { setImmediate as nextTurn } from 'node:timers/promises';
+import { createUserAgentPlugin } from '../apps/server/src/lib/browser-stealth.js';
 import { defaultWebFetchConfig } from '@aime/shared/tools';
 import { createWebFetchTool } from '../apps/server/src/mastra/tools/web_fetch.js';
 import { JinaAIProvider } from '../apps/server/src/mastra/providers/jina-ai.js';
@@ -44,6 +46,93 @@ const resource = (
   headers: Record<string, string> = { 'content-type': 'text/html' },
 ): WebResource => ({ body: Buffer.from(body), status, headers, url });
 const html = `<html><head><title>Article title</title></head><body><nav>Navigation</nav><article><h1>Article title</h1><p>${'This is the article content with enough text to be recognized. '.repeat(12)}</p><p><a href="../guide">Guide</a><img src="/image.png" alt="Diagram" /></p><script>secretScript()</script></article></body></html>`;
+
+const browserVersion = {
+  userAgent: async () =>
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/146.0.0.0 Safari/537.36',
+  version: async () => 'Chrome/146.0.0.0',
+};
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+test('stealth page initialization waits for the UA command and preserves its identity', async () => {
+  const command = deferred<unknown>();
+  let complete = false;
+  const task = createUserAgentPlugin()
+    .onPageCreated({
+      browser: () => browserVersion,
+      _client: () => ({
+        send(method, params) {
+          assert.equal(method, 'Network.setUserAgentOverride');
+          assert.doesNotMatch(String(params?.userAgent), /HeadlessChrome/);
+          assert.equal(params?.platform, 'MacIntel');
+          assert.ok(params?.userAgentMetadata);
+          return command.promise;
+        },
+      }),
+    })
+    .then(() => {
+      complete = true;
+    });
+  await nextTurn();
+  assert.equal(complete, false);
+  command.resolve({});
+  await task;
+  assert.equal(complete, true);
+});
+
+test('stealth UA command failures reject the page hook without an unhandled promise', async () => {
+  for (const message of [
+    'cdpSession.send: Target page, context or browser has been closed',
+    'Protocol error (Network.setUserAgentOverride): Invalid parameters',
+  ]) {
+    const failure = new Error(message);
+    // Exercise both Puppeteer client shapes supported by the upstream evasion.
+    const client = {
+      send: async () => {
+        await nextTurn();
+        throw failure;
+      },
+    };
+    for (const _client of [client, () => client]) {
+      await assert.rejects(
+        createUserAgentPlugin().onPageCreated({
+          browser: () => browserVersion,
+          _client,
+        }),
+        (error) => error === failure,
+      );
+      await nextTurn();
+    }
+  }
+});
+
+test('concurrent stealth page hooks do not share pending commands or failures', async () => {
+  const plugin = createUserAgentPlugin();
+  const command = deferred<unknown>();
+  const failure = new Error('first page closed');
+  const first = assert.rejects(
+    plugin.onPageCreated({
+      browser: () => browserVersion,
+      _client: () => ({ send: () => command.promise }),
+    }),
+    (error) => error === failure,
+  );
+  await plugin.onPageCreated({
+    browser: () => browserVersion,
+    _client: () => ({ send: async () => ({}) }),
+  });
+  command.reject(failure);
+  await first;
+});
 
 test('Jina uses the configured Reader endpoint, credential header and Markdown format without losing query or hash routes', async () => {
   const provider = new JinaAIProvider(
@@ -295,7 +384,7 @@ test('cancellation stops provider resolution, provider execution and direct fall
     });
     const output = await execute(tool, url, controller.signal);
     assert.equal(output.isError, true);
-    assert.match(output.content, /cancelled/);
+    assert.match(output.content, /用户中止了操作/);
     assert.equal(fallbacks, 0);
   }
   const controller = new AbortController();
@@ -434,6 +523,93 @@ test(
         requests.some((entry) => entry.url.includes('/blocked-write')),
         false,
       );
+    }
+  },
+);
+
+test(
+  'stealth reports an in-flight CDP failure after page, context or browser closure without terminating Node',
+  { skip: process.env.TEST_WEB_FETCH_BROWSER !== '1', timeout: 30000 },
+  async () => {
+    const { chromium } = await import('../apps/server/src/lib/browser.js');
+    const browser = await chromium.launch({ headless: true });
+    const originalErrorHandler = chromium.plugins.onPluginError;
+    try {
+      for (const closeTarget of ['page', 'context', 'browser']) {
+        const started = deferred<void>();
+        const release = deferred<void>();
+        const reported = deferred<Error>();
+        chromium.plugins.onPluginError = (plugin, method, error) => {
+          if (
+            plugin.name === 'stealth/evasions/user-agent-override' &&
+            method === 'onPageCreated'
+          ) {
+            reported.resolve(error);
+          } else {
+            originalErrorHandler.call(chromium.plugins, plugin, method, error);
+          }
+        };
+        const context = await browser.newContext();
+        const newSession = context.newCDPSession.bind(context);
+        context.newCDPSession = async (page) => {
+          const session = await newSession(page);
+          // Hold only the UA request, then send it through the real CDP session
+          // after closure. This deterministically reproduces the production race.
+          session.send = new Proxy(session.send, {
+            apply(send, receiver, args) {
+              if (args[0] !== 'Network.setUserAgentOverride')
+                return Reflect.apply(send, receiver, args);
+              started.resolve();
+              return release.promise.then(() =>
+                Reflect.apply(send, receiver, args),
+              );
+            },
+          });
+          return session;
+        };
+        try {
+          const page = await context.newPage();
+          await started.promise;
+          if (closeTarget === 'page') await page.close();
+          else if (closeTarget === 'context') await context.close();
+          else await browser.close();
+          release.resolve();
+          const error = await reported.promise;
+          assert.match(error.message, /closed/i);
+          await nextTurn();
+        } finally {
+          release.resolve();
+          await context.close();
+        }
+      }
+    } finally {
+      await browser.close();
+      chromium.plugins.onPluginError = originalErrorHandler;
+    }
+  },
+);
+
+test(
+  'browser reads preserve cancellation and continue reading successfully after repeated aborts',
+  { skip: process.env.TEST_WEB_FETCH_BROWSER !== '1', timeout: 30000 },
+  async () => {
+    for (let run = 0; run < 3; run++) {
+      const controller = new AbortController();
+      const reason = new Error('用户中止了操作');
+      await assert.rejects(
+        readBrowserPage(url, controller.signal, 15000, async () => {
+          controller.abort(reason);
+          throw reason;
+        }),
+        (error) => error === reason,
+      );
+      const result = await readBrowserPage(
+        url,
+        AbortSignal.timeout(15000),
+        15000,
+        async () => resource(html),
+      );
+      assert.match(result.content, /article content/);
     }
   },
 );

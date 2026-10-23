@@ -9,11 +9,14 @@ import {
   createPosition,
   adjustPosition,
   parseDrawings,
+  isTwoPointTool,
+  fibonacciOptions,
   type Anchor,
   type Drawing,
   type DrawingPart,
   type DrawingState,
   type DrawingTool,
+  type FibonacciOptions,
   type Point,
 } from './model';
 
@@ -145,6 +148,19 @@ export class DrawingController {
     toast.success('已清空当前视图的划线');
   }
 
+  setFibonacciOptions(options: Partial<FibonacciOptions>) {
+    const selected = this.primitive.drawings.find(
+      (drawing) => drawing.id === this.primitive.selected,
+    );
+    if (selected?.kind !== 'fibonacci') return;
+    this.primitive.drawings = this.primitive.drawings.map((drawing) =>
+      drawing.id === selected.id ? { ...selected, ...options } : drawing,
+    );
+    this.persist();
+    this.publish();
+    toast.success('已更新斐波那契回撤设置', { id: 'chart-fibonacci-settings' });
+  }
+
   dispose() {
     this.cancel();
     this.container.removeEventListener('pointerdown', this.down, true);
@@ -174,6 +190,8 @@ export class DrawingController {
         (drawing) => drawing.crossPeriod,
       ).length,
       selectedPosition: selected?.kind === 'position' ? selected.side : null,
+      selectedFibonacci:
+        selected?.kind === 'fibonacci' ? fibonacciOptions(selected) : null,
     });
   }
 
@@ -281,15 +299,14 @@ export class DrawingController {
             this.placementOrigin = point;
             this.placementDragged = false;
           }
-          this.primitive.preview =
-            this.tool === 'trend'
-              ? {
-                  id: 'draft',
-                  kind: 'trend',
-                  start: anchor,
-                  end: anchor,
-                }
-              : { id: 'draft', kind: 'horizontal', price: anchor.price };
+          this.primitive.preview = isTwoPointTool(this.tool)
+            ? {
+                id: 'draft',
+                kind: this.tool,
+                start: anchor,
+                end: anchor,
+              }
+            : { id: 'draft', kind: 'horizontal', price: anchor.price };
           this.publish();
         } else if (this.tool === 'long' || this.tool === 'short') {
           const position = this.positionCandidate(anchor, crypto.randomUUID());
@@ -304,7 +321,7 @@ export class DrawingController {
         ) {
           this.add({
             id: crypto.randomUUID(),
-            kind: 'trend',
+            kind: this.tool,
             start: this.first,
             end: anchor,
           });
@@ -349,7 +366,8 @@ export class DrawingController {
           this.primitive.bars,
         );
       else if (
-        original.kind === 'trend' &&
+        original.kind !== 'horizontal' &&
+        original.kind !== 'position' &&
         (part === 'start' || part === 'end')
       ) {
         const anchor = this.anchor(point, true);
@@ -401,18 +419,17 @@ export class DrawingController {
         price === null ? null : { id: 'draft', kind: 'horizontal', price };
     } else if (this.first) {
       const end = this.anchor(point);
-      this.primitive.preview =
-        this.tool === 'trend'
-          ? end
-            ? { id: 'draft', kind: 'trend', start: this.first, end }
-            : null
-          : end
-            ? (this.positionCandidate(end) ?? {
-                id: 'draft',
-                kind: 'horizontal',
-                price: this.first.price,
-              })
-            : null;
+      this.primitive.preview = isTwoPointTool(this.tool)
+        ? end
+          ? { id: 'draft', kind: this.tool, start: this.first, end }
+          : null
+        : end
+          ? (this.positionCandidate(end) ?? {
+              id: 'draft',
+              kind: 'horizontal',
+              price: this.first.price,
+            })
+          : null;
     }
     this.primitive.refresh();
   };

@@ -1,15 +1,41 @@
 import { MONTH_DURATION, type Bar } from '../../shared';
 
-export type DrawingTool = 'cursor' | 'trend' | 'horizontal' | 'long' | 'short';
+export type LineDrawingKind = 'trend' | 'ray' | 'segment';
+export type TwoPointDrawingKind = LineDrawingKind | 'fibonacci';
+export type DrawingTool =
+  'cursor' | TwoPointDrawingKind | 'horizontal' | 'long' | 'short';
 export interface Anchor {
   time: number;
   price: number;
 }
 export type Drawing = (
-  | { id: string; kind: 'trend'; start: Anchor; end: Anchor }
+  | { id: string; kind: LineDrawingKind; start: Anchor; end: Anchor }
+  | FibonacciDrawing
   | { id: string; kind: 'horizontal'; price: number }
   | PositionDrawing
 ) & { crossPeriod?: boolean };
+export interface FibonacciOptions {
+  reverse: boolean;
+  extendLeft: boolean;
+  extendRight: boolean;
+  background: boolean;
+}
+export interface FibonacciDrawing extends Partial<FibonacciOptions> {
+  id: string;
+  kind: 'fibonacci';
+  start: Anchor;
+  end: Anchor;
+}
+export function fibonacciOptions(
+  drawing: Partial<FibonacciOptions>,
+): FibonacciOptions {
+  return {
+    reverse: drawing.reverse ?? false,
+    extendLeft: drawing.extendLeft ?? false,
+    extendRight: drawing.extendRight ?? false,
+    background: drawing.background ?? true,
+  };
+}
 export interface PositionDrawing {
   id: string;
   kind: 'position';
@@ -35,6 +61,7 @@ export interface DrawingState {
   crossPeriod: boolean;
   sharedCount: number;
   selectedPosition: PositionDrawing['side'] | null;
+  selectedFibonacci: FibonacciOptions | null;
 }
 export const EMPTY_DRAWING_STATE: DrawingState = {
   tool: 'cursor',
@@ -44,12 +71,22 @@ export const EMPTY_DRAWING_STATE: DrawingState = {
   crossPeriod: false,
   sharedCount: 0,
   selectedPosition: null,
+  selectedFibonacci: null,
 };
 
 export const drawingStorageKey = (scope: string) =>
   `vibe-quant:drawings:v1:${encodeURIComponent(scope)}`;
 export const sharedDrawingStorageKey = (scope: string) =>
   `vibe-quant:drawings:shared:v1:${encodeURIComponent(scope)}`;
+
+export function isTwoPointTool(value: unknown): value is TwoPointDrawingKind {
+  return (
+    value === 'trend' ||
+    value === 'ray' ||
+    value === 'segment' ||
+    value === 'fibonacci'
+  );
+}
 
 function anchor(value: unknown): value is Anchor {
   if (!value || typeof value !== 'object') return false;
@@ -158,7 +195,11 @@ export function parseDrawings(raw: string | null): Drawing[] {
         Number.isFinite(item.price)
       )
         drawing = { id: item.id, kind: item.kind, price: item.price };
-      else if (item.kind === 'trend' && anchor(item.start) && anchor(item.end))
+      else if (
+        isTwoPointTool(item.kind) &&
+        anchor(item.start) &&
+        anchor(item.end)
+      )
         drawing = {
           id: item.id,
           kind: item.kind,
@@ -177,6 +218,15 @@ export function parseDrawings(raw: string | null): Drawing[] {
           stop: item.stop,
         };
       else return [];
+      if (drawing.kind === 'fibonacci') {
+        for (const key of [
+          'reverse',
+          'extendLeft',
+          'extendRight',
+          'background',
+        ] as const)
+          if (typeof item[key] === 'boolean') drawing[key] = item[key];
+      }
       if (item.crossPeriod === true) drawing.crossPeriod = true;
       ids.add(item.id);
       return [drawing];
@@ -239,6 +289,41 @@ export function segmentDistance(point: Point, start: Point, end: Point) {
   );
 }
 
+/** Clip the forward ray to the pane, including rays whose anchors are offscreen. */
+export function raySegment(
+  start: Point,
+  end: Point,
+  width: number,
+  height: number,
+): [Point, Point] | null {
+  const dx = end.x - start.x,
+    dy = end.y - start.y;
+  if (dx === 0 && dy === 0)
+    return start.x >= 0 && start.x <= width && start.y >= 0 && start.y <= height
+      ? [start, end]
+      : null;
+  let from = 0,
+    to = Infinity;
+  for (const [origin, direction, limit] of [
+    [start.x, dx, width],
+    [start.y, dy, height],
+  ]) {
+    if (direction === 0) {
+      if (origin < 0 || origin > limit) return null;
+      continue;
+    }
+    const first = -origin / direction,
+      last = (limit - origin) / direction;
+    from = Math.max(from, Math.min(first, last));
+    to = Math.min(to, Math.max(first, last));
+    if (from > to) return null;
+  }
+  return [
+    { x: start.x + from * dx, y: start.y + from * dy },
+    { x: start.x + to * dx, y: start.y + to * dy },
+  ];
+}
+
 export function moveDrawing(
   drawing: Drawing,
   deltaBars: number,
@@ -248,8 +333,8 @@ export function moveDrawing(
   if (drawing.kind === 'horizontal')
     return { ...drawing, price: drawing.price + deltaPrice };
   const startTime =
-    drawing.kind === 'trend' ? drawing.start.time : drawing.start;
-  const endTime = drawing.kind === 'trend' ? drawing.end.time : drawing.end;
+    drawing.kind === 'position' ? drawing.start : drawing.start.time;
+  const endTime = drawing.kind === 'position' ? drawing.end : drawing.end.time;
   const start = logicalAtTime(startTime, bars);
   const end = logicalAtTime(endTime, bars);
   if (start === null || end === null) return drawing;

@@ -49,6 +49,127 @@ const files = (prompt: Prompt) =>
     .flatMap((message) => message.content)
     .filter((part) => part.type === 'file');
 
+test('text and PDF attachments remain path references for Chat Completions and Responses', async (t) => {
+  const root = await realpath(await mkdtemp('/tmp/chat-attachment-text-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, '.uploads'));
+  const source = 'print("hello")\n';
+  await writeFile(join(root, '.uploads/script.py'), source);
+  const reader = new AttachmentMediaReader(root);
+  const read = t.mock.method(reader, 'read');
+  const processor = new AttachmentProcessor(reader, () => [
+    'text',
+    'image',
+    'pdf',
+  ]);
+  const prompt: Prompt = [
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Read the attached script' },
+        {
+          type: 'text',
+          text: serializeAttachments([
+            {
+              path: '/.uploads/script.py',
+              mimeType: 'text/x-python-script',
+            },
+            { path: './document.pdf', mimeType: 'application/pdf' },
+          ]),
+        },
+      ],
+    },
+  ];
+  const original = structuredClone(prompt);
+  const processed = await process(processor, prompt);
+  const requests: unknown[] = [];
+  t.mock.method(
+    globalThis,
+    'fetch',
+    async (_input: unknown, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)));
+      throw new Error('CAPTURE_ONLY');
+    },
+  );
+  for (const api of ['chat', 'responses'] as const) {
+    const model = await resolveModelConfig({
+      providerId: 'openai',
+      modelId: 'test-model',
+      url: 'https://capture.invalid/v1',
+      apiKey: 'test-only',
+      api,
+    });
+    assert.ok(model.specificationVersion === 'v2');
+    await assert.rejects(
+      async () => model.doGenerate({ prompt: processed }),
+      /CAPTURE_ONLY/,
+    );
+  }
+  assert.equal(requests.length, 2);
+  assert.equal(files(processed).length, 0);
+  assert.match(
+    text(processed),
+    /<attachment path="\/\.uploads\/script.py"><\/attachment>/,
+  );
+  assert.match(
+    text(processed),
+    /<attachment path="\.\/document.pdf"><\/attachment>/,
+  );
+  assert.equal(read.mock.callCount(), 0);
+  assert.deepEqual(prompt, original);
+});
+
+test('all non-image files remain path-only even when the model supports their modalities', async (t) => {
+  let modalities = ['text', 'application'];
+  const reader = new AttachmentMediaReader('/unused');
+  const read = t.mock.method(reader, 'read');
+  const processor = new AttachmentProcessor(reader, () => modalities);
+  const attachments = [
+    ['script.py', 'text/x-python-script'],
+    ['notes.txt', 'text/plain'],
+    ['notes.md', 'text/markdown'],
+    ['data.csv', 'text/csv'],
+    ['script.js', 'application/javascript'],
+    ['data.json', 'application/json'],
+    ['document.pdf', 'application/pdf'],
+    ['sound.wav', 'audio/wav'],
+    ['clip.mp4', 'video/mp4'],
+    ['archive.zip', 'application/zip'],
+  ];
+  const prompt: Prompt = [
+    {
+      role: 'user',
+      content: attachments.flatMap(([filename, mediaType]) => [
+        {
+          type: 'file' as const,
+          filename,
+          mediaType,
+          data: Buffer.from('file contents'),
+        },
+        {
+          type: 'text' as const,
+          text: serializeAttachments([
+            { path: `./${filename}`, mimeType: mediaType },
+          ]),
+        },
+      ]),
+    },
+  ];
+  const original = structuredClone(prompt);
+  const result = await process(processor, prompt);
+  assert.equal(files(result).length, 0);
+  assert.equal(
+    text(result),
+    attachments
+      .map(([filename]) => `<attachment path="./${filename}"></attachment>`)
+      .join('\n'),
+  );
+  modalities = ['text', 'image', 'pdf', 'audio', 'video', 'application'];
+  assert.deepEqual(await process(processor, prompt), result);
+  assert.equal(read.mock.callCount(), 0);
+  assert.deepEqual(structuredClone(prompt), original);
+});
+
 test('gates images per current model and keeps audio/video path-only without reading files or mutating history', async (t) => {
   const reader = new AttachmentMediaReader('/unused');
   const read = t.mock.method(reader, 'read', async () => {
@@ -136,7 +257,11 @@ test('gates images per current model and keeps audio/video path-only without rea
   modalities = ['text'];
   const plain = await process(processor, prompt);
   assert.equal(files(plain).length, 0);
-  assert.equal(text(plain), text(rich));
+  assert.match(
+    text(plain),
+    /<attachment path="\/\.uploads\/picture.png"><\/attachment>/,
+  );
+  assert.doesNotMatch(text(plain), /mimeType=|size=|width=|height=/);
   modalities = ['audio'];
   assert.equal(files(await process(processor, prompt)).length, 0);
   assert.equal(read.mock.callCount(), 0);
@@ -275,7 +400,7 @@ test('dragged thread/shared images use their scoped bytes while folders and audi
   );
   assert.match(
     text(result),
-    /<attachment path="\.\.\/shared\/docs\/" mimeType="inode\/directory">/,
+    /<attachment path="\.\.\/shared\/docs\/"><\/attachment>/,
   );
   assert.match(
     text(result),

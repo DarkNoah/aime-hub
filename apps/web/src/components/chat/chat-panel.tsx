@@ -31,6 +31,7 @@ import { ChatRunningTasks } from './chat-running-tasks';
 import { useThreadChat } from './use-thread-chat';
 import { PersonalChatSettingsProvider } from './personal-chat-settings-provider';
 import { ChatWorkspaceMenuContext } from './layout-context';
+import { ThreadPluginBadge } from './thread-plugin-badge';
 
 const chatContentClassName = 'mx-auto w-full max-w-3xl px-4 @lg/chat:px-6';
 
@@ -210,12 +211,14 @@ function ChatPanelSession({
 
 function PanelHeader({
   title,
+  plugin,
   onClose,
   actions,
   details,
   navigation,
 }: {
   title: string;
+  plugin?: string;
   projectId?: string;
   status?: ThreadSummary['status'];
   onClose?: () => void;
@@ -232,6 +235,7 @@ function PanelHeader({
     >
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
+          <ThreadPluginBadge plugin={plugin} />
           <h1 className="truncate text-sm font-semibold" title={title}>
             {title}
           </h1>
@@ -350,6 +354,7 @@ function ExistingChat({
       />
       <PanelHeader
         title={chat.thread?.title || t('chat.new')}
+        plugin={chat.thread?.plugin}
         projectId={projectId}
         status={chat.thread?.status}
         details={
@@ -385,46 +390,51 @@ function ExistingChat({
         contentClassName={chatContentClassName}
         composer={
           chat.thread && (
-            <ChatComposer
-              className={chatContentClassName}
-              threadId={threadId}
-              disabled={!chat.connected}
-              running={running}
-              stopping={stopping}
-              usage={chat.usage}
-              goal={chat.goal}
-              onClearGoal={chat.clearGoal}
-              queue={
-                <>
-                  <SpeechPlaybackBar
-                    state={chat.speech.state}
-                    readSpectrum={chat.speech.readSpectrum}
-                    onResume={chat.speech.unlock}
-                    onStop={() => {
-                      chat.speech.stop();
-                      void chatApi.stopSpeech(threadId).catch(notifyError);
-                    }}
-                  />
-                  <ChatQueue
-                    thread={chat.thread}
-                    disabled={!chat.connected}
-                    waitingForTool={chat.toolInteractions.some(
-                      (item) => !item.response,
-                    )}
-                  />
-                </>
-              }
-              onSend={chat.send}
-              onStop={async () => {
-                chat.speech.stop();
-                setStopping(true);
-                try {
-                  await chatApi.abort(threadId);
-                } finally {
-                  setStopping(false);
+            <PersonalChatSettingsProvider
+              threadId={chat.thread.plugin ? threadId : undefined}
+              initialSettings={chat.thread}
+            >
+              <ChatComposer
+                className={chatContentClassName}
+                threadId={threadId}
+                disabled={!chat.connected}
+                running={running}
+                stopping={stopping}
+                usage={chat.usage}
+                goal={chat.goal}
+                onClearGoal={chat.clearGoal}
+                queue={
+                  <>
+                    <SpeechPlaybackBar
+                      state={chat.speech.state}
+                      readSpectrum={chat.speech.readSpectrum}
+                      onResume={chat.speech.unlock}
+                      onStop={() => {
+                        chat.speech.stop();
+                        void chatApi.stopSpeech(threadId).catch(notifyError);
+                      }}
+                    />
+                    <ChatQueue
+                      thread={chat.thread}
+                      disabled={!chat.connected}
+                      waitingForTool={chat.toolInteractions.some(
+                        (item) => !item.response,
+                      )}
+                    />
+                  </>
                 }
-              }}
-            />
+                onSend={chat.send}
+                onStop={async () => {
+                  chat.speech.stop();
+                  setStopping(true);
+                  try {
+                    await chatApi.abort(threadId);
+                  } finally {
+                    setStopping(false);
+                  }
+                }}
+              />
+            </PersonalChatSettingsProvider>
           )
         }
       >

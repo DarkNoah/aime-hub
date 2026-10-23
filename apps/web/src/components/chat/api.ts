@@ -1,5 +1,6 @@
 import type {
   ChatSettings,
+  CreateThreadInput,
   RunInput,
   ToolResponse,
   UpdateQueuedMessage,
@@ -16,11 +17,20 @@ export const chatApi = {
     scope: { threadId?: string; projectId?: string },
     signal?: AbortSignal,
   ) => api.threads.skills({ query: scope }, { signal }),
-  list: (page = 0, signal?: AbortSignal, projectId?: string, perPage = 10) =>
-    api.threads.list({ query: { page, perPage, projectId } }, { signal }),
+  list: (
+    page = 0,
+    signal?: AbortSignal,
+    projectId?: string,
+    perPage = 10,
+    plugin?: string,
+  ) =>
+    api.threads.list(
+      { query: { page, perPage, projectId, plugin } },
+      { signal },
+    ),
   get: (threadId: string, signal?: AbortSignal) =>
     api.threads.get({ params: { threadId } }, { signal }),
-  create: (settings: ChatSettings & { projectId?: string }) =>
+  create: (settings: CreateThreadInput) =>
     api.threads.create({ body: settings }),
   update: (
     threadId: string,

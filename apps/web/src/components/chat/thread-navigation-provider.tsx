@@ -1,9 +1,11 @@
 import { useContext, useEffect, useState, type ReactNode } from 'react';
 import type { ThreadNavigationEvent } from '@aime/shared/threads';
-import { ThreadListContext } from '@/pages/threads/use-thread-list';
+import { ThreadListContext } from './use-thread-list';
 import { useProjectNavigation } from '@/pages/projects/use-project-navigation';
 import { createThreadNavigationResource } from './thread-navigation-resource';
 import { ThreadNavigationContext } from './thread-navigation-context';
+import { useAuthSession } from '@/features/auth/session-context';
+import { SharedEventSource } from '@/components/realtime/event-source';
 
 export function ThreadNavigationProvider({
   children,
@@ -11,13 +13,15 @@ export function ThreadNavigationProvider({
   children: ReactNode;
 }) {
   const personal = useContext(ThreadListContext);
+  const sessionId = useAuthSession().data?.session.id;
   const projects = useProjectNavigation();
   if (!personal) throw new Error('ThreadListProvider is required');
   const [resource] = useState(() =>
     createThreadNavigationResource(personal, projects),
   );
   useEffect(() => {
-    const source = new EventSource('/api/threads/events');
+    if (!sessionId) return;
+    const source = new SharedEventSource('/api/threads/events', sessionId);
     source.addEventListener('navigation', (event) => {
       resource.receive(
         JSON.parse((event as MessageEvent).data) as ThreadNavigationEvent,
@@ -33,8 +37,11 @@ export function ThreadNavigationProvider({
       });
     });
     // EventSource retries transport failures; every connection starts with a fresh snapshot.
-    return () => source.close();
-  }, [resource]);
+    return () => {
+      source.close();
+      resource.cancel();
+    };
+  }, [resource, sessionId]);
   return (
     <ThreadNavigationContext.Provider value={resource}>
       {children}

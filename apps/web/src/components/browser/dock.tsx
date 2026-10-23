@@ -13,6 +13,7 @@ import { browserWorkspaceState } from '@/components/chat/workspace-navigation';
 import { BrowserScreencast } from './screencast';
 import { browserErrorKey, getBrowserResource } from './resource';
 import { RunningBrowsersContext } from './layout-context';
+import { useAuthSession } from '@/features/auth/session-context';
 
 /** The server owns the catalog, so refresh and route changes preserve running browsers. */
 export function BrowserDock({
@@ -25,6 +26,7 @@ export function BrowserDock({
   children?: ReactNode;
 }) {
   const { t } = useTranslation();
+  const sessionId = useAuthSession().data?.session.id ?? '';
   const navigate = useNavigate();
   const [browsers, setBrowsers] = useState<BrowserSummary[]>([]);
   const [closing, setClosing] = useState<string | null>(null);
@@ -86,7 +88,7 @@ export function BrowserDock({
   async function close(threadId: string) {
     setClosing(threadId);
     try {
-      await getBrowserResource(threadId).action({ kind: 'close' });
+      await getBrowserResource(threadId, sessionId).action({ kind: 'close' });
       revision.current += 1;
       setBrowsers([]);
       toast.success(t('browser.closedSuccess'));
@@ -133,7 +135,7 @@ export function BrowserDock({
           visible ? (
             <BrowserScreencast
               key={item.id}
-              resource={getBrowserResource(item.id)}
+              resource={getBrowserResource(item.id, sessionId)}
               className="h-full"
             />
           ) : null

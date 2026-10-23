@@ -1,102 +1,40 @@
-import { createKnowledgeSearchTool } from '../../mastra/tools/knowledge_search.js';
-import { createKnowledgeTools } from '../../mastra/tools/knowledge.js';
-import {
-  createAutomationTools,
-  type ResolveAutomations,
-} from '../../mastra/tools/automations.js';
-import type { KnowledgeService } from '../knowledge/service.js';
-import type { AudioService } from '../audio/service.js';
-import { createTranscriptionsTool } from '../../mastra/tools/transcriptions.js';
-import {
-  createExtractTool,
-  type ResolvedExtractionModel,
-} from '../../mastra/tools/extract.js';
-import { normalizeTranscriptionAudio } from '../audio/convert.js';
-import {
-  createReadFileTool,
-  type ResolvedOcrModel,
-} from '../../mastra/tools/read_file.js';
-import { createListVoicesTool } from '../../mastra/tools/list_voices.js';
 import type { ToolsInput } from '@mastra/core/agent';
-import { z } from 'zod';
 import {
-  enabledToolConfigSchema,
-  legacyToolIds,
   normalizeToolId,
   toolIdSchema,
-  toolConfigSchemas,
   type ToolConfig,
-  type WebSearchConfig,
-  type WebFetchConfig,
-  type ImageGenConfig,
-  type SpeechConfig,
-  type ReadFileConfig,
-  type ExtractConfig,
 } from '@aime/shared/tools';
 import * as applicationTools from '../../mastra/tools/index.js';
-import { createExecTool } from '../../mastra/tools/exec.js';
-import { createWebSearchTool } from '../../mastra/tools/web_search.js';
-import { createWebFetchTool } from '../../mastra/tools/web_fetch.js';
-import {
-  createImageGenTool,
-  type ResolvedImageModel,
-} from '../../mastra/tools/image_gen.js';
-import type { BaseProvider } from '../../mastra/providers/base-provider.js';
-import type { AssetService } from '../assets/service.js';
-import {
-  createSpeechTool,
-  type ResolvedSpeechModel,
-} from '../../mastra/tools/speech.js';
+import { agentAllowed, BaseTool, BuiltinTool } from './base.js';
+import { toolSources } from './sources.js';
+import type {
+  RegisteredTool,
+  ToolDefaultConfigs,
+  ToolDependencies,
+  ToolRegistryOptions,
+} from './types.js';
 
-export type RegisteredToolId = string;
-export type ToolDefaultConfigs = Partial<
-  Record<string, { enabled?: boolean; [key: string]: unknown }>
-> & {
-  web_search?: Partial<WebSearchConfig>;
-  web_fetch?: Partial<WebFetchConfig>;
-  image_gen?: Partial<ImageGenConfig>;
-  speech?: Partial<SpeechConfig>;
-  read_file?: Partial<ReadFileConfig>;
-  extract?: Partial<ExtractConfig>;
-};
-type ToolDependencies = {
-  audio?: AudioService;
-  automations?: ResolveAutomations;
-  knowledgeSearch?: KnowledgeService['searchContext'];
-  knowledge?: KnowledgeService;
-  disabledTools?: readonly string[];
-  mcpTools?: () => Promise<ToolsInput>;
-  pluginTools?: () => Promise<ToolsInput>;
-  loadConfig?: (id: string) => Promise<unknown>;
-  searchProvider?: (
-    id: string | null,
-    timeoutMs: number,
-  ) => Promise<Pick<BaseProvider, 'id' | 'webSearch'>>;
-  fetchProvider?: (
-    id: string | null,
-    timeoutMs: number,
-  ) => Promise<Pick<BaseProvider, 'id' | 'webFetch'>>;
-  imageModel?: (reference: string | null) => Promise<ResolvedImageModel>;
-  speechModel?: (reference: string | null) => Promise<ResolvedSpeechModel>;
-  ocrModel?: (reference: string | null) => Promise<ResolvedOcrModel>;
-  extractionModel?: (
-    reference: string | null,
-  ) => Promise<ResolvedExtractionModel>;
-  recordAsset?: AssetService['record'];
+export { BaseTool, BuiltinTool } from './base.js';
+export type {
+  RegisteredToolId,
+  RegisteredTool,
+  ToolDefaultConfigs,
+  ToolDependencies,
+  ToolRegistryOptions,
+  ToolBuilder,
+} from './types.js';
+
+type ToolDefinition = BaseTool<ToolDependencies> & {
+  readonly id: string;
+  parseConfig(input: unknown): ToolConfig;
 };
 
-/** Tool instances exported by the application entry point register themselves by ID. */
-export function registerTools(
-  tools: Record<
-    string,
-    ToolsInput[string] & { id: string; description?: string }
-  >,
-) {
-  const registry = new Map<
-    string,
-    ToolsInput[string] & { id: string; description?: string }
-  >();
+/** Application registrations must inherit the common construction contract. */
+export function registerTools(tools: Record<string, ToolDefinition>) {
+  const registry = new Map<string, ToolDefinition>();
   for (const tool of Object.values(tools)) {
+    if (!(tool instanceof BuiltinTool))
+      throw new Error('Tool definitions must extend BuiltinTool');
     const id = toolIdSchema.parse(tool.id);
     if (registry.has(id)) throw new Error(`Duplicate tool ID: ${id}`);
     registry.set(id, tool);
@@ -109,204 +47,79 @@ export const registeredToolIds: readonly string[] = [...registry.keys()];
 export function parseToolConfig(id: string, input: unknown): ToolConfig {
   const tool = registry.get(id);
   if (!tool) throw new Error(`Unknown tool ID: ${id}`);
-  const description = tool.description?.split('\n')[0] ?? id;
-  switch (id) {
-    case 'extract':
-      return {
-        id,
-        kind: id,
-        description,
-        config: toolConfigSchemas.extract.parse(input),
-      };
-    case 'web_search':
-      return {
-        id,
-        kind: id,
-        description,
-        config: toolConfigSchemas.web_search.parse(input),
-      };
-    case 'web_fetch':
-      return {
-        id,
-        kind: id,
-        description,
-        config: toolConfigSchemas.web_fetch.parse(input),
-      };
-    case 'image_gen':
-      return {
-        id,
-        kind: id,
-        description,
-        config: toolConfigSchemas.image_gen.parse(input),
-      };
-    case 'speech':
-      return {
-        id,
-        kind: id,
-        description,
-        config: toolConfigSchemas.speech.parse(input),
-      };
-    case 'transcriptions':
-      return {
-        id,
-        kind: id,
-        description,
-        config: toolConfigSchemas.transcriptions.parse(input),
-      };
-    case 'read_file':
-      return {
-        id,
-        kind: id,
-        description,
-        config: toolConfigSchemas.read_file.parse(input),
-      };
-    default:
-      return {
-        id,
-        kind: 'builtin',
-        description,
-        config: enabledToolConfigSchema.parse(input),
-      };
-  }
+  return tool.parseConfig(input);
 }
 
-async function buildTool(
-  id: string,
-  defaults: ToolDefaultConfigs,
-  dependencies: ToolDependencies,
-) {
-  const saved = await dependencies.loadConfig?.(id);
-  const tool = parseToolConfig(id, {
-    ...(legacyToolIds[id] ? defaults[legacyToolIds[id]] : undefined),
-    ...defaults[id],
-    ...z.looseObject({}).parse(saved ?? {}),
-  });
-  if (!tool.config.enabled) return undefined;
-  switch (tool.kind) {
-    case 'extract':
-      return createExtractTool(tool.config, {
-        resolveModel: dependencies.extractionModel,
-        resolveOcr: dependencies.ocrModel
-          ? async () => {
-              const settings = parseToolConfig('read_file', {
-                ...defaults.read_file,
-                ...z
-                  .looseObject({})
-                  .parse((await dependencies.loadConfig?.('read_file')) ?? {}),
-              });
-              return dependencies.ocrModel!(
-                settings.kind === 'read_file' ? settings.config.model : null,
-              );
-            }
-          : undefined,
-        transcribe: dependencies.audio
-          ? async (data, signal) => {
-              const settings = parseToolConfig('transcriptions', {
-                ...defaults.transcriptions,
-                ...z
-                  .looseObject({})
-                  .parse(
-                    (await dependencies.loadConfig?.('transcriptions')) ?? {},
-                  ),
-              });
-              signal.throwIfAborted();
-              const bytes = await normalizeTranscriptionAudio(data, signal);
-              const result = await dependencies.audio!.transcriptions(bytes, {
-                response_format: 'json',
-                signal,
-                model:
-                  settings.kind === 'transcriptions'
-                    ? (settings.config.model ?? undefined)
-                    : undefined,
-              });
-              return typeof result === 'string' ? result : result.text;
-            }
-          : undefined,
-      });
-    case 'web_search':
-      return createWebSearchTool(tool.config, {
-        resolveProvider: dependencies.searchProvider
-          ? (providerId) =>
-              dependencies.searchProvider!(providerId, tool.config.timeoutMs)
-          : undefined,
-      });
-    case 'web_fetch':
-      return createWebFetchTool(tool.config, {
-        resolveProvider: dependencies.fetchProvider
-          ? (providerId) =>
-              dependencies.fetchProvider!(providerId, tool.config.timeoutMs)
-          : undefined,
-      });
-    case 'image_gen':
-      return createImageGenTool(tool.config, {
-        resolveModel: dependencies.imageModel,
-        recordAsset: dependencies.recordAsset,
-      });
-    case 'speech':
-      return createSpeechTool(tool.config, {
-        resolveModel: dependencies.speechModel,
-        recordAsset: dependencies.recordAsset,
-        audio: dependencies.audio,
-      });
-    case 'transcriptions':
-      return createTranscriptionsTool(tool.config, dependencies.audio);
-    case 'read_file':
-      return createReadFileTool(tool.config, {
-        resolveModel: dependencies.ocrModel,
-      });
-    case 'builtin':
-      if (id === 'list_voices')
-        return createListVoicesTool(dependencies.audio?.voices);
-      if (id.startsWith('automation_')) {
-        const tools = createAutomationTools(dependencies.automations);
-        if (id in tools) return tools[id as keyof typeof tools];
-      }
-      if (id.startsWith('knowledge_') && id !== 'knowledge_search') {
-        const tools = createKnowledgeTools(dependencies.knowledge);
-        if (id in tools) return tools[id as keyof typeof tools];
-      }
-      if (id === 'knowledge_search')
-        return createKnowledgeSearchTool(
-          dependencies.knowledgeSearch,
-          dependencies.knowledge,
-        );
-      if (id === 'exec')
-        return createExecTool({
-          getTools: async () => {
-            const [builtIn, mcp, plugins] = await Promise.all([
-              buildTools(
-                registeredToolIds.filter((toolId) => toolId !== 'exec'),
-                defaults,
-                dependencies,
-              ),
-              dependencies.mcpTools?.() ?? {},
-              dependencies.pluginTools?.() ?? {},
-            ]);
-            return { ...mcp, ...plugins, ...builtIn };
-          },
-        });
-      return registry.get(id)!;
+/** Aggregate BaseTool subclasses; each owns its configuration and dependencies. */
+export async function getTools(
+  config: ToolDefaultConfigs = {},
+  dependencies: ToolDependencies = {},
+  options: ToolRegistryOptions = {},
+): Promise<RegisteredTool[]> {
+  dependencies.context?.abortSignal?.throwIfAborted();
+  if (!agentAllowed(dependencies, options) || options.ids?.length === 0)
+    return [];
+  const selected = options.ids && [
+    ...new Set(options.ids.map(normalizeToolId)),
+  ];
+  const definitions = selected
+    ? selected.flatMap((id) => (registry.has(id) ? [registry.get(id)!] : []))
+    : [...registry.values()];
+  const boundDependencies = { ...dependencies, getTools };
+  const sources = await Promise.all(
+    toolSources.map((source) =>
+      source.getTools(config, boundDependencies, options),
+    ),
+  );
+  const discovered = new Set(sources.flat().map((tool) => tool.id));
+  const disabled = new Set(
+    [
+      ...(dependencies.disabledTools ?? []),
+      ...(options.disabledTools ?? []),
+    ].map(normalizeToolId),
+  );
+  for (const id of selected ?? []) {
+    if (
+      !registry.has(id) &&
+      !dependencies.ownsPluginTool?.(id) &&
+      !disabled.has(id) &&
+      !discovered.has(id)
+    )
+      throw new Error(`Unknown tool ID: ${id}`);
   }
+  const builtins = await Promise.all(
+    definitions.map((tool) =>
+      tool.getTools(config, boundDependencies, options),
+    ),
+  );
+  const tools = new Map<string, RegisteredTool>();
+  for (const tool of [...builtins, ...sources].flat()) {
+    if (tools.has(tool.id)) throw new Error(`Duplicate tool ID: ${tool.id}`);
+    tools.set(tool.id, tool);
+  }
+  dependencies.context?.abortSignal?.throwIfAborted();
+  return selected
+    ? selected.flatMap((id) => (tools.has(id) ? [tools.get(id)!] : []))
+    : [...tools.values()];
 }
 
-/** All registered tools are selected by default; saved settings override caller defaults. */
+/** Convert the public array to the mapping required by Mastra Agent.tools. */
+export function toToolsInput(tools: readonly RegisteredTool[]): ToolsInput {
+  const entries = new Map<string, RegisteredTool>();
+  for (const tool of tools) {
+    if (entries.has(tool.id)) throw new Error(`Duplicate tool ID: ${tool.id}`);
+    entries.set(tool.id, tool);
+  }
+  return Object.fromEntries(entries);
+}
+
+/** Compatibility adapter for existing Agent callers; all assembly lives in getTools. */
 export async function buildTools(
-  ids: readonly string[] = registeredToolIds,
+  ids?: readonly string[],
   defaults: ToolDefaultConfigs = {},
   dependencies: ToolDependencies = {},
 ): Promise<ToolsInput> {
-  const selected = [...new Set(ids.map(normalizeToolId))];
-  const disabled = new Set(dependencies.disabledTools?.map(normalizeToolId));
-  for (const id of selected) {
-    if (!registry.has(id)) throw new Error(`Unknown tool ID: ${id}`);
-  }
-  const entries = await Promise.all(
-    selected
-      .filter((id) => !disabled.has(id))
-      .map(async (id) => {
-        const tool = await buildTool(id, defaults, dependencies);
-        return tool ? [[id, tool] as const] : [];
-      }),
+  return toToolsInput(
+    await getTools(defaults, dependencies, { ids, includeRuntimeTools: false }),
   );
-  return Object.fromEntries(entries.flat());
 }

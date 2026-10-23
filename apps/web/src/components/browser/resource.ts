@@ -5,13 +5,14 @@ import {
   type BrowserState,
 } from '@aime/shared/browser';
 import { api, apiErrorCode } from '@/lib/rpc';
+import { SharedEventSource } from '@/components/realtime/event-source';
 
 export type BrowserViewState = BrowserState & {
   connection: 'connecting' | 'connected' | 'disconnected' | 'forbidden';
 };
 
 /** The dock and sidebar share one SSE connection and one ordered input queue. */
-export function createBrowserResource(threadId: string) {
+export function createBrowserResource(threadId: string, sessionId: string) {
   let state: BrowserViewState = {
     ...emptyBrowserState,
     connection: 'connecting',
@@ -19,7 +20,7 @@ export function createBrowserResource(threadId: string) {
   const listeners = new Set<() => void>();
   const frames = new Set<(frame: BrowserFrame | null) => void>();
   let lastFrame: BrowserFrame | null = null;
-  let source: EventSource | undefined;
+  let source: SharedEventSource | undefined;
   let controller: AbortController | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let input: Promise<unknown> = Promise.resolve();
@@ -35,6 +36,7 @@ export function createBrowserResource(threadId: string) {
     for (const listener of listeners) listener();
   }
   function connect() {
+    if (!sessionId) return;
     controller = new AbortController();
     const signal = controller.signal;
     update({ ...state, connection: 'connecting' });
@@ -43,8 +45,9 @@ export function createBrowserResource(threadId: string) {
       .then((initial) => {
         if (signal.aborted) return;
         update({ ...initial, connection: 'connecting' });
-        source = new EventSource(
+        source = new SharedEventSource(
           `/api/threads/${encodeURIComponent(threadId)}/browser/events`,
+          sessionId,
         );
         source.addEventListener('state', (event) => {
           if (signal.aborted) return;
@@ -127,10 +130,11 @@ export function createBrowserResource(threadId: string) {
 }
 export type BrowserResource = ReturnType<typeof createBrowserResource>;
 const resources = new Map<string, BrowserResource>();
-export function getBrowserResource(threadId: string) {
-  let resource = resources.get(threadId);
+export function getBrowserResource(threadId: string, sessionId: string) {
+  const key = `${sessionId}:${threadId}`;
+  let resource = resources.get(key);
   if (!resource)
-    resources.set(threadId, (resource = createBrowserResource(threadId)));
+    resources.set(key, (resource = createBrowserResource(threadId, sessionId)));
   return resource;
 }
 

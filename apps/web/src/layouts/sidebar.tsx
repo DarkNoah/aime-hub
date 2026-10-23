@@ -29,7 +29,7 @@ import { Item } from '@/components/ui/item';
 import { useAuthSession } from '@/features/auth/session-context';
 import { authClient, isAdmin } from '@/features/auth/client';
 import { authErrorKey } from '@/features/auth/errors';
-import { ThreadSidebar } from '@/pages/threads/components/thread-sidebar';
+import { ThreadSidebar } from '@/components/chat/thread-sidebar';
 import { ProjectSidebar } from '@/pages/projects/components/project-sidebar';
 import { adminNavigation } from './navigation';
 

@@ -1,3 +1,5 @@
+import { BuiltinTool, type ToolSettings } from '../../modules/tools/base.js';
+import type { ToolDependencies } from '../../modules/tools/types.js';
 import { createTool, type ToolExecutionContext } from '@mastra/core/tools';
 import { z } from 'zod';
 import {
@@ -241,4 +243,21 @@ export function createAutomationTools(resolve?: ResolveAutomations) {
       },
     }),
   };
+}
+
+const defaultAutomationTools = createAutomationTools();
+
+export class AutomationTool extends BuiltinTool {
+  constructor(
+    private readonly toolId: keyof ReturnType<typeof createAutomationTools>,
+  ) {
+    super(defaultAutomationTools[toolId]);
+  }
+
+  protected override create(
+    _config: ToolSettings<'builtin'>,
+    dependencies: ToolDependencies,
+  ) {
+    return createAutomationTools(dependencies.automations)[this.toolId];
+  }
 }

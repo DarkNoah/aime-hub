@@ -925,22 +925,24 @@ export const en = {
   'chat.extract.loading': 'Reading the file and extracting JSON…',
   'tools.viewFile': 'Read file',
   'tools.viewFileDescription':
-    'Read text and code files, or parse images and PDFs into Markdown using OCR.',
+    'Read text, Office and PDF documents, transcribe audio/video, and read images with OCR or native multimodal input.',
   'tools.configureViewFile': 'Configure file reading',
   'tools.enableViewFile': 'Enable file reading',
   'tools.ocrModel': 'OCR model',
   'tools.selectOcrModel': 'Use default OCR model',
   'tools.ocrModelHint':
-    'Uses the system OCR default when no model is selected. Text reading works without OCR. Supports MinerU and PaddleOCR.',
+    'Uses the system OCR default when no model is selected. Text, Office and text PDFs work without OCR. Images and scans support MinerU and PaddleOCR.',
   'tools.ocrProviderHint':
-    'Text supports line ranges; images and PDFs use OCR. Other binary files return media or metadata. PDF page selection depends on the provider endpoint.',
+    'PDF, Word and presentations become Markdown; spreadsheets show worksheet samples. Images include OCR text and image data when the current model supports images. Audio/video use the transcription tool model or default ASR model.',
   'tools.invalidOcrModel':
     'Select an available MinerU or PaddleOCR model from an enabled provider.',
   'chat.viewFile.loading': 'Parsing file…',
   'chat.viewFile.empty': 'No text was recognized.',
   'chat.viewFile.truncated': 'Content truncated',
   'chat.viewFile.truncatedHint':
-    'Only the first 100,000 characters are shown. Split the file to read the remaining content.',
+    'Content exceeds the 100,000 character output limit and is only partly shown. Split the file to read the remaining content.',
+  'chat.viewFile.continueHint':
+    'Showing parsed lines {{start}}–{{end}} of {{total}}. Continue with offset={{offset}}.',
   'chat.viewFile.failed': 'File parsing failed.',
   'tools.transcriptionsDescription':
     'Transcribe audio or video as JSON, text, SRT or VTT. Video audio is converted to WAV first.',
@@ -1246,6 +1248,8 @@ export const en = {
     'Add your first variable to manage its name, value and description.',
   'nav.plugins': 'Plugins',
   'plugins.sidebarLoading': 'Loading plugin sidebar…',
+  'plugins.threadList': '{{name}} chat threads',
+  'plugins.newThread': 'New {{name}} chat',
   'plugins.sidebarFailed':
     'Could not load this sidebar. Refresh the page to retry.',
   'plugins.title': 'Plugins',
@@ -1497,6 +1501,13 @@ export const en = {
   'files.refreshPreview': 'Reload file',
   'files.download': 'Download file',
   'imagePreview.open': 'View image: {{name}}',
+  'imagePreview.edit': 'Edit image: {{name}}',
+  'imagePreview.editTitle': 'Edit image',
+  'imagePreview.editHint':
+    'Annotate with the pen, arrows, or text, then upload the image as an attachment.',
+  'imagePreview.editAdded': 'Edited image added to the upload queue',
+  'imagePreview.editLoadFailed':
+    'Could not load this image for editing. Retry or download and upload it again.',
   'imagePreview.zoomIn': 'Zoom in',
   'imagePreview.zoomOut': 'Zoom out',
   'imagePreview.enterFullscreen': 'Enter fullscreen',

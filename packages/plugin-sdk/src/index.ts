@@ -6,7 +6,7 @@ import {
 export * from './config.js';
 
 /** Increment this when the host breaks the plugin contract. */
-export const PLUGIN_API_VERSION = 1;
+export const PLUGIN_API_VERSION = 2;
 export const pluginManifestSchema = z.strictObject({
   id: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/),
   name: z.string().trim().min(1).max(100),
@@ -21,6 +21,13 @@ export const pluginManifestSchema = z.strictObject({
   configFields: pluginConfigFieldsSchema,
   /** Request persistent storage at <WORKSPACE_ROOT>/plugins/<id>. */
   workspace: z.boolean().optional(),
+  /** Opt in to a personal chat section beneath the plugin's main navigation. */
+  chatThreads: z
+    .strictObject({
+      /** Default agent for new plugin chats; omitted uses the host default. */
+      agentId: z.string().trim().min(1).optional(),
+    })
+    .optional(),
   pages: z
     .array(
       z.strictObject({

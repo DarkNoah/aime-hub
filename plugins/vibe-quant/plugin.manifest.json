@@ -3,7 +3,7 @@
   "name": "Vibe Quant",
   "description": "多引擎实时行情、自选自动同步与 ClickHouse 时序存储。",
   "version": "0.1.0",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "enabled": true,
   "dependencies": [],
   "configFields": [
@@ -81,11 +81,27 @@
       }
     },
     {
+      "key": "tdxTradeStockHost",
+      "label": "证券分笔服务器",
+      "type": "text",
+      "default": "124.71.187.122",
+      "description": "通达信分笔独立数据源，端口 7709；成交量分布按需读取并单独保存，不影响 K 线和盘口引擎。",
+      "group": "分笔成交"
+    },
+    {
+      "key": "tdxTradeFutureHost",
+      "label": "期货分笔服务器",
+      "type": "text",
+      "default": "116.205.143.214",
+      "description": "通达信扩展行情节点，端口 7727；与 stock-rl 使用相同的分笔接口。",
+      "group": "分笔成交"
+    },
+    {
       "key": "clickhouseReadOnly",
       "label": "不写入行情数据",
       "type": "boolean",
       "default": false,
-      "description": "开启后查询 ClickHouse 历史数据，实时行情、盘口和 K 线仅在内存中展示；自选、合约目录和运行状态仍保存到 ClickHouse。",
+      "description": "开启后查询 ClickHouse 历史数据，实时行情、盘口和 K 线仅在内存中展示，通达信分笔只读已有存储；自选、合约目录、策略、版本及回测数据仍保存到 ClickHouse。",
       "group": "ClickHouse"
     },
     {
@@ -195,6 +211,56 @@
       "max": 500,
       "default": 100,
       "group": "同步策略"
+    },
+    {
+      "key": "newsEnabled",
+      "label": "资讯同步",
+      "type": "boolean",
+      "default": true,
+      "description": "保存后生效。开启后后台同步 RSS/Atom 和完整正文；关闭后中止当前抓取并停止后续同步，已有资讯和来源配置保留。独立于行情同步。",
+      "group": "资讯聚合"
+    },
+    {
+      "key": "newsDatabase",
+      "label": "资讯数据库",
+      "type": "text",
+      "required": true,
+      "default": "vibe_quant_news",
+      "description": "使用上述 ClickHouse 连接，自动建库建表；多个服务使用相同库时自动协调采集。",
+      "group": "资讯聚合"
+    },
+    {
+      "key": "newsPollSeconds",
+      "label": "资讯源轮询间隔（秒）",
+      "type": "number",
+      "integer": true,
+      "min": 30,
+      "max": 3600,
+      "default": 120,
+      "description": "每个资讯源的目标间隔；失败时退避，恢复后继续。RSS 源的发布时间和更新速度由原站决定。",
+      "group": "资讯聚合"
+    },
+    {
+      "key": "newsFetchConcurrency",
+      "label": "正文抓取并发数",
+      "type": "number",
+      "integer": true,
+      "min": 1,
+      "max": 8,
+      "default": 3,
+      "description": "资讯正文独立读取，优先 Playwright、直接解析回退；不受 web_fetch 工具长度和启停设置影响。",
+      "group": "资讯聚合"
+    },
+    {
+      "key": "newsFailureThreshold",
+      "label": "连续失败自动停用次数",
+      "type": "number",
+      "integer": true,
+      "min": 1,
+      "max": 20,
+      "default": 3,
+      "description": "RSS 拉取或正文读取连续失败达到次数后停用该来源，保留错误原因；管理员可重新启用。",
+      "group": "资讯聚合"
     }
   ],
   "pages": [
@@ -203,7 +269,22 @@
       "title": "行情",
       "access": "session",
       "navigation": true
+    },
+    {
+      "path": "strategies",
+      "title": "策略",
+      "access": "session",
+      "navigation": true
+    },
+    {
+      "path": "news",
+      "title": "资讯",
+      "access": "session",
+      "navigation": true
     }
   ],
-  "workspace": true
+  "workspace": true,
+  "chatThreads": {
+    "agentId": "plugin:vibe-quant:quant-agent"
+  }
 }

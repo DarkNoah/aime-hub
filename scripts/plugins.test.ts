@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { PLUGIN_API_VERSION } from '@app/plugin-sdk';
 import assert from 'node:assert/strict';
 import {
   mkdtemp,
@@ -38,7 +39,7 @@ async function fixture(
           name: plugin.id,
           description: '',
           version: '1.0.0',
-          apiVersion: 1,
+          apiVersion: PLUGIN_API_VERSION,
           ...plugin,
         }),
       );
@@ -213,7 +214,7 @@ test('cycles fail discovery', () =>
     },
   ));
 test('unsupported SDK versions fail discovery', () =>
-  fixture([{ id: 'a', apiVersion: 2 }], async (root) => {
+  fixture([{ id: 'a', apiVersion: PLUGIN_API_VERSION + 1 }], async (root) => {
     await assert.rejects(discoverPlugins(root));
   }));
 test('ambiguous page parameters fail discovery', () =>

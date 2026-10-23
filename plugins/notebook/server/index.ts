@@ -4,7 +4,7 @@ import { z } from 'zod';
 import slugifyModule from 'slugify';
 // slugify publishes a CommonJS callable with an ESM default in its declarations.
 const slugify = slugifyModule as unknown as typeof slugifyModule.default;
-import { createTool } from '@mastra/core/tools';
+import { ListNotesTool } from './tools/list-notes.js';
 import type {
   PluginContext,
   PluginHttpEnv,
@@ -46,41 +46,13 @@ export default function createServer(context: PluginContext): PluginServer {
       ? c.json({ deleted: true })
       : c.json({ code: 'NOT_FOUND' }, 404);
   });
-  const tool = createTool({
-    id: 'plugin_notebook_list_notes',
-    description:
-      'List up to 50 personal notes belonging to the authenticated user. Use these records to answer questions about their notes.',
-    inputSchema: z.object({}),
-    outputSchema: z.object({
-      notes: z.array(
-        z.object({
-          id: z.string(),
-          title: z.string(),
-          content: z.string(),
-          slug: z.string(),
-        }),
-      ),
-    }),
-    execute: async (_input, execution) => {
-      const userId = execution?.requestContext?.get('userId');
-      if (typeof userId !== 'string' || !userId)
-        throw new Error('UNAUTHORIZED');
-      return {
-        notes: (await list(userId)).map(({ id, title, content, slug }) => ({
-          id,
-          title,
-          content,
-          slug,
-        })),
-      };
-    },
-  });
+
   return {
     onEnable({ config }) {
       maxNotes = config.maxNotes as number;
     },
     api,
-    tools: [tool],
+    tools: [new ListNotesTool(list)],
     agents: [
       {
         id: 'plugin:notebook:assistant',

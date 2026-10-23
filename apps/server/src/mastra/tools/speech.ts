@@ -1,3 +1,5 @@
+import { BuiltinTool, type ToolSettings } from '../../modules/tools/base.js';
+import type { ToolDependencies } from '../../modules/tools/types.js';
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import { createTool } from '@mastra/core/tools';
@@ -368,3 +370,20 @@ export function createSpeechTool(
 }
 
 export const speech = createSpeechTool();
+
+export class SpeechTool extends BuiltinTool<'speech'> {
+  constructor() {
+    super(speech, 'speech');
+  }
+
+  protected override create(
+    config: ToolSettings<'speech'>,
+    dependencies: ToolDependencies,
+  ) {
+    return createSpeechTool(config, {
+      resolveModel: dependencies.speechModel,
+      recordAsset: dependencies.recordAsset,
+      audio: dependencies.audio,
+    });
+  }
+}

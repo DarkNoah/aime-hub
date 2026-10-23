@@ -12,6 +12,7 @@ import {
   logicalAtTime,
   barEndTime,
   segmentDistance,
+  raySegment,
   type Anchor,
   type Drawing,
   type DrawingPart,
@@ -23,6 +24,11 @@ import {
   hitPosition,
   type PositionGeometry,
 } from './position-renderer';
+import {
+  drawFibonacci,
+  fibonacciGeometry,
+  hitFibonacci,
+} from './fibonacci-renderer';
 
 export type PriceSeries = ISeriesApi<'Candlestick'> | ISeriesApi<'Line'>;
 
@@ -83,8 +89,13 @@ export class DrawingPrimitive implements ISeriesPrimitive {
     const first = this.bars[0].time,
       last = barEndTime(this.bars.at(-1)!);
     if (
-      Math.max(startTime, endTime) < first ||
-      Math.min(startTime, endTime) > last
+      drawing.kind !== 'ray' &&
+      !(
+        drawing.kind === 'fibonacci' &&
+        (drawing.extendLeft || drawing.extendRight)
+      ) &&
+      (Math.max(startTime, endTime) < first ||
+        Math.min(startTime, endTime) > last)
     )
       return null;
     const start = this.point(
@@ -98,6 +109,17 @@ export class DrawingPrimitive implements ISeriesPrimitive {
           : drawing.end,
       );
     return start && end ? [start, end] : null;
+  }
+
+  private visibleSegment(drawing: Drawing, anchors: [Point, Point]) {
+    return drawing.kind === 'ray'
+      ? raySegment(
+          anchors[0],
+          anchors[1],
+          this.chart.timeScale().width(),
+          this.chart.panes()[0].getHeight(),
+        )
+      : anchors;
   }
 
   positionGeometry(drawing: PositionDrawing): PositionGeometry | null {
@@ -129,16 +151,25 @@ export class DrawingPrimitive implements ISeriesPrimitive {
         if (part) return { id: drawing.id, part };
         continue;
       }
-      const segment = this.segment(drawing);
-      if (!segment) continue;
-      const [start, end] = segment;
-      if (drawing.kind === 'trend' && drawing.id === this.selected) {
+      const anchors = this.segment(drawing);
+      if (!anchors) continue;
+      const [start, end] = anchors;
+      if (drawing.kind !== 'horizontal' && drawing.id === this.selected) {
         if (Math.hypot(point.x - start.x, point.y - start.y) <= 9)
           return { id: drawing.id, part: 'start' };
         if (Math.hypot(point.x - end.x, point.y - end.y) <= 9)
           return { id: drawing.id, part: 'end' };
       }
-      if (segmentDistance(point, start, end) <= 7)
+      if (drawing.kind === 'fibonacci') {
+        const geometry = fibonacciGeometry(drawing, anchors, width, (price) =>
+          this.series.priceToCoordinate(price),
+        );
+        if (geometry && hitFibonacci(point, geometry))
+          return { id: drawing.id, part: 'line' };
+        continue;
+      }
+      const segment = this.visibleSegment(drawing, anchors);
+      if (segment && segmentDistance(point, ...segment) <= 7)
         return { id: drawing.id, part: 'line' };
     }
     return null;
@@ -164,9 +195,8 @@ export class DrawingPrimitive implements ISeriesPrimitive {
 
   private draw(target: Parameters<IPrimitivePaneRenderer['draw']>[0]) {
     target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
-      const color = document.documentElement.classList.contains('dark')
-        ? '#60a5fa'
-        : '#2563eb';
+      const dark = document.documentElement.classList.contains('dark');
+      const color = dark ? '#60a5fa' : '#2563eb';
       for (const drawing of [
         ...this.drawings,
         ...(this.preview ? [this.preview] : []),
@@ -185,7 +215,29 @@ export class DrawingPrimitive implements ISeriesPrimitive {
             );
           continue;
         }
-        const segment = this.segment(drawing);
+        const anchors = this.segment(drawing);
+        if (!anchors) continue;
+        if (drawing.kind === 'fibonacci') {
+          const geometry = fibonacciGeometry(
+            drawing,
+            anchors,
+            mediaSize.width,
+            (price) => this.series.priceToCoordinate(price),
+          );
+          if (geometry)
+            drawFibonacci(
+              ctx,
+              geometry,
+              drawing,
+              drawing.id === this.selected || drawing === this.preview,
+              drawing === this.preview,
+              mediaSize,
+              (price) => this.series.priceFormatter().format(price),
+              dark,
+            );
+          continue;
+        }
+        const segment = this.visibleSegment(drawing, anchors);
         if (!segment) continue;
         const [start, end] = segment;
         const selected =
@@ -210,7 +262,7 @@ export class DrawingPrimitive implements ISeriesPrimitive {
           );
         } else if (selected) {
           ctx.setLineDash([]);
-          for (const point of segment) {
+          for (const point of anchors) {
             ctx.beginPath();
             ctx.arc(point.x, point.y, 4, 0, Math.PI * 2);
             ctx.fill();

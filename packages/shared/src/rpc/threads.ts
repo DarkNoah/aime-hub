@@ -55,6 +55,7 @@ export const threadsContract = {
           page,
           perPage: perPage.default(10),
           projectId: threadId.optional(),
+          plugin: createThreadSchema.shape.plugin,
         }),
       }),
     )

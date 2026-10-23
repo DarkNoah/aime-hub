@@ -12,6 +12,7 @@ import {
   moveDrawing,
   parseDrawings,
   segmentDistance,
+  raySegment,
   type Drawing,
 } from '../web/drawings/model.js';
 import {
@@ -84,6 +85,95 @@ test('anchors survive prepending and interpolate over closed-market gaps', () =>
   assert.equal(logicalAtTime(40, bars), -1);
   assert.equal(logicalAtTime(520, bars), 5);
   assert.equal(logicalAtTime(100, []), null);
+});
+
+test('rays and segments preserve their kind, anchors and cross-period setting after saving and moving', () => {
+  for (const kind of ['ray', 'segment'] as const) {
+    const drawing: Drawing = { ...line, id: kind, kind, crossPeriod: true };
+    assert.deepEqual(parseDrawings(JSON.stringify([drawing])), [drawing]);
+    assert.deepEqual(moveDrawing(drawing, 1, 2, bars), {
+      ...drawing,
+      start: { time: 220, price: 12 },
+      end: { time: 460, price: 14 },
+    });
+    assert.deepEqual(
+      parseDrawings(
+        JSON.stringify([{ ...drawing, end: { time: 0, price: 1 } }]),
+      ),
+      [],
+    );
+  }
+});
+
+test('rays extend forward to each pane boundary without extending behind their origin', () => {
+  const origin = { x: 50, y: 50 };
+  for (const [direction, boundary] of [
+    [
+      { x: 60, y: 55 },
+      { x: 100, y: 75 },
+    ],
+    [
+      { x: 40, y: 55 },
+      { x: 0, y: 75 },
+    ],
+    [
+      { x: 55, y: 60 },
+      { x: 75, y: 100 },
+    ],
+    [
+      { x: 55, y: 40 },
+      { x: 75, y: 0 },
+    ],
+    [
+      { x: 60, y: 50 },
+      { x: 100, y: 50 },
+    ],
+    [
+      { x: 50, y: 40 },
+      { x: 50, y: 0 },
+    ],
+    [
+      { x: 50, y: 60 },
+      { x: 50, y: 100 },
+    ],
+  ]) {
+    assert.deepEqual(raySegment(origin, direction, 100, 100), [
+      origin,
+      boundary,
+    ]);
+  }
+  assert.deepEqual(raySegment(origin, origin, 100, 100), [origin, origin]);
+});
+
+test('ray clipping keeps visible extensions with offscreen anchors and excludes rays pointing away', () => {
+  assert.deepEqual(raySegment({ x: -50, y: 20 }, { x: -25, y: 30 }, 100, 100), [
+    { x: 0, y: 40 },
+    { x: 100, y: 80 },
+  ]);
+  assert.deepEqual(raySegment({ x: 150, y: 50 }, { x: 125, y: 50 }, 100, 100), [
+    { x: 100, y: 50 },
+    { x: 0, y: 50 },
+  ]);
+  for (const [start, end] of [
+    [
+      { x: -50, y: 50 },
+      { x: -75, y: 50 },
+    ],
+    [
+      { x: -50, y: 50 },
+      { x: -50, y: 60 },
+    ],
+    [
+      { x: -50, y: -50 },
+      { x: -25, y: -75 },
+    ],
+    [
+      { x: -50, y: 50 },
+      { x: -50, y: 50 },
+    ],
+  ]) {
+    assert.equal(raySegment(start, end, 100, 100), null);
+  }
 });
 
 test('cross-period storage preserves sharing and isolates engines and symbols', () => {

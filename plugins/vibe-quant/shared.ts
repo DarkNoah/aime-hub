@@ -57,6 +57,7 @@ export interface Bar {
 export interface BarWindow {
   bars: Bar[];
   targetTime: number | null;
+  priceTick?: number;
 }
 export const BAR_PAGE_SIZE = 200;
 export const BAR_JUMP_RADIUS = 100;

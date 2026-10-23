@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./server": "./src/server.ts",
+    "./tools": "./src/tools.ts",
     "./web": "./src/web.ts"
   },
   "scripts": {

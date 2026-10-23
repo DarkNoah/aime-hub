@@ -39,6 +39,8 @@ export class StateStore extends ClickHouseClient {
       quant_leases:
         'engine LowCardinality(String), ownerId String, expiresAt Float64, version UInt64',
       quant_migrations: 'id String, version UInt64',
+      quant_strategy_subscriptions:
+        'userId String, sessionId String, engine LowCardinality(String), symbol String, expiresAt Float64, version UInt64',
     };
     const keys = {
       quant_instruments: '(engine, symbol)',
@@ -46,6 +48,7 @@ export class StateStore extends ClickHouseClient {
       quant_status: '(engine, instanceId)',
       quant_leases: 'engine',
       quant_migrations: 'id',
+      quant_strategy_subscriptions: '(userId, sessionId, engine, symbol)',
     };
     for (const name of Object.keys(tables) as (keyof typeof tables)[]) {
       try {
@@ -151,10 +154,14 @@ export class StateStore extends ClickHouseClient {
          coalesce((SELECT minOrNull(createdAt) FROM (${existing})), ${timeSql}), ${versionSql}
        WHERE ({requireExisting:Bool} = false OR EXISTS (${existing}))
          AND ({enabled:Bool} = false OR {deleted:Bool} = true OR
-           (SELECT count(DISTINCT symbol) FROM ${this.watches()} FINAL
-            WHERE enabled AND NOT deleted AND symbol != {symbol:String}
+           (SELECT count(DISTINCT symbol) FROM (
+            SELECT symbol FROM ${this.watches()} FINAL
+            WHERE enabled AND NOT deleted
               AND symbol IN (SELECT symbol FROM ${this.catalog()} FINAL
-                WHERE engine = {engine:String} AND NOT JSONExtractBool(metadata, 'expired')))
+                WHERE engine = {engine:String} AND NOT JSONExtractBool(metadata, 'expired'))
+            UNION ALL SELECT symbol FROM ${this.table('quant_strategy_subscriptions')} FINAL
+              WHERE engine = {engine:String} AND expiresAt > ${timeSql}
+           ) WHERE symbol != {symbol:String})
              < {limit:UInt32})`,
       {
         userId,
@@ -176,10 +183,13 @@ export class StateStore extends ClickHouseClient {
 
   async subscriptions(engine: Engine): Promise<string[]> {
     const rows = await this.rows<{ symbol: string }>(
-      `SELECT DISTINCT symbol FROM ${this.watches()} FINAL
+      `SELECT DISTINCT symbol FROM (
+       SELECT symbol FROM ${this.watches()} FINAL
        WHERE enabled AND NOT deleted AND symbol IN
          (SELECT symbol FROM ${this.catalog()} FINAL
           WHERE engine = {engine:String} AND NOT JSONExtractBool(metadata, 'expired'))
+       UNION ALL SELECT symbol FROM ${this.table('quant_strategy_subscriptions')} FINAL
+         WHERE engine = {engine:String} AND expiresAt > ${timeSql})
        ORDER BY symbol`,
       { engine },
     );

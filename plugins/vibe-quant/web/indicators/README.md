@@ -8,6 +8,18 @@ SMC 智能资金参照 stock-rl 的 `src/lib/smc` 移植，默认显示，入口
 
 计算、默认参数和绘图改编自 stock-rl 对 Smart Money Concepts [LuxAlgo] 的移植，© LuxAlgo，依据 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) 发布该改编。这里调整了时间桶、参数表单和渲染器接入，保留来源署名。
 
+## 成交量分布
+
+成交量分布入口为「主图指标 → 成交量分布」，默认关闭。保留 stock-rl 的 30 个价格档、70% 价值区间、固定范围（5/15/30 分钟、1–5 小时、1/2/3/5 天）和默认隐藏当前未完成区间。横向分布占区间宽度的 42%，显示 POC、VAH、VAL、VWAP；POC 并列取较低价格档，价值区间从 POC 向成交量较大的邻档扩展，并列向上。设置沿用统一弹窗及本地保存。
+
+数据源与 stock-rl 一致，使用 `node-tdx-market@0.2.1` 的通达信当日 / 历史分笔接口，股票走 `TdxClient`，期货走 `TdxExHqClient`。在授权的 `/volume-profile` 请求中按需补齐整日分页，保存到独立的 ClickHouse `tdx_trade_days`；当前日快照 15 秒缓存，图表每 30 秒刷新，已完成历史日复用持久化数据。K 线、盘口和 TqSdk 累计 Tick 的数据源及存储不变。价值区间内买入红色 `#e74c3cb3`、卖出绿色 `#27ae60b3`、中性灰色 `#95a5a6b3`，区间外浅灰 `#b6bdc680`，与 stock-rl 相同。方向沿用通达信，不通过 K 线或 TqSdk 快照推断；未知方向保留中性。期货时间到秒、股票到分钟，成交量单位沿用源接口（手）；它们不是交易所完整逐笔。
+
+分笔按北京时间自然日归档，夜盘通过同款 stock-sdk 交易日历转换，涵盖周五夜盘及周六凌晨。主连按历史 `quotes.underlying` 映射，只显示映射覆盖完整且未跨换月的区间。指数、暂未接入的期权、缺失历史分笔、分页异常或存储权限不足都会显示原因，不回退成 K 线估算。原始分笔不发到浏览器，仅返回价格分档及价位。
+
+`tdx_trade_days` 每行是一个标的的一天完整分页快照，分笔数组顺序保留同时间同价格同数量的重复记录；整行原子替换，版本按取数开始时间排序，旧请求晚完成不会覆盖新快照。旧版本由 ReplacingMergeTree 合并回收。当前日记录始终标为未终结，刷新失败不发布部分分页；跨日区间缺任一天即不绘制。行情只读模式只读取已保存分笔，不连接通达信或写入新分笔。插件参数中「分笔成交」独立配置证券 / 期货节点，不受主行情引擎选择影响。
+
+固定锚点为北京时间 1970-01-01 00:00，按自然时间分段（不等同于期货交易日）。图表平移按可见范围加载，最多 60 天 / 240 段 / 25 万条快照；超限不返回截断的分布。实时每 30 秒刷新；隐藏指标、切标的或换范围时取消过期请求。分钟图支持将一根较粗 K 线拆为多个区间，日线只显示日范围，月线提示切换周期。历史整段分布仅供复盘，不能当作盘中当时已知信号。
+
 ## 定义接口
 
 `types.ts` 中的 `IndicatorDefinition` 包含：
@@ -22,7 +34,7 @@ SMC 智能资金参照 stock-rl 的 `src/lib/smc` 移植，默认显示，入口
 - `requiresCandles`：只在 K 线视图显示，分时菜单禁用但保留已保存设置。
 - `priceFormat` / `paneWeight`：价格精度类型、初始副图高度权重。
 - `render(bars, parameters)`：计算与显示逻辑，返回具有稳定 ID 的折线/柱状图配置及数据。数据按时间升序，预热不足时省略 `value`，不要填入零值。
-- `renderOverlay(bars, parameters, duration)`：可选，返回线段、矩形、标签、蜡烛颜色和提示。绘图横坐标使用当前历史窗口内的逻辑索引，不增加虚拟时间点。
+- `renderOverlay(bars, parameters, duration, context)`：可选，返回线段、矩形、标签、蜡烛颜色和提示。绘图横坐标使用当前历史窗口内的逻辑索引，不增加虚拟时间点。`context.volumeProfile` 提供异步加载的成交量分布。
 
 `renderer.ts` 统一维护序列、零轴、独立面板和销毁逻辑。脚本不访问 React、DOM 或存储。每次行情更新、历史补齐或参数修改，基于当前已加载数据重新计算，当前未收盘 K 线也参与计算。
 
@@ -45,5 +57,7 @@ SMC 保留参考实现的收盘价突破、单次 pivot 突破、内部 5 根 / 
 计算及配置回归测试：
 
 ```sh
-node --import tsx --test plugins/vibe-quant/tests/indicators.test.ts plugins/vibe-quant/tests/smc.test.ts plugins/vibe-quant/tests/indicator-renderer.test.ts
+node --import tsx --test plugins/vibe-quant/tests/indicators.test.ts plugins/vibe-quant/tests/smc.test.ts plugins/vibe-quant/tests/indicator-renderer.test.ts plugins/vibe-quant/tests/volume-profile.test.ts
 ```
+
+成交量分布的 ClickHouse 集成测试使用本机隔离测试实例 `127.0.0.1:18128`，以 `QUANT_PROFILE_INTEGRATION=1` 启用；每次创建随机测试库并在结束时清理。

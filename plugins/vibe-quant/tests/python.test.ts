@@ -49,7 +49,11 @@ if(args[0]==='-m'&&args[1]==='venv'){
     );
     const signal = new AbortController().signal;
     try {
-      const python = await ensurePython(runtime, signal);
+      const [python, concurrent] = await Promise.all([
+        ensurePython(runtime, signal),
+        ensurePython(runtime, signal),
+      ]);
+      assert.equal(concurrent, python);
       const venv = join(runtime.paths.pluginWorkspace!, '.venv');
       assert.equal(python, join(venv, 'bin/python'));
       assert.equal(await ensurePython(runtime, signal), python);

@@ -1,4 +1,9 @@
 import type { Bar } from '../../shared';
+import type { VolumeProfileData } from '../../volume-profile';
+
+export interface IndicatorContext {
+  volumeProfile?: VolumeProfileData;
+}
 
 export type IndicatorType = 'main' | 'sub';
 export type IndicatorValue = string | number | boolean;
@@ -56,6 +61,7 @@ export interface IndicatorDrawing {
   bottom: number;
   color: string;
   style?: string;
+  lineWidth?: number;
   border?: boolean;
   extendRight?: boolean;
   text?: string;
@@ -91,6 +97,7 @@ export interface IndicatorDefinition {
     bars: readonly Bar[],
     parameters: IndicatorParameters,
     duration: number,
+    context?: IndicatorContext,
   ) => IndicatorOverlay;
 }
 

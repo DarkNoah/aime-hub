@@ -63,8 +63,14 @@ class OrderBookTest(unittest.TestCase):
         class Api:
             count = 0
             closed = False
+            bar_subscriptions = []
             def get_quote_list(self, symbols):
                 return [item]
+            def get_kline_serial(self, symbol, duration, **kwargs):
+                self.bar_subscriptions.append((symbol, duration))
+                return object()
+            def is_serial_ready(self, frame):
+                return False
             def get_trading_calendar(self, *args):
                 return SimpleNamespace(to_dict=lambda mode: [])
             def wait_update(self, **kwargs):
@@ -93,6 +99,8 @@ class OrderBookTest(unittest.TestCase):
         self.assertEqual(books[0]['sourceTime'], books[1]['sourceTime'])
         self.assertNotEqual(books[0]['snapshotId'], books[1]['snapshotId'])
         self.assertTrue(api.closed)
+        self.assertEqual(api.bar_subscriptions, [('CFFEX.IM2610', 60)],
+                         'Read-only collection still provides actual-contract execution bars')
 
     def test_tdx_emits_depth_before_history_failure_and_skips_indices(self):
         class Connection:

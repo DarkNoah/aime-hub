@@ -1,0 +1,57 @@
+export type NewsIndustry = { key: string; name: string };
+export type NewsSource = {
+  id: string;
+  name: string;
+  industry: string;
+  url: string;
+  enabled: boolean;
+  contentMode: 'page' | 'feed';
+  failureCount: number;
+  lastError: string;
+  autoDisabled: boolean;
+};
+export type NewsSourceState = {
+  sourceId: string;
+  lastPollAt: number;
+  lastSuccessAt: number;
+  nextPollAt: number;
+  failures: number;
+  error: string;
+  etag: string;
+  lastModified: string;
+  itemCount: number;
+};
+export type NewsSourceView = NewsSource & { state: NewsSourceState | null };
+export type NewsArticle = {
+  id: string;
+  sourceId: string;
+  sourceName: string;
+  industry: string;
+  url: string;
+  title: string;
+  summary: string;
+  publishedAt: number | null;
+  publishedRaw: string;
+  discoveredAt: number;
+  sortAt: number;
+  content: string;
+  contentStatus: 'pending' | 'ready' | 'failed';
+  contentFetchedAt: number | null;
+  contentUrl: string;
+  contentProvider: string;
+  contentTruncated: boolean;
+  contentError: string;
+  attempts: number;
+  nextRetryAt: number;
+};
+export type NewsSummary = Omit<NewsArticle, 'content' | 'publishedRaw'>;
+export type NewsPage = { items: NewsSummary[]; nextCursor: string | null };
+export type NewsOverview = {
+  industries: NewsIndustry[];
+  sources: NewsSourceView[];
+  canManage: boolean;
+  enabled: boolean;
+  pollSeconds: number;
+  collector: { active: boolean; heartbeatAt: number | null };
+  counts: { total: number; ready: number; pending: number; failed: number };
+};

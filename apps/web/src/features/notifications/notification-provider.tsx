@@ -5,6 +5,7 @@ import { useAuthSession } from '@/features/auth/session-context';
 import { Toaster } from '@/components/ui/toast';
 import { toast } from '@/components/ui/toast-manager';
 import { refreshDesktopPush } from './desktop-push';
+import { SharedEventSource } from '@/components/realtime/event-source';
 
 export function NotificationProvider() {
   const { data } = useAuthSession();
@@ -12,7 +13,7 @@ export function NotificationProvider() {
   const userId = data?.user.id;
   const sessionId = data?.session.id;
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || !sessionId) return;
     const key = `notification-cursor:${userId}`;
     let cursor: string | undefined;
     try {
@@ -22,13 +23,14 @@ export function NotificationProvider() {
     }
     if (cursor && !/^\d{1,18}$/.test(cursor)) cursor = undefined;
     let stopped = false;
-    let source: EventSource;
+    let source: SharedEventSource;
     let retry: ReturnType<typeof setTimeout>;
     const openToasts = new Set<string>();
     const connect = () => {
       if (stopped) return;
-      source = new EventSource(
+      source = new SharedEventSource(
         `/api/notifications/events${cursor ? `?after=${cursor}` : ''}`,
+        sessionId,
       );
       source.addEventListener('notification', (message) => {
         let raw: unknown;

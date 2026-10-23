@@ -16,7 +16,7 @@ import type { PreviewPart } from './selection';
 import { ViewFilePreview } from './view-file';
 import { parseViewFileOutput } from './view-file-output';
 
-// The wrapped tool can return native text/media or structured OCR results.
+// The wrapped tool returns native text/media or converted document/transcript results.
 export function ReadFileToolPreview({ part }: { part: PreviewPart }) {
   if (!isToolUIPart(part)) return null;
   return parseViewFileOutput(part.output) ? (

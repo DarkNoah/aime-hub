@@ -3,7 +3,8 @@ import type {
   ThreadNavigationEvent,
   ThreadSummary,
 } from '@aime/shared/threads';
-import type { createThreadListResource } from './thread-list-resource.js';
+import { createThreadListResource } from './thread-list-resource.js';
+import { chatApi } from './api.js';
 import type { createProjectNavigationResource } from '../../pages/projects/navigation-resource.js';
 
 export function createThreadNavigationResource(
@@ -11,6 +12,11 @@ export function createThreadNavigationResource(
   projects: ReturnType<typeof createProjectNavigationResource>,
 ) {
   const threads = new Map<string, ThreadSummary>();
+  const pluginLists = new Map<
+    string,
+    ReturnType<typeof createThreadListResource>
+  >();
+  let synchronized = false;
   const listeners = new Set<() => void>();
   let archivedThreads: ThreadSummary[] | undefined;
   const removeArchived = (id: string) => {
@@ -19,6 +25,26 @@ export function createThreadNavigationResource(
   };
   let counts = new Map<string, number>();
   return {
+    /** Personal plugin chats share the global feed but keep independent pagination. */
+    pluginThreads(plugin: string) {
+      let list = pluginLists.get(plugin);
+      if (!list) {
+        list = createThreadListResource(
+          (page, signal) => chatApi.list(page, signal, undefined, 5, plugin),
+          5,
+          plugin,
+        );
+        if (synchronized)
+          list.synchronize(
+            [...threads.values()].filter((thread) => !thread.projectId),
+          );
+        pluginLists.set(plugin, list);
+      }
+      return list;
+    },
+    cancel() {
+      pluginLists.forEach((list) => list.cancel());
+    },
     getArchivedThreads: () => archivedThreads,
     removeArchivedThread(id: string) {
       removeArchived(id);
@@ -36,11 +62,17 @@ export function createThreadNavigationResource(
     receive(event: ThreadNavigationEvent) {
       switch (event.type) {
         case 'snapshot':
+          synchronized = true;
           archivedThreads = event.archivedThreads;
           threads.clear();
           event.threads.forEach((thread) => threads.set(thread.id, thread));
           personal.synchronize(
             event.threads.filter((thread) => !thread.projectId),
+          );
+          pluginLists.forEach((list) =>
+            list.synchronize(
+              event.threads.filter((thread) => !thread.projectId),
+            ),
           );
           projects.synchronize(
             event.projects,
@@ -51,7 +83,10 @@ export function createThreadNavigationResource(
           removeArchived(event.thread.id);
           threads.set(event.thread.id, event.thread);
           if (event.thread.projectId) projects.updateThread(event.thread);
-          else personal.update(event.thread, true);
+          else {
+            personal.update(event.thread, true);
+            pluginLists.forEach((list) => list.update(event.thread, true));
+          }
           break;
         case 'remove':
           removeArchived(event.id);
@@ -62,7 +97,10 @@ export function createThreadNavigationResource(
             ];
           threads.delete(event.id);
           if (event.projectId) projects.removeThread(event.id, event.projectId);
-          else personal.remove(event.id);
+          else {
+            personal.remove(event.id);
+            pluginLists.forEach((list) => list.remove(event.id));
+          }
           break;
         case 'project-removed':
           for (const [id, thread] of threads) {
@@ -73,7 +111,11 @@ export function createThreadNavigationResource(
       }
       counts = new Map();
       for (const thread of threads.values()) {
-        if (thread.projectId && isThreadActive(thread.status))
+        if (
+          thread.projectId &&
+          thread.plugin === undefined &&
+          isThreadActive(thread.status)
+        )
           counts.set(thread.projectId, (counts.get(thread.projectId) ?? 0) + 1);
       }
       listeners.forEach((listener) => listener());

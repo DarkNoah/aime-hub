@@ -15,6 +15,35 @@
 - 共享 ClickHouse 通过租约选择每个引擎的入库实例，失去租约后拒绝行情写入。引擎配置变化自动重启，停用回收 Python 子进程，异常退避重连。每天按上海日期刷新目录，过期/移除的合约不再开放新订阅。
 - 可开启“不写入行情数据”：查询 ClickHouse 历史，实时行情、盘口和 K 线仅在当前服务内存中合并展示；自选、目录和状态仍正常保存。
 - TqSdk 最近 Tick 窗口回补与持续采集，保存原始累计成交量、累计成交额和精确时间；自动检查序号缺口、累计量回退，并与已覆盖分钟 K 线对账。本版不实现 Volume Profile 指标。
+- 资讯聚合：`/p/vibe-quant/news`，12 个行业、106 个 RSS/Atom 源，来源筛选、标题/摘要搜索、游标翻页及正文阅读；后台独立采集，通过 Playwright 优先读取完整正文。
+
+## 资讯聚合
+
+资讯源清单移植自 [Vibe-Research 的 rss_sources.json](https://github.com/simonlin1212/Vibe-Research/blob/main/datasources/rss_sources.json)，上游为 [investment-news](https://github.com/simonlin1212/investment-news)。本次锁定源清单 blob `fd04152cb0c076dbdcc0e1df093cd63ffda98073`，实际 106 个源、12 个行业；来源和 MIT 许可保留在 `server/news/sources.json` 与 `server/news/LICENSE.investment-news`。只复用源清单，不导入上游的内容屏蔽词表；完整性和站点可用性以实际抓取结果为准。
+
+在 **后台 → 插件管理 → Vibe Quant → 参数配置 → 资讯聚合** 中使用 **资讯同步** 开关（`newsEnabled`，默认开启），点击保存后生效。关闭会中止当前 RSS/正文抓取、停止后续同步并释放采集租约，已有资讯仍可阅读，来源配置保留；重新开启后继续轮询和处理待抓取正文。此开关独立于行情同步；保存参数沿用宿主的插件重载流程。多实例分别管理配置时，每个实例都需关闭，才能停止共享资讯库的全部采集。
+
+同组还可设置目标轮询间隔（默认 120 秒）、正文并发（默认 3）、连续失败停用阈值（默认 3）及资讯数据库（默认 `vibe_quant_news`）。沿用插件 ClickHouse HTTP 地址和凭据，启用时执行幂等建库建表；账号需具有目标库的 CREATE DATABASE / CREATE TABLE / ALTER / SELECT / INSERT 权限。新闻存储与“不写入行情数据”开关独立。源新增、编辑、删除和启停是管理员操作，对同库的所有用户生效。删除使用持久化标记，保留历史新闻，服务重启不会重新导入已删除的内置源；再次添加同一地址可恢复来源。
+
+| 表                  | 内容                                                                                                     |
+| ------------------- | -------------------------------------------------------------------------------------------------------- |
+| `news_sources`      | 来源 ID、名称、行业、RSS 地址、启停/删除状态、正文连续失败次数、停用原因和自动停用标记                   |
+| `news_source_state` | 最近尝试/成功、ETag、Last-Modified、下次轮询、错误及连续失败次数                                         |
+| `news_articles`     | 标题、URL、摘要、来源、原始发布时间、UTC epoch 发布时间、首次发现时间、正文状态/提供方/截断标记/重试信息 |
+| `news_contents`     | 完整 Markdown 正文，独立存储以避免列表读取正文                                                           |
+| `news_lease`        | 共享采集租约与心跳，失去租约后拒绝写入                                                                   |
+
+没有发布时间时保持 `publishedAt=null`，页面标注发现时间，所有展示时间为北京时间。同一来源的规范化 URL 去重，仅剥离明确的跟踪参数；保留 `?p=` / `?id=` 等文章标识，同一文章的不同来源记录分别保留。重复轮询不会覆盖已保存正文。正文失败保留摘要、错误及退避重试时间，不将摘要标为完整正文；不按字符数截断正文，不将部分正文标为成功；响应超过 5 MB 的安全读取上限会失败重试。旧截断记录应重新入队，阅读器不再展示它们为完整正文。
+
+RSS 使用宿主的安全 HTTP 传输（逐跳地址校验、响应体大小限制、条件请求），正文直接按 URL 调用宿主文章读取器，优先 Playwright 渲染（35 秒总时限），失败后尝试 HTTP 读取（20 秒）。它不调用 Agent 的 `web_fetch` 工具，也不受该工具启用状态、供应商或 `maxChars` 限制。两者仅共享底层安全传输和正文解析代码。微信文章等待 `#js_content`，解析懒加载图片、代码段和部分 `JsDecode` 内嵌正文；验证页、失效文章或空壳会记录具体错误，不保存为成功。Playwright 不保证解决验证码，遇到验证不会绕过。资讯源与正文队列独立运行，不需要打开页面，非交易时段也采集；正文批次一半优先最新资讯，另一半处理积压和到期重试。单篇正文失败按 30 秒起指数退避，RSS 失败按轮询间隔起退避，上限均一小时。同一源正文连续失败达到阈值或 RSS 连续失败达到阈值时自动停用，持久保存错误码（例如 `WECHAT_VERIFICATION_REQUIRED`）并在源管理中解释原因；RSS 成功不会清除正文失败计数。停用后不再派发新请求，已在途请求会结束；管理员重新启用时清除计数和停用原因，恢复轮询及到期正文重试。停用插件会中止请求并释放租约。多实例必须直连同一 ClickHouse 24.8+ 服务，共享新闻库；租约及写入采用同一查询锁，负载均衡到不同服务器不提供此保证。
+
+来源可选择「读取原文网页」（默认）或「仅保存 RSS 自带正文」。后者只读取 RSS `content:encoded` / Atom `content`，转换并完整保存为 Markdown；没有正文字段、仅有 `description` / `summary`、或清理后正文为空的条目不入库，也不进入网页抓取队列。正文标记 `contentProvider=rss`；来源模式保存到 ClickHouse `news_sources.contentMode`，在来源编辑中可查看与更改。AIHOT 的 `https://aihot.news/feed/full.xml` 使用此模式。
+
+页面每 15 秒检查新数据，用「新资讯」按钮插入列表以保持阅读位置。源目标间隔不等于交易所行情推送：源更新频率、网络和队列都会影响延迟。初次采集每个源最多读取 200 条当前条目，不承诺历史全量回补，也不绕过付费墙。数据没有自动 TTL，部署方按自己的保留策略管理。
+
+会话 API：`GET /news`（industry/source/q/cursor/limit）、`GET /news/overview`、`GET /news/:id`；管理员可 `POST /news/sources`、`PATCH /news/sources/:id`（name/industry/url/enabled/contentMode）和 `DELETE /news/sources/:id`。路径前缀均为 `/api/plugins/vibe-quant`。
+
+验证：`node --import tsx --test plugins/vibe-quant/tests/news.test.ts`；微信适配及实际浏览器测试使用 `TEST_WEB_FETCH_BROWSER=1 node --import tsx --test scripts/wechat-fetch.test.ts scripts/web-fetch.test.ts`；真实数据库隔离测试使用 `QUANT_INTEGRATION=1 TEST_WEB_FETCH_BROWSER=1 node --import tsx --test plugins/vibe-quant/tests/news-integration.test.ts`，连接本机 `18124` 测试 ClickHouse，并在唯一临时数据库中创建/清理数据。
 
 ## 多服务共享 ClickHouse
 
@@ -104,6 +133,8 @@ TqSdk 入库服务自动对自选的股票、基金、期货和期权调用 `get
 
 分钟校验仅比较有前序基线、序号连续、数值有效、已由后续 Tick 证明结束且有参考 K 线的分钟；首个不完整分钟、最后未结束分钟、缺口或缺 K 线均保留为未校验。`state` 区分 `empty`、`partial`、`warning`、`consistent`；`consistent` 仅表示已覆盖区间的一致性，**不代表全天完整或交易所逐笔完整**。校验从 `FINAL` 原始数据重新计算，因此后续回补能修复此前的缺口结果。
 
+成交量分布独立使用与 stock-rl 相同的通达信分笔接口（`node-tdx-market@0.2.1`），按图表请求补齐历史分页并保存到 `tdx_trade_days`。此表按标的、北京时间自然日保存整日分笔数组，原子替换并保留重复分笔，避免将每笔成交量与 TqSdk 的累计量混用。当前日按需刷新，历史日读取存储；K 线和盘口采集流程不变。分笔连接位于插件参数「分笔成交」，股票默认 `124.71.187.122:7709`，期货默认 `116.205.143.214:7727`；行情只读模式只读已有分笔。配色及时间范围见 [指标说明](web/indicators/README.md#成交量分布)。
+
 K 线查询会从 `ticks FINAL` 同时重建 OHLC 并补齐缺失成交额，直接按请求周期计算。要求序号连续、累计成交量有效且不回退、区间起点有基线、末尾有连续的后续 Tick 证明结束，并与该根源 K 线成交量对账。OHLC 只采用成交量增量大于 0 的 Tick 最新价：首条为开盘、最后一条为收盘、最大/最小值为最高/最低，排除前一根收盘价及无成交的报价变化。区间存在缺口、未结束、成交量不一致、成交 Tick 价格无效或无成交时，整组 OHLC 保留源 K 线，不混用部分重建值。历史分页、日期跳转、主副图指标均使用查询返回的同一组价格。
 
 成交额仍按累计额差分汇总，不把累计额直接相加；额还须有效、不回退且与成交量变化一致。缺失累计额不影响满足条件的 OHLC 重建，但成交额继续返回 NULL（界面“—”）。零成交量且累计额不变可返回 0，数据源已有单根成交额时保留原值。换交易日重置累计基线；日线和月线按 Tick 的 `tradingDay` 归属，涵盖前一晚夜盘、跨周末和跨月夜盘。
@@ -122,7 +153,7 @@ pnpm db:migrate
 pnpm dev
 ```
 
-不需要配置 Python 路径。宿主需有 Python 3.9+（建议 3.11）和 venv/pip；插件通过宿主运行上下文，在 `<WORKSPACE_ROOT>/plugins/vibe-quant/.venv` 自动创建独立环境并安装 `worker/requirements.txt`。依赖指纹不变且导入检查通过时复用环境，首次安装显示准备状态，失败后 30 秒重试。停用会中止准备任务。Docker 镜像预构建依赖 wheel，运行时可离线安装；本地首次安装需要访问 Python 包仓库。Workspace 应挂载持久卷。
+不需要配置 Python 路径。宿主需有 Python 3.10+（建议 3.11）和 venv/pip；插件通过宿主运行上下文，在 `<WORKSPACE_ROOT>/plugins/vibe-quant/.venv` 自动创建独立环境并安装 `worker/requirements.txt`。依赖指纹不变且导入检查通过时复用环境，首次安装显示准备状态，失败后 30 秒重试。停用会中止准备任务。Docker 镜像预构建依赖 wheel，运行时可离线安装；本地首次安装需要访问 Python 包仓库。Workspace 应挂载持久卷。
 
 清单的 `workspace: true` 申请插件专属空间；代码通过 `context.runtime.paths.pluginRoot` 读取采集脚本和依赖清单，通过 `context.runtime.ensureWorkspace()` 取得持久化目录。迁移自动移除旧的 `pythonPath` 参数，保留账号和行情数据。插件清单默认参与构建；新安装仍由宿主默认停用。
 
@@ -162,3 +193,69 @@ Tick 测试另外覆盖最近窗口完整读取、多 Tick 合并到达、纳秒
 实时行情验证需要使用者提供有效账号/Token/行情服务器；通过构建和隔离测试不代表已验证付费行情权限或生产逐笔数据完整性。断线重连按接口最近窗口回补 K 线和 Tick，不承诺重放窗口之外的中断数据。进程强杀可能丢失尚未入库的内存批次。
 
 接口依据：[TqSdk](https://doc.shinnytech.com/tqsdk/latest/reference/tqsdk.api.html)、[Tushare 股票实时行情](https://tushare.pro/document/2?doc_id=372)、[Tushare 指数实时行情](https://tushare.pro/document/2?doc_id=403)、[PyTDX](https://github.com/rainx/pytdx)、[TradingView Lightweight Charts](https://tradingview.github.io/lightweight-charts/)。
+
+## Python 策略 SDK
+
+`sdk/` 提供独立 Python `quant_sdk` 包，覆盖 IM／商品期货主连及股票的数据、回测和实时计算接口。安装、可运行示例、结果协议和当前边界见 [SDK 文档](sdk/README.md)。
+
+## 策略管理
+
+入口：侧边栏 **Vibe Quant → 策略**（`/plugins/vibe-quant/strategies`）。支持创建策略、编辑或导入 `.py` 脚本、下载脚本、保存草稿、发布固定版本、从旧版本恢复到草稿、停用新回测。
+
+- **策略编辑**：默认参数和回测参数共用表单 / JSON 编辑器，保留数字、文本、布尔和嵌套 JSON 类型，错误输入不能切换成有效表单或保存。Python 脚本支持带行号的语法高亮预览、编辑和复制；历史版本只读。入口无需配置，运行时自动选择本文件中唯一可实例化的 `Strategy` 子类（同一继承链选择最末级）；多个独立策略类需拆分为单独脚本。旧记录中的入口字段不再影响新回测。
+- **脚本与版本解耦**：ClickHouse `quant_strategy_sources` 以 SHA-256 存放脚本正文，读写均校验哈希。`quant_strategies` 保存所有者、策略信息、草稿引用及已发布版本列表（固定正文哈希、默认参数和说明）。发布版本和更新 revision 在同一条记录中原子完成，已发布版本不可覆盖。保存草稿使用 revision 防止多个窗口相互覆盖；标签页内的未保存编辑可恢复。SDK 接口类仍随插件源码发布，不存入数据库。
+- **每次运行都有记录**：ClickHouse `quant_strategy_runs` 固定用户、版本、数据引擎、时间区间、策略参数、资金、保证金、乘数、滑点、成交量参与率、手续费和基准，并保存队列状态、执行者与心跳。策略可调项集中在版本的默认参数中，脚本通过 `ctx.params` 读取；新回测先合并版本默认参数与本次覆盖值，再冻结完整参数，HTTP、页面和 Agent 工具保持一致。失败与取消同样保留，历史记录可用原参数创建新回测。
+- **冻结数据**：执行前保存原始行情与 SDK Dataset，完成后保存结果和 SDK manifest；这些 JSON 存入 ClickHouse `quant_strategy_run_artifacts`；大产物在传输前使用带版本前缀的 gzip/base64 编码，并以单线程解析入库，降低数据库解析内存，表层仍使用 ZSTD。读取兼容旧明文 JSON，解压受大小上限约束，按运行 ID 和产物类型保持不可覆盖，并校验原始 JSON 的 SHA-256。与当前行情解耦，也不依赖某个服务进程的临时文件。导出包含版本源码、运行参数、Dataset、结果及 manifest。SDK manifest 记录 Python/SDK 版本和运行时源码哈希。
+- **使用插件 venv**：调用现有 `ensurePython()`，运行 `<WORKSPACE_ROOT>/plugins/vibe-quant/.venv/bin/python`（Windows 为 `Scripts/python.exe`），要求 Python 3.10+。行情采集和回测共用环境，初始化/修复有文件锁。SDK 源码复制到本次运行目录并加入 Python 导入路径；用户额外依赖可安装到此 venv。
+- **执行权限**：venv 是依赖环境，不是安全沙箱。只有管理员可提交运行服务器 Python 代码的回测；策略、版本、结果 API 均按所有者隔离。子进程不继承数据库、行情账号、会话等环境变量。工作目录位于插件空间 `strategy-runs/`，产物入库后移除临时副本；脚本仍是具有宿主文件访问能力的受信任代码。
+- **队列生命周期**：ClickHouse 的单条条件 INSERT 同时检查修订号或用户队列容量，并写入新状态；通过共享查询 ID 串行执行这些单条语句，不把跨请求读写当成事务。此机制沿用“同一台 ClickHouse 24.8+ 服务器”的要求，不支持多节点负载均衡。每进程同时认领一个与自身行情引擎匹配的任务，每用户最多三个未完成任务；两秒心跳用于取消和断线发现。执行超时五分钟；取消先请求 SDK 停止，再终止不响应的进程组。服务异常退出后超时的记录标记为失败，不自动重复执行。插件停用会停止本进程运行。
+- **结果与回放**：显示总收益/收益率、年化、最大回撤、夏普、交易笔数、最终权益、基准收益/年化、索提诺、卡玛、PF、净值曲线、月度/年度收益和交易表。交易回放与行情页共用完整的 `MarketChartPanel`，包含分时/多周期 K 线、指标及参数、划线、日期跳转和边缘分页，额外提供入场/离场定位。K 线通过 `useMarketBars` 和行情页相同的历史数据查询按需加载实际成交合约，使用该次回测的数据引擎，不受回测起止时间限制。成交标记仍取自回测记录，行情库后续修订不会改写成交结果。划线按回测、标的、周期保存，支持跨周期显示，与实时行情的划线隔离。打开时定位入场，入场/离场按钮只跳转视窗；拖至边缘继续双向加载，每页 200 根并保留视窗位置。冻结快照仍随回测保留、供导出和结果核验使用，不再限制图表可浏览的范围。
+
+回测仅使用已经采集/导入的行情。默认 `actual_contract` 模式缺少历史主力映射或对应实际合约分钟线时明确失败，不替换成当前主力。显式选择 `continuous_price` 时，将所选主连作为保留原符号的合成期货，按主连价格模拟成交；原始行情目录不变，配置、Dataset、manifest 和结果页标明模拟口径，不计实际合约价差及换月成交成本，策略需支持此模式。单次最多十年（3,660 天）、500,000 根输入 K 线、24 个实际合约；单份产物最多 128 MiB。默认交易日历使用 venv 中 `chinese-calendar` 的已公布节假日并排除周末；可在配置中提供完整日期到布尔值的交易所日历以覆盖特殊休市，未知日期失败。股票与期货交易规则需要根据品种明确填写；目录选择股票会填入 100 股、T+1、全额资金的默认配置。保证金和手续费都是回测假设，不代表交易所或经纪商当前标准。
+
+数据模型与撮合范围沿用 [Python SDK](./sdk/README.md)。这里提供回测管理，不接入实盘委托；参数优化与实时监控的管理界面可在固定版本和运行记录上继续扩展。
+
+升级时先停止旧版本执行进程，再启用新版插件。首次启用自动创建上述 ClickHouse 表和 `quant_strategy_migrations`，读取旧 PostgreSQL 策略、版本、任务与 gzip 产物，分批复制并校验，完成后记录迁移指纹。中断可重试，已有 ClickHouse 记录不会被旧数据覆盖；旧 PostgreSQL 表保留为备份，正常策略业务不再读写这些表。旧的排队任务继续排队，迁移时仍在执行的任务标记失败，避免重复运行。宿主账号、插件配置和连接凭据仍由宿主管理。
+
+所有服务均需对策略表有 SELECT、INSERT 权限；首次建表还需 CREATE TABLE，使用 `input()` 写入需 `CREATE TEMPORARY TABLE ON *.*`。开启“不写入行情数据”只影响行情表，策略及回测仍写入 ClickHouse。更换 ClickHouse 地址或数据库前需迁移这些表；旧 PostgreSQL 备份不包含升级后新保存的数据。
+
+验证命令（集成测试使用本地 18124 ClickHouse 的独立数据库和 PostgreSQL schema 并自动清理，`QUANT_PYTHON` 可指定测试用插件 venv）：
+
+```sh
+node --import tsx --test plugins/vibe-quant/tests/strategies.test.ts plugins/vibe-quant/tests/strategy-storage.test.ts
+QUANT_STRATEGY_INTEGRATION=1 node --import dotenv/config --import tsx --test plugins/vibe-quant/tests/strategies.test.ts plugins/vibe-quant/tests/strategy-storage.test.ts
+# 加 QUANT_INTEGRATION=1 可连接既有测试约定的 localhost:18124 ClickHouse 验证真实快照查询。
+```
+
+策略回调支持返回 `RiskLevels`（或调用 `ctx.set_risk_levels`），每次计算的止盈止损快照写入 `risk_levels` 并通过 live 回调输出。回测和 paper 实时模拟会按执行 K 线开盘前的最新有效价格检查触发并自动平仓，计入成交量、T+1、手续费和滑点；monitor 仅输出计算结果。交易记录及行情回放显示离场原因、触发价格和对应的计算记录，并按入场信号绘制动态分段范围。开盘跳空按开盘价为基准，同根盘中两侧都触发时优先止损；OHLC 盘中成交注明时间精度。详见 [SDK 止盈止损接口](sdk/README.md#止盈止损范围与动态更新)。
+
+## Quant Agent
+
+插件启用后，聊天 Agent 列表提供 **Quant Agent**（`plugin:vibe-quant:quant-agent`），模型沿用宿主设置。Agent 定义位于 `mastra/agents/`，工具及共享执行上下文位于 `mastra/tools/`，由 `mastra/index.ts` 统一注册，不需要单独的模型凭据。可描述入场、离场、仓位和风控要求，让 Agent 创建或更新 Python 策略，再发布固定版本并提交历史回测。
+
+所有工具 ID 均以 `plugin_vibe_quant_` 开头：
+
+| 工具                                    | 用途                                                               |
+| --------------------------------------- | ------------------------------------------------------------------ |
+| `strategy_guide`、`instrument_search`   | 当前 SDK 文档、模板、权限和标的目录                                |
+| `strategy_list`、`strategy_read`        | 当前用户的策略列表、草稿及指定版本源码                             |
+| `strategy_create`、`strategy_update`    | 创建草稿、按 revision 更新；支持启停，省略字段保留原值             |
+| `strategy_versions`、`strategy_publish` | 查看版本摘要、固定当前草稿版本                                     |
+| `backtest_start`、`backtest_list`       | 提交回测、分页读取历史记录                                         |
+| `backtest_status`、`backtest_result`    | 等待进度、指标与说明、分页读取交易/委托/成交/信号/日志/权益/风险线 |
+| `backtest_cancel`                       | 取消排队或运行中的回测                                             |
+| `news_search`、`news_read`              | 搜索已采集资讯、读取正文及来源；采集关闭后仍可读取已有数据         |
+
+典型流程是 `guide → list/read → create/update → publish → backtest_start → status → result`。创建策略只需 `name`、`source`，`parameters` 默认空对象；更新传 `strategy_id`、`revision` 和要改的字段，`source`、`parameters` 直接放在顶层，无需 `draft`。省略字段保留原值，`parameters` 如提供则整体替换。读取结果仍保留 `strategy.draft` 结构。
+
+回测只需 `version_id`、`symbol`、`start`、`end`、`rules`，策略归属由版本自动确定；仍兼容可选 `strategy_id` 并校验归属。`backtest_start.parameters` 覆盖固定版本的同名参数。默认使用 1 分钟 K 线、初始资金 100 万、滑点 1 tick、参与率 10%、年化交易日 252，均为可覆盖的研究假设；乘数、保证金、手数、T+1 和手续费规则必须明确提供。日期使用 UTC epoch 秒。工具参数保持简单，实际保存和回测仍执行后端校验；参数错误会返回具体字段或错误码。结果明细每页固定 50 条，用 `next_offset` 继续。数据缺失、执行错误和无成交保留为实际结果，不会被当作验证成功。
+
+资讯查询无需策略指南：`news_search` 可直接留空查看最新资讯，或传 `query` 和可选行业名称/`industry` key，每页 20 条，用 `next_cursor` 继续。把返回的资讯 `id` 传给 `news_read.article_id` 读取正文；返回原文链接、来源、发布时间、采集时间及正文状态，不触发额外抓取。引用时区分发布时间与采集时间，说明正文缺失、截断或同步关闭的限制。
+
+工具以当前消息作者的可信 `userId` 校验所有权，每次执行检查账号和插件状态；Python 回测沿用 HTTP 接口的管理员限制，并重新查询账号角色。工具自动出现在后台工具配置中，可单独启停；聊天使用已有通用工具结果展示。中止工具等待会立即返回“用户中止了操作”；已提交的回测需通过 `backtest_cancel` 明确取消，提交过程中延迟写入的任务会在检测到中止后补充取消。数据库写入如已提交仍可能保留，恢复操作前应重新读取状态。
+
+```sh
+node --import tsx --test plugins/vibe-quant/tests/quant-agent.test.ts
+# 使用上述隔离测试数据库和插件 Python 环境，验证工具到真实回测的完整链路
+QUANT_STRATEGY_INTEGRATION=1 node --import dotenv/config --import tsx --test plugins/vibe-quant/tests/quant-agent.test.ts
+```

@@ -8,6 +8,8 @@ import { KnowledgeWorker } from './modules/knowledge/worker.js';
 import { syncPluginSkills } from './modules/plugins/assets.js';
 import { installedPlugins } from './modules/plugins/generated.js';
 import { PluginService } from './modules/plugins/service.js';
+import { requestWebResource } from './mastra/web/request.js';
+import { readArticleContent } from './mastra/web/article.js';
 import { registerPluginSkillAccess } from './modules/plugins/skill-access.js';
 import { UsageService } from './modules/usage/service.js';
 import 'reflect-metadata';
@@ -106,10 +108,19 @@ try {
   ]);
   throw error;
 }
-const plugins = new PluginService(database, installedPlugins, 2000, {
-  applicationRoot: fileURLToPath(new URL('../../../', import.meta.url)),
-  workspaceRoot,
-});
+const plugins = new PluginService(
+  database,
+  installedPlugins,
+  2000,
+  {
+    applicationRoot: fileURLToPath(new URL('../../../', import.meta.url)),
+    workspaceRoot,
+  },
+  {
+    fetchContent: readArticleContent,
+    request: requestWebResource,
+  },
+);
 await syncPluginSkills(workspaceRoot);
 const disposePluginSkills = registerPluginSkillAccess(
   workspaceRoot,

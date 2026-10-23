@@ -7,6 +7,7 @@ import {
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation';
 import { cn } from '@/lib/utils';
+import { ImageEditProvider } from '@/components/image-viewer/image-edit-provider';
 
 type ChatConversationProps = {
   children: ReactNode;
@@ -16,9 +17,11 @@ type ChatConversationProps = {
 
 export function ChatConversation(props: ChatConversationProps) {
   return (
-    <Conversation className="min-h-0" initial="instant" resize="instant">
-      <ChatConversationLayout {...props} />
-    </Conversation>
+    <ImageEditProvider>
+      <Conversation className="min-h-0" initial="instant" resize="instant">
+        <ChatConversationLayout {...props} />
+      </Conversation>
+    </ImageEditProvider>
   );
 }
 

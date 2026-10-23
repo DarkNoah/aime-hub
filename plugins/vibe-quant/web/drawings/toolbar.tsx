@@ -19,17 +19,25 @@ import {
 import {
   ArrowDownRight,
   ArrowUpRight,
+  MoveUpRight,
   Check,
   ChevronDown,
   Eraser,
   Layers,
+  ListFilter,
   Minus,
   MousePointer2,
   PencilRuler,
+  Slash,
   Trash2,
   TrendingUp,
 } from 'lucide-react';
-import type { DrawingState, DrawingTool } from './model';
+import {
+  isTwoPointTool,
+  type DrawingState,
+  type DrawingTool,
+  type FibonacciOptions,
+} from './model';
 
 const TOOLS = [
   {
@@ -39,10 +47,28 @@ const TOOLS = [
     detail: '连接两个价格点',
   },
   {
+    tool: 'ray',
+    label: '射线',
+    icon: MoveUpRight,
+    detail: '从起点沿第二点方向延伸',
+  },
+  {
+    tool: 'segment',
+    label: '线段',
+    icon: Slash,
+    detail: '仅连接起点和终点',
+  },
+  {
     tool: 'horizontal',
     label: '水平线',
     icon: Minus,
     detail: '标记支撑或阻力',
+  },
+  {
+    tool: 'fibonacci',
+    label: '斐波那契回撤',
+    icon: ListFilter,
+    detail: '两点测量回撤比例与价位',
   },
   {
     tool: 'long',
@@ -64,12 +90,14 @@ export function DrawingToolbar({
   onDelete,
   onClear,
   onCrossPeriod,
+  onFibonacciOptions,
 }: {
   state: DrawingState;
   onTool: (tool: DrawingTool) => void;
   onDelete: () => void;
   onClear: () => void;
   onCrossPeriod: (value: boolean) => void;
+  onFibonacciOptions: (options: Partial<FibonacciOptions>) => void;
 }) {
   const [clearOpen, setClearOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -115,9 +143,9 @@ export function DrawingToolbar({
             onCloseAutoFocus={(event) => event.preventDefault()}
           >
             <DropdownMenuLabel>划线工具</DropdownMenuLabel>
-            {TOOLS.map(({ tool, label, icon: Icon, detail }, index) => (
+            {TOOLS.map(({ tool, label, icon: Icon, detail }) => (
               <div key={tool}>
-                {index === 2 && <DropdownMenuSeparator />}
+                {tool === 'long' && <DropdownMenuSeparator />}
                 <DropdownMenuItem
                   aria-label={`绘制${label}`}
                   onSelect={() => requestAnimationFrame(() => onTool(tool))}
@@ -143,7 +171,13 @@ export function DrawingToolbar({
           variant={state.crossPeriod ? 'secondary' : 'ghost'}
           size="icon-sm"
           aria-label="划线显示设置"
-          title={state.selected ? '选中划线的跨周期设置' : '新划线的跨周期设置'}
+          title={
+            state.selectedFibonacci
+              ? '斐波那契回撤与跨周期设置'
+              : state.selected
+                ? '选中划线的跨周期设置'
+                : '新划线的跨周期设置'
+          }
           onClick={() => setSettingsOpen(true)}
         >
           <Layers className="size-4" />
@@ -197,6 +231,37 @@ export function DrawingToolbar({
               onCheckedChange={onCrossPeriod}
             />
           </label>
+          {state.selectedFibonacci && (
+            <div className="space-y-3 rounded-md border p-3">
+              <p className="text-sm font-medium">斐波那契回撤</p>
+              <p className="text-xs text-muted-foreground">
+                档位：0%、23.6%、38.2%、50%、61.8%、78.6%、100%。 默认起点为
+                100%，终点为 0%。
+              </p>
+              {(
+                [
+                  ['reverse', '反转回撤方向'],
+                  ['extendLeft', '向左延伸'],
+                  ['extendRight', '向右延伸'],
+                  ['background', '显示背景色带'],
+                ] as const
+              ).map(([key, label]) => (
+                <label
+                  key={key}
+                  className="flex items-center justify-between gap-4 text-sm"
+                >
+                  {label}
+                  <Switch
+                    aria-label={label}
+                    checked={state.selectedFibonacci![key]}
+                    onCheckedChange={(value) =>
+                      onFibonacciOptions({ [key]: value })
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+          )}
           <DialogFooter>
             <Button onClick={() => setSettingsOpen(false)}>完成</Button>
           </DialogFooter>
@@ -235,22 +300,29 @@ export function DrawingToolbar({
 export function DrawingHint({ state }: { state: DrawingState }) {
   const positionDirection = (side: 'long' | 'short') =>
     side === 'long' ? '上拉止盈，下拉止损' : '上拉止损，下拉止盈';
-  const hint =
-    state.tool === 'trend'
-      ? state.placingEnd
-        ? '点击终点完成，Esc 取消'
-        : '在主图 K 线区域点击起点和终点'
-      : state.tool === 'horizontal'
-        ? '在主图点击放置水平线，Esc 取消'
-        : state.tool === 'long' || state.tool === 'short'
-          ? state.placingEnd
-            ? `${positionDirection(state.tool)}；点击或松开完成，Esc 取消`
-            : `点击或按住入场点，${positionDirection(state.tool)}`
-          : state.selected
-            ? state.selectedPosition
-              ? `${state.selectedPosition === 'long' ? '多头' : '空头'}：${positionDirection(state.selectedPosition)}，拖动区域可整体移动`
-              : '拖动图形或控制点调整，Delete 删除'
-            : '';
+  const hint = isTwoPointTool(state.tool)
+    ? state.placingEnd
+      ? state.tool === 'ray'
+        ? '点击第二点确定延伸方向，Esc 取消'
+        : state.tool === 'fibonacci'
+          ? '点击波段终点（0%）完成回撤，Esc 取消'
+          : '点击终点完成，Esc 取消'
+      : state.tool === 'ray'
+        ? '在主图点击起点，再点击第二点，射线沿此方向延伸'
+        : state.tool === 'fibonacci'
+          ? '依次点击波段起点（100%）和终点（0%）'
+          : '在主图 K 线区域点击起点和终点'
+    : state.tool === 'horizontal'
+      ? '在主图点击放置水平线，Esc 取消'
+      : state.tool === 'long' || state.tool === 'short'
+        ? state.placingEnd
+          ? `${positionDirection(state.tool)}；点击或松开完成，Esc 取消`
+          : `点击或按住入场点，${positionDirection(state.tool)}`
+        : state.selected
+          ? state.selectedPosition
+            ? `${state.selectedPosition === 'long' ? '多头' : '空头'}：${positionDirection(state.selectedPosition)}，拖动区域可整体移动`
+            : '拖动图形或控制点调整，Delete 删除'
+          : '';
   return hint ? (
     <p
       role="status"

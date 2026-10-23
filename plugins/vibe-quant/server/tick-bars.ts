@@ -82,7 +82,9 @@ export async function rebuildTickBars(
     // bounded query that cannot finish must not turn a partial sum into data.
     if (
       error instanceof ClickHouseError &&
-      [60, 497, 158, 159].includes(error.code)
+      // readonly=1 also rejects the per-query SETTINGS used by the bounded
+      // reconstruction query (164). Stored/overlaid bars remain readable.
+      [60, 497, 158, 159, 164].includes(error.code)
     )
       return bars;
     throw error;

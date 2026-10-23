@@ -10,18 +10,10 @@ import {
   DialogTitle,
   Input,
   ScrollArea,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Switch,
 } from '@app/plugin-ui';
 import {
   Activity,
-  ArrowLeft,
-  ArrowRight,
-  LocateFixed,
   ChartCandlestick,
   Plus,
   Search,
@@ -30,8 +22,6 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  DURATIONS,
-  durationLabel,
   KIND_LABELS,
   type Instrument,
   type InstrumentKind,
@@ -40,17 +30,10 @@ import {
   type SyncStatus,
   type WatchItem,
 } from '../shared';
-import { MarketChart } from './chart';
-import { DateJump } from './date-jump';
+import { MarketChartPanel } from './components/market-chart-panel';
 import { useMarketBars } from './use-market-bars';
-import {
-  parseChartPeriod,
-  readChartPeriod,
-  saveChartPeriod,
-} from './chart-period';
+import { readChartPeriod } from './chart-period';
 import { OrderBookPanel } from './order-book';
-import { IndicatorControls } from './indicators/indicator-controls';
-import { useIndicators } from './indicators/use-indicators';
 
 const ENGINE_NAMES = { tqsdk: 'TqSdk', tushare: 'Tushare', tdx: '通达信' };
 const STATE_LABELS = {
@@ -94,7 +77,6 @@ const timeText = (value?: string | null) =>
     : '暂无';
 
 export function MarketPage({ pluginId }: PluginPageProps) {
-  const indicators = useIndicators();
   const [list, setList] = useState<WatchItem[]>([]);
   const [selected, setSelected] = useState('');
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -124,7 +106,6 @@ export function MarketPage({ pluginId }: PluginPageProps) {
     identity,
     retry,
   });
-  const { bars, loading: barsLoading } = marketBars;
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
@@ -202,14 +183,6 @@ export function MarketPage({ pluginId }: PluginPageProps) {
       clearTimeout(timer);
     };
   }, [pluginId, query, kind, searchOpen, retry]);
-  function changePeriod(value: string) {
-    const next = parseChartPeriod(value);
-    setPeriod(next);
-    if (!saveChartPeriod(next))
-      toast.error('浏览器未能保存视图周期，本次选择仅在当前页面生效', {
-        id: 'chart-period-storage-error',
-      });
-  }
   async function mutate(
     symbol: string,
     action: 'add' | 'delete' | 'toggle',
@@ -440,132 +413,18 @@ export function MarketPage({ pluginId }: PluginPageProps) {
         </aside>
         <section className="flex min-w-0 flex-col">
           {item ? (
-            <>
-              <div className="@container/chart-toolbar border-b px-3 py-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex items-center gap-2">
-                    <Select value={String(period)} onValueChange={changePeriod}>
-                      <SelectTrigger
-                        size="sm"
-                        className="w-24 shrink-0 text-xs"
-                        aria-label="视图周期"
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent position="popper" align="start">
-                        <SelectItem value="intraday">分时图</SelectItem>
-                        {DURATIONS.map((value) => (
-                          <SelectItem key={value} value={String(value)}>
-                            {durationLabel(value)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <IndicatorControls
-                      intraday={isIntraday}
-                      preferences={indicators.preferences}
-                      onVisibleChange={indicators.setVisible}
-                      onParametersChange={indicators.setParameters}
-                    />
-                  </div>
-                </div>
-              </div>
-              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-                <MarketChart
-                  bars={bars}
-                  identity={`${identity}:${marketBars.windowRevision}`}
-                  drawingScope={identity}
-                  drawingSharedScope={`${status?.engine ?? ''}:${selected}`}
-                  targetTime={marketBars.targetTime}
-                  historical={marketBars.historical}
-                  onLoadMore={marketBars.loadMore}
-                  duration={duration}
-                  intraday={isIntraday}
-                  priceTick={item.priceTick}
-                  indicators={indicators.preferences}
-                />
-                {!bars.length && (
-                  <div className="absolute inset-0 flex items-center justify-center px-8 text-center">
-                    <div className="max-w-sm rounded-lg bg-card/95 p-5">
-                      <ChartCandlestick className="mx-auto mb-3 size-8 text-muted-foreground" />
-                      <p className="text-sm font-medium">
-                        {barsLoading
-                          ? isIntraday
-                            ? '正在读取分时行情…'
-                            : '正在读取 K 线…'
-                          : '等待行情数据'}
-                      </p>
-                      <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                        首次订阅需要加载历史数据。请确认当前引擎具备此标的行情权限。
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-              {!isIntraday && (
-                <div
-                  className="flex flex-wrap items-center gap-2 border-t px-3 py-2"
-                  aria-label="K 线导航"
-                >
-                  <DateJump
-                    key={identity}
-                    defaultTime={marketBars.targetTime ?? bars.at(-1)?.time}
-                    duration={duration}
-                    loading={barsLoading}
-                    onJump={marketBars.navigate}
-                  />
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={barsLoading}
-                    onClick={() => void marketBars.navigate(null)}
-                  >
-                    <LocateFixed className="size-4" />
-                    最新行情
-                  </Button>
-                  <div className="ml-auto flex items-center gap-1">
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      aria-label="加载更早行情"
-                      disabled={
-                        barsLoading ||
-                        !bars.length ||
-                        !marketBars.hasBefore ||
-                        marketBars.beforeLoading
-                      }
-                      onClick={() => void marketBars.loadMore('before')}
-                    >
-                      <ArrowLeft className="size-4" />
-                    </Button>
-                    <span
-                      role="status"
-                      className="text-xs text-muted-foreground"
-                    >
-                      {marketBars.beforeLoading
-                        ? '正在加载更早行情…'
-                        : marketBars.afterLoading
-                          ? '正在加载后续行情…'
-                          : '拖动到边缘自动加载'}
-                    </span>
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      aria-label="加载后续行情"
-                      disabled={
-                        barsLoading ||
-                        !bars.length ||
-                        !marketBars.hasAfter ||
-                        marketBars.afterLoading
-                      }
-                      onClick={() => void marketBars.loadMore('after')}
-                    >
-                      <ArrowRight className="size-4" />
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </>
+            <MarketChartPanel
+              view={marketBars}
+              identity={identity}
+              drawingSharedScope={`${status?.engine ?? ''}:${selected}`}
+              period={period}
+              onPeriodChange={setPeriod}
+              priceTick={item.priceTick}
+              volumeProfileSource={{
+                pluginId,
+                path: `/volume-profile?symbol=${encodeURIComponent(selected)}`,
+              }}
+            />
           ) : (
             <div className="flex min-h-[500px] flex-1 items-center justify-center p-8 text-center">
               <div className="max-w-md">

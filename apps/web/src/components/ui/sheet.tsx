@@ -83,3 +83,22 @@ export function SheetDescription({
     />
   );
 }
+
+export function SheetHeader({ className, ...props }: ComponentProps<'div'>) {
+  return (
+    <div
+      data-slot="sheet-header"
+      className={cn('flex flex-col gap-1.5 pr-12', className)}
+      {...props}
+    />
+  );
+}
+export function SheetFooter({ className, ...props }: ComponentProps<'div'>) {
+  return (
+    <div
+      data-slot="sheet-footer"
+      className={cn('mt-auto flex flex-col gap-2 p-4', className)}
+      {...props}
+    />
+  );
+}

@@ -1,5 +1,7 @@
 import { Link } from '@tanstack/react-router';
 import { ChevronRight, FileText, Puzzle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { ThreadSidebar } from '@/components/chat/thread-sidebar';
 import {
   Collapsible,
   CollapsibleContent,
@@ -15,13 +17,15 @@ export function PluginNavigation({
   onNavigate?: () => void;
 }) {
   const { plugins } = usePlugins();
+  const { t } = useTranslation();
   return plugins
     .filter((p) => p.enabled)
     .map((plugin) => {
       const pages = plugin.pages.filter(
         (page) => page.navigation && (page.access === 'admin') === admin,
       );
-      if (!pages.length) return null;
+      const chats = !admin && plugin.chatThreads;
+      if (!pages.length && !chats) return null;
 
       return (
         <Collapsible key={plugin.id} defaultOpen>
@@ -61,6 +65,15 @@ export function PluginNavigation({
                   <span className="truncate">{page.title}</span>
                 </Link>
               ))}
+              {chats && (
+                <ThreadSidebar
+                  plugin={plugin.id}
+                  agentId={chats.agentId}
+                  label={t('plugins.threadList', { name: plugin.name })}
+                  newLabel={t('plugins.newThread', { name: plugin.name })}
+                  onNavigate={onNavigate}
+                />
+              )}
             </div>
           </CollapsibleContent>
         </Collapsible>

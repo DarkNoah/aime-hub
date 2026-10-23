@@ -42,6 +42,10 @@ import {
   consumeVoicesCommand,
 } from './slash-command';
 import { DrawingDialog } from './drawing-dialog';
+import {
+  useImageEdit,
+  type ImageEditSource,
+} from '@/components/image-viewer/image-edit-context';
 import { VoiceLibrary } from '@/components/audio/voice-library';
 import { ChatGoal } from './chat-goal';
 import type { GeneratedAsset } from '@aime/shared/assets';
@@ -212,6 +216,8 @@ export function ChatComposer({
   const [drawingOpen, setDrawingOpen] = useState(false);
   const [voicesOpen, setVoicesOpen] = useState(false);
   const [editingDrawing, setEditingDrawing] = useState<ChatUpload | null>(null);
+  const [editingImage, setEditingImage] = useState<ImageEditSource>();
+  const registerImageEdit = useImageEdit()?.register;
   const composer = useRef<HTMLDivElement>(null);
   const skillCatalog = useChatSkills(commandsOpen, threadId, projectId);
   const commandGroups = [
@@ -270,6 +276,45 @@ export function ChatComposer({
     loadingSettings ||
     savingSettings ||
     !!settingsError;
+  useEffect(
+    () =>
+      registerImageEdit?.((image) => {
+        if (
+          pendingRef.current ||
+          unavailable ||
+          stopping ||
+          capturingRef.current ||
+          drawingOpen ||
+          voicesOpen
+        ) {
+          toast.error(t('assets.composerUnavailable'));
+          return;
+        }
+        if (
+          uploads.queue.getSnapshot().length +
+            assetAttachments.length +
+            workspaceAttachments.length >=
+          MAX_CHAT_FILES
+        ) {
+          toast.error(t('assets.limit', { count: MAX_CHAT_FILES }));
+          return;
+        }
+        setEditingDrawing(null);
+        setEditingImage(image);
+        setDrawingOpen(true);
+      }),
+    [
+      registerImageEdit,
+      unavailable,
+      stopping,
+      drawingOpen,
+      voicesOpen,
+      uploads.queue,
+      assetAttachments.length,
+      workspaceAttachments.length,
+      t,
+    ],
+  );
   const speech = useChatSpeechInput({
     setText,
     disabled:
@@ -299,6 +344,7 @@ export function ChatComposer({
       return;
     }
     setEditingDrawing(null);
+    setEditingImage(undefined);
     setDrawingOpen(true);
   }
 
@@ -531,6 +577,7 @@ export function ChatComposer({
                 )
                   return;
                 setEditingDrawing(item);
+                setEditingImage(undefined);
                 setDrawingOpen(true);
               }}
             />
@@ -718,10 +765,12 @@ export function ChatComposer({
       </div>
       {drawingOpen && (
         <DrawingDialog
+          image={editingImage}
           initialSnapshot={editingDrawing?.drawing}
           onCancel={() => {
             setDrawingOpen(false);
             setEditingDrawing(null);
+            setEditingImage(undefined);
           }}
           onRestoreFocus={() =>
             composer.current?.querySelector('textarea')?.focus()
@@ -732,25 +781,30 @@ export function ChatComposer({
               return false;
             }
             const added = editingDrawing
-              ? uploads.queue.replaceInlineImage(
-                  editingDrawing.id,
-                  file,
-                  snapshot,
-                )
-              : uploads.queue.addInlineImage(
-                  file,
-                  assetAttachments.length + workspaceAttachments.length,
-                  snapshot,
-                );
+              ? uploads.queue.replaceDrawing(editingDrawing.id, file, snapshot)
+              : editingImage
+                ? uploads.queue.add(
+                    [file],
+                    assetAttachments.length + workspaceAttachments.length,
+                    snapshot,
+                  )
+                : uploads.queue.addInlineImage(
+                    file,
+                    assetAttachments.length + workspaceAttachments.length,
+                    snapshot,
+                  );
             if (added) {
               retryId.current = null;
               setDrawingOpen(false);
               setEditingDrawing(null);
+              setEditingImage(undefined);
               toast.success(
                 t(
-                  editingDrawing
-                    ? 'chat.drawing.updated'
-                    : 'chat.drawing.added',
+                  editingImage
+                    ? 'imagePreview.editAdded'
+                    : editingDrawing
+                      ? 'chat.drawing.updated'
+                      : 'chat.drawing.added',
                 ),
               );
             }

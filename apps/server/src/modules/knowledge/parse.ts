@@ -1,6 +1,6 @@
 import { extname } from 'node:path';
 import { MDocument } from '@mastra/rag';
-import { OfficeParser, type SupportedFileType } from 'officeparser';
+import { parseFileContent } from '../files/content/parse.js';
 import { readWebPage } from '../../mastra/web/page.js';
 import {
   knowledgeFileAccept,
@@ -68,27 +68,17 @@ export async function parseKnowledgeSource(source: {
         format = 'json';
       }
     } else {
-      const fileType = (
-        ext === '.markdown' ? 'md' : ext === '.htm' ? 'html' : ext.slice(1)
-      ) as SupportedFileType;
-      const document = await OfficeParser.parseOffice(source.sourceData, {
-        fileType,
-        abortSignal: AbortSignal.timeout(30_000),
-        extractAttachments: false,
-        includeRawContent: false,
-        ocr: false,
-        ignorePageGeometry: true,
-        decompressionLimits: {
-          maxUncompressedBytes: 64 * 1024 * 1024,
-          maxZipEntries: 5000,
+      const parsed = await parseFileContent(
+        { data: source.sourceData, fileName },
+        {
+          signal: AbortSignal.timeout(30_000),
+          parameters: { excel_rows: 'all' },
         },
-      });
-      content = (
-        await document.to('text', {
-          textConfig: { preserveLayout: false },
-          includeImages: 'none',
-        })
-      ).value;
+      );
+      if (parsed.type !== 'text')
+        throw new ThreadError('KNOWLEDGE_FILE_TYPE', 400);
+      content = parsed.text;
+      format = parsed.format;
     }
   }
   content = content.trim();

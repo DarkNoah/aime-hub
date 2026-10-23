@@ -58,7 +58,10 @@ export type ExecModules = ReturnType<typeof createExecModules>;
 /** Expose a small Node-compatible API through the same JSON-only VM boundary. */
 export function createExecModules(
   context: ToolExecutionContext,
-  options: { readFileEnabled?: boolean } = {},
+  options: {
+    readFileEnabled?: boolean;
+    availableTools?: ReadonlySet<string>;
+  } = {},
 ) {
   return {
     load(name: string): string {
@@ -205,7 +208,10 @@ export function createExecModules(
         operation === 'readFile' && options.readFileEnabled !== undefined
           ? options.readFileEnabled
           : config.enabled;
-      if (!enabled || (writing && filesystem.readOnly))
+      const inCatalog =
+        !options.availableTools ||
+        options.availableTools.has(config.name ?? workspaceToolName);
+      if (!enabled || !inCatalog || (writing && filesystem.readOnly))
         throw new Error(
           `Filesystem operation unavailable: ${operation} (disabled or read-only)`,
         );

@@ -20,11 +20,6 @@ type UserMessage = Extract<Prompt[number], { role: 'user' }>;
 type Part = UserMessage['content'][number];
 type FilePart = Extract<Part, { type: 'file' }>;
 
-function modality(mimeType: string) {
-  if (mimeType === 'application/pdf') return 'pdf';
-  return mimeType.split('/')[0];
-}
-
 function inlineData(file: FilePart) {
   if (file.data instanceof Uint8Array) return file.data;
   if (file.data instanceof URL) {
@@ -54,7 +49,7 @@ export class AttachmentProcessor implements Processor {
     prompt,
     abortSignal,
   }: ProcessLLMRequestArgs): Promise<ProcessLLMRequestResult> {
-    const supported = new Set(await this.modalities());
+    const supportsImages = (await this.modalities()).includes('image');
     const result: Prompt = [];
     for (const message of prompt) {
       if (message.role !== 'user') {
@@ -107,7 +102,8 @@ export class AttachmentProcessor implements Processor {
       for (const attachment of attachments) {
         abortSignal?.throwIfAborted();
         let { attributes, file } = attachment;
-        if (/^(audio|video)\//.test(attributes.mimeType)) {
+        // Only supported images are sent natively; everything else is a path reference.
+        if (!supportsImages || !attributes.mimeType.startsWith('image/')) {
           const path = attachmentAttributes({ path: attributes.path });
           body.push({
             type: 'text',
@@ -115,7 +111,6 @@ export class AttachmentProcessor implements Processor {
           });
           continue;
         }
-        const includeData = supported.has(modality(attributes.mimeType));
         const bytes = file && inlineData(file);
         if (bytes) {
           attributes = {
@@ -131,7 +126,7 @@ export class AttachmentProcessor implements Processor {
           try {
             const loaded = await this.reader.read(
               attributes,
-              includeData,
+              true,
               abortSignal,
             );
             attributes = loaded.attributes;
@@ -151,7 +146,7 @@ export class AttachmentProcessor implements Processor {
           type: 'text',
           text: `<attachment ${attachmentAttributes(attributes)}>`,
         });
-        if (includeData && file) body.push(file);
+        if (file) body.push(file);
         body.push({ type: 'text', text: '</attachment>' });
       }
       result.push({ ...message, content: body });

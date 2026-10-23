@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/popover';
 import { SidebarPageList } from '@/components/sidebar-page-list';
 import { ThreadStatusBadge } from './thread-activity';
+import { ThreadPluginBadge } from './thread-plugin-badge';
 import type { createThreadListResource } from './thread-list-resource';
 import { Input } from '@/components/ui/input';
 import { FloatingChatContext } from './layout-context';
@@ -172,6 +173,10 @@ export function ChatThreadNavigation({
                       ? 'size-3.5 shrink-0'
                       : 'size-3.5 shrink-0 invisible'
                   }
+                />
+                <ThreadPluginBadge
+                  plugin={thread.plugin}
+                  className="max-w-24 px-1.5 py-0 text-[10px]"
                 />
                 <span className="min-w-0 flex-1 truncate text-left">
                   {thread.title || t('chat.new')}

@@ -1,3 +1,5 @@
+import { BuiltinTool, type ToolSettings } from '../../modules/tools/base.js';
+import type { ToolDependencies } from '../../modules/tools/types.js';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import {
@@ -154,3 +156,16 @@ export function createTranscriptionsTool(
   });
 }
 export const transcriptions = createTranscriptionsTool();
+
+export class TranscriptionsTool extends BuiltinTool<'transcriptions'> {
+  constructor() {
+    super(transcriptions, 'transcriptions');
+  }
+
+  protected override create(
+    config: ToolSettings<'transcriptions'>,
+    dependencies: ToolDependencies,
+  ) {
+    return createTranscriptionsTool(config, dependencies.audio);
+  }
+}

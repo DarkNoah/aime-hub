@@ -33,17 +33,25 @@ import {
   type ResolvedImageModel,
 } from '../../mastra/tools/image_gen.js';
 import {
-  buildTools,
+  getTools,
   parseToolConfig,
   registeredToolIds,
+  toToolsInput,
   type RegisteredToolId,
+  type ToolDependencies,
   type ToolDefaultConfigs,
+  type ToolRegistryOptions,
 } from './registry.js';
 export {
   buildTools,
+  getTools,
   registeredToolIds,
+  toToolsInput,
+  type RegisteredTool,
   type RegisteredToolId,
+  type ToolDependencies,
   type ToolDefaultConfigs,
+  type ToolRegistryOptions,
 } from './registry.js';
 
 export class ToolService {
@@ -226,6 +234,16 @@ export class ToolService {
     }
   }
 
+  private async fileInputModel(selected: string | null) {
+    const reference =
+      selected ?? (await this.providers.getDefaults()).defaultModel;
+    if (!reference) return null;
+    const model = await this.providers.getModel(reference);
+    return model.enabled && modelSupportsType(model, 'language')
+      ? { reference, modalitiesInput: model.modalitiesInput }
+      : null;
+  }
+
   private async configuredProvider(
     id: string,
     tool: 'web_search' | 'web_fetch',
@@ -326,29 +344,24 @@ export class ToolService {
     });
   }
 
-  async buildTools(
-    ids?: readonly RegisteredToolId[],
-    defaults: ToolDefaultConfigs = {},
-    disabledTools: readonly string[] = [],
-  ): Promise<ToolsInput> {
-    const pluginTools = async () =>
-      Object.fromEntries(
-        Object.entries((await this.plugins?.tools(defaults)) ?? {}).filter(
-          ([id]) => !disabledTools.includes(id),
-        ),
-      );
-    const available = await pluginTools();
-    const builtins = await buildTools(
-      ids?.filter((id) => !this.plugins?.ownsTool(id)),
-      defaults,
+  /** Bind application services to the shared array-returning registry. */
+  async getTools(
+    config: ToolDefaultConfigs = {},
+    dependencies: Pick<ToolDependencies, 'agentId' | 'context'> = {},
+    options: ToolRegistryOptions = {},
+  ) {
+    return getTools(
+      config,
       {
+        ...dependencies,
         audio: this.audio,
         automations: this.automations,
         knowledgeSearch: this.knowledge?.searchContext.bind(this.knowledge),
         knowledge: this.knowledge,
-        pluginTools,
-        disabledTools,
-        // MCP tools are discovered only inside exec, never injected into the Agent.
+        pluginTools: (defaults, dependencies, options) =>
+          this.plugins?.tools(defaults, dependencies, options) ??
+          Promise.resolve({}),
+        ownsPluginTool: (id) => this.plugins?.ownsTool(id) ?? false,
         mcpTools: () => this.mcp?.getTools() ?? Promise.resolve({}),
         loadConfig: (id) => this.loadConfig(id),
         searchProvider: (id, timeoutMs) => this.searchProvider(id, timeoutMs),
@@ -356,17 +369,32 @@ export class ToolService {
         imageModel: (reference) => this.imageModel(reference),
         speechModel: (reference) => this.speechModel(reference),
         ocrModel: (reference) => this.ocrModel(reference),
+        fileInputModel: (reference) => this.fileInputModel(reference),
         extractionModel: (reference) => this.extractionModel(reference),
         recordAsset: this.assets
           ? (input) => this.assets!.record(input)
           : undefined,
       },
+      options,
     );
-    return {
-      ...builtins,
-      ...Object.fromEntries(
-        Object.entries(available).filter(([id]) => !ids || ids.includes(id)),
+  }
+
+  /** Mastra adapter. Deferred tools are discovered inside exec at invocation time. */
+  async buildTools(
+    ids?: readonly RegisteredToolId[],
+    defaults: ToolDefaultConfigs = {},
+    disabledTools: readonly string[] = [],
+  ): Promise<ToolsInput> {
+    return toToolsInput(
+      await this.getTools(
+        defaults,
+        {},
+        {
+          ids,
+          disabledTools,
+          includeRuntimeTools: false,
+        },
       ),
-    };
+    );
   }
 }

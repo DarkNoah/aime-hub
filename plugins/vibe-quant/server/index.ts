@@ -5,13 +5,27 @@ import type {
   PluginHttpEnv,
   PluginServer,
 } from '@app/plugin-sdk/server';
-import { DURATIONS, type SyncStatus } from '../shared.js';
+import type { SyncStatus } from '../shared.js';
 import { parseConfig, type QuantConfig } from './config.js';
 import { MarketStore } from './clickhouse.js';
 import { StateStore } from './state-store.js';
 import { migrateState } from './migrate-state.js';
 import { SyncWorker } from './worker.js';
 import { searchTerms, supports } from './symbols.js';
+import { StrategyFeed } from './sdk/feed.js';
+import { StrategySubscriptions } from './sdk/subscriptions.js';
+import { strategyDataRoutes } from './sdk/routes.js';
+import { StrategyStore } from './strategies/store.js';
+import { migrateStrategies } from './strategies/migrate.js';
+import { strategyRoutes } from './strategies/routes.js';
+import { BacktestWorker } from './strategies/runner.js';
+import { marketBarsQuery, readMarketBars } from './market-bars.js';
+import { createQuantMastra } from '../mastra/index.js';
+import { NewsStore } from './news/store.js';
+import { NewsWorker } from './news/worker.js';
+import { newsRoutes } from './news/routes.js';
+import { readVolumeProfile, volumeProfileQuery } from './volume-profile.js';
+import { TradeService } from './trades/service.js';
 
 const symbolSchema = z
   .string()
@@ -23,9 +37,45 @@ export default function createServer(context: PluginContext): PluginServer {
   let store: MarketStore;
   let state: StateStore;
   let worker: SyncWorker | undefined;
+  let feed: StrategyFeed;
+  let subscriptions: StrategySubscriptions;
+  let records: StrategyStore;
+  let backtests: BacktestWorker | undefined;
+  let news: NewsStore;
+  let newsWorker: NewsWorker | undefined;
+  let trades: TradeService;
   const api = new Hono<PluginHttpEnv>();
+  api.route(
+    '/news',
+    newsRoutes(() => ({ store: news, config })),
+  );
+  api.route(
+    '/strategies',
+    strategyRoutes(
+      context,
+      () => records,
+      () => ({
+        config,
+        state,
+        store,
+        trades,
+        wake: () => backtests?.wake(),
+      }),
+    ),
+  );
   api.onError((_error, c) =>
     c.json({ code: 'MARKET_SERVICE_UNAVAILABLE' }, 503),
+  );
+  api.route(
+    '/sdk',
+    strategyDataRoutes(() => ({
+      config,
+      store,
+      state,
+      feed,
+      subscriptions,
+      status: () => worker!.getStatus(),
+    })),
   );
   const watchlist = (userId: string) => state.watchlist(userId, config.engine);
   api.get('/instruments', async (c) => {
@@ -116,37 +166,31 @@ export default function createServer(context: PluginContext): PluginServer {
   });
   api.get('/bars', async (c) => {
     const symbol = symbolSchema.safeParse(c.req.query('symbol'));
-    const duration = Number(c.req.query('duration') ?? 60);
-    const timestamp = (name: string) =>
-      c.req.query(name) === undefined ? undefined : Number(c.req.query(name));
-    const before = timestamp('before');
-    const after = timestamp('after');
-    const around = timestamp('around');
-    const limit = Number(c.req.query('limit') ?? 1000);
-    if (
-      !symbol.success ||
-      !DURATIONS.some((d) => d === duration) ||
-      [before, after, around].some(
-        (value) =>
-          value !== undefined && (!Number.isSafeInteger(value) || value <= 0),
-      ) ||
-      [before, after, around].filter((value) => value !== undefined).length >
-        1 ||
-      !Number.isSafeInteger(limit) ||
-      limit < 1 ||
-      limit > 1000
-    )
+    const query = marketBarsQuery.safeParse(c.req.query());
+    if (!symbol.success || !query.success)
       return c.json({ code: 'VALIDATION_ERROR' }, 400);
     const owned = await state.owns(c.get('userId'), symbol.data);
     if (!owned) return c.json({ code: 'NOT_IN_WATCHLIST' }, 404);
     return c.json(
-      around === undefined
-        ? await store.bars(config.engine, symbol.data, duration, {
-            before,
-            after,
-            limit,
-          })
-        : await store.barsAround(config.engine, symbol.data, duration, around),
+      await readMarketBars(store, config.engine, symbol.data, query.data),
+    );
+  });
+  api.get('/volume-profile', async (c) => {
+    const symbol = symbolSchema.safeParse(c.req.query('symbol'));
+    const query = volumeProfileQuery.safeParse(c.req.query());
+    if (!symbol.success || !query.success)
+      return c.json({ code: 'VALIDATION_ERROR' }, 400);
+    if (!(await state.owns(c.get('userId'), symbol.data)))
+      return c.json({ code: 'NOT_IN_WATCHLIST' }, 404);
+    return c.json(
+      await readVolumeProfile(
+        store,
+        config.engine,
+        symbol.data,
+        query.data,
+        trades,
+        c.req.raw.signal,
+      ),
     );
   });
   api.get('/ticks/validation', async (c) => {
@@ -175,11 +219,23 @@ export default function createServer(context: PluginContext): PluginServer {
     });
   });
   const stop = async () => {
+    await trades?.stop();
+    await newsWorker?.stop();
+    newsWorker = undefined;
+    await backtests?.stop();
+    backtests = undefined;
     await worker?.stop();
     worker = undefined;
   };
   return {
     api,
+    ...createQuantMastra(context, () => ({
+      records,
+      state,
+      news,
+      config,
+      wake: () => backtests?.wake(),
+    })),
     async onEnable({ config: values }) {
       config = parseConfig(values);
       state = new StateStore(config);
@@ -192,8 +248,36 @@ export default function createServer(context: PluginContext): PluginServer {
         );
       store = new MarketStore(config);
       await store.initialize();
-      worker = new SyncWorker(context, config, store, state);
+      trades = new TradeService(config);
+      await trades.initialize();
+      records = new StrategyStore(config);
+      await records.initialize();
+      await migrateStrategies(context.database, records);
+      news = new NewsStore(config);
+      await news.initialize();
+      if (config.newsEnabled && !context.web)
+        throw new Error('资讯采集需要宿主 web_fetch 服务，请升级宿主后重试');
+      feed = new StrategyFeed();
+      subscriptions = new StrategySubscriptions(config);
+      worker = new SyncWorker(
+        context,
+        config,
+        store,
+        state,
+        undefined,
+        (batch) => feed.publish(batch),
+      );
       worker.start();
+      backtests = new BacktestWorker(context, records, {
+        config,
+        store,
+        state,
+      });
+      backtests.start();
+      if (config.newsEnabled && context.web) {
+        newsWorker = new NewsWorker(config, news, context.web);
+        newsWorker.start();
+      }
     },
     onDisable: stop,
     dispose: stop,

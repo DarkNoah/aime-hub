@@ -1,3 +1,4 @@
+import { BuiltinTool } from '../../modules/tools/base.js';
 import { createTool } from '@mastra/core/tools';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
@@ -19,3 +20,13 @@ export const currTime = createTool({
     };
   },
 });
+
+export class ClockTool extends BuiltinTool {
+  constructor() {
+    super(currTime);
+  }
+
+  protected override create() {
+    return this.tool;
+  }
+}

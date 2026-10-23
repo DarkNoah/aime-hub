@@ -31,11 +31,14 @@ export type ChatSkill = {
 };
 export const createThreadSchema = chatSettingsSchema.extend({
   title: z.string().trim().min(1).max(120).optional(),
+  /** ID of the plugin that created this thread. */
+  plugin: z.string().trim().min(1).optional(),
   projectId: z
     .string()
     .regex(/^[a-zA-Z0-9_-]{16}$/)
     .optional(),
 });
+export type CreateThreadInput = z.infer<typeof createThreadSchema>;
 export const updateThreadSchema = z
   .object({
     title: z.string().trim().min(1).max(120).optional(),
@@ -181,6 +184,8 @@ export const isThreadActive = (status?: ThreadStatus) =>
 export type ThreadSummary = ChatSettings & {
   id: string;
   projectId?: string | null;
+  /** ID of the plugin that created this thread, when provided. */
+  plugin?: string;
   createdBy?: string;
   title: string;
   archivedAt?: string | null;

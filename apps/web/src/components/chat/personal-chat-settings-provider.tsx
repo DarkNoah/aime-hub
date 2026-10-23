@@ -9,15 +9,17 @@ type Props = {
   children: ReactNode;
   initialSettings?: ChatSettings;
   projectId?: string;
+  /** Plugin chats keep their agent/model selection on the thread. */
+  threadId?: string;
 };
 
 export function PersonalChatSettingsProvider(props: Props) {
   const inherited = useContext(PersonalChatSettingsContext);
   const { data } = useAuthSession();
-  if (inherited && !props.projectId) return props.children;
+  if (inherited && !props.projectId && !props.threadId) return props.children;
   return (
     <SettingsSession
-      key={`${data?.session.id}:${props.projectId ?? 'personal'}`}
+      key={`${data?.session.id}:${props.threadId ?? props.projectId ?? 'personal'}`}
       personal={inherited}
       {...props}
     />
@@ -28,6 +30,7 @@ function SettingsSession({
   children,
   initialSettings,
   projectId,
+  threadId,
   personal,
 }: Props & {
   personal: ReturnType<typeof createChatPreferencesResource> | null;
@@ -40,27 +43,49 @@ function SettingsSession({
   const [resource] = useState(() =>
     createChatPreferencesResource(
       initialSettings,
-      projectId
+      threadId
         ? {
             read: async () => {
-              const [project, personal] = await Promise.all([
-                chatApi.projectPreferences(projectId),
+              const [{ thread }, personal] = await Promise.all([
+                chatApi.get(threadId),
                 readPersonal(),
               ]);
-              return { ...project, agentId: personal.agentId ?? null };
+              return {
+                agentId: thread.agentId ?? null,
+                model: thread.model ?? personal.model,
+                reasoningEffort: thread.reasoningEffort,
+              };
             },
-            // A member's current chat selection is local; shared defaults are edited in project settings.
             save: async (settings) => {
-              const previous = await readPersonal();
-              if ((previous.agentId ?? null) !== (settings.agentId ?? null))
-                await (personal ? personal.save : chatApi.savePreferences)({
-                  ...previous,
-                  agentId: settings.agentId ?? null,
-                });
-              return settings;
+              const thread = await chatApi.update(threadId, settings);
+              return {
+                agentId: thread.agentId ?? null,
+                model: thread.model,
+                reasoningEffort: thread.reasoningEffort,
+              };
             },
           }
-        : undefined,
+        : projectId
+          ? {
+              read: async () => {
+                const [project, personal] = await Promise.all([
+                  chatApi.projectPreferences(projectId),
+                  readPersonal(),
+                ]);
+                return { ...project, agentId: personal.agentId ?? null };
+              },
+              // A member's current chat selection is local; shared defaults are edited in project settings.
+              save: async (settings) => {
+                const previous = await readPersonal();
+                if ((previous.agentId ?? null) !== (settings.agentId ?? null))
+                  await (personal ? personal.save : chatApi.savePreferences)({
+                    ...previous,
+                    agentId: settings.agentId ?? null,
+                  });
+                return settings;
+              },
+            }
+          : undefined,
     ),
   );
   useEffect(() => {

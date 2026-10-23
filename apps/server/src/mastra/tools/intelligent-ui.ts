@@ -1,3 +1,4 @@
+import { BuiltinTool } from '../../modules/tools/base.js';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import {
@@ -41,3 +42,13 @@ Make the panel visually polished and responsive: clear typography, balanced spac
     });
   },
 });
+
+export class IntelligentUITool extends BuiltinTool {
+  constructor() {
+    super(intelligentUI);
+  }
+
+  protected override create() {
+    return this.tool;
+  }
+}

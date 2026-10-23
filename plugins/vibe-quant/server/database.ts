@@ -1,5 +1,6 @@
 import type { MigrationInterface, QueryRunner } from 'typeorm';
 import type { PluginDatabase } from '@app/plugin-sdk/server';
+import { StrategyManagement1792600000000 } from './strategies/migration.js';
 
 class CreateVibeQuant1792100000000 implements MigrationInterface {
   async up(runner: QueryRunner) {
@@ -57,5 +58,6 @@ export default {
     CreateVibeQuant1792100000000,
     ManagedPython1792100001000,
     TdxServerList1792100002000,
+    StrategyManagement1792600000000,
   ],
 } satisfies PluginDatabase;

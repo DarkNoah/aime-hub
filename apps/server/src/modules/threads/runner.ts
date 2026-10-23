@@ -42,6 +42,7 @@ import {
   createProjectWorkspace,
   getWorkspace,
   projectDirectory,
+  userDirectory,
 } from './workspace.js';
 import { threadScope } from './scope.js';
 import { listChatSkills, resolveAgentSkillPaths } from './skills.js';
@@ -58,6 +59,7 @@ import { buildTools, type ToolService } from '../tools/service.js';
 import { CommandSandbox } from '../../mastra/tools/command/sandbox.js';
 import { agentEnvironment } from './agent-environment.js';
 import { AgentsMDProcessor } from '../../mastra/processors/agents-md.js';
+import { MemoryMDProcessor } from '../../mastra/processors/memory-md.js';
 import { IncompleteToolCallsProcessor } from '../../mastra/processors/incomplete-tool-calls.js';
 import { AttachmentProcessor } from './attachment-processor.js';
 import { AttachmentMediaReader } from './attachment-media.js';
@@ -284,6 +286,13 @@ export function createChatRunner(
         const inputModalities = (selection: typeof resolved) =>
           selection.modalitiesInput ??
           (selection.supportsImages ? ['text', 'image'] : ['text']);
+        const memoryDirectory = resolve(
+          projectId
+            ? projectDirectory(workspaceRoot, projectId)
+            : userDirectory(workspaceRoot, userId),
+          '.agents',
+          'memory',
+        );
         const agent = await createAgent(config.id, {
           localSubagents: () =>
             loadLocalAgents(workspaceRoot, userId, projectId),
@@ -302,6 +311,7 @@ export function createChatRunner(
             new AttachmentProcessor(attachmentMedia, () =>
               inputModalities(resolved),
             ),
+            new MemoryMDProcessor(memoryDirectory),
           ],
           outputProcessors: [compaction],
           subagentOptions: (child) => {
@@ -315,6 +325,7 @@ export function createChatRunner(
                   )
                 : Promise.resolve(resolved);
             return {
+              // Native delegation already carries the parent's injected context.
               inputProcessors: [
                 new IncompleteToolCallsProcessor(),
                 new AttachmentProcessor(attachmentMedia, async () =>

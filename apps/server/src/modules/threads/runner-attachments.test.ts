@@ -139,7 +139,9 @@ test(
         .join('\n');
       assert.match(
         texts,
-        /<attachment size="\d+" mimeType="image\/png" width="1" height="1">\n<\/attachment>/,
+        index === 1
+          ? /<attachment size="\d+" mimeType="image\/png" width="1" height="1">\n<\/attachment>/
+          : /<attachment><\/attachment>/,
       );
       assert.doesNotMatch(texts, /<\/?attachments>/);
     }

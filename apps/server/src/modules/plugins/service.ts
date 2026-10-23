@@ -14,7 +14,18 @@ import {
   type PluginConfiguration,
   type PluginConfigSaveResult,
 } from '@app/plugin-sdk';
-import type { InstalledPlugin, PluginServer } from '@app/plugin-sdk/server';
+import {
+  PluginTool,
+  type InstalledPlugin,
+  type PluginServer,
+  type PluginWebServices,
+} from '@app/plugin-sdk/server';
+import type {
+  RegisteredTool,
+  ToolDefaultConfigs,
+  ToolDependencies,
+  ToolRegistryOptions,
+} from '@app/plugin-sdk/tools';
 import { PluginLifecycle } from './lifecycle.js';
 import { createPluginRuntime, type PluginRuntimeOptions } from './runtime.js';
 
@@ -59,6 +70,7 @@ export class PluginService {
       applicationRoot: process.cwd(),
       workspaceRoot: resolve(process.cwd(), 'workspaces'),
     },
+    web?: PluginWebServices,
   ) {
     const ids = new Set<string>();
     for (const definition of definitions) {
@@ -68,6 +80,7 @@ export class PluginService {
       const server = definition.createServer({
         id,
         database,
+        web,
         runtime: createPluginRuntime(definition.manifest, runtimeOptions),
         assertEnabled: () => this.assertEnabled(id),
       });
@@ -91,6 +104,8 @@ export class PluginService {
       }
       const tools = new Set<string>();
       for (const tool of server.tools ?? []) {
+        if (!(tool instanceof PluginTool))
+          throw new Error(`Plugin tools must extend PluginTool: ${id}`);
         toolIdSchema.parse(tool.id);
         if (
           !tool.id.startsWith(`plugin_${id.replaceAll('-', '_')}_`) ||
@@ -98,21 +113,6 @@ export class PluginService {
         )
           throw new Error(`Invalid plugin Tool ID: ${tool.id}`);
         tools.add(tool.id);
-        const execute = tool.execute;
-        if (!execute)
-          throw new Error(`Plugin Tool requires execute: ${tool.id}`);
-        // Clone the instance rather than mutating a plugin export or losing its prototype.
-        const guarded = Object.create(
-          Object.getPrototypeOf(tool),
-          Object.getOwnPropertyDescriptors(tool),
-        ) as typeof tool;
-        guarded.execute = async (...args: Parameters<typeof execute>) => {
-          await this.assertEnabled(id);
-          return execute.apply(tool, args);
-        };
-        server.tools = (server.tools ?? []).map((item) =>
-          item === tool ? guarded : item,
-        );
       }
       this.servers.set(id, server);
     }
@@ -488,9 +488,7 @@ export class PluginService {
     );
   }
 
-  async toolConfigs(
-    defaults: Partial<Record<string, { enabled?: boolean }>> = {},
-  ): Promise<ToolConfig[]> {
+  async toolConfigs(defaults: ToolDefaultConfigs = {}): Promise<ToolConfig[]> {
     const states = await this.list();
     const rows = await this.database.query<
       { id: string; value: { enabled?: boolean } }[]
@@ -498,34 +496,59 @@ export class PluginService {
       "SELECT id, value FROM settings WHERE id LIKE 'tool:plugin_%' AND deleted_at IS NULL",
     );
     return states.flatMap((state) =>
-      (this.servers.get(state.id)?.tools ?? []).map((tool) => ({
-        id: tool.id,
-        kind: 'builtin' as const,
-        description: tool.description?.split('\n')[0] ?? tool.id,
-        config: {
+      (this.servers.get(state.id)?.tools ?? []).map((tool) =>
+        tool.parseConfig({
           enabled:
             state.enabled &&
             (rows.find((row) => row.id === `tool:${tool.id}`)?.value.enabled ??
               defaults[tool.id]?.enabled ??
               true),
-        },
-      })),
+        }),
+      ),
     );
   }
 
   async tools(
-    defaults: Partial<Record<string, { enabled?: boolean }>> = {},
+    defaults: ToolDefaultConfigs = {},
+    dependencies: ToolDependencies = {},
+    options: ToolRegistryOptions = {},
   ): Promise<ToolsInput> {
-    const enabled = new Set(
-      (await this.toolConfigs(defaults))
-        .filter((t) => t.config.enabled)
-        .map((t) => t.id),
+    const configs = new Map(
+      (await this.toolConfigs(defaults)).map((tool) => [tool.id, tool.config]),
     );
-    return Object.fromEntries(
-      [...this.servers.values()].flatMap((s) =>
-        (s.tools ?? []).filter((t) => enabled.has(t.id)).map((t) => [t.id, t]),
+    const entries = await Promise.all(
+      [...this.servers.entries()].flatMap(([pluginId, server]) =>
+        (server.tools ?? []).map(async (definition) => {
+          if (!configs.get(definition.id)?.enabled) return [];
+          const tools = await definition.getTools(
+            defaults,
+            { ...dependencies, loadConfig: async (id) => configs.get(id) },
+            options,
+          );
+          return tools.map((tool) => {
+            const execute = 'execute' in tool && tool.execute;
+            if (!execute)
+              throw new Error(`Plugin Tool requires execute: ${tool.id}`);
+            // Guard constructed instances, including handles retained after plugin disable.
+            const descriptors = Object.getOwnPropertyDescriptors(tool);
+            descriptors.execute = {
+              configurable: true,
+              enumerable: true,
+              value: async (...args: Parameters<typeof execute>) => {
+                await this.assertEnabled(pluginId);
+                return Reflect.apply(execute, tool, args);
+              },
+            };
+            const guarded = Object.create(
+              Object.getPrototypeOf(tool),
+              descriptors,
+            ) as RegisteredTool;
+            return [guarded.id, guarded] as const;
+          });
+        }),
       ),
     );
+    return Object.fromEntries(entries.flat());
   }
 
   beginShutdown() {

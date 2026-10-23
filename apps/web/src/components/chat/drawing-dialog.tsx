@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import type { TLEditorSnapshot } from 'tldraw';
+import type { ImageEditSource } from '@/components/image-viewer/image-edit-context';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -13,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 
 export type DrawingDialogProps = {
+  image?: ImageEditSource;
   initialSnapshot?: TLEditorSnapshot;
   onComplete: (file: File, snapshot: TLEditorSnapshot) => boolean;
   onCancel: () => void;
@@ -24,12 +26,15 @@ export function DrawingDialog({
   onCancel,
   onRestoreFocus,
   initialSnapshot,
+  image,
 }: DrawingDialogProps) {
   const { t } = useTranslation();
   const [Canvas, setCanvas] =
     useState<typeof import('./drawing-canvas').DrawingCanvas>();
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [actionsContainer, setActionsContainer] =
+    useState<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,23 +72,39 @@ export function DrawingDialog({
         // Escape belongs to tldraw (cancel a stroke, leave text editing, etc.).
         onEscapeKeyDown={(event) => event.preventDefault()}
       >
-        <DialogHeader className="sr-only">
-          <DialogTitle>{t('chat.drawing.title')}</DialogTitle>
-          <DialogDescription>{t('chat.drawing.hint')}</DialogDescription>
-        </DialogHeader>
-        <DialogClose asChild>
-          <Button
-            type="button"
-            variant="secondary"
-            size="icon-sm"
-            className="absolute top-3 right-3 z-10 rounded-full"
-            aria-label={t('chat.drawing.close')}
+        <DialogHeader
+          className={image ? 'gap-1 border-b px-4 py-3 text-left' : 'sr-only'}
+        >
+          <DialogTitle
+            className={image ? 'flex h-8 items-center pr-32' : undefined}
           >
-            <X />
-          </Button>
-        </DialogClose>
+            {t(image ? 'imagePreview.editTitle' : 'chat.drawing.title')}
+          </DialogTitle>
+          <DialogDescription>
+            {t(image ? 'imagePreview.editHint' : 'chat.drawing.hint')}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
+          <div ref={setActionsContainer} className="flex items-center" />
+          <DialogClose asChild>
+            <Button
+              type="button"
+              variant="secondary"
+              size="icon-sm"
+              className="rounded-full"
+              aria-label={t('chat.drawing.close')}
+            >
+              <X />
+            </Button>
+          </DialogClose>
+        </div>
         {Canvas ? (
-          <Canvas initialSnapshot={initialSnapshot} onComplete={onComplete} />
+          <Canvas
+            image={image}
+            initialSnapshot={initialSnapshot}
+            onComplete={onComplete}
+            actionsContainer={actionsContainer}
+          />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-muted/30 p-6">
             <p

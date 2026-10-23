@@ -260,7 +260,7 @@ test(
   { skip: process.env.QUANT_INTEGRATION !== '1' || !process.env.DATABASE_URL },
   async () => {
     const schema = `quant_test_${randomUUID().replaceAll('-', '')}`;
-    const apiConfig = { ...config, clickhouseDatabase: schema };
+    const apiConfig = { ...config, clickhouseDatabase: schema, newsEnabled: false, newsDatabase: schema };
     const clickhouse = new ClickHouseClient(parseConfig(apiConfig));
     await clickhouse.request(`CREATE DATABASE ${schema}`);
     const admin = await new DataSource({

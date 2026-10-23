@@ -1,3 +1,5 @@
+import { BuiltinTool, type ToolSettings } from '../../modules/tools/base.js';
+import type { ToolDependencies } from '../../modules/tools/types.js';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import {
@@ -80,3 +82,20 @@ export function createWebSearchTool(
 }
 
 export const webSearch = createWebSearchTool();
+
+export class WebSearchTool extends BuiltinTool<'web_search'> {
+  constructor() {
+    super(webSearch, 'web_search');
+  }
+
+  protected override create(
+    config: ToolSettings<'web_search'>,
+    dependencies: ToolDependencies,
+  ) {
+    return createWebSearchTool(config, {
+      resolveProvider: dependencies.searchProvider
+        ? (id) => dependencies.searchProvider!(id, config.timeoutMs)
+        : undefined,
+    });
+  }
+}

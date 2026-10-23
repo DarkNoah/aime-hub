@@ -7,6 +7,8 @@ export { Label } from '../../../apps/web/src/components/ui/label';
 export { Switch } from '../../../apps/web/src/components/ui/switch';
 export { ScrollArea } from '../../../apps/web/src/components/ui/scroll-area';
 export { PasswordInput } from '../../../apps/web/src/components/password-input';
+export { CodeEditor } from '../../../apps/web/src/components/code-editor';
+export { JsonObjectEditor } from '../../../apps/web/src/components/json-object-editor';
 export {
   Dialog,
   DialogContent,
@@ -32,3 +34,35 @@ export {
   SelectItem,
   SelectValue,
 } from '../../../apps/web/src/components/ui/select';
+export {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetFooter,
+} from '../../../apps/web/src/components/ui/sheet';
+export {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from '../../../apps/web/src/components/ui/tabs';
+export {
+  Table,
+  TableHeader,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
+} from '../../../apps/web/src/components/ui/table';
+export { Skeleton } from '../../../apps/web/src/components/ui/skeleton';
+export { MarkdownContent } from '../../../apps/web/src/components/markdown-content';
+export {
+  ThreadList,
+  type ThreadListProps,
+} from '../../../apps/web/src/components/chat/thread-list';
+export {
+  ThreadSidebar,
+  type ThreadSidebarProps,
+} from '../../../apps/web/src/components/chat/thread-sidebar';

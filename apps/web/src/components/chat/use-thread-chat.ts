@@ -20,11 +20,14 @@ import type {
   ChatTurnSummary,
 } from '@aime/shared/chat-turns';
 import { mergeTurns } from './turns';
+import { useAuthSession } from '@/features/auth/session-context';
+import { SharedEventSource } from '@/components/realtime/event-source';
 
 export function useThreadChat(
   threadId: string,
   onThreadUpdated?: (thread: ThreadSummary) => void,
 ) {
+  const sessionId = useAuthSession().data?.session.id;
   const speech = useSpeechPlayback(threadId);
   const {
     receive: receiveSpeech,
@@ -92,10 +95,12 @@ export function useThreadChat(
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
+    if (!sessionId) return;
     const controller = new AbortController();
     session.current = controller;
-    const source = new EventSource(
+    const source = new SharedEventSource(
       `/api/threads/${threadId}/messages?view=summary`,
+      sessionId,
     );
     const receive = (event: Event) => {
       if (controller.signal.aborted) return;
@@ -171,7 +176,7 @@ export function useThreadChat(
       source.close();
       stopSpeech();
     };
-  }, [threadId, updateThread, receiveSpeech, stopSpeech]);
+  }, [threadId, sessionId, updateThread, receiveSpeech, stopSpeech]);
 
   const loadDetails = useCallback(
     async (turn: ChatTurnSummary) => {

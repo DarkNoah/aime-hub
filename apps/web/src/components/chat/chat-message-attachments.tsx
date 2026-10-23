@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState } from 'react';
-import { Expand, Folder } from 'lucide-react';
+import { Download, Expand, Folder } from 'lucide-react';
 import { attachmentFileReference } from '@aime/shared/chat-attachments';
 import { workspaceReferencePath } from '@aime/shared/files';
 import { useTranslation } from 'react-i18next';
@@ -11,6 +11,7 @@ import {
 import { filesApi } from '@/components/file-manager/api';
 import { useWorkspaceFile } from '@/components/file-manager/context';
 import { Button } from '@/components/ui/button';
+import { ImageEditButton } from '@/components/image-viewer/image-edit-button';
 import type { MessageAttachment } from './message-attachments';
 
 const ImageLightbox = lazy(
@@ -75,23 +76,53 @@ export function ChatMessageAttachments({
                 }
               />
             </button>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-xs"
-              className="absolute right-1 bottom-1 bg-background/90 shadow-none"
-              aria-label={previewLabel}
-              title={previewLabel}
-              aria-haspopup={canPreviewImage ? 'dialog' : undefined}
-              disabled={!canPreviewImage && !canOpenFile}
-              onClick={(event) => {
-                event.stopPropagation();
-                if (canPreviewImage) setPreview({ url, name });
-                else if (path) openFile?.(path);
-              }}
-            >
-              <Expand className="size-3.5" aria-hidden="true" />
-            </Button>
+            <div className="absolute right-1 bottom-1 flex items-center gap-1">
+              {canPreviewImage && (
+                <>
+                  <ImageEditButton
+                    src={url}
+                    name={name}
+                    variant="outline"
+                    size="icon-xs"
+                    className="bg-background/90"
+                  />
+                  <Button
+                    asChild
+                    variant="outline"
+                    size="icon-xs"
+                    className="bg-background/90 shadow-none"
+                  >
+                    <a
+                      href={url}
+                      download={name}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`${t('files.download')}: ${name}`}
+                      title={t('files.download')}
+                    >
+                      <Download className="size-3.5" aria-hidden="true" />
+                    </a>
+                  </Button>
+                </>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-xs"
+                className="bg-background/90 shadow-none"
+                aria-label={previewLabel}
+                title={previewLabel}
+                aria-haspopup={canPreviewImage ? 'dialog' : undefined}
+                disabled={!canPreviewImage && !canOpenFile}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (canPreviewImage) setPreview({ url, name });
+                  else if (path) openFile?.(path);
+                }}
+              >
+                <Expand className="size-3.5" aria-hidden="true" />
+              </Button>
+            </div>
           </Attachment>
         );
       })}

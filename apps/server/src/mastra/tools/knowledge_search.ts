@@ -1,3 +1,5 @@
+import { BuiltinTool, type ToolSettings } from '../../modules/tools/base.js';
+import type { ToolDependencies } from '../../modules/tools/types.js';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import {
@@ -74,3 +76,19 @@ export function createKnowledgeSearchTool(
   });
 }
 export const knowledgeSearch = createKnowledgeSearchTool();
+
+export class KnowledgeSearchTool extends BuiltinTool<'builtin'> {
+  constructor() {
+    super(knowledgeSearch, 'builtin');
+  }
+
+  protected override create(
+    _config: ToolSettings<'builtin'>,
+    dependencies: ToolDependencies,
+  ) {
+    return createKnowledgeSearchTool(
+      dependencies.knowledgeSearch,
+      dependencies.knowledge,
+    );
+  }
+}

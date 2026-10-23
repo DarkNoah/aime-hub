@@ -173,7 +173,7 @@ test('exec exposes only the wrapped read_file and uses it for text and OCR calls
   await writeFile(join(directory, 'image.png'), png);
   const f = fixture();
   const exec = createExecTool({
-    getTools: async () => ({ read_file: f.tool }),
+    getTools: async () => [f.tool],
   });
   const result = await exec.execute!(
     {
@@ -197,7 +197,7 @@ const fs = await import('node:fs/promises'); text(await fs.readFile('notes.txt',
   assert.match(text, /# Parsed 12345/);
   assert.match(text, /first\nsecond\nthird/);
   assert.equal(f.calls.length, 1);
-  const disabled = createExecTool({ getTools: async () => ({}) });
+  const disabled = createExecTool({ getTools: async () => [] });
   const denied = await disabled.execute!(
     {
       code: `const fs = await import('node:fs/promises'); text(await fs.readFile('notes.txt', 'utf8'));`,

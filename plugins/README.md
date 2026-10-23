@@ -61,7 +61,7 @@ plugins/<id>/
   "name": "个人笔记 Demo",
   "description": "保存与查询自己的笔记",
   "version": "1.0.0",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "enabled": false,
   "dependencies": [],
   "pages": [
@@ -97,7 +97,7 @@ plugins/<id>/
 
 - `id`：小写字母开头，允许数字和连字符，最长 40 字符。
 - `version`：`major.minor.patch`；每次发布升级应递增，迁移命令拒绝降级。
-- `apiVersion`：当前为 `1`，不兼容版本在发现阶段失败。
+- `apiVersion`：当前为 `2`，不兼容版本在发现阶段失败。
 - `enabled`：源码发现开关，默认 `true`；`false` 完全排除该插件，不进入后台管理。与后台持久化启停状态独立。
 - `dependencies`：其他插件 ID，按依赖顺序发现；缺失、循环依赖构建失败。启用依赖插件后才能启用当前插件；存在已启用依赖者时禁止停用。
 - `pages`：`session` 页面挂到 `/p/<id>/<path>`，`admin` 页面挂到 `/admin/p/<id>/<path>`。`path` 为空表示首页，也支持 `notes/:noteId` 等多级参数。动态参数页面不能直接成为导航链接。
@@ -121,10 +121,39 @@ export default function createServer(context: PluginContext): PluginServer {
 - `api`：`Hono<PluginHttpEnv>`，自动挂载到 `/api/plugins/<id>`。宿主统一处理会话、写操作 Origin 校验、128 KiB 请求体限制、启停检查和错误脱敏。
 - `c.get('userId')`：当前会话用户 ID；`c.get('isAdmin')`：管理员标志。插件必须自行校验记录归属、项目成员关系和业务操作权限。**页面的 `admin` 标志不替代 API 权限检查。**
 - `agents`：宿主 `BaseAgent[]`，ID 使用 `plugin:<id>:<name>`；`source: 'code'`；`model: null` 继承宿主模型配置；`agents: {}` 默认不委派。宿主 AgentService 统一列出和执行，不需要写入 Mastra Agent 数据表。
-- `tools`：Mastra `createTool()` 实例数组，ID 使用 `plugin_<id（连字符转下划线）>_<name>`。宿主包装执行入口，因此已经取出的句柄在停用后也无法执行。工具进入全局配置、Agent 和 `exec` 目录，支持标准启停开关；结果使用现有通用工具展示。本版未增加任意工具配置表单或专用结果渲染器注册接口。
+- `tools`：继承 `@app/plugin-sdk/tools` 中 `PluginTool` 的类实例数组，与内置工具共享 `BaseTool`，通过 `getTools(config, dependencies, options)` 返回 Mastra 工具数组。ID 使用 `plugin_<id（连字符转下划线）>_<name>`。宿主包装执行入口，因此已经取出的句柄在停用后也无法执行。工具进入全局配置、Agent 和 `exec` 目录，支持标准启停开关；结果使用现有通用工具展示。本版未增加任意工具配置表单或专用结果渲染器注册接口。
 - `onEnable`：可选的同步或异步启用回调，用于启动定时任务、订阅和连接。后台开启、服务启动恢复，以及其他实例开启后的状态同步都会触发；宿主等待成功后才开放当前实例的能力。
 - `onDisable`：可选的同步或异步停用回调，用于停止并等待后台任务结束、取消订阅、关闭插件自己的连接。后台关闭、其他实例关闭后的状态同步、服务退出以及 `onEnable` 部分失败后的补偿清理都会触发。
 - `dispose`：可选的异步进程退出清理函数。在 `onDisable` 之后执行；即使前面的清理失败，宿主仍会尝试所有插件的 `dispose`，等待全部结束后再关闭共享数据库。
+
+每个插件工具定义自己的类，构造函数传入 Mastra 工具定义，业务依赖由插件注入。例如：
+
+```ts
+import { PluginTool } from '@app/plugin-sdk/tools';
+import { createTool } from '@mastra/core/tools';
+import { z } from 'zod';
+
+class ListNotesTool extends PluginTool {
+  constructor(listNotes: (userId: string) => Promise<unknown[]>) {
+    const tool = createTool({
+      id: 'plugin_notebook_list_notes',
+      description: '查询当前用户的笔记',
+      inputSchema: z.object({}),
+      execute: async (_input, context) => {
+        const userId = context?.requestContext?.get('userId');
+        if (typeof userId !== 'string' || !userId)
+          throw new Error('UNAUTHORIZED');
+        return { notes: await listNotes(userId) };
+      },
+    });
+    super(tool);
+  }
+}
+
+// createServer 返回：tools: [new ListNotesTool(listNotes)]
+```
+
+`getTools` 统一处理配置、`ids`、`disabledTools` 和 Agent 限制。`onlyAgents: false`（默认）允许所有 Agent；传入 ID 数组时，只允许对应 Agent 使用，并在执行时再次检查。`dependencies.agentId` 提供构建时 Agent，执行上下文中的 Agent 优先。`onlyPlugins` 暂未开放。插件 API v2 不再接受直接返回 `createTool()` 实例，需要改成上述子类。
 
 `createServer` 只构造接口，不能启动后台任务或外部副作用。参与构建的插件即使在后台停用也会调用它；清单 `enabled: false` 的插件不会导入或调用此入口。生命周期函数可以直接闭包使用 `context`，不需要重新创建插件实例：
 
@@ -288,6 +317,22 @@ export default { pages: { '': Page } } satisfies PluginWeb;
 `pages` 支持多个页面，键必须对应清单路径，例如 `pages: { '': NotebookPage, overview: OverviewPage, 'notes/:noteId': DetailPage }`（清单也需声明相应路径），动态参数通过 `params.noteId` 传入。每个页面独立指定权限和是否出现在导航；全部随插件统一启停。插件模块通过动态 import 按需加载。页面处于宿主会话、主题和布局中；ErrorBoundary 隔离页面渲染错误。复用 `@app/plugin-ui` 提供的 Dialog、Button、Input、PasswordInput、ScrollArea 等组件，通知使用 `sonner`。
 
 每个插件可以在自己的 `package.json` 声明 npm 依赖和组件库。React 与 React DOM 使用 `peerDependencies`，宿主 Vite 对 React、React DOM、Router 去重。参与构建的插件样式通过 `generated.css` 纳入 Tailwind 扫描，其他组件库样式应在插件入口导入并避免全局 reset。Node 原生扩展及系统库仍需在 Docker 构建阶段提供。本版不支持后台上传源码后即时安装依赖。
+
+### 插件聊天线程
+
+在清单中设置 `"chatThreads": { "agentId": "plugin:<id>:<agent-id>" }`，宿主会在应用左侧该插件分组下显示可折叠的聊天区域。`agentId` 可省略以使用宿主默认 Agent；未声明 `chatThreads` 的插件不显示此区域。入口随插件启停，管理导航中不重复显示。
+
+区域按 `thread.plugin === plugin.id` 精确筛选当前用户的未归档个人线程，支持分页、实时状态、切换、重命名和归档。新建会保存插件 ID 并打开聊天，但不会自动发送消息。普通个人聊天和项目聊天列表默认排除带 `plugin` 的线程，项目运行数量也只统计普通线程。列表 API 未传 `plugin` 时排除插件线程，传入时按插件 ID 精确筛选；与 `projectId` 同时使用时只筛选该授权项目，筛选发生在分页之前。
+
+插件页面也可以从 `@app/plugin-ui` 导入共用组件：
+
+```tsx
+import { ThreadSidebar } from '@app/plugin-ui';
+
+<ThreadSidebar plugin={pluginId} agentId="plugin:vibe-quant:quant-agent" />;
+```
+
+`ThreadSidebar` 包含折叠、新建、路由切换和编辑弹窗。只需要列表时可使用 `ThreadList`，传入 `plugin`、`selectedId`、`onSelect` 和 `onAction`；需要自定义数据源时可传入 `resource`。两者复用宿主会话内的实时导航与分页缓存；默认跟随外层 `ScrollArea` 滚动，独立选择器可给 `ThreadList` 传入 `maxHeight`。
 
 ### 多个右侧栏扩展
 

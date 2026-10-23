@@ -8,6 +8,7 @@ import {
   Attachments,
 } from '@/components/ai-elements/attachments';
 import { PreviewImage } from '@/components/image-viewer/preview-image';
+import { ImageEditButton } from '@/components/image-viewer/image-edit-button';
 import { useWorkspaceFile } from '@/components/file-manager/context';
 import { Button } from '@/components/ui/button';
 import { AudioClip } from '@/components/audio/audio-clip';
@@ -100,6 +101,14 @@ export function ChatToolAttachments({
               >
                 {name}
               </button>
+              {kind === 'image' && (
+                <ImageEditButton
+                  src={file.url}
+                  name={name}
+                  referrerPolicy="no-referrer"
+                  className="size-6"
+                />
+              )}
               <Button
                 asChild
                 variant="ghost"

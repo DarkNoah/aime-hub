@@ -12,7 +12,9 @@ type Snapshot = {
 export function createThreadListResource(
   loadPage = chatApi.list,
   pageSize = 10,
+  plugin?: string,
 ) {
+  const matches = (thread: ThreadSummary) => thread.plugin === plugin;
   let liveThreads: ThreadSummary[] | undefined;
   let snapshot: Snapshot = {
     threads: [],
@@ -64,7 +66,10 @@ export function createThreadListResource(
           threads: [
             ...snapshot.threads,
             ...result.threads.filter(
-              (thread) => !known.has(thread.id) && !removed.has(thread.id),
+              (thread) =>
+                matches(thread) &&
+                !known.has(thread.id) &&
+                !removed.has(thread.id),
             ),
           ],
           page: result.page,
@@ -81,6 +86,18 @@ export function createThreadListResource(
     })();
     return pending;
   }
+  function remove(id: string) {
+    removed.add(id);
+    if (liveThreads) liveThreads = liveThreads.filter((item) => item.id !== id);
+    const threads = snapshot.threads.filter((item) => item.id !== id);
+    publish({
+      ...snapshot,
+      threads,
+      hasMore: liveThreads
+        ? liveThreads.length > threads.length
+        : snapshot.hasMore,
+    });
+  }
   return {
     getSnapshot: () => snapshot,
     getCatalogSnapshot: () => catalog,
@@ -92,6 +109,7 @@ export function createThreadListResource(
     },
     loadMore,
     synchronize(threads: ThreadSummary[]) {
+      threads = threads.filter(matches);
       controller?.abort();
       pending = undefined;
       removed.clear();
@@ -130,6 +148,15 @@ export function createThreadListResource(
       // Once connected, only the ordered global feed writes summaries. HTTP acknowledgements
       // and the open chat's independent message stream can arrive after a newer status.
       if (liveThreads && !authoritative) return;
+      if (!matches(thread)) {
+        if (
+          (liveThreads ?? snapshot.threads).some(
+            (item) => item.id === thread.id,
+          )
+        )
+          remove(thread.id);
+        return;
+      }
       removed.delete(thread.id);
       if (liveThreads) {
         const exists = liveThreads.some((item) => item.id === thread.id);
@@ -159,19 +186,7 @@ export function createThreadListResource(
           : [thread, ...snapshot.threads],
       });
     },
-    remove(id: string) {
-      removed.add(id);
-      if (liveThreads)
-        liveThreads = liveThreads.filter((item) => item.id !== id);
-      publish({
-        ...snapshot,
-        threads: snapshot.threads.filter((item) => item.id !== id),
-        hasMore: liveThreads
-          ? liveThreads.length >
-            snapshot.threads.filter((item) => item.id !== id).length
-          : snapshot.hasMore,
-      });
-    },
+    remove,
     cancel() {
       controller?.abort();
       pending = undefined;

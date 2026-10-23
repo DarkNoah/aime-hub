@@ -9,6 +9,7 @@ import type {
 import { IndicatorRenderer } from '../web/indicators/renderer';
 import { parsePreferences } from '../web/indicators/preferences';
 import type { Bar } from '../shared';
+import { buildPriceProfile, profileRangeStart } from '../volume-profile';
 
 function harness(candles = true) {
   const primitives = new Set<ISeriesPrimitive>();
@@ -39,7 +40,9 @@ function harness(candles = true) {
     attachPrimitive: (primitive: ISeriesPrimitive) => {
       additions++;
       primitives.add(primitive);
-      primitive.attached?.({ chart, series, requestUpdate() {} });
+      primitive.attached?.({ chart, series, requestUpdate() {} } as Parameters<
+        NonNullable<typeof primitive.attached>
+      >[0]);
     },
     detachPrimitive: (primitive: ISeriesPrimitive) => {
       removals++;
@@ -177,4 +180,49 @@ test('intraday line charts skip SMC without erasing its saved preference', () =>
   assert.equal(h.writes.length, 0);
   assert.equal(h.preferences.smc.visible, true);
   h.renderer.dispose();
+});
+
+test('volume profile refreshes asynchronous context without resetting the chart and detaches when hidden', () => {
+  const h = harness();
+  h.preferences.smc.visible = false;
+  h.preferences.volumeProfile.visible = true;
+  h.renderer.update(bars, h.preferences);
+  const primitive = [...h.primitives][0];
+  assert.equal(draw(primitive).boxes, 0);
+  const context = {
+    volumeProfile: {
+      source: 'fixture',
+      warnings: [],
+      segments: [
+        {
+          start: profileRangeStart(bars[0].time, 86400),
+          end: bars.at(-1)!.time + 60,
+          profile: buildPriceProfile(
+            [{ price: 10, size: 20, side: 'unknown' }],
+            30,
+            70,
+          )!,
+        },
+      ],
+    },
+  };
+  h.renderer.update(bars, h.preferences, context);
+  assert.equal(draw(primitive).boxes, 1);
+  assert.deepEqual(draw(primitive).labels, ['POC', 'VAH', 'VAL', 'VWAP']);
+  assert.deepEqual(h.range(), { from: 5, to: 30 });
+  h.renderer.update(bars, h.preferences, {
+    volumeProfile: { ...context.volumeProfile, segments: [] },
+  });
+  assert.equal(draw(primitive).boxes, 0);
+  h.renderer.update(
+    bars,
+    {
+      ...h.preferences,
+      volumeProfile: { ...h.preferences.volumeProfile, visible: false },
+    },
+    context,
+  );
+  assert.equal(h.primitives.size, 0);
+  h.renderer.dispose();
+  assert.deepEqual(h.counts(), { additions: 1, removals: 1 });
 });

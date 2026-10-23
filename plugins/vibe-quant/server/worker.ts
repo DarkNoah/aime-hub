@@ -16,6 +16,7 @@ import type { QuantConfig } from './config.js';
 import { MarketStore } from './clickhouse.js';
 import { StateStore } from './state-store.js';
 import { ensurePython } from './python.js';
+import type { MarketBatch } from './sdk/feed.js';
 
 type Event =
   | { type: 'catalog'; instruments: Instrument[] }
@@ -57,6 +58,7 @@ export class SyncWorker {
     readonly state: StateStore,
     private readonly preparePython = (signal: AbortSignal) =>
       ensurePython(context.runtime, signal),
+    private readonly onMarketData?: (batch: MarketBatch) => void,
   ) {
     this.status = {
       engine: config.engine,
@@ -146,6 +148,7 @@ export class SyncWorker {
           return;
         }
         if (event.type !== 'catalog' && event.type !== 'data') return;
+        if (event.type === 'data') this.onMarketData?.(event);
         if (event.type === 'catalog')
           for (const item of event.instruments) catalogSymbols.add(item.symbol);
         const count =

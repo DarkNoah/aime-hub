@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { isToolUIPart } from 'ai';
 import { useTranslation } from 'react-i18next';
 import { MessageResponse } from '@/components/ai-elements/message';
+import { FileCode } from '@/components/file-code';
 import {
   getStatusBadge,
   ToolInput,
@@ -11,12 +12,18 @@ import { WorkspaceFileLink } from '@/components/file-manager/workspace-file-link
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { parseViewFileOutput } from './view-file-output';
+import { readFileBlocks } from './read-file-output';
+import { ToolMedia } from './tool-media';
 import type { PreviewPart } from './selection';
 
 export function ViewFilePreview({ part }: { part: PreviewPart }) {
   const { t } = useTranslation();
   const output = isToolUIPart(part) ? part.output : undefined;
   const result = useMemo(() => parseViewFileOutput(output), [output]);
+  const media = useMemo(
+    () => readFileBlocks(output).filter((block) => block.type === 'media'),
+    [output],
+  );
   if (!isToolUIPart(part)) return null;
   const error =
     part.errorText ||
@@ -43,26 +50,48 @@ export function ViewFilePreview({ part }: { part: PreviewPart }) {
           {t('tools.ocrModel')}: {result.model}
         </p>
       )}
+      {result?.warnings?.map((warning, index) => (
+        <p key={index} className="text-xs text-muted-foreground">
+          {warning}
+        </p>
+      ))}
+      {!error &&
+        media.map((block, index) => <ToolMedia key={index} media={block} />)}
       {result?.truncated && (
         <p className="rounded-lg bg-muted/50 p-3 text-xs leading-5 text-muted-foreground">
-          {t('chat.viewFile.truncatedHint')}
+          {result.nextOffset
+            ? t('chat.viewFile.continueHint', {
+                start: result.startLine ?? 1,
+                end: result.endLine ?? result.nextOffset - 1,
+                total: result.totalLines ?? result.nextOffset,
+                offset: result.nextOffset,
+              })
+            : t('chat.viewFile.truncatedHint')}
         </p>
       )}
       {result &&
         !error &&
         (result.text.trim() ? (
-          <MessageResponse
-            mode="static"
-            renderEnhancedLinks={false}
-            className="min-w-0 text-sm leading-7 [overflow-wrap:anywhere]"
-          >
-            {result.text}
-          </MessageResponse>
-        ) : (
+          result.format === 'text' ? (
+            <FileCode
+              filename="content.txt"
+              code={result.text}
+              showLineNumbers={false}
+            />
+          ) : (
+            <MessageResponse
+              mode="static"
+              renderEnhancedLinks={false}
+              className="min-w-0 text-sm leading-7 [overflow-wrap:anywhere]"
+            >
+              {result.text}
+            </MessageResponse>
+          )
+        ) : !media.length ? (
           <p className="text-sm text-muted-foreground">
             {t('chat.viewFile.empty')}
           </p>
-        ))}
+        ) : null)}
       {loading && !result && !error && (
         <div role="status" className="space-y-3">
           <p className="text-sm text-muted-foreground">

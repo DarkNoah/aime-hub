@@ -39,6 +39,7 @@ export function threadRouter(
         input.query.page,
         input.query.projectId,
         input.query.perPage,
+        input.query.plugin,
       ),
     ),
     create: p.create.handler(({ context, input }) =>

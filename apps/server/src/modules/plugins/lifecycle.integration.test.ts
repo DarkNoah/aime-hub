@@ -6,6 +6,7 @@ import { Pool } from 'pg';
 import { DataSource } from 'typeorm';
 import type { Auth } from '@aime/auth';
 import {
+  PLUGIN_API_VERSION,
   pluginManifestSchema,
   pluginConfigFieldsSchema,
   type PluginConfig,
@@ -34,7 +35,7 @@ function definition(
       name: id,
       description: '',
       version: '1.0.0',
-      apiVersion: 1,
+      apiVersion: PLUGIN_API_VERSION,
       dependencies,
     }),
     database: { entities: [], migrations: [] },
