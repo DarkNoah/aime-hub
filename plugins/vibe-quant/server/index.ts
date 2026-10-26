@@ -58,7 +58,6 @@ export default function createServer(context: PluginContext): PluginServer {
       state,
       config,
       wake: () => signals?.wake(true),
-      wakeBacktests: () => backtests?.wake(),
     })),
   );
   api.route(

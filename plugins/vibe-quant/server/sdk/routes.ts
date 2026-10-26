@@ -47,7 +47,10 @@ export function strategyDataRoutes(get: () => Dependencies) {
           .refine((value) => DURATIONS.some((d) => d === value)),
         after: z.coerce.number().finite().nonnegative(),
         before: z.coerce.number().finite().positive(),
-        limit: z.coerce.number().int().min(1).max(1000).default(1000),
+        limit: z.coerce.number().int().min(1).max(5000).default(1000),
+        execution_model: z
+          .enum(['actual_contract', 'continuous_price'])
+          .optional(),
       })
       .safeParse(c.req.query());
     if (!parsed.success || parsed.data.after >= parsed.data.before)
@@ -57,11 +60,19 @@ export function strategyDataRoutes(get: () => Dependencies) {
     const item = await state.instrument(config.engine, symbol);
     if (!item || item.kind === 'option')
       return c.json({ code: 'UNSUPPORTED_INSTRUMENT' }, 400);
+    if (
+      parsed.data.execution_model === 'continuous_price' &&
+      (item.kind !== 'continuous' || !symbol.startsWith('KQ.m@'))
+    )
+      return c.json({ code: 'UNSUPPORTED_INSTRUMENT' }, 400);
     const bars = (
       await store.bars(config.engine, symbol, duration, {
         after: Math.floor(after),
         before: Math.ceil(before),
         limit,
+        ...(parsed.data.execution_model === 'continuous_price'
+          ? { rebuildTicks: false }
+          : {}),
       })
     ).filter((bar) => bar.time > after && bar.time < before);
     return c.json({
@@ -70,6 +81,33 @@ export function strategyDataRoutes(get: () => Dependencies) {
       next: bars.length === limit ? bars.at(-1)!.time : null,
       dataPolicy: 'latest-corrected; freeze returned data before backtesting',
     });
+  });
+  api.get('/history/range', async (c) => {
+    const parsed = z
+      .object({
+        symbol: symbolSchema,
+        duration: z.coerce
+          .number()
+          .refine((value) => DURATIONS.some((d) => d === value)),
+      })
+      .safeParse(c.req.query());
+    if (!parsed.success) return c.json({ code: 'VALIDATION_ERROR' }, 400);
+    const { config, store } = get();
+    const [range] = await store.rows<{
+      start: number | null;
+      end: number | null;
+    }>(
+      `SELECT minOrNull(time) AS start, maxOrNull(time) AS end FROM ${store.table('bars')} FINAL
+       WHERE engine={engine:String} AND symbol={symbol:String} AND duration={duration:UInt32}`,
+      {
+        engine: config.engine,
+        symbol: parsed.data.symbol,
+        duration: String(
+          parsed.data.duration === 180 ? 60 : parsed.data.duration,
+        ),
+      },
+    );
+    return c.json(range ?? { start: null, end: null });
   });
   api.get('/contracts', async (c) => {
     const parsed = z

@@ -1,6 +1,9 @@
 import type { MarketStrategyHint } from '../../signal-types';
+import type { ReactNode } from 'react';
 import {
   Button,
+  ScrollArea,
+  ScrollBar,
   Select,
   SelectContent,
   SelectItem,
@@ -46,6 +49,7 @@ export function MarketChartPanel({
   markerTimes,
   riskLevels,
   strategyHints,
+  toolbarActions,
   volumeProfileSource,
   latestLabel = '最新行情',
   emptyHint = '首次订阅需要加载历史数据。请确认当前引擎具备此标的行情权限。',
@@ -60,6 +64,7 @@ export function MarketChartPanel({
   markerTimes?: TradeReplay['markerTimes'];
   riskLevels?: readonly RiskLevelRecord[];
   strategyHints?: readonly MarketStrategyHint[];
+  toolbarActions?: ReactNode;
   volumeProfileSource?: VolumeProfileSource;
   latestLabel?: string;
   emptyHint?: string;
@@ -78,32 +83,36 @@ export function MarketChartPanel({
   }
   return (
     <>
-      <div className="@container/chart-toolbar border-b px-3 py-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <Select value={String(period)} onValueChange={changePeriod}>
-            <SelectTrigger
-              size="sm"
-              className="w-24 shrink-0 text-xs"
-              aria-label="视图周期"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent position="popper" align="start">
-              <SelectItem value="intraday">分时图</SelectItem>
-              {DURATIONS.map((value) => (
-                <SelectItem key={value} value={String(value)}>
-                  {durationLabel(value)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <IndicatorControls
-            intraday={intraday}
-            preferences={indicators.preferences}
-            onVisibleChange={indicators.setVisible}
-            onParametersChange={indicators.setParameters}
-          />
-        </div>
+      <div className="@container/chart-toolbar min-w-0 border-b px-3 py-2">
+        <ScrollArea viewportProps={{ className: '[&>div]:block!' }}>
+          <div className="flex w-max min-w-full items-center gap-2">
+            <Select value={String(period)} onValueChange={changePeriod}>
+              <SelectTrigger
+                size="sm"
+                className="w-24 shrink-0 text-xs"
+                aria-label="视图周期"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent position="popper" align="start">
+                <SelectItem value="intraday">分时图</SelectItem>
+                {DURATIONS.map((value) => (
+                  <SelectItem key={value} value={String(value)}>
+                    {durationLabel(value)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <IndicatorControls
+              intraday={intraday}
+              preferences={indicators.preferences}
+              onVisibleChange={indicators.setVisible}
+              onParametersChange={indicators.setParameters}
+            />
+            {toolbarActions}
+          </div>
+          <ScrollBar orientation="horizontal" />
+        </ScrollArea>
       </div>
       {view.error && (
         <p role="alert" className="border-b px-3 py-2 text-xs text-destructive">

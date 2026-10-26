@@ -275,6 +275,7 @@ class Runner:
                       'broker': {'cash': self.broker.cash, 'lots': [asdict(l) for l in self.broker.lots],
                                  'orders': [asdict(o) for o in self.broker.orders], 'fills': self.broker.fills,
                                  'trades': self.broker.trades, 'marks': self.broker.marks,
+                                 'fill_sequence': self.broker.fill_sequence, 'trade_sequence': self.broker.trade_sequence,
                                  'trading_day': self.broker.trading_day}})
         return path
 
@@ -348,5 +349,7 @@ class Runner:
         runner.broker.lots = [Lot(**lot) for lot in broker['lots']]
         runner.broker.orders = [Order(**order) for order in broker['orders']]
         runner.broker.fills, runner.broker.trades = broker['fills'], broker['trades']
+        runner.broker.fill_sequence = broker.get('fill_sequence', len(broker['fills']))
+        runner.broker.trade_sequence = broker.get('trade_sequence', len(broker['trades']))
         runner.broker.trading_day = broker['trading_day']
         return runner

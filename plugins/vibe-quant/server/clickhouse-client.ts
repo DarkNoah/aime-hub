@@ -31,6 +31,14 @@ export class ClickHouseClient {
     const url = new URL(this.config.clickhouseUrl);
     url.searchParams.set('query', query);
     url.searchParams.set('wait_end_of_query', '1');
+    // Full-history pages and durable strategy checkpoints can be several MiB.
+    // Fetch transparently decodes the negotiated HTTP response compression.
+    url.searchParams.set('enable_http_compression', '1');
+    // Keep concurrent chart/history reads within the shared collector's small
+    // memory budget instead of expanding each request across all server CPUs.
+    url.searchParams.set('max_threads', '2');
+    url.searchParams.set('max_final_threads', '2');
+    url.searchParams.set('max_block_size', '8192');
     for (const [key, value] of Object.entries(params))
       url.searchParams.set(`param_${key}`, value);
     if (resource) {

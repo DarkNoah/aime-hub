@@ -6,20 +6,34 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import signal
 import sys
-from threading import Event as StopEvent
+from time import monotonic
+from threading import Event as StopEvent, Lock
 
 if __name__ == '__main__':
     sys.path.insert(0, sys.argv[1])
 from quant_sdk import Bar, Fees, HubClient, Instrument, RunConfig, Strategy, TradingCalendar
-from quant_sdk.live import LiveRunner
+from quant_sdk.runtime import Runner
 from strategy_entrypoint import resolve_strategy
+from signal_history import BufferedEvents, MonitorHistory, history_events
 
 
 class BridgeClient(HubClient):
-    def __init__(self):
+    def __init__(self, simulated_symbol=None):
         self.sequence = 0
+        self.lock = Lock()
+        self.simulated_symbol = simulated_symbol
+
+    def instrument(self, symbol):
+        metadata = super().instrument(symbol)
+        # Adapt only this explicitly simulated monitor's catalog, as frozen
+        # continuous-price backtests do. The shared market catalog is untouched.
+        return {**metadata, 'kind': 'future'} if symbol == self.simulated_symbol else metadata
 
     def call(self, kind, **value):
+        with self.lock:
+            return self._call(kind, **value)
+
+    def _call(self, kind, **value):
         self.sequence += 1
         sys.__stdout__.write(json.dumps({'id': self.sequence, 'kind': kind, **value}, ensure_ascii=False, allow_nan=False) + '\n')
         sys.__stdout__.flush()
@@ -32,6 +46,10 @@ class BridgeClient(HubClient):
         return response.get('value')
 
     def request(self, path, *, method='GET', params=None, body=None):
+        if path == '/history' and params:
+            params = {**params, 'limit': 5000}
+        if path == '/history' and params and params.get('symbol') == self.simulated_symbol:
+            params = {**params, 'execution_model': 'continuous_price'}
         return self.call('market', path=path, method=method, params=params, body=body)
 
 
@@ -71,6 +89,7 @@ class SignalOutput:
         self.event = None
         self.overlay_key = None
         self.dirty = True
+        self.history = None
 
     def __call__(self, event):
         if event['type'] in ('signal', 'risk_levels'):
@@ -98,15 +117,17 @@ class SignalOutput:
             self.targets[symbol] = self.runner.broker.position(symbol) if self.runner else 0
         elif kind in ('entry', 'exit'):
             signals.append((kind, value.get('side') if value.get('side') in ('long', 'short') else 'unknown'))
-        # Catch-up updates state without notifying about historical signals.
-        if value['time'] <= self.cutoff:
-            return
         bars = self.runner.data.history(symbol, 60, 1) if self.runner else []
         price = value.get('trigger_price', bars[-1].close if bars else None)
         for event_type, side in signals:
-            self.client.call('signal', signal={'id': value['id'] + ':' + event_type, 'type': event_type,
+            record = {'id': value['id'] + ':' + event_type, 'type': event_type,
                 'side': side, 'symbol': symbol, 'time': value['time'], 'reason': str(value.get('reason', '')),
-                'price': price, 'chart_time': value.get('trigger_bar_time', getattr(self.event.payload, 'time', value['time']) if self.event else value['time'])})
+                'price': price, 'chart_time': value.get('trigger_bar_time', getattr(self.event.payload, 'time', value['time']) if self.event else value['time'])}
+            if self.history:
+                self.history.signal(record)
+            # Historical records are persisted, but never replay old notifications.
+            if value['time'] > self.cutoff:
+                self.client.call('signal', signal=record)
 
     def flush_overlay(self, chart_symbol):
         if not self.dirty and (self.overlay_key == '[]' or not self.event or not isinstance(self.event.payload, Bar)):
@@ -147,6 +168,16 @@ def main():
     directory = Path(sys.argv[2])
     config = json.loads((directory / 'config.json').read_text())
     saved = json.loads((directory / 'checkpoint.json').read_text()) if (directory / 'checkpoint.json').exists() else None
+    # Rebuild legacy monitor history once to add the protection paths used by
+    # the existing trade chart. Stable trade/signal IDs replace the same records.
+    if saved and saved.get('history_version') != 2:
+        saved = None
+    execution_model = config.get('execution_model', 'actual_contract')
+    simulated = execution_model == 'continuous_price'
+    if simulated and not config['symbol'].startswith('KQ.m@'):
+        raise ValueError('主连价格模拟仅适用于主连标的')
+    if saved and saved['runner']['manifest']['params'].get('execution_model', 'actual_contract') != execution_model:
+        raise ValueError('历史计算口径已变更，请移除后重新添加策略提示')
     stop = StopEvent()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     spec = importlib.util.spec_from_file_location('saved_strategy', directory / 'strategy.py')
@@ -154,7 +185,7 @@ def main():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     strategy = resolve_strategy(module, Strategy)()
-    client = BridgeClient()
+    client = BridgeClient(config['symbol'] if simulated else None)
     calendar = ExchangeCalendar(config.get('calendar'))
 
     def rules(symbol, metadata):
@@ -162,74 +193,86 @@ def main():
         values['fees'] = Fees(**values['fees'])
         if metadata['kind'] == 'stock':
             values['multiplier'] = values['margin_rate'] = 1
-        return Instrument(symbol, metadata['kind'], price_tick=metadata['priceTick'], **values)
+        # This monitor alone treats the main-price series as a synthetic future.
+        kind = 'future' if simulated and symbol == config['symbol'] else metadata['kind']
+        return Instrument(symbol, kind, price_tick=metadata['priceTick'], **values)
 
     with client.stream([config['symbol']], calendar=calendar, rules=rules,
                        duration=config['duration'], stop_event=stop) as stream:
-        output = SignalOutput(client, stream.cutoff, saved.get('targets') if saved else None, saved.get('risk_times') if saved else None)
-        if saved:
-            checkpoint = directory / 'sdk-checkpoint.json'
-            checkpoint.write_text(json.dumps(saved['runner']))
-            runner = LiveRunner.restore(strategy, checkpoint, output_dir=directory / 'runs', on_event=output)
-            stream._contracts.update(runner.data._contracts)
-        else:
-            runner = LiveRunner(strategy, stream.instruments, mode='paper',
-                config=RunConfig(initial_cash=config['initial_cash'], start=stream.cutoff, checkpoint_interval=60),
-                params={**config['parameters'], 'symbol':config['symbol'], 'duration':config['duration'], 'execution_model':'actual_contract'},
-                output_dir=directory / 'runs', on_event=output)
-        output.runner = runner
-        checkpoint = runner.checkpoint
-        preparing = True
+        with BufferedEvents(stream, directory / 'live-events.jsonl') as live:
+            bounds = client.request('/history/range', params={'symbol': config['symbol'], 'duration': config['duration']})
+            first = bounds['start'] if bounds.get('start') is not None else stream.cutoff
+            output = SignalOutput(client, stream.cutoff, saved.get('targets') if saved else None, saved.get('risk_times') if saved else None)
+            if saved:
+                checkpoint = directory / 'sdk-checkpoint.json'
+                checkpoint.write_text(json.dumps(saved['runner']))
+                runner = Runner.restore(strategy, checkpoint, output_dir=directory / 'runs', on_event=output)
+            else:
+                runner = Runner(strategy, stream.instruments, mode='backtest' if simulated else 'paper',
+                    config=RunConfig(initial_cash=config['initial_cash'], start=first, checkpoint_interval=60, benchmark_symbol=config['symbol']),
+                    params={**config['parameters'], 'symbol':config['symbol'], 'duration':config['duration'], 'execution_model':execution_model},
+                    output_dir=directory / 'runs', on_event=output)
+            output.runner = runner
+            checkpoint = runner.checkpoint
+            history = MonitorHistory(client, runner, first, saved.get('history') if saved else None)
+            output.history = history
+            preparing = True
+            checkpoint_at = monotonic()
 
-        def persist():
-            if preparing:
-                runner._checkpoint_at = runner.data.now
-                return runner.directory / 'checkpoint.json'
-            # Bound diagnostics; keep order/signal identity counters and active trading state intact.
-            runner.curve[:] = runner.curve[-1000:]
-            runner.logs[:] = runner.logs[-500:]
-            for name in ('events.jsonl', 'outputs.jsonl'):
-                path = runner.directory / name
-                if path.exists() and path.stat().st_size > 16 * 1024 * 1024:
-                    path.write_text('')
-            result = checkpoint()
-            client.call('checkpoint', checkpoint={'runner':json.loads(result.read_text()), 'targets':output.targets, 'risk_times':output.risk_times})
-            return result
-        runner.checkpoint = persist
-        runner.stop_event = stop
-        start = (saved['runner']['now'] if saved else stream.cutoff) - config['warmup_days'] * 86400
-        # Mapping initialization needs a trading instant even when the lookback lands on a holiday.
-        try:
-            calendar.trading_day(start, futures=stream.instruments[0].kind != 'stock')
-        except ValueError:
-            day = calendar._next(datetime.fromtimestamp(start, calendar.timezone).date())
-            start = datetime.combine(day, datetime.min.time(), calendar.timezone).timestamp()
-        if start < stream.cutoff:
-            history = client.snapshot([config['symbol']], start=start, end=stream.cutoff,
-                                      duration=config['duration'], calendar=calendar, rules=rules)
-            runner.data._instruments.update({item.symbol: item for item in history.instruments})
-            for event in history.events:
-                if stop.is_set():
-                    return
-                if saved and event.available_at <= runner.data.now:
-                    continue
-                output.event = event
-                runner.process(event, warmup=not saved)
-        stream._contracts.update(runner.data._contracts)
-        preparing = False
-        runner._deliver()
-        output.flush_overlay(config['symbol'])
-        runner.checkpoint()
-        client.call('ready')
-        runner.start()
-        for event in stream:
-            if stop.is_set():
-                break
-            output.event = event
-            runner.process(event)
+            def persist():
+                nonlocal checkpoint_at
+                if preparing and monotonic() - checkpoint_at < 10:
+                    runner._checkpoint_at = runner.data.now
+                    return runner.directory / 'checkpoint.json'
+                history.flush(force=True)
+                retained = {value['id'] for value in runner.risk_levels}
+                output.risk_times = {key: value for key, value in output.risk_times.items() if key in retained}
+                for name in ('events.jsonl', 'outputs.jsonl'):
+                    path = runner.directory / name
+                    if path.exists() and path.stat().st_size > 16 * 1024 * 1024:
+                        path.write_text('')
+                result = checkpoint()
+                client.call('checkpoint', checkpoint={'runner': json.loads(result.read_text()),
+                    'targets': output.targets, 'risk_times': output.risk_times,
+                    'history_version': 2, 'history': history.state})
+                checkpoint_at = monotonic()
+                return result
+            runner.checkpoint = persist
+            # Continuous-price history uses backtest semantics for strategy guards,
+            # while this hosted runner still checkpoints and consumes new live bars.
+            def maybe_checkpoint():
+                if runner.output_events or runner.data.now - runner._checkpoint_at >= runner.config.checkpoint_interval:
+                    persist()
+            runner._maybe_checkpoint = maybe_checkpoint
+            runner.stop_event = stop
+            start = max(first, saved['runner']['now'] - 86400) if saved else first
+            if start < stream.cutoff:
+                for event in history_events(client, runner, config['symbol'], config['duration'],
+                                            start, stream.cutoff, calendar, rules):
+                    live.check()
+                    if stop.is_set():
+                        return
+                    if saved and event.available_at < saved['runner']['now']:
+                        continue
+                    output.event = event
+                    runner.process(event)
+                    history.flush()
+            history.replaying = False
+            preparing = False
+            runner._deliver()
             output.flush_overlay(config['symbol'])
-        runner.checkpoint()
-        runner.journal.close()
+            runner.checkpoint()
+            client.call('ready')
+            runner.start()
+            for event in live:
+                if stop.is_set():
+                    break
+                output.event = event
+                runner.process(event)
+                output.flush_overlay(config['symbol'])
+                history.flush(force=bool(history.pending))
+            runner.checkpoint()
+            runner.journal.close()
 
 
 if __name__ == '__main__':

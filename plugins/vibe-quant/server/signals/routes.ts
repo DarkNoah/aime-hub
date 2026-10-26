@@ -1,8 +1,3 @@
-import { enqueueBacktest } from '../strategies/enqueue.js';
-import {
-  matchesMonitorRun,
-  monitorHistoryInput,
-} from '../../signal-history.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { PluginHttpEnv } from '@app/plugin-sdk/server';
@@ -47,7 +42,6 @@ export function signalRoutes(
     state: StateStore;
     config: QuantConfig;
     wake: () => void;
-    wakeBacktests?: () => void;
   },
 ) {
   const api = new Hono<PluginHttpEnv>();
@@ -67,50 +61,18 @@ export function signalRoutes(
     return row;
   };
   api.get('/monitors/:id/history', async (c) => {
-    const { records, monitors } = get();
-    const owner = c.get('userId');
-    const monitor = await monitors.get(c.req.param('id'), owner);
-    const before = c.req.query('before');
-    if (before && !z.uuid().safeParse(before).success)
-      throw new StrategyError('INVALID_MONITOR_CONFIG');
-    const rows = await records.runs(
-      owner,
-      monitor.strategy_id,
-      before,
-      'backtest',
-      monitor,
-    );
-    return c.json({
-      runs: rows.filter((run) => matchesMonitorRun(monitor, run)),
-      next: rows.length === 30 ? rows.at(-1)!.id : null,
-      canRun: c.get('isAdmin'),
-    });
-  });
-  api.post('/monitors/:id/history', async (c) => {
-    const owner = c.get('userId'),
-      isAdmin = c.get('isAdmin');
-    if (!isAdmin)
-      throw new StrategyError('SCRIPT_EXECUTION_ADMIN_REQUIRED', 403);
-    const input = z
-      .object({
-        months: z
-          .union([z.literal(3), z.literal(12), z.literal(36)])
-          .default(12),
-      })
-      .safeParse(await c.req.json().catch(() => null));
-    if (!input.success) throw new StrategyError('INVALID_BACKTEST_TIME_RANGE');
-    const { records, monitors, state, config, wakeBacktests } = get();
-    const monitor = await monitors.get(c.req.param('id'), owner);
-    if (monitor.engine !== config.engine)
-      throw new StrategyError('MONITOR_ENGINE_CHANGED', 409);
-    const run = await enqueueBacktest(
-      records,
-      { state, config, wake: () => wakeBacktests?.() },
-      { userId: owner, isAdmin },
-      monitor.strategy_id,
-      monitorHistoryInput(monitor, input.data.months),
-    );
-    return c.json(run, 202);
+    const { monitors } = get();
+    const monitor = await monitors.get(c.req.param('id'), c.get('userId'));
+    if (monitor.deleted) throw new StrategyError('MONITOR_NOT_FOUND', 404);
+    const [history, view] = await Promise.all([
+      monitors.history.read(
+        monitor.id,
+        c.req.query('before'),
+        c.req.query('signalsBefore'),
+      ),
+      monitors.view(monitor),
+    ]);
+    return c.json({ ...history, monitor: view });
   });
   api.get('/monitors', async (c) => {
     const { monitors, records, config } = get();
@@ -118,18 +80,34 @@ export function signalRoutes(
       symbol = c.req.query('symbol');
     if (!symbol || !shape.symbol.safeParse(symbol).success)
       throw new StrategyError('INVALID_MONITOR_CONFIG');
+    const rawFrom = c.req.query('from'),
+      rawTo = c.req.query('to');
+    const range =
+      rawFrom !== undefined || rawTo !== undefined
+        ? { from: Number(rawFrom), to: Number(rawTo) }
+        : undefined;
+    if (
+      range &&
+      (!Number.isFinite(range.from) ||
+        !Number.isFinite(range.to) ||
+        range.from < 0 ||
+        range.from >= range.to)
+    )
+      throw new StrategyError('INVALID_MONITOR_CONFIG');
     const rows = (await monitors.list(owner)).filter(
       (row) => row.config.symbol === symbol && row.engine === config.engine,
     );
     return c.json(
       await Promise.all(
         rows.map(async (row) => {
-          const [monitor, strategy, signals, overlay] = await Promise.all([
-            monitors.view(row),
-            records.storedStrategy(row.strategy_id),
-            monitors.signals(owner, row.id),
-            monitors.overlay(row.id),
-          ]);
+          const [monitor, strategy, signals, overlay, chart] =
+            await Promise.all([
+              monitors.view(row),
+              records.storedStrategy(row.strategy_id),
+              monitors.signals(owner, row.id),
+              monitors.overlay(row.id),
+              monitors.history.chart(row.id, range),
+            ]);
           return {
             ...monitor,
             strategy_name: strategy.name,
@@ -138,6 +116,7 @@ export function signalRoutes(
             ),
             signals,
             overlay,
+            ...chart,
           };
         }),
       ),

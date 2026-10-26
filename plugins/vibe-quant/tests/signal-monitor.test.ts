@@ -101,9 +101,13 @@ test('monitor creation uses shared strategies and enforces administrator, versio
   );
 });
 
-for (const monitorSymbol of [actual, 'KQ.m@CFFEX.IM'])
+for (const [monitorSymbol, executionModel] of [
+  [actual, 'actual_contract'],
+  ['KQ.m@CFFEX.IM', 'actual_contract'],
+  ['KQ.m@CFFEX.IM', 'continuous_price'],
+] as const)
   test(
-    `real Python ${monitorSymbol}: warmup, entry/reversal/risk exits and checkpoint recovery`,
+    `real Python ${monitorSymbol} ${executionModel}: full-history replay, entry/reversal/risk exits and checkpoint recovery`,
     { timeout: 45000 },
     async () => {
       const directory = await mkdtemp(join(tmpdir(), 'signal-monitor-test-'));
@@ -111,12 +115,16 @@ for (const monitorSymbol of [actual, 'KQ.m@CFFEX.IM'])
         worker = fileURLToPath(
           new URL('../worker/strategy_monitor.py', import.meta.url),
         );
-      const settings = config();
+      const settings = { ...config(), execution_model: executionModel };
+      const simulated = executionModel === 'continuous_price';
       settings.symbol = monitorSymbol;
       settings.calendar = { ...settings.calendar, '2026-10-18': false };
       const source = `from quant_sdk import Strategy
 class Signals(Strategy):
     def on_start(self, ctx):
+        if ctx.params['execution_model'] == 'continuous_price':
+            assert ctx.mode == 'backtest'
+            assert ctx.data.instrument(ctx.params['symbol']).kind == 'future'
         ctx.data.subscribe(ctx.params['symbol'], 60)
     def on_bar(self, ctx, bar):
         contract = ctx.data.resolve_contract(bar.symbol)
@@ -142,7 +150,7 @@ class Signals(Strategy):
       const chartBar = (value: ReturnType<typeof bar>, symbol: string) => ({
         ...value,
         symbol,
-        ...(symbol.startsWith('KQ.m@')
+        ...(symbol.startsWith('KQ.m@') && !simulated
           ? {
               open: value.open + 20,
               high: value.high + 20,
@@ -163,6 +171,8 @@ class Signals(Strategy):
         }[];
       }[] = [];
       const signals: Record<string, unknown>[] = [];
+      const history = new Map<string, Record<string, unknown>>();
+      const summaries: Record<string, unknown>[] = [];
       async function execute(resume: boolean) {
         const abort = new AbortController();
         let polled = 0;
@@ -175,6 +185,20 @@ class Signals(Strategy):
               directory,
               abort.signal,
               async (message) => {
+                if (message.kind === 'history') {
+                  const batch = message.batch as {
+                    records: {
+                      id: string;
+                      kind: string;
+                      payload: Record<string, unknown>;
+                    }[];
+                    summary?: Record<string, unknown>;
+                  };
+                  for (const row of batch.records)
+                    history.set(row.kind + row.id, row.payload);
+                  if (batch.summary) summaries.push(batch.summary);
+                  return true;
+                }
                 if (message.kind === 'overlay') {
                   overlays.push(message.overlay as (typeof overlays)[number]);
                   return true;
@@ -190,7 +214,7 @@ class Signals(Strategy):
                 }
                 if (message.kind === 'signal') {
                   signals.push(message.signal as Record<string, unknown>);
-                  if (signals.length === 4) setTimeout(() => abort.abort(), 20);
+                  if (signals.length === 1) setTimeout(() => abort.abort(), 20);
                   return true;
                 }
                 const path = String(message.path);
@@ -220,11 +244,18 @@ class Signals(Strategy):
                   };
                 if (path === '/sessions/a1' && message.method === 'DELETE')
                   return {};
-                if (path === '/contracts')
+                if (path === '/contracts') {
+                  assert.equal(
+                    simulated,
+                    false,
+                    'main-price simulation never requires actual mapping',
+                  );
                   return {
                     mappings: [{ time: start - 86400, underlying: actual }],
                     next: null,
                   };
+                }
+                if (path === '/history/range') return { start, end: cutoff };
                 if (path === '/history')
                   return {
                     bars: (resume ? [...warmup, ...live] : warmup).map((bar) =>
@@ -271,6 +302,13 @@ class Signals(Strategy):
         await execute(false);
         assert.deepEqual(
           signals.map((v) => [v.type, v.side]),
+          [['exit', 'short']],
+          'past entries are saved without notifying',
+        );
+        assert.deepEqual(
+          [...history.entries()]
+            .filter(([id]) => id.startsWith('signal'))
+            .map(([, v]) => [v.type, v.side]),
           [
             ['entry', 'long'],
             ['exit', 'long'],
@@ -278,17 +316,34 @@ class Signals(Strategy):
             ['exit', 'short'],
           ],
         );
-        assert.equal(new Set(signals.map((v) => v.id)).size, 4);
-        assert.ok(checkpoint);
+        assert.equal(
+          [...history.keys()].filter((id) => id.startsWith('trade')).length,
+          2,
+        );
         assert.ok(
-          overlays.some((overlay) =>
-            overlay.levels.some(
-              (level) =>
-                level.stop_loss === 105 &&
-                level.chart_stop_loss ===
-                  (monitorSymbol === actual ? 105 : 125) &&
-                level.chart_time === cutoff + 60,
-            ),
+          summaries.some(
+            (value) => (value.open_trades as unknown[]).length > 0,
+          ),
+          'current positions remain visible',
+        );
+        assert.equal(
+          (summaries.at(-1)?.metrics as { trade_count: number }).trade_count,
+          2,
+        );
+        assert.equal((summaries.at(-1)?.open_trades as unknown[]).length, 0);
+        assert.ok(
+          [...history.values()].some((value) =>
+            (
+              value as { risk_levels?: { stop_loss: number }[] }
+            ).risk_levels?.some((level) => level.stop_loss === 105),
+          ),
+          'closed monitor trades retain the protection path after leaving the position',
+        );
+        assert.ok(checkpoint);
+        assert.equal(summaries.at(-1)?.execution_model, executionModel);
+        assert.ok(
+          overlays.some((value) =>
+            value.levels.some((level) => level.stop_loss === 105),
           ),
         );
         assert.equal(
@@ -296,8 +351,7 @@ class Signals(Strategy):
           0,
           'exit clears protection lines',
         );
-        assert.equal(signals[0].chart_time, cutoff);
-        assert.equal(signals[3].chart_time, cutoff + 120);
+        assert.equal(signals[0].chart_time, cutoff + 120);
         await writeFile(
           join(directory, 'checkpoint.json'),
           JSON.stringify(checkpoint),
@@ -306,7 +360,7 @@ class Signals(Strategy):
         assert.equal(ready, 2);
         assert.equal(
           signals.length,
-          4,
+          1,
           'recovery never replays historical notifications',
         );
       } finally {
@@ -391,14 +445,28 @@ test(
         [historyRows[0].id],
         'filter happens before the 30-record page limit',
       );
-      await assert.rejects(
-        records.runs('bob', strategy.id),
-        /STRATEGY_NOT_FOUND/,
-      );
+      assert.equal((await records.runs('bob', strategy.id)).length, 30);
       const row = await store.create('alice', 'strategy', 1, 'tqsdk', config());
       assert.equal(row.status, 'starting');
       assert.equal((await store.list('bob')).length, 0);
       await assert.rejects(store.get(row.id, 'bob'), /MONITOR_NOT_FOUND/);
+      assert.equal(await store.acquire(row.id, 'fresh-schema'), true);
+      assert.equal(
+        await store.heartbeat(
+          row.id,
+          'fresh-schema',
+          'paused',
+          '',
+          undefined,
+          true,
+        ),
+        true,
+      );
+      // Production can retain this legacy column after checkpoints moved to a
+      // separate table. Both leasing and renewal must tolerate the old layout.
+      await store.request(
+        `ALTER TABLE ${database}.quant_signal_runtime ADD COLUMN checkpoint String AFTER message`,
+      );
       const leases = await Promise.all([
         store.acquire(row.id, 'worker-a'),
         store.acquire(row.id, 'worker-b'),
@@ -411,6 +479,22 @@ test(
         await store.heartbeat(row.id, owner, 'running', '监听中', checkpoint),
         true,
       );
+      const slowWriter = store
+        .execute('SELECT sleep(2)', {}, undefined, `signal-monitor:${row.id}`)
+        .then(() => 'writer');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const renewal = store
+        .heartbeat(row.id, owner, 'running', '监听中')
+        .then((renewed) => {
+          assert.equal(renewed, true);
+          return 'renewal';
+        });
+      assert.equal(
+        await Promise.race([slowWriter, renewal]),
+        'renewal',
+        'large history/checkpoint writes must not block lease renewal',
+      );
+      await slowWriter;
       const overlay = { updated_at: start, levels: [] };
       assert.equal(await store.saveOverlay(row.id, owner, overlay), true);
       assert.deepEqual(await store.overlay(row.id), overlay);
@@ -455,8 +539,8 @@ test(
         reason: '入场',
       };
       await Promise.all([
-        store.signal('alice', signal),
-        store.signal('alice', signal),
+        store.signal('alice', signal, other),
+        store.signal('alice', signal, other),
       ]);
       assert.equal((await store.signals('alice', row.id)).length, 1);
       await assert.rejects(store.signals('bob', row.id), /MONITOR_NOT_FOUND/);
@@ -487,6 +571,141 @@ test(
           .option,
         'saved',
       );
+      const batch = {
+        records: Array.from({ length: 65 }, (_, index) => ({
+          kind: 'trade' as const,
+          id: `trade-${index}`,
+          time: start + Math.floor(index / 2),
+          payload: {
+            id: `trade-${index}`,
+            entry_time: start + Math.floor(index / 2) - 2,
+            exit_time: start + Math.floor(index / 2),
+            risk_levels: [
+              { id: 'saved-risk', stop_loss: 99, take_profit: 105 },
+            ],
+          },
+        })),
+      };
+      await store.history.save(row.id, other, batch);
+      await store.history.save(row.id, other, batch);
+      const first = await store.history.read(row.id);
+      assert.equal(first.trades.length, 50);
+      assert.ok(first.next);
+      const second = await store.history.read(row.id, first.next!);
+      assert.equal(second.trades.length, 15);
+      assert.equal(
+        new Set([...first.trades, ...second.trades].map((t) => t.id)).size,
+        65,
+      );
+      await store.history.save(row.id, other, {
+        records: [
+          {
+            kind: 'summary',
+            id: 'summary',
+            time: start + 25,
+            payload: {
+              open_trades: [
+                {
+                  id: 'open-in-range',
+                  status: 'open',
+                  entry_time: start + 19,
+                  observed_until: start + 25,
+                },
+                {
+                  id: 'open-outside',
+                  status: 'open',
+                  entry_time: start + 10,
+                  observed_until: start + 18,
+                },
+              ],
+            },
+          },
+        ],
+      });
+      const chart = await store.history.chart(row.id, {
+        from: start + 20,
+        to: start + 21,
+      });
+      assert.equal(
+        chart.trades.length,
+        7,
+        'range includes overlapping holdings and current open positions',
+      );
+      assert.equal(chart.trades_truncated, false);
+      assert.ok(chart.trades.find((t) => t.id === 'open-in-range'));
+      assert.equal(chart.trades[0].risk_levels?.[0].stop_loss, 99);
+      await store.history.save(row.id, other, {
+        records: Array.from({ length: 55 }, (_, index) => ({
+          kind: 'signal' as const,
+          id: `signal-${index}`,
+          time: start + index,
+          payload: { ...signal, id: `signal-${index}`, time: start + index },
+        })),
+      });
+      const signalFirst = await store.history.read(row.id);
+      assert.equal(signalFirst.signals.length, 50);
+      assert.ok(signalFirst.signals_next);
+      const signalOlder = await store.history.read(
+        row.id,
+        undefined,
+        signalFirst.signals_next!,
+      );
+      assert.equal(signalOlder.signals.length, 6);
+      assert.equal(
+        new Set(
+          [...signalFirst.signals, ...signalOlder.signals].map((row) => row.id),
+        ).size,
+        56,
+      );
+      await assert.rejects(
+        store.history.read(row.id, 'invalid'),
+        /INVALID_MONITOR_CONFIG/,
+      );
+      await assert.rejects(store.history.save(row.id, owner, batch), /租约/);
+      const removed = await store.update(
+        'alice',
+        row.id,
+        muted.revision,
+        false,
+        true,
+      );
+      assert.equal(await store.acquire(row.id, other), false);
+      assert.equal(
+        await store.heartbeat(row.id, other, 'running', '', 'late checkpoint'),
+        false,
+      );
+      assert.equal(await store.saveOverlay(row.id, other, overlay), false);
+      await assert.rejects(store.history.save(row.id, other, batch), /租约/);
+      await assert.rejects(store.signal('alice', signal, other), /租约/);
+      for (const table of [
+        'quant_signal_history',
+        'quant_signal_events',
+        'quant_signal_runtime',
+        'quant_signal_checkpoints',
+        'quant_signal_overlays',
+      ]) {
+        const [count] = await store.rows<{ count: string }>(
+          `SELECT count() AS count FROM ${database}.${table}`,
+        );
+        assert.equal(Number(count.count), 0, table + ' must be cleared');
+      }
+      await store.update('alice', row.id, removed.revision, false, true);
+      assert.equal(
+        (await records.runs('alice', strategy.id)).length,
+        30,
+        'normal backtests remain independent',
+      );
+      const readded = await store.create(
+        'alice',
+        'strategy',
+        1,
+        'tqsdk',
+        config(),
+      );
+      assert.notEqual(readded.id, row.id);
+      assert.equal((await store.history.read(readded.id)).summary, null);
+      assert.equal((await store.history.read(readded.id)).trades.length, 0);
+      assert.equal(await store.runtime(readded.id, true), undefined);
       const creates = await Promise.allSettled(
         Array.from({ length: 9 }, () =>
           store.create('alice', 'strategy', 1, 'tqsdk', config()),

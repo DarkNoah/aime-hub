@@ -8,6 +8,8 @@ export function useStrategyHints(
   pluginId: string,
   symbol: string,
   engine?: string,
+  from?: number,
+  to?: number,
 ) {
   const key = `${engine}:${symbol}`;
   const [state, setState] = useState<{
@@ -30,7 +32,7 @@ export function useStrategyHints(
       try {
         const items = await pluginRequest<MarketStrategyHint[]>(
           pluginId,
-          `/strategies/monitors?symbol=${encodeURIComponent(symbol)}`,
+          `/strategies/monitors?symbol=${encodeURIComponent(symbol)}${from !== undefined && to !== undefined ? `&from=${from}&to=${to}` : ''}`,
           { signal: abort.signal },
         );
         if (abort.signal.aborted) return;
@@ -58,7 +60,7 @@ export function useStrategyHints(
       abort.abort();
       clearTimeout(timer);
     };
-  }, [pluginId, symbol, engine, key]);
+  }, [pluginId, symbol, engine, key, from, to]);
   function add(item: MarketStrategyHint) {
     revision.current++;
     setState((old) => ({
@@ -109,7 +111,9 @@ export function useStrategyHints(
                   ),
             },
       );
-      toast.success(patch.deleted ? '已移除策略提示' : '策略提示已更新');
+      toast.success(
+        patch.deleted ? '已移除策略提示并清除历史记录' : '策略提示已更新',
+      );
       return true;
     } catch (error) {
       toast.error(errorText(error));

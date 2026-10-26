@@ -24,7 +24,7 @@ const errors: Record<string, string> = {
   MONITOR_ENGINE_CHANGED: '行情引擎已切换，请切回该策略提示所使用的引擎后计算',
   MONITOR_CONFLICT: '监控设置已更新，请稍后重试',
   MONITOR_LIMIT: '每位用户最多保留 8 条策略提示，请先移除不需要的提示',
-  INVALID_MONITOR_CONFIG: '请检查信号标的、版本、周期、交易规则与预热天数（1–90 天）',
+  INVALID_MONITOR_CONFIG: '请检查信号标的、版本、周期与交易规则',
   STRATEGY_ARCHIVED: '策略已归档，请恢复后再编辑、发布或新建任务',
   STRATEGY_DELETED: '策略已移入回收站，请恢复后再编辑、发布或新建任务',
   RUN_QUEUE_FULL: '已有 3 个回测或调优任务等待或执行，请完成或取消后重试',

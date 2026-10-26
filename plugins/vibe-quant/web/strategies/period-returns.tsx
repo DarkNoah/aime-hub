@@ -108,7 +108,7 @@ export const PeriodReturns = memo(function PeriodReturns({
       </div>
       {years.length > 0 && (
         <p className="text-xs text-muted-foreground">
-          年度合计仅包含本次回测覆盖的时间。
+          年度合计仅包含已计算行情覆盖的时间。
         </p>
       )}
     </div>

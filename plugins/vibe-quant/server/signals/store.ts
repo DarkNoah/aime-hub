@@ -1,3 +1,5 @@
+import { SignalHistoryStore } from './history.js';
+import { monitorExecutionModel } from '../../signal-types.js';
 import { randomUUID } from 'node:crypto';
 import type {
   SignalMonitor,
@@ -17,6 +19,7 @@ import { StrategyError } from '../strategies/schema.js';
 export type StoredMonitor = Omit<SignalMonitor, 'status' | 'message'> & {
   user_id: string;
   deleted: boolean;
+  history_cleared?: boolean;
 };
 export type MonitorRuntime = {
   ownerId: string;
@@ -26,6 +29,9 @@ export type MonitorRuntime = {
   checkpoint: string;
 };
 export class MonitorStore extends ClickHouseClient {
+  get history() {
+    return new SignalHistoryStore(this.config);
+  }
   async initialize() {
     const tables = {
       quant_signal_monitors: [
@@ -65,6 +71,7 @@ export class MonitorStore extends ClickHouseClient {
         );
       }
     }
+    await this.history.initialize();
   }
   async get(id: string, owner?: string) {
     const [row] = await this.rows<{ payload: string }>(
@@ -95,7 +102,10 @@ export class MonitorStore extends ClickHouseClient {
       strategy_id: row.strategy_id,
       version_number: row.version_number,
       engine: row.engine,
-      config: row.config,
+      config: {
+        ...row.config,
+        execution_model: monitorExecutionModel(row.config),
+      },
       enabled: row.enabled,
       notifications_enabled: row.notifications_enabled ?? true,
       notifications: row.notifications,
@@ -128,7 +138,7 @@ export class MonitorStore extends ClickHouseClient {
       strategy_id,
       version_number,
       engine,
-      config,
+      config: { ...config, execution_model: monitorExecutionModel(config) },
       enabled: true,
       ...notificationOptions,
       deleted: false,
@@ -158,7 +168,10 @@ export class MonitorStore extends ClickHouseClient {
     > = {},
   ) {
     const previous = await this.get(id, owner);
-    if (previous.deleted) throw new StrategyError('MONITOR_NOT_FOUND', 404);
+    if (previous.deleted) {
+      if (deleted) return this.view(await this.finishDelete(previous));
+      throw new StrategyError('MONITOR_NOT_FOUND', 404);
+    }
     if (previous.revision !== revision)
       throw new StrategyError('MONITOR_CONFLICT', 409);
     const row = {
@@ -183,13 +196,16 @@ export class MonitorStore extends ClickHouseClient {
       'signal-monitor-config',
     );
     if (!result.writtenRows) throw new StrategyError('MONITOR_CONFLICT', 409);
-    return this.view(row);
+    return this.view(deleted ? await this.finishDelete(row) : row);
   }
   async acquire(id: string, owner: string) {
+    // Older databases also have an inline checkpoint column. Name the columns
+    // so its implicit default is used without changing or dropping that data.
     const result = await this.execute(
-      `INSERT INTO ${this.table('quant_signal_runtime')}
+      `INSERT INTO ${this.table('quant_signal_runtime')} (id, ownerId, expiresAt, status, message, version)
       SELECT {id:String}, {owner:String}, ${timeSql}+30, 'starting', '正在准备实时计算', ${versionSql}
-      WHERE NOT EXISTS (SELECT 1 FROM ${this.table('quant_signal_runtime')} FINAL WHERE id={id:String} AND expiresAt>${timeSql} AND ownerId!={owner:String})`,
+      WHERE EXISTS (SELECT 1 FROM ${this.table('quant_signal_monitors')} FINAL WHERE id={id:String} AND NOT JSONExtractBool(payload,'deleted') AND JSONExtractBool(payload,'enabled'))
+      AND NOT EXISTS (SELECT 1 FROM ${this.table('quant_signal_runtime')} FINAL WHERE id={id:String} AND expiresAt>${timeSql} AND ownerId!={owner:String})`,
       { id, owner },
       undefined,
       `signal-monitor:${id}`,
@@ -204,42 +220,37 @@ export class MonitorStore extends ClickHouseClient {
     checkpoint?: string,
     release = false,
   ) {
-    const fence = `EXISTS (SELECT 1 FROM ${this.table('quant_signal_runtime')} FINAL WHERE id={id:String} AND ownerId={owner:String} AND expiresAt>${timeSql})`;
+    const fence = this.history.fence();
     if (checkpoint !== undefined) {
       const saved = await this.execute(
         `INSERT INTO ${this.table('quant_signal_checkpoints')}
          SELECT {id:String}, checkpoint, ${versionSql} FROM input('checkpoint String')
          WHERE ${fence} FORMAT JSONEachRow`,
-        { id, owner },
+        { id, owner, monitor: id, worker: owner },
         JSON.stringify({ checkpoint }),
         `signal-monitor:${id}`,
       );
       if (!saved.writtenRows) return false;
     }
     const result = await this.execute(
-      `INSERT INTO ${this.table('quant_signal_runtime')}
+      `INSERT INTO ${this.table('quant_signal_runtime')} (id, ownerId, expiresAt, status, message, version)
        SELECT {id:String}, {owner:String}, ${release ? '0' : `${timeSql}+30`}, {status:String}, message, ${versionSql}
        FROM input('message String') WHERE ${fence} FORMAT JSONEachRow`,
-      { id, owner, status },
+      { id, owner, status, monitor: id, worker: owner },
       JSON.stringify({ message }),
-      `signal-monitor:${id}`,
+      // Renewals must not queue behind multi-MiB checkpoint/history writes.
+      // Acquisition still uses the writer lock; the owner/expiry fence keeps
+      // late renewals from replacing a newer lease.
+      `signal-heartbeat:${id}`,
     );
     return result.writtenRows > 0;
   }
-  async signal(owner: string, signal: StrategySignal) {
-    await this.execute(
-      `INSERT INTO ${this.table('quant_signal_events')}
-      SELECT {id:String}, {monitor:String}, {owner:String}, {time:Float64}, payload, ${versionSql} FROM input('payload String')
-      WHERE NOT EXISTS (SELECT 1 FROM ${this.table('quant_signal_events')} FINAL WHERE monitorId={monitor:String} AND id={id:String}) FORMAT JSONEachRow`,
-      {
-        id: signal.id,
-        monitor: signal.monitor_id,
-        owner,
-        time: String(signal.time),
-      },
-      JSON.stringify({ payload: JSON.stringify(signal) }),
-      `signal-event:${signal.id}`,
-    );
+  async signal(_owner: string, signal: StrategySignal, worker: string) {
+    await this.history.save(signal.monitor_id, worker, {
+      records: [
+        { kind: 'signal', id: signal.id, time: signal.time, payload: signal },
+      ],
+    });
   }
   async overlay(id: string): Promise<SignalOverlay> {
     const [row] = await this.rows<{ payload: string }>(
@@ -252,20 +263,38 @@ export class MonitorStore extends ClickHouseClient {
     const result = await this.execute(
       `INSERT INTO ${this.table('quant_signal_overlays')}
        SELECT {id:String}, payload, ${versionSql} FROM input('payload String')
-       WHERE EXISTS (SELECT 1 FROM ${this.table('quant_signal_runtime')} FINAL WHERE id={id:String} AND ownerId={owner:String} AND expiresAt>${timeSql}) FORMAT JSONEachRow`,
-      { id, owner },
+       WHERE ${this.history.fence()} FORMAT JSONEachRow`,
+      { id, owner, monitor: id, worker: owner },
       JSON.stringify({ payload: JSON.stringify(overlay) }),
       `signal-monitor:${id}`,
     );
     return result.writtenRows > 0;
   }
   async signals(owner: string, id: string): Promise<StrategySignal[]> {
-    await this.get(id, owner);
-    return (
-      await this.rows<{ payload: string }>(
-        `SELECT payload FROM ${this.table('quant_signal_events')} FINAL WHERE userId={owner:String} AND monitorId={id:String} ORDER BY time DESC LIMIT 50`,
-        { owner, id },
-      )
-    ).map((row) => JSON.parse(row.payload));
+    const row = await this.get(id, owner);
+    if (row.deleted) throw new StrategyError('MONITOR_NOT_FOUND', 404);
+    return this.history.signals(id);
+  }
+  private async finishDelete(row: StoredMonitor) {
+    if (row.history_cleared) return row;
+    await this.history.clear(row.id);
+    const next = { ...row, history_cleared: true, revision: row.revision + 1 };
+    await this.execute(
+      `INSERT INTO ${this.table('quant_signal_monitors')}
+      SELECT {id:String}, {owner:String}, payload, {revision:UInt64}+1 FROM input('payload String')
+      WHERE EXISTS (SELECT 1 FROM ${this.table('quant_signal_monitors')} FINAL WHERE id={id:String}
+        AND revision={revision:UInt64} AND JSONExtractBool(payload,'deleted')) FORMAT JSONEachRow`,
+      { id: row.id, owner: row.user_id, revision: String(row.revision) },
+      JSON.stringify({ payload: JSON.stringify(next) }),
+      'signal-monitor-config',
+    );
+    return this.get(row.id, row.user_id);
+  }
+  async cleanupDeleted() {
+    const rows = await this.rows<{
+      payload: string;
+    }>(`SELECT payload FROM ${this.table('quant_signal_monitors')} FINAL
+      WHERE JSONExtractBool(payload,'deleted') AND NOT JSONExtractBool(payload,'history_cleared') LIMIT 20`);
+    for (const row of rows) await this.finishDelete(JSON.parse(row.payload));
   }
 }

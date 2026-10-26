@@ -46,6 +46,7 @@ class PaperBroker:
         self.orders: list[Order] = []
         self.fills: list[dict] = []
         self.trades: list[dict] = []
+        self.fill_sequence = self.trade_sequence = 0
         self.marks: dict[str, float] = {}
         self.trading_day = ''
         self.protection = ProtectionBook()
@@ -277,7 +278,8 @@ class PaperBroker:
                         'trigger_price': order.trigger_price, 'trigger_time': order.trigger_time,
                         'trigger_bar_time': order.trigger_bar_time,
                         'trigger_time_precision': order.trigger_time_precision}
-        self.trades.append({'id': f'trade-{len(self.trades) + 1}', 'symbol': bar.symbol,
+        self.trade_sequence += 1
+        self.trades.append({'id': f'trade-{self.trade_sequence}', 'symbol': bar.symbol,
                             'side': 'long' if side > 0 else 'short', 'quantity': size,
                             'entry_time': lot.entry_time, 'exit_time': time,
                             'entry_price': lot.entry_price, 'exit_price': price,
@@ -291,7 +293,8 @@ class PaperBroker:
 
     def _fill(self, order: Order, quantity: int, price: float, fee: float, bar: Bar, offset: str,
               *, time: float | None = None, details: dict | None = None) -> None:
-        fill = {'id': f'fill-{len(self.fills) + 1}', 'order_id': order.id, 'signal_id': order.signal_id,
+        self.fill_sequence += 1
+        fill = {'id': f'fill-{self.fill_sequence}', 'order_id': order.id, 'signal_id': order.signal_id,
                 'symbol': order.symbol, 'time': bar.time if time is None else time, 'trading_day': bar.trading_day,
                 'quantity': quantity, 'price': price, 'fee': fee, 'offset': offset, **(details or {})}
         self.fills.append(fill)

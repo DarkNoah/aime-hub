@@ -10,6 +10,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
   Label,
   ScrollArea,
   Select,
@@ -20,14 +24,21 @@ import {
   Skeleton,
   Switch,
 } from '@app/plugin-ui';
-import { ChartNoAxesCombined, Plus, Settings2, Trash2 } from 'lucide-react';
+import {
+  ChartNoAxesCombined,
+  ChevronDown,
+  Pencil,
+  Plus,
+  Trash2,
+} from 'lucide-react';
 import type { Instrument } from '../../shared';
 import { durationLabel, MONTH_DURATION } from '../../shared';
 import type { MarketStrategyHint, SignalMonitor } from '../../signal-types';
+import { monitorExecutionModel } from '../../signal-types';
 import type { StrategySummary, StrategyVersion } from '../../strategy-types';
 import { strategyNotifications } from '../../strategy-notifications';
 import { StrategyNotificationSettings } from './notification-settings';
-import { dateTime, errorText } from '../strategies/format';
+import { errorText } from '../strategies/format';
 import type { useStrategyHints } from './use-strategy-hints';
 
 const HintPerformance = lazy(() =>
@@ -41,20 +52,18 @@ const labels = {
   paused: '已暂停',
   error: '异常',
 };
-const price = (value: number | null) =>
-  value === null
-    ? '—'
-    : value.toLocaleString('zh-CN', { maximumFractionDigits: 4 });
 export function StrategyHints({
   pluginId,
   instrument,
   duration,
   hints,
+  onJumpToEntry,
 }: {
   pluginId: string;
   instrument: Instrument;
   duration: number;
   hints: ReturnType<typeof useStrategyHints>;
+  onJumpToEntry: (time: number) => Promise<boolean>;
 }) {
   const [adding, setAdding] = useState(false);
   const [settings, setSettings] = useState<string>();
@@ -62,174 +71,132 @@ export function StrategyHints({
   const historical = hints.items.find((item) => item.id === performance);
   const edited = hints.items.find((item) => item.id === settings);
   return (
-    <section aria-label={`${instrument.name} 策略提示`} className="border-b">
-      <div className="flex items-center justify-between gap-3 px-3 py-2">
-        <span className="text-xs font-medium">
-          策略提示{hints.items.length ? ` · ${hints.items.length}` : ''}
-        </span>
-        <Button size="sm" variant="ghost" onClick={() => setAdding(true)}>
-          <Plus className="size-3.5" />
-          添加策略提示
-        </Button>
-      </div>
-      {hints.error && (
-        <p role="alert" className="px-3 pb-2 text-xs text-destructive">
-          {hints.error}
-        </p>
-      )}
-      {hints.loading && !hints.items.length ? (
-        <Skeleton className="mx-3 mb-3 h-9" />
-      ) : !hints.items.length ? (
-        <p className="px-3 pb-3 text-xs text-muted-foreground">
-          为此标的添加策略，在图上查看入场、离场及策略输出的止盈止损。
-        </p>
-      ) : (
-        <ScrollArea
-          className="max-h-64"
-          viewportProps={{ className: 'max-h-64' }}
+    <section
+      aria-label={`${instrument.name} 策略提示`}
+      className="flex shrink-0 items-center gap-1"
+    >
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5 px-2 text-xs"
+            aria-label="策略菜单"
+          >
+            策略
+            <Badge variant="secondary" className="px-1.5 tabular-nums">
+              {hints.items.length}
+            </Badge>
+            <ChevronDown className="size-3.5 text-muted-foreground" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="start"
+          aria-label={`${instrument.name} 策略列表`}
+          className="w-[34rem] max-w-[calc(100vw-2rem)] overflow-hidden motion-reduce:animate-none"
         >
-          <div className="divide-y border-t">
-            {hints.items.map((item) => (
-              <div key={item.id} className="space-y-2 px-3 py-3">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                  <span className="min-w-0 break-words text-xs font-medium">
-                    {item.strategy_name} · v{item.version_number} ·{' '}
-                    {durationLabel(item.config.duration)}
+          {hints.error && (
+            <p role="alert" className="px-2 py-2 text-xs text-destructive">
+              {hints.error}
+            </p>
+          )}
+          {hints.loading && !hints.items.length ? (
+            <Skeleton className="m-2 h-8" />
+          ) : !hints.items.length ? (
+            <p className="px-2 py-3 text-xs text-muted-foreground">
+              暂无策略，点击旁边的 ＋ 添加。
+            </p>
+          ) : (
+            <ScrollArea
+              viewportProps={{ className: 'max-h-[min(60dvh,360px)]' }}
+            >
+              {hints.items.map((item) => (
+                <div
+                  key={item.id}
+                  role="group"
+                  aria-label={item.strategy_name}
+                  className="flex min-w-0 items-center gap-1 rounded-sm px-2 py-1"
+                >
+                  <span
+                    className="min-w-0 flex-1 truncate pr-2 text-xs font-medium"
+                    title={`${item.strategy_name} · v${item.version_number} · ${durationLabel(item.config.duration)}${monitorExecutionModel(item.config) === 'continuous_price' ? ' · 主连价格模拟' : ''}`}
+                  >
+                    {item.strategy_name} · v{item.version_number}
                   </span>
                   <Badge
                     variant={
                       item.status === 'error' ? 'destructive' : 'outline'
                     }
+                    className="mr-1 shrink-0"
                   >
                     {labels[item.status]}
                   </Badge>
-                  <div className="ml-auto flex flex-wrap items-center gap-3">
+                  <DropdownMenuItem
+                    asChild
+                    onSelect={() => setPerformance(item.id)}
+                  >
                     <Button
-                      size="sm"
                       variant="ghost"
-                      className="h-7 px-1.5 text-xs"
-                      aria-label={`${item.strategy_name} 历史表现`}
-                      onClick={() => setPerformance(item.id)}
+                      size="icon-sm"
+                      className="shrink-0"
+                      aria-label={`${item.strategy_name} 历史记录`}
+                      title="历史记录"
                     >
                       <ChartNoAxesCombined className="size-3.5" />
-                      历史表现
                     </Button>
-                    <Label className="flex items-center gap-1.5 text-xs">
-                      计算
-                      <Switch
-                        aria-label={`${item.strategy_name} 策略计算`}
-                        checked={item.enabled}
-                        disabled={!!hints.busy}
-                        onCheckedChange={(enabled) =>
-                          void hints.change(item, { enabled })
-                        }
-                      />
-                    </Label>
-                    <Label className="flex items-center gap-1.5 text-xs">
-                      通知
-                      <Switch
-                        aria-label={`${item.strategy_name} 信号通知`}
-                        checked={item.notifications_enabled !== false}
-                        disabled={!!hints.busy}
-                        onCheckedChange={(notifications_enabled) =>
-                          void hints.change(item, {
-                            notifications_enabled,
-                            ...(notifications_enabled &&
-                            !(
-                              item.notifications?.channels.toast?.enabled ||
-                              item.notifications?.channels.desktop?.enabled
-                            )
-                              ? {
-                                  notifications: strategyNotifications({
-                                    channels: {
-                                      ...item.notifications?.channels,
-                                      toast: { enabled: true },
-                                    },
-                                  }),
-                                }
-                              : {}),
-                          })
-                        }
-                      />
-                    </Label>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    asChild
+                    onSelect={() => setSettings(item.id)}
+                  >
                     <Button
-                      size="icon-sm"
                       variant="ghost"
-                      aria-label={`${item.strategy_name} 通知设置`}
-                      onClick={() => setSettings(item.id)}
+                      size="icon-sm"
+                      className="shrink-0"
+                      aria-label={`编辑 ${item.strategy_name}`}
+                      title="编辑策略"
                     >
-                      <Settings2 className="size-3.5" />
+                      <Pencil className="size-3.5" />
                     </Button>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    asChild
+                    variant="destructive"
+                    disabled={!!hints.busy}
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      void hints.change(item, {
+                        deleted: true,
+                        enabled: false,
+                      });
+                    }}
+                  >
                     <Button
-                      size="icon-sm"
                       variant="ghost"
+                      size="icon-sm"
+                      className="shrink-0"
                       aria-label={`移除 ${item.strategy_name} 策略提示`}
+                      title="删除策略提示及历史记录"
                       disabled={!!hints.busy}
-                      onClick={() =>
-                        void hints.change(item, {
-                          deleted: true,
-                          enabled: false,
-                        })
-                      }
                     >
                       <Trash2 className="size-3.5" />
                     </Button>
-                  </div>
+                  </DropdownMenuItem>
                 </div>
-                {item.status !== 'running' && (
-                  <p
-                    className={`text-xs ${item.status === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}
-                  >
-                    {item.message}
-                  </p>
-                )}
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                  {item.signals.slice(0, 2).map((signal) => (
-                    <span key={signal.id}>
-                      {signal.side === 'long'
-                        ? '多头'
-                        : signal.side === 'short'
-                          ? '空头'
-                          : ''}
-                      {signal.type === 'entry' ? '入场' : '离场'}{' '}
-                      {price(signal.price)} · {dateTime(signal.time)}
-                    </span>
-                  ))}
-                  {!item.signals.length && <span>等待新的入场／离场信号</span>}
-                </div>
-                {item.overlay.levels.length ? (
-                  <div className="space-y-1 text-xs">
-                    {item.overlay.levels.map((level) => (
-                      <div
-                        key={level.id}
-                        className="flex flex-wrap gap-x-4 gap-y-1"
-                      >
-                        <span className="font-mono text-muted-foreground">
-                          {level.symbol}
-                        </span>
-                        <span>止盈 {price(level.take_profit)}</span>
-                        <span>止损 {price(level.stop_loss)}</span>
-                        <span className="text-muted-foreground">
-                          更新于 {dateTime(level.time)}
-                        </span>
-                      </div>
-                    ))}
-                    {instrument.kind === 'continuous' && (
-                      <p className="text-muted-foreground">
-                        价格为实际合约值，图中保护线按同期主连价差投影；缺少对应行情时仅显示数值。
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    当前无有效止盈止损，策略输出后自动显示。
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        </ScrollArea>
-      )}
+              ))}
+            </ScrollArea>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        aria-label="添加策略提示"
+        title="添加策略提示"
+        onClick={() => setAdding(true)}
+      >
+        <Plus className="size-3.5" />
+      </Button>
       {adding && (
         <StrategyPicker
           pluginId={pluginId}
@@ -249,12 +216,13 @@ export function StrategyHints({
         />
       )}
       {historical && (
-        <Suspense fallback={<p className="p-3 text-xs">正在打开历史表现…</p>}>
+        <Suspense fallback={<p className="p-3 text-xs">正在打开历史记录…</p>}>
           <HintPerformance
             key={historical.id}
             pluginId={pluginId}
             item={historical}
             onClose={() => setPerformance(undefined)}
+            onJumpToEntry={onJumpToEntry}
           />
         </Suspense>
       )}
@@ -264,9 +232,8 @@ export function StrategyHints({
           item={edited}
           busy={!!hints.busy}
           onClose={() => setSettings(undefined)}
-          onSave={async (notifications) => {
-            if (await hints.change(edited, { notifications }))
-              setSettings(undefined);
+          onSave={async (patch) => {
+            if (await hints.change(edited, patch)) setSettings(undefined);
           }}
         />
       )}
@@ -282,8 +249,17 @@ function HintSettings({
   item: MarketStrategyHint;
   busy: boolean;
   onClose: () => void;
-  onSave: (value: ReturnType<typeof strategyNotifications>) => Promise<void>;
+  onSave: (
+    value: Pick<
+      SignalMonitor,
+      'enabled' | 'notifications_enabled' | 'notifications'
+    >,
+  ) => Promise<void>;
 }) {
+  const [enabled, setEnabled] = useState(item.enabled);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(
+    item.notifications_enabled !== false,
+  );
   const [value, setValue] = useState(() =>
     strategyNotifications(item.notifications),
   );
@@ -296,28 +272,76 @@ function HintSettings({
     >
       <DialogContent className="flex max-h-[90svh] flex-col">
         <DialogHeader>
-          <DialogTitle>{item.strategy_name} · 通知设置</DialogTitle>
+          <DialogTitle>编辑策略 · {item.strategy_name}</DialogTitle>
           <DialogDescription>
-            仅影响 {item.config.symbol}{' '}
-            上的这条策略提示。通知关闭时图表仍持续更新。
+            {item.config.symbol} · v{item.version_number} ·{' '}
+            {durationLabel(item.config.duration)}
+            {monitorExecutionModel(item.config) === 'continuous_price' &&
+              ' · 主连价格模拟'}
           </DialogDescription>
         </DialogHeader>
         <ScrollArea
           className="flex min-h-0 flex-1 flex-col overflow-hidden"
           viewportProps={{ className: 'min-h-0 flex-1' }}
         >
+          <div className="space-y-4 pb-4">
+            <Label className="flex items-center justify-between gap-4">
+              策略计算
+              <Switch
+                checked={enabled}
+                disabled={busy}
+                aria-label={`${item.strategy_name} 策略计算`}
+                onCheckedChange={setEnabled}
+              />
+            </Label>
+            <Label className="flex items-center justify-between gap-4">
+              信号通知
+              <Switch
+                checked={notificationsEnabled}
+                disabled={busy}
+                aria-label={`${item.strategy_name} 信号通知`}
+                onCheckedChange={(checked) => {
+                  setNotificationsEnabled(checked);
+                  if (
+                    checked &&
+                    !(
+                      value.channels.toast?.enabled ||
+                      value.channels.desktop?.enabled
+                    )
+                  )
+                    setValue(
+                      strategyNotifications({
+                        channels: {
+                          ...value.channels,
+                          toast: { enabled: true },
+                        },
+                      }),
+                    );
+                }}
+              />
+            </Label>
+          </div>
           <StrategyNotificationSettings
             value={value}
             onChange={setValue}
-            disabled={busy}
+            disabled={busy || !notificationsEnabled}
           />
         </ScrollArea>
         <DialogFooter>
           <Button variant="outline" disabled={busy} onClick={onClose}>
             取消
           </Button>
-          <Button disabled={busy} onClick={() => void onSave(value)}>
-            保存通知设置
+          <Button
+            disabled={busy}
+            onClick={() =>
+              void onSave({
+                enabled,
+                notifications_enabled: notificationsEnabled,
+                notifications: value,
+              })
+            }
+          >
+            保存设置
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -420,7 +444,7 @@ function StrategyPicker({
         },
       );
       onCreated(item, strategy);
-      toast.success('已添加策略提示，开始实时计算');
+      toast.success('已添加策略提示，开始计算全量历史并监听实时行情');
     } catch (error) {
       setError(errorText(error));
       toast.error(errorText(error));
@@ -440,7 +464,9 @@ function StrategyPicker({
           <DialogTitle>添加策略提示 · {symbolName}</DialogTitle>
           <DialogDescription>
             使用所选版本的参数，按 {durationLabel(calculationDuration)}{' '}
-            周期计算。
+            周期计算全部已存行情，完成后持续实时更新。
+            {symbol.startsWith('KQ.m@') &&
+              '主连按主连价格模拟，不计实际合约价差与换月成本。'}
             {duration === MONTH_DURATION
               ? '月线视图使用日线计算信号。'
               : '周期取自当前行情图表。'}

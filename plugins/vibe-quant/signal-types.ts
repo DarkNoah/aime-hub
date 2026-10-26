@@ -1,5 +1,5 @@
 import type { StrategyNotifications } from './strategy-notifications.js';
-import type { BacktestInput } from './strategy-types.js';
+import type { BacktestInput, TradeRecord } from './strategy-types.js';
 import type { Engine } from './shared.js';
 
 export interface SignalMonitorInput extends Pick<
@@ -11,9 +11,18 @@ export interface SignalMonitorInput extends Pick<
   | 'rules'
   | 'initial_cash'
   | 'calendar'
+  | 'execution_model'
 > {
   warmup_days: number;
   events: { entry: boolean; exit: boolean };
+}
+export function monitorExecutionModel(
+  config: Pick<SignalMonitorInput, 'symbol' | 'execution_model'>,
+) {
+  return (
+    config.execution_model ??
+    (config.symbol.startsWith('KQ.m@') ? 'continuous_price' : 'actual_contract')
+  );
 }
 export interface SignalMonitor {
   id: string;
@@ -61,4 +70,6 @@ export interface MarketStrategyHint extends SignalMonitor {
   strategy_name: string;
   signals: StrategySignal[];
   overlay: SignalOverlay;
+  trades?: TradeRecord[];
+  trades_truncated?: boolean;
 }

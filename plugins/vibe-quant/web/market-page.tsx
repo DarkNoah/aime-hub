@@ -101,7 +101,6 @@ export function MarketPage({ pluginId }: PluginPageProps) {
   const [period, setPeriod] = useState(readChartPeriod);
   const isIntraday = period === 'intraday';
   const duration = isIntraday ? 60 : period;
-  const hints = useStrategyHints(pluginId, selected, status?.engine);
   const identity = `${status?.engine ?? ''}:${selected}:${period}`;
   const marketBars = useMarketBars({
     pluginId,
@@ -111,6 +110,15 @@ export function MarketPage({ pluginId }: PluginPageProps) {
     identity,
     retry,
   });
+  const hints = useStrategyHints(
+    pluginId,
+    selected,
+    status?.engine,
+    marketBars.bars[0]?.time,
+    marketBars.bars.length
+      ? marketBars.bars.at(-1)!.time + duration
+      : undefined,
+  );
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
@@ -419,14 +427,17 @@ export function MarketPage({ pluginId }: PluginPageProps) {
         <section className="flex min-w-0 flex-col">
           {item ? (
             <>
-              <StrategyHints
-                key={`${status?.engine}:${selected}`}
-                pluginId={pluginId}
-                instrument={item}
-                duration={duration}
-                hints={hints}
-              />
               <MarketChartPanel
+                toolbarActions={
+                  <StrategyHints
+                    key={`${status?.engine}:${selected}`}
+                    pluginId={pluginId}
+                    instrument={item}
+                    duration={duration}
+                    hints={hints}
+                    onJumpToEntry={marketBars.navigate}
+                  />
+                }
                 strategyHints={hints.items}
                 view={marketBars}
                 identity={identity}

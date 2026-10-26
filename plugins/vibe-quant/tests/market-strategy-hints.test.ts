@@ -3,6 +3,7 @@ import test from 'node:test';
 import { Hono } from 'hono';
 import type { PluginHttpEnv } from '@app/plugin-sdk/server';
 import type { MarketStrategyHint, SignalOverlay } from '../signal-types.js';
+import type { Trade } from '../strategy-types.js';
 import type { Bar } from '../shared.js';
 import {
   strategyHintMarkers,
@@ -121,6 +122,103 @@ test('chart anchors use source candle time; notification mute keeps markers and 
     'unmapped actual-contract prices are never drawn on a main chart',
   );
 });
+test('protective exits retain their trigger candle and distinct stop/target labels for both directions', () => {
+  const bars = Array.from({ length: 4 }, (_, i) => ({
+    symbol,
+    duration: 60,
+    time: start + i * 60,
+    open: 100,
+    high: 106,
+    low: 98,
+    close: 101,
+    volume: 10,
+  }));
+  const signals = (
+    ['take_profit', 'stop_loss', 'take_profit', 'stop_loss'] as const
+  ).map((reason, i) => ({
+    ...hint.signals[0],
+    id: `exit-${i}`,
+    type: 'exit' as const,
+    side: i < 2 ? ('long' as const) : ('short' as const),
+    reason,
+    price: i < 2 ? 105 : 99,
+    time: start + (i + 1) * 60,
+    chart_time: start + i * 60,
+  }));
+  const markers = strategyHintMarkers([{ ...hint, signals }], bars, 60, 0.2);
+  assert.equal(markers.length, 4);
+  for (let i = 0; i < markers.length; i++) {
+    assert.equal(markers[i].time, barLabelTime(signals[i].chart_time, 60));
+    assert.match(markers[i].text ?? '', i % 2 === 0 ? /止盈离场/ : /止损离场/);
+    assert.equal(markers[i].color, i % 2 === 0 ? '#dc4c5c' : '#16a085');
+    assert.equal(markers[i].position, i < 2 ? 'aboveBar' : 'belowBar');
+  }
+  const strategyExit = strategyHintMarkers(
+    [{ ...hint, signals: [{ ...signals[0], reason: 'orb_negative_pnl' }] }],
+    bars,
+    60,
+    0.2,
+  )[0];
+  assert.match(strategyExit.text ?? '', /持仓超时亏损离场/);
+  assert.doesNotMatch(strategyExit.text ?? '', /止损/);
+});
+test('market protection ranges reuse holding intervals, stop updates and trigger snapshots', () => {
+  const levels = [
+    { ...overlay.levels[0], id: 'r1', time: start, event_id: 'a' },
+    {
+      ...overlay.levels[0],
+      id: 'r2',
+      time: start + 60,
+      stop_loss: 101,
+      event_id: 'b',
+    },
+    {
+      ...overlay.levels[0],
+      id: 'r3',
+      time: start + 120,
+      stop_loss: 103,
+      event_id: 'c',
+    },
+  ];
+  const trade = {
+    id: 't1',
+    symbol,
+    entry_signal_id: 'e1',
+    entry_time: start,
+    exit_time: start + 150,
+    entry_price: 100,
+    risk_level_id: 'r2',
+    risk_levels: levels,
+  } as Trade;
+  const item = {
+    ...hint,
+    overlay: { updated_at: start, levels: [] },
+    trades: [trade],
+  };
+  const drawings = strategyHintDrawings([item], bars, 60, 0.2);
+  assert.equal(drawings.filter((d) => d.kind === 'box').length, 4);
+  assert.ok(
+    drawings.some((d) => d.from === d.to && d.top === 99 && d.bottom === 101),
+  );
+  assert.ok(
+    drawings.every((d) => d.to <= 2.5),
+    'protection ends at the actual exit',
+  );
+  assert.ok(
+    drawings.every((d) => !d.id.includes('r3')),
+    'later recalculations cannot overwrite the triggering protection',
+  );
+  assert.deepEqual(
+    strategyHintDrawings(
+      [{ ...item, trades: [{ ...trade, symbol: 'CFFEX.IM2612' }] }],
+      bars,
+      60,
+      0.2,
+    ),
+    [],
+    'actual contract risk prices cannot be drawn on another price series',
+  );
+});
 test('market API scopes hints by owner, instrument and engine; muting preserves calculation and future channels', async () => {
   let stored = {
     ...hint,
@@ -170,6 +268,9 @@ test('market API scopes hints by owner, instrument and engine; muting preserves 
           return hint.signals;
         },
         overlay: async () => overlay,
+        history: {
+          chart: async () => ({ trades: [], trades_truncated: false }),
+        },
         get: async (id: string, owner: string) => {
           assert.equal(owner, 'alice');
           assert.equal(id, 'm1');
@@ -243,151 +344,137 @@ test('multiple strategies share coincident protection lines without overlapping 
   );
 });
 
-test('history reuses only matching versions, instruments, periods, engines and parameters; win rate excludes open trades', async () => {
-  const { matchesMonitorRun, monitorHistoryInput } =
-    await import('../signal-history.js');
-  const { closedTradeWinRate } = await import('../strategy-trades.js');
-  const { input } = await import('./strategy-fixture.js');
-  const bound = {
-    ...hint,
-    config: {
-      ...input('11111111-1111-4111-8111-111111111111', symbol),
-      warmup_days: 7,
-      events: { entry: true, exit: true },
-    },
-  };
-  const config = monitorHistoryInput(bound, 12, start);
-  assert.equal(config.version_id, bound.config.version_id);
-  assert.deepEqual(config.parameters, bound.config.parameters);
-  assert.equal(config.end, start);
-  assert.ok(config.start < start - 365 * 86400);
-  assert.equal(config.execution_model, 'actual_contract');
-  config.rules.multiplier = 10;
-  assert.equal(
-    bound.config.rules.multiplier,
-    200,
-    'backtest defaults do not mutate the live configuration',
-  );
-  const run = {
-    id: 'run',
-    strategy_id: hint.strategy_id,
-    version_id: config.version_id,
-    engine: hint.engine,
-    config,
-  } as import('../strategy-types.js').BacktestRun;
-  assert.equal(matchesMonitorRun(bound, run), true);
-  assert.equal(matchesMonitorRun(bound, { ...run, engine: 'tdx' }), false);
-  assert.equal(
-    matchesMonitorRun(bound, { ...run, version_id: 'other' }),
-    false,
-  );
-  assert.equal(
-    matchesMonitorRun(bound, {
-      ...run,
-      config: { ...config, symbol: 'SSE.600000' },
-    }),
-    false,
-  );
-  assert.equal(
-    matchesMonitorRun(bound, { ...run, config: { ...config, duration: 300 } }),
-    false,
-  );
-  assert.equal(
-    matchesMonitorRun(bound, {
-      ...run,
-      config: { ...config, parameters: { fast: 999 } },
-    }),
-    false,
-  );
-  assert.equal(
-    matchesMonitorRun(bound, {
-      ...run,
-      config: {
-        ...config,
-        parameters: Object.fromEntries(
-          Object.entries(config.parameters).reverse(),
-        ),
-      },
-    }),
-    true,
-  );
-  const trades = [
-    { net_pnl: 10 },
-    { net_pnl: -3 },
-    { net_pnl: 0 },
-  ] as import('../strategy-types.js').Trade[];
-  assert.equal(closedTradeWinRate({ trades }), 1 / 3);
-  assert.equal(closedTradeWinRate({ trades: [] }), null);
-
+test('market history reads the independent monitor store; no manual backtest submission', async () => {
   const app = new Hono<PluginHttpEnv>();
-  let submissions = 0;
+  let deleted = false;
   app.use('*', async (c, next) => {
     c.set('userId', 'alice');
-    c.set('isAdmin', c.req.header('admin') === 'yes');
     await next();
   });
+  app.onError((err, c) => c.json({ error: err.message }, 404));
   app.route(
     '/strategies',
     signalRoutes(() => ({
       config: { engine: 'tqsdk' } as QuantConfig,
       wake: () => {},
-      wakeBacktests: () => {},
-      state: {
-        instrument: async () => ({ symbol, kind: 'future' }),
-      } as unknown as StateStore,
+      state: {} as StateStore,
+      records: {} as StrategyStore,
       monitors: {
         get: async (_id: string, owner: string) => {
           assert.equal(owner, 'alice');
-          return bound;
+          return { ...hint, deleted };
+        },
+        view: async () => hint,
+        history: {
+          read: async (id: string, before: string) => {
+            assert.equal(id, 'm1');
+            assert.equal(before, 'cursor');
+            return {
+              summary: { through: start },
+              trades: [{ id: 'trade' }],
+              signals: hint.signals,
+              next: null,
+            };
+          },
         },
       } as unknown as MonitorStore,
-      records: {
-        runs: async (
-          owner: string,
-          _strategy: string,
-          _before: string,
-          _kind: string,
-          monitor: typeof bound,
-        ) => {
-          assert.equal(owner, 'alice');
-          assert.equal(monitor.id, bound.id);
-          return [
-            run,
-            {
-              ...run,
-              id: 'wrong',
-              config: { ...config, parameters: { fast: 999 } },
-            },
-          ];
-        },
-        enqueue: async (
-          owner: string,
-          strategy: string,
-          value: typeof config,
-        ) => {
-          assert.equal(owner, 'alice');
-          assert.equal(strategy, bound.strategy_id);
-          assert.deepEqual(value.parameters, bound.config.parameters);
-          submissions++;
-          return { ...run, config: value };
-        },
-      } as unknown as StrategyStore,
     })),
   );
-  const response = await app.request('/strategies/monitors/m1/history');
-  assert.deepEqual(
-    (await response.json()).runs.map((value: { id: string }) => value.id),
-    ['run'],
+  const response = await app.request(
+    '/strategies/monitors/m1/history?before=cursor',
   );
-  const create = (admin: string, months = 12) =>
-    app.request('/strategies/monitors/m1/history', {
-      method: 'POST',
-      headers: { admin, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ months }),
-    });
-  assert.equal((await create('no')).status, 403);
-  assert.equal((await create('yes', 0)).status, 400);
-  assert.equal(submissions, 0);
-  assert.equal((await create('yes', 36)).status, 202);
-  assert.equal(submissions, 1);
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.trades[0].id, 'trade');
+  assert.equal(result.summary.through, start);
+  assert.equal(result.monitor.id, 'm1');
+  assert.equal(
+    (await app.request('/strategies/monitors/m1/history', { method: 'POST' }))
+      .status,
+    404,
+  );
+  deleted = true;
+  assert.equal(
+    (await app.request('/strategies/monitors/m1/history?before=cursor')).status,
+    404,
+  );
+});
+
+test('automatic history range is scoped to engine and instrument, with derived three-minute bars using minute data', async () => {
+  const { strategyDataRoutes } = await import('../server/sdk/routes.js');
+  const dependencies = {
+    config: { engine: 'tqsdk' },
+    store: {
+      table: () => 'bars',
+      rows: async (_query: string, params: Record<string, string>) => {
+        assert.deepEqual(params, { engine: 'tqsdk', symbol, duration: '60' });
+        return [{ start: 1, end: 100 }];
+      },
+    },
+  };
+  const app = strategyDataRoutes(
+    () =>
+      dependencies as unknown as ReturnType<
+        Parameters<typeof strategyDataRoutes>[0]
+      >,
+  );
+  const result = await app.request(
+    `/history/range?symbol=${symbol}&duration=180`,
+  );
+  assert.equal(result.status, 200);
+  assert.deepEqual(await result.json(), { start: 1, end: 100 });
+  assert.equal(
+    (await app.request(`/history/range?symbol=${symbol}&duration=17`)).status,
+    400,
+  );
+});
+
+test('main-price simulation requests only stored main prices in larger bounded pages', async () => {
+  const { strategyDataRoutes } = await import('../server/sdk/routes.js');
+  const main = 'KQ.m@CFFEX.IM';
+  let bounds: { rebuildTicks?: boolean; limit?: number } = {};
+  const dependencies = {
+    config: { engine: 'tqsdk' },
+    state: {
+      instrument: async (_engine: string, requested: string) => ({
+        symbol: requested,
+        kind: requested === main ? 'continuous' : 'future',
+      }),
+    },
+    store: {
+      bars: async (
+        _engine: string,
+        _symbol: string,
+        _duration: number,
+        query: typeof bounds,
+      ) => {
+        bounds = query;
+        return [];
+      },
+    },
+  };
+  const api = strategyDataRoutes(
+    () =>
+      dependencies as unknown as ReturnType<
+        Parameters<typeof strategyDataRoutes>[0]
+      >,
+  );
+  assert.equal(
+    (
+      await api.request(
+        `/history?symbol=${main}&duration=60&after=1&before=1000&limit=5000&execution_model=continuous_price`,
+      )
+    ).status,
+    200,
+  );
+  assert.equal(bounds.rebuildTicks, false);
+  assert.equal(bounds.limit, 5000);
+  assert.equal(
+    (
+      await api.request(
+        `/history?symbol=${symbol}&duration=60&after=1&before=1000&execution_model=continuous_price`,
+      )
+    ).status,
+    400,
+  );
 });

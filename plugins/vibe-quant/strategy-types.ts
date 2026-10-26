@@ -89,6 +89,8 @@ export interface BacktestRun {
   finished_at: string | null;
 }
 export interface Trade {
+  /** Monitor-owned protection snapshots, retained after a position closes. */
+  risk_levels?: RiskLevelRecord[];
   status?: 'closed';
   id: string;
   symbol: string;

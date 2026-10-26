@@ -1,77 +1,177 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { pluginRequest } from '@app/plugin-sdk/web';
 import {
   Badge,
   Button,
-  Label,
   ScrollArea,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
   SheetDescription,
   Skeleton,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
 } from '@app/plugin-ui';
-import { Loader2, Play, RefreshCw } from 'lucide-react';
+import { Loader2, LocateFixed } from 'lucide-react';
 import { toast } from 'sonner';
+import { monitorExecutionModel } from '../../signal-types';
 import type { MarketStrategyHint } from '../../signal-types';
-import type { BacktestRun } from '../../strategy-types';
+import type { SignalHistoryPage } from '../../signal-history';
+import type { OpenTrade, Trade } from '../../strategy-types';
 import { durationLabel } from '../../shared';
-import { ResultView } from '../strategies/result-view';
-import { dateTime, errorText } from '../strategies/format';
+import { PeriodReturns } from '../strategies/period-returns';
+import { dateTime, errorText, number, percent } from '../strategies/format';
+import { TradeExitBadge } from '../trade-exit-badge';
 
-interface HistoryPage {
-  runs: BacktestRun[];
-  next: string | null;
-  canRun: boolean;
+function HistoryTab({
+  value,
+  children,
+}: {
+  value: string;
+  children: ReactNode;
+}) {
+  return (
+    <TabsContent
+      value={value}
+      forceMount
+      className="flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden"
+    >
+      <ScrollArea
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
+        viewportProps={{ className: 'min-h-0 flex-1 [&>div]:block!' }}
+      >
+        <div className="space-y-6 p-4 sm:p-5">{children}</div>
+      </ScrollArea>
+    </TabsContent>
+  );
 }
-const statusLabels: Record<BacktestRun['status'], string> = {
-  queued: '排队中',
-  preparing: '准备中',
-  running: '计算中',
-  completed: '已完成',
-  failed: '失败',
-  cancelled: '已取消',
-};
-const active = (run: BacktestRun) =>
-  ['queued', 'preparing', 'running'].includes(run.status);
-const merge = (fresh: BacktestRun[], old: BacktestRun[]) => [
-  ...fresh,
-  ...old.filter((row) => !fresh.some((value) => value.id === row.id)),
-];
-const shortDate = (value: number) =>
-  new Date(value * 1000).toLocaleDateString('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-  });
+
+function Trades({
+  rows,
+  open = false,
+  jumping,
+  onJumpToEntry,
+}: {
+  rows: (Trade | OpenTrade)[];
+  open?: boolean;
+  jumping: string | null;
+  onJumpToEntry: (trade: Trade | OpenTrade) => void;
+}) {
+  return (
+    <div className="rounded-md border">
+      <ScrollArea className="w-full">
+        <Table aria-label={open ? '当前持仓' : '历史入场离场记录'}>
+          <TableHeader>
+            <TableRow>
+              <TableHead>标的 / 方向</TableHead>
+              <TableHead>数量</TableHead>
+              <TableHead>入场时间</TableHead>
+              <TableHead>入场价</TableHead>
+              <TableHead>离场时间</TableHead>
+              <TableHead>离场价</TableHead>
+              {!open && <TableHead>离场原因</TableHead>}
+              <TableHead>净收益</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={row.id}>
+                <TableCell className="whitespace-nowrap">
+                  {row.symbol}{' '}
+                  <Badge variant="outline">
+                    {row.side === 'long' ? '多' : '空'}
+                  </Badge>
+                </TableCell>
+                <TableCell>{number(row.quantity)}</TableCell>
+                <TableCell className="whitespace-nowrap">
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto gap-1.5 p-0 font-normal tabular-nums"
+                    disabled={jumping !== null}
+                    title="跳转到入场时间"
+                    aria-label={`跳转到 ${row.symbol} ${dateTime(row.entry_time)} 的入场时间`}
+                    onClick={() => onJumpToEntry(row)}
+                  >
+                    {jumping === row.id ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <LocateFixed className="size-3.5" />
+                    )}
+                    {dateTime(row.entry_time)}
+                  </Button>
+                </TableCell>
+                <TableCell>{number(row.entry_price)}</TableCell>
+                <TableCell className="whitespace-nowrap">
+                  {open ? (
+                    <Badge variant="secondary">持仓中</Badge>
+                  ) : (
+                    dateTime(row.exit_time)
+                  )}
+                </TableCell>
+                <TableCell className="whitespace-nowrap">
+                  {number(row.exit_price)}
+                  {!open && row.trigger_price != null && (
+                    <div className="text-xs text-muted-foreground">
+                      触发价 {number(row.trigger_price)}
+                    </div>
+                  )}
+                </TableCell>
+                {!open && (
+                  <TableCell className="whitespace-nowrap">
+                    <TradeExitBadge reason={row.exit_reason} />
+                  </TableCell>
+                )}
+                <TableCell>{number(row.net_pnl)}</TableCell>
+              </TableRow>
+            ))}
+            {!rows.length && (
+              <TableRow>
+                <TableCell
+                  colSpan={open ? 7 : 8}
+                  className="py-6 text-center text-muted-foreground"
+                >
+                  {open ? '当前无持仓' : '暂无已完成的入场离场记录'}
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </ScrollArea>
+    </div>
+  );
+}
 
 export function HintPerformance({
   pluginId,
   item,
   onClose,
+  onJumpToEntry,
 }: {
   pluginId: string;
   item: MarketStrategyHint;
   onClose: () => void;
+  onJumpToEntry: (time: number) => Promise<boolean>;
 }) {
-  const [runs, setRuns] = useState<BacktestRun[]>([]);
-  const [selected, setSelected] = useState('');
-  const [months, setMonths] = useState('12');
+  const [page, setPage] = useState<SignalHistoryPage | null>(null);
+  const [trades, setTrades] = useState<Trade[]>([]);
   const [next, setNext] = useState<string | null>(null);
-  const [canRun, setCanRun] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [older, setOlder] = useState(false);
+  const [signals, setSignals] = useState<MarketStrategyHint['signals']>([]);
+  const [signalsNext, setSignalsNext] = useState<string | null>(null);
+  const [older, setOlder] = useState<'trade' | 'signal' | null>(null);
   const [error, setError] = useState('');
-  const [retry, setRetry] = useState(0);
-  const paginated = useRef(false);
+  const [jumping, setJumping] = useState<string | null>(null);
+  const paginated = useRef({ trade: false, signal: false });
   const lifecycle = useRef<AbortController | null>(null);
-  const run = runs.find((value) => value.id === selected);
-  const pending = runs.some(active);
   const path = `/strategies/monitors/${item.id}/history`;
   useEffect(() => {
     const abort = new AbortController();
@@ -79,29 +179,31 @@ export function HintPerformance({
     let timer: ReturnType<typeof setTimeout>;
     async function poll() {
       try {
-        const page = await pluginRequest<HistoryPage>(pluginId, path, {
+        const fresh = await pluginRequest<SignalHistoryPage>(pluginId, path, {
           signal: abort.signal,
         });
         if (abort.signal.aborted) return;
-        setRuns((old) => merge(page.runs, old));
-        setSelected(
-          (old) =>
-            old ||
-            page.runs.find((row) => row.status === 'completed')?.id ||
-            page.runs[0]?.id ||
-            '',
-        );
-        if (!paginated.current) setNext(page.next);
-        setCanRun(page.canRun);
-        setLoaded(true);
+        setPage(fresh);
+        setTrades((old) => [
+          ...fresh.trades,
+          ...old.filter(
+            (row) => !fresh.trades.some((value) => value.id === row.id),
+          ),
+        ]);
+        setSignals((old) => [
+          ...fresh.signals,
+          ...old.filter(
+            (row) => !fresh.signals.some((value) => value.id === row.id),
+          ),
+        ]);
+        if (!paginated.current.trade) setNext(fresh.next);
+        if (!paginated.current.signal) setSignalsNext(fresh.signals_next);
         setError('');
       } catch (error) {
-        if (!abort.signal.aborted) {
-          setError(errorText(error));
-          setLoaded(true);
-        }
+        if (!abort.signal.aborted) setError(errorText(error));
       } finally {
-        if (!abort.signal.aborted) timer = setTimeout(() => void poll(), 3000);
+        if (!abort.signal.aborted)
+          timer = setTimeout(() => void poll(), document.hidden ? 10000 : 2000);
       }
     }
     void poll();
@@ -109,206 +211,252 @@ export function HintPerformance({
       abort.abort();
       clearTimeout(timer);
     };
-  }, [pluginId, path, retry]);
-  async function calculate() {
-    if (busy || pending) return;
-    setBusy(true);
+  }, [pluginId, path]);
+  async function jumpToEntry(trade: Trade | OpenTrade) {
+    if (jumping !== null) return;
+    setJumping(trade.id);
+    const signal = lifecycle.current?.signal;
     try {
-      const created = await pluginRequest<BacktestRun>(pluginId, path, {
-        method: 'POST',
-        body: JSON.stringify({ months: Number(months) }),
-      });
-      if (lifecycle.current?.signal.aborted) return;
-      setRuns((old) => merge([created], old));
-      setSelected(created.id);
-      setError('');
-      toast.success('已开始计算历史表现，完成后自动显示结果');
+      const success = await onJumpToEntry(trade.entry_time);
+      if (signal?.aborted) return;
+      if (success) onClose();
     } catch (error) {
-      setError(errorText(error));
-      toast.error(errorText(error));
+      if (!signal?.aborted) toast.error(errorText(error));
     } finally {
-      setBusy(false);
+      if (!signal?.aborted) setJumping(null);
     }
   }
-  async function cancel() {
-    if (!run || busy) return;
-    setBusy(true);
+  async function loadOlder(kind: 'trade' | 'signal') {
+    const cursor = kind === 'trade' ? next : signalsNext;
+    if (!cursor || older) return;
+    setOlder(kind);
+    const signal = lifecycle.current?.signal;
     try {
-      const updated = await pluginRequest<BacktestRun>(
+      const fresh = await pluginRequest<SignalHistoryPage>(
         pluginId,
-        `/strategies/runs/${run.id}/cancel`,
-        { method: 'POST' },
+        `${path}?${kind === 'trade' ? 'before' : 'signalsBefore'}=${encodeURIComponent(cursor)}`,
+        { signal },
       );
-      setRuns((old) =>
-        old.map((row) => (row.id === updated.id ? updated : row)),
-      );
-      toast.success('已请求取消计算');
+      if (signal?.aborted) return;
+      paginated.current[kind] = true;
+      if (kind === 'signal') {
+        setSignalsNext(fresh.signals_next);
+        setSignals((old) => [
+          ...old,
+          ...fresh.signals.filter(
+            (row) => !old.some((value) => value.id === row.id),
+          ),
+        ]);
+        return;
+      }
+      setNext(fresh.next);
+      setTrades((old) => [
+        ...old,
+        ...fresh.trades.filter(
+          (row) => !old.some((value) => value.id === row.id),
+        ),
+      ]);
     } catch (error) {
-      toast.error(errorText(error));
+      if (!signal?.aborted) toast.error(errorText(error));
     } finally {
-      setBusy(false);
+      if (!signal?.aborted) setOlder(null);
     }
   }
-  async function loadOlder() {
-    if (!next || older) return;
-    setOlder(true);
-    try {
-      const page = await pluginRequest<HistoryPage>(
-        pluginId,
-        `${path}?before=${encodeURIComponent(next)}`,
-        { signal: lifecycle.current?.signal },
-      );
-      paginated.current = true;
-      setNext(page.next);
-      setRuns((old) => merge(old, page.runs));
-      setSelected((old) => old || page.runs[0]?.id || '');
-    } catch (error) {
-      if (!lifecycle.current?.signal.aborted) toast.error(errorText(error));
-    } finally {
-      setOlder(false);
-    }
-  }
+  const summary = page?.summary;
+  const monitor = page?.monitor ?? item;
+  const computing = monitor.status === 'starting' || summary?.replaying;
   return (
     <Sheet
       open
       onOpenChange={(open) => {
-        if (!open && !busy) onClose();
+        if (!open) onClose();
       }}
     >
-      <SheetContent className="w-full sm:max-w-5xl gap-0 p-0">
+      <SheetContent className="w-full gap-0 p-0 sm:max-w-5xl">
         <SheetHeader className="border-b px-5 py-4 pr-12">
-          <SheetTitle>{item.strategy_name} · 历史表现</SheetTitle>
+          <SheetTitle>{item.strategy_name} · 历史记录</SheetTitle>
           <SheetDescription>
             {item.config.symbol} · v{item.version_number} ·{' '}
             {durationLabel(item.config.duration)}
-            。展示对应版本与参数的历史回测，费用与资金按所选回测记录。
+            。加入后自动计算全部已存行情，并持续更新当前入场、离场与持仓。
           </SheetDescription>
         </SheetHeader>
-        <ScrollArea
-          className="flex min-h-0 flex-1 flex-col overflow-hidden"
-          viewportProps={{ className: 'min-h-0 flex-1 [&>div]:block!' }}
-        >
-          <div className="space-y-3 border-b p-4 sm:p-5">
-            <div className="flex flex-wrap items-end gap-3">
-              <Label className="grid min-w-0 flex-1 basis-64 grid-cols-1 gap-2 text-xs">
-                回测记录
-                <Select
-                  value={selected}
-                  onValueChange={setSelected}
-                  disabled={!runs.length}
-                >
-                  <SelectTrigger
-                    className="w-full min-w-0"
-                    aria-label="选择历史回测"
-                  >
-                    <SelectValue
-                      className="min-w-0 truncate"
-                      placeholder={loaded ? '暂无匹配的历史回测' : '正在加载…'}
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {runs.map((row) => (
-                      <SelectItem key={row.id} value={row.id}>
-                        {shortDate(row.config.start)} —{' '}
-                        {shortDate(row.config.end)} · {statusLabels[row.status]}{' '}
-                        · {shortDate(Date.parse(row.created_at) / 1000)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Label>
-              <Label className="grid gap-2 text-xs">
-                计算区间
-                <Select
-                  value={months}
-                  onValueChange={setMonths}
-                  disabled={busy || pending}
-                >
-                  <SelectTrigger className="w-28" aria-label="历史计算区间">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="3">近 3 个月</SelectItem>
-                    <SelectItem value="12">近 1 年</SelectItem>
-                    <SelectItem value="36">近 3 年</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Label>
-              <Button
-                disabled={!canRun || busy || pending}
-                onClick={() => void calculate()}
+        <div className="space-y-2 border-b px-4 py-3 sm:px-5">
+          <div className="space-y-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2">
+              <Badge
+                variant={monitor.status === 'error' ? 'destructive' : 'outline'}
               >
-                {busy || pending ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Play className="size-4" />
-                )}
-                {pending ? '正在计算' : '计算历史表现'}
-              </Button>
-              <Button
-                variant="outline"
-                size="icon"
-                aria-label="刷新历史表现"
-                onClick={() => setRetry((n) => n + 1)}
-              >
-                <RefreshCw className="size-4" />
-              </Button>
+                {monitor.status === 'error'
+                  ? '计算异常'
+                  : monitor.status === 'paused'
+                    ? '已暂停'
+                    : computing
+                      ? '计算全量历史中'
+                      : '实时更新'}
+              </Badge>
+              {computing && <Loader2 className="size-3 animate-spin" />}
+              <span>{monitor.message}</span>
             </div>
-            {error && (
-              <p role="alert" className="text-sm text-destructive">
-                {error}
+            {summary && (
+              <p>
+                数据起点：{dateTime(summary.start)} · 已计算至：
+                {dateTime(summary.through)}
               </p>
             )}
-            {next && (
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={older}
-                onClick={() => void loadOlder()}
-              >
-                {older ? '正在加载…' : '加载更早回测'}
-              </Button>
-            )}
-            {loaded && !canRun && (
-              <p className="text-xs text-muted-foreground">
-                可以查看已有结果；新建历史计算需要管理员权限。
+            {monitorExecutionModel(item.config) === 'continuous_price' && (
+              <p>
+                <Badge variant="secondary">主连价格模拟</Badge>{' '}
+                入场、离场和持仓按主连价格模拟，不代表实际合约成交，不计合约价差与换月成本。
               </p>
             )}
-            {run && (
-              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <Badge
-                  variant={run.status === 'failed' ? 'destructive' : 'outline'}
-                >
-                  {statusLabels[run.status]}
-                </Badge>
-                <span>
-                  回测区间：{dateTime(run.config.start)} —{' '}
-                  {dateTime(run.config.end)}
-                </span>
-                {active(run) && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={busy || run.cancel_requested}
-                    onClick={() => void cancel()}
-                  >
-                    {run.cancel_requested ? '取消中…' : '取消计算'}
-                  </Button>
-                )}
-              </div>
-            )}
+            <p>移除该策略提示会清除全部历史记录，再次加入将重新计算。</p>
           </div>
-          {!loaded ? (
-            <Skeleton className="m-5 h-48" />
-          ) : run ? (
-            <ResultView key={run.id} pluginId={pluginId} run={run} />
-          ) : (
-            <div className="space-y-2 p-8 text-center text-sm text-muted-foreground">
-              <p>还没有该标的、版本、周期和参数的历史回测。</p>
-              <p>选择计算区间，即可生成交易记录、胜率与月度／年度收益。</p>
-            </div>
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
           )}
-        </ScrollArea>
+        </div>
+        <Tabs
+          defaultValue="trades"
+          className="min-h-0 flex-1 gap-0 overflow-hidden"
+        >
+          <div className="shrink-0 border-b px-4 py-3 sm:px-5">
+            <TabsList
+              className="grid w-full grid-cols-3"
+              aria-label="历史记录分类"
+            >
+              <TabsTrigger value="trades">交易记录</TabsTrigger>
+              <TabsTrigger value="signals">信号记录</TabsTrigger>
+              <TabsTrigger value="overview">收益概览</TabsTrigger>
+            </TabsList>
+          </div>
+          {!page && !error ? (
+            <Skeleton className="m-4 h-48 sm:m-5" />
+          ) : !summary ? (
+            <p className="p-8 text-center text-sm text-muted-foreground">
+              正在准备历史记录，计算进度与新记录将自动显示。
+            </p>
+          ) : (
+            <>
+              <HistoryTab value="trades">
+                <section className="space-y-2">
+                  <h3 className="text-sm font-medium">当前持仓</h3>
+                  <Trades
+                    rows={summary.open_trades}
+                    open
+                    jumping={jumping}
+                    onJumpToEntry={(trade) => void jumpToEntry(trade)}
+                  />
+                </section>
+                <section className="space-y-2">
+                  <h3 className="text-sm font-medium">入场与离场记录</h3>
+                  <Trades
+                    rows={trades}
+                    jumping={jumping}
+                    onJumpToEntry={(trade) => void jumpToEntry(trade)}
+                  />
+                  {next && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={older !== null}
+                      onClick={() => void loadOlder('trade')}
+                    >
+                      {older === 'trade' ? '正在加载…' : '加载更早记录'}
+                    </Button>
+                  )}
+                </section>
+              </HistoryTab>
+              <HistoryTab value="signals">
+                <section className="space-y-2">
+                  <h3 className="text-sm font-medium">入场与离场信号</h3>
+                  <div className="divide-y rounded-md border">
+                    {signals.length ? (
+                      signals.map((signal) => (
+                        <div
+                          key={signal.id}
+                          className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs"
+                        >
+                          <Badge
+                            variant={
+                              signal.type === 'entry' ? 'default' : 'secondary'
+                            }
+                          >
+                            {signal.type === 'entry' ? '入场' : '离场'}
+                            {signal.side === 'long'
+                              ? ' · 多'
+                              : signal.side === 'short'
+                                ? ' · 空'
+                                : ''}
+                          </Badge>
+                          {signal.type === 'exit' && (
+                            <TradeExitBadge reason={signal.reason} />
+                          )}
+                          <span>{signal.symbol}</span>
+                          <span className="tabular-nums">
+                            {number(signal.price)}
+                          </span>
+                          <span className="text-muted-foreground">
+                            {dateTime(signal.time)}
+                          </span>
+                          {signal.type === 'entry' && (
+                            <span>{signal.reason}</span>
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      <p className="p-4 text-sm text-muted-foreground">
+                        暂无信号
+                      </p>
+                    )}
+                  </div>
+                  {signalsNext && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={older !== null}
+                      onClick={() => void loadOlder('signal')}
+                    >
+                      {older === 'signal' ? '正在加载…' : '加载更早信号'}
+                    </Button>
+                  )}
+                </section>
+              </HistoryTab>
+              <HistoryTab value="overview">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  {(
+                    [
+                      ['累计收益', percent(summary.metrics.total_return)],
+                      ['净收益', number(summary.metrics.total_pnl)],
+                      ['已完成交易', number(summary.metrics.trade_count)],
+                      ['胜率', percent(summary.metrics.win_rate)],
+                      ['最大回撤', percent(summary.metrics.max_drawdown)],
+                      ['账户权益', number(summary.metrics.final_equity)],
+                      ['当前持仓', String(summary.open_trades.length)],
+                      ['初始资金', number(summary.initial_cash)],
+                    ] as const
+                  ).map(([label, value]) => (
+                    <div key={label} className="rounded-md border p-3">
+                      <p className="text-xs text-muted-foreground">{label}</p>
+                      <p className="mt-1 text-lg font-semibold tabular-nums">
+                        {value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <section className="space-y-2">
+                  <h3 className="text-sm font-medium">月度与年度收益</h3>
+                  <PeriodReturns
+                    monthly={summary.monthly_returns}
+                    yearly={summary.yearly_returns}
+                  />
+                </section>
+              </HistoryTab>
+            </>
+          )}
+        </Tabs>
       </SheetContent>
     </Sheet>
   );

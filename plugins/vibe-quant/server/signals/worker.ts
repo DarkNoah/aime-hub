@@ -1,15 +1,18 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import type { PluginContext } from '@app/plugin-sdk/server';
 import type { SyncStatus } from '../../shared.js';
 import type { StrategySignal } from '../../signal-types.js';
+import { monitorExecutionModel } from '../../signal-types.js';
 import { strategyNotifications } from '../../strategy-notifications.js';
 import type { StrategyStore } from '../strategies/store.js';
 import { ensurePython } from '../python.js';
 import type { MonitorStore, StoredMonitor } from './store.js';
 import { runSignalProcess } from './process.js';
+import type { SignalHistoryBatch } from '../../signal-history.js';
 
 const signalSchema = z.object({
   id: z.string(),
@@ -115,6 +118,7 @@ export class SignalWorker {
   private async tick() {
     if (this.stopped) return;
     await this.context.assertEnabled();
+    await this.monitors.cleanupDeleted();
     const rows = await this.monitors.list();
     const candidates = new Map(
       rows
@@ -215,6 +219,7 @@ export class SignalWorker {
         join(directory, 'config.json'),
         JSON.stringify({
           ...row.config,
+          execution_model: monitorExecutionModel(row.config),
           parameters: { ...version.parameters, ...row.config.parameters },
         }),
         { mode: 0o600 },
@@ -242,7 +247,7 @@ export class SignalWorker {
           if (message.kind === 'market') {
             if (
               typeof message.path !== 'string' ||
-              !/^\/(?:instruments\/[^/]+|history|contracts|sessions(?:\/[a-f0-9-]+(?:\/events)?)?)$/.test(
+              !/^\/(?:instruments\/[^/]+|history(?:\/range)?|contracts|sessions(?:\/[a-f0-9-]+(?:\/events)?)?)$/.test(
                 message.path,
               )
             )
@@ -251,19 +256,32 @@ export class SignalWorker {
             if (message.params && typeof message.params === 'object')
               for (const [key, value] of Object.entries(message.params))
                 url.searchParams.set(key, String(value));
-            const response = await this.market(
-              row.user_id,
-              url.pathname + url.search,
-              {
+            const request = () =>
+              this.market(row.user_id, url.pathname + url.search, {
                 method:
                   typeof message.method === 'string' ? message.method : 'GET',
                 headers: { 'Content-Type': 'application/json' },
                 body: message.body ? JSON.stringify(message.body) : undefined,
                 signal,
-              },
-            );
-            const result = await response.json();
-            if (!response.ok) throw new Error(result.code ?? '行情读取失败');
+              });
+            let response = await request();
+            for (
+              let attempt = 0;
+              response.status >= 500 &&
+              (message.method ?? 'GET') === 'GET' &&
+              attempt < 2;
+              attempt++
+            ) {
+              await response.body?.cancel();
+              await delay(500 * (attempt + 1), undefined, { signal });
+              response = await request();
+            }
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok)
+              throw new Error(
+                result.code ??
+                  `行情读取失败（HTTP ${response.status}，${message.path}）`,
+              );
             if (message.path === '/sessions' && typeof result.id === 'string')
               sessions.add(result.id);
             return result;
@@ -284,6 +302,32 @@ export class SignalWorker {
               throw new Error('实时计算租约已失效');
             return true;
           }
+          if (message.kind === 'history') {
+            const batch = message.batch as SignalHistoryBatch;
+            if (
+              !batch ||
+              !Array.isArray(batch.records) ||
+              batch.records.length > 2000
+            )
+              throw new Error('Invalid history batch');
+            for (const record of batch.records) {
+              if (
+                !['signal', 'trade'].includes(record.kind) ||
+                typeof record.id !== 'string' ||
+                !Number.isFinite(record.time)
+              )
+                throw new Error('Invalid history record');
+              if (record.kind === 'signal') {
+                const raw = signalSchema.parse(record.payload);
+                record.id = createHash('sha256')
+                  .update(`${row.id}:${raw.id}`)
+                  .digest('hex');
+                record.payload = { ...raw, id: record.id, monitor_id: row.id };
+              }
+            }
+            await this.monitors.history.save(row.id, run.token, batch);
+            return true;
+          }
           if (message.kind === 'overlay') {
             const overlay = overlaySchema.parse(message.overlay);
             if (!(await this.monitors.saveOverlay(row.id, run.token, overlay)))
@@ -292,7 +336,7 @@ export class SignalWorker {
           }
           if (message.kind === 'ready') {
             run.status = 'running';
-            run.message = '监听新的入场与离场信号';
+            run.message = '全量历史已计算，实时更新入场与离场记录';
             if (
               !(await this.monitors.heartbeat(
                 row.id,
@@ -324,7 +368,7 @@ export class SignalWorker {
                 .digest('hex'),
               monitor_id: row.id,
             };
-            await this.monitors.signal(row.user_id, event);
+            await this.monitors.signal(row.user_id, event, run.token);
             const strategy = await this.records.storedStrategy(row.strategy_id);
             const current = await this.monitors.get(row.id, row.user_id);
             const channels = strategyNotifications(
