@@ -34,6 +34,8 @@ import { MarketChartPanel } from './components/market-chart-panel';
 import { useMarketBars } from './use-market-bars';
 import { readChartPeriod } from './chart-period';
 import { OrderBookPanel } from './order-book';
+import { useStrategyHints } from './signals/use-strategy-hints';
+import { StrategyHints } from './signals/strategy-hints';
 
 const ENGINE_NAMES = { tqsdk: 'TqSdk', tushare: 'Tushare', tdx: '通达信' };
 const STATE_LABELS = {
@@ -78,7 +80,9 @@ const timeText = (value?: string | null) =>
 
 export function MarketPage({ pluginId }: PluginPageProps) {
   const [list, setList] = useState<WatchItem[]>([]);
-  const [selected, setSelected] = useState('');
+  const [selected, setSelected] = useState(
+    () => new URLSearchParams(window.location.search).get('symbol') ?? '',
+  );
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [orderBooks, setOrderBooks] = useState<OrderBook[]>([]);
   const [status, setStatus] = useState<SyncStatus>();
@@ -97,6 +101,7 @@ export function MarketPage({ pluginId }: PluginPageProps) {
   const [period, setPeriod] = useState(readChartPeriod);
   const isIntraday = period === 'intraday';
   const duration = isIntraday ? 60 : period;
+  const hints = useStrategyHints(pluginId, selected, status?.engine);
   const identity = `${status?.engine ?? ''}:${selected}:${period}`;
   const marketBars = useMarketBars({
     pluginId,
@@ -413,18 +418,28 @@ export function MarketPage({ pluginId }: PluginPageProps) {
         </aside>
         <section className="flex min-w-0 flex-col">
           {item ? (
-            <MarketChartPanel
-              view={marketBars}
-              identity={identity}
-              drawingSharedScope={`${status?.engine ?? ''}:${selected}`}
-              period={period}
-              onPeriodChange={setPeriod}
-              priceTick={item.priceTick}
-              volumeProfileSource={{
-                pluginId,
-                path: `/volume-profile?symbol=${encodeURIComponent(selected)}`,
-              }}
-            />
+            <>
+              <StrategyHints
+                key={`${status?.engine}:${selected}`}
+                pluginId={pluginId}
+                instrument={item}
+                duration={duration}
+                hints={hints}
+              />
+              <MarketChartPanel
+                strategyHints={hints.items}
+                view={marketBars}
+                identity={identity}
+                drawingSharedScope={`${status?.engine ?? ''}:${selected}`}
+                period={period}
+                onPeriodChange={setPeriod}
+                priceTick={item.priceTick}
+                volumeProfileSource={{
+                  pluginId,
+                  path: `/volume-profile?symbol=${encodeURIComponent(selected)}`,
+                }}
+              />
+            </>
           ) : (
             <div className="flex min-h-[500px] flex-1 items-center justify-center p-8 text-center">
               <div className="max-w-md">

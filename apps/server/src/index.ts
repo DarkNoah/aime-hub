@@ -108,6 +108,14 @@ try {
   ]);
   throw error;
 }
+const notifications = new NotificationService(
+  new PgNotificationStore(pool),
+  createPushTransport({
+    publicKey: env.WEB_PUSH_PUBLIC_KEY,
+    privateKey: env.WEB_PUSH_PRIVATE_KEY,
+    subject: env.WEB_PUSH_SUBJECT,
+  }),
+);
 const plugins = new PluginService(
   database,
   installedPlugins,
@@ -120,6 +128,9 @@ const plugins = new PluginService(
     fetchContent: readArticleContent,
     request: requestWebResource,
   },
+  (pluginId) => ({
+    publish: (input) => notifications.publishPlugin(pluginId, input),
+  }),
 );
 await syncPluginSkills(workspaceRoot);
 const disposePluginSkills = registerPluginSkillAccess(
@@ -141,14 +152,6 @@ const projects = new ProjectService(database, { workspaceRoot });
 const groupChats = new GroupChatService(database);
 const users = new UserService(database, groupChats);
 const environmentVariables = new EnvironmentVariableService(database);
-const notifications = new NotificationService(
-  new PgNotificationStore(pool),
-  createPushTransport({
-    publicKey: env.WEB_PUSH_PUBLIC_KEY,
-    privateKey: env.WEB_PUSH_PRIVATE_KEY,
-    subject: env.WEB_PUSH_SUBJECT,
-  }),
-);
 const scheduleHooks: ScheduleHooks<Mastra> = {};
 const memoryVectors = new PgVector({
   id: 'chat-memory',

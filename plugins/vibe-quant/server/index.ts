@@ -26,6 +26,9 @@ import { NewsWorker } from './news/worker.js';
 import { newsRoutes } from './news/routes.js';
 import { readVolumeProfile, volumeProfileQuery } from './volume-profile.js';
 import { TradeService } from './trades/service.js';
+import { MonitorStore } from './signals/store.js';
+import { SignalWorker } from './signals/worker.js';
+import { signalRoutes } from './signals/routes.js';
 
 const symbolSchema = z
   .string()
@@ -44,7 +47,20 @@ export default function createServer(context: PluginContext): PluginServer {
   let news: NewsStore;
   let newsWorker: NewsWorker | undefined;
   let trades: TradeService;
+  let monitors: MonitorStore;
+  let signals: SignalWorker | undefined;
   const api = new Hono<PluginHttpEnv>();
+  api.route(
+    '/strategies',
+    signalRoutes(() => ({
+      records,
+      monitors,
+      state,
+      config,
+      wake: () => signals?.wake(true),
+      wakeBacktests: () => backtests?.wake(),
+    })),
+  );
   api.route(
     '/news',
     newsRoutes(() => ({ store: news, config })),
@@ -66,17 +82,15 @@ export default function createServer(context: PluginContext): PluginServer {
   api.onError((_error, c) =>
     c.json({ code: 'MARKET_SERVICE_UNAVAILABLE' }, 503),
   );
-  api.route(
-    '/sdk',
-    strategyDataRoutes(() => ({
-      config,
-      store,
-      state,
-      feed,
-      subscriptions,
-      status: () => worker!.getStatus(),
-    })),
-  );
+  const sdkApi = strategyDataRoutes(() => ({
+    config,
+    store,
+    state,
+    feed,
+    subscriptions,
+    status: () => worker!.getStatus(),
+  }));
+  api.route('/sdk', sdkApi);
   const watchlist = (userId: string) => state.watchlist(userId, config.engine);
   api.get('/instruments', async (c) => {
     const { continuous } = searchTerms(c.req.query('q') ?? '');
@@ -219,6 +233,8 @@ export default function createServer(context: PluginContext): PluginServer {
     });
   });
   const stop = async () => {
+    await signals?.stop();
+    signals = undefined;
     await trades?.stop();
     await newsWorker?.stop();
     newsWorker = undefined;
@@ -253,6 +269,8 @@ export default function createServer(context: PluginContext): PluginServer {
       records = new StrategyStore(config);
       await records.initialize();
       await migrateStrategies(context.database, records);
+      monitors = new MonitorStore(config);
+      await monitors.initialize();
       news = new NewsStore(config);
       await news.initialize();
       if (config.newsEnabled && !context.web)
@@ -268,6 +286,24 @@ export default function createServer(context: PluginContext): PluginServer {
         (batch) => feed.publish(batch),
       );
       worker.start();
+      signals = new SignalWorker(
+        context,
+        monitors,
+        records,
+        async (owner, path, init) => {
+          // In-process transport reuses the SDK route validation; no session cookies or public bypass.
+          const bridge = new Hono<PluginHttpEnv>();
+          bridge.use('*', async (c, next) => {
+            c.set('userId', owner);
+            c.set('isAdmin', true);
+            await next();
+          });
+          bridge.route('/', sdkApi);
+          return bridge.request(`http://monitor${path}`, init);
+        },
+        () => worker!.getStatus(),
+      );
+      signals.start();
       backtests = new BacktestWorker(context, records, {
         config,
         store,

@@ -1,5 +1,6 @@
 import type { Bar, Engine } from './shared.js';
 import type { OptimizationConfig } from './optimization-types.js';
+import type { StrategyNotifications } from './strategy-notifications.js';
 
 export interface ScriptDraft {
   source: string;
@@ -23,6 +24,7 @@ export interface StrategySummary {
 }
 export interface StrategyDetail extends StrategySummary {
   draft: ScriptDraft;
+  notifications: StrategyNotifications;
 }
 export interface StrategyVersion extends ScriptDraft {
   id: string;

@@ -93,3 +93,15 @@ export function resultTradeRecords(result: BacktestResult): TradeRecord[] {
   }
   return [...closed, ...open];
 }
+
+/** Closed FIFO lots only; breakeven trades stay in the denominator. */
+export function closedTradeWinRate(
+  result: Pick<BacktestResult, 'trades'>,
+): number | null {
+  const trades = result.trades.filter((trade) =>
+    Number.isFinite(trade.net_pnl),
+  );
+  return trades.length
+    ? trades.filter((trade) => trade.net_pnl > 0).length / trades.length
+    : null;
+}

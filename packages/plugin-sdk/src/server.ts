@@ -4,6 +4,11 @@ import type { BaseAgent } from '@aime/shared/agents';
 import type { PluginTool } from './tools.js';
 export { PluginTool } from './tools.js';
 import type { PluginConfig, PluginManifest } from './index.js';
+import type { PluginNotificationInput } from '@aime/shared/notifications';
+
+export interface PluginNotifications {
+  publish(input: PluginNotificationInput): Promise<void>;
+}
 
 export type PluginHttpEnv = { Variables: { userId: string; isAdmin: boolean } };
 export interface PluginWebFetchResult {
@@ -52,6 +57,8 @@ export interface PluginContext {
   /** Shared, initialized host connection. Do not initialize or destroy it. */
   readonly database: DataSource;
   readonly web?: PluginWebServices;
+  /** Host delivery scoped to this plugin; recipients still require an active account/session. */
+  readonly notifications?: PluginNotifications;
   /** Checks persisted state and local readiness. Not available until onEnable completes. */
   assertEnabled(): Promise<void>;
 }

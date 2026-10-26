@@ -2,13 +2,13 @@ import type { Pool } from 'pg';
 import type { AutomationScope } from '@aime/shared/automations';
 import type {
   BrowserPushSubscription,
-  TaskNotification,
+  AppNotification,
 } from '@aime/shared/notifications';
 
 export type NotificationRecord = {
   ownerId: string;
   scope: AutomationScope;
-  notification: TaskNotification;
+  notification: AppNotification;
 };
 export type PushRecipient = BrowserPushSubscription & {
   userId: string;
@@ -20,11 +20,11 @@ export interface NotificationStore {
     userId: string,
     after?: string,
   ): Promise<{
-    items: { cursor: string; notification: TaskNotification }[];
+    items: { cursor: string; notification: AppNotification }[];
     cursor: string;
     more: boolean;
   }>;
-  get(userId: string, id: string): Promise<TaskNotification | undefined>;
+  get(userId: string, id: string): Promise<AppNotification | undefined>;
   subscribe(
     userId: string,
     sessionId: string,
@@ -93,7 +93,7 @@ export class PgNotificationStore implements NotificationStore {
       JOIN users u ON u.id = $1 WHERE n.id = $2 AND ${visible}`,
       [userId, id],
     );
-    return rows[0]?.payload as TaskNotification | undefined;
+    return rows[0]?.payload as AppNotification | undefined;
   }
   async subscribe(
     userId: string,

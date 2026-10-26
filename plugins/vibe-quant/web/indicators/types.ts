@@ -66,6 +66,8 @@ export interface IndicatorDrawing {
   extendRight?: boolean;
   text?: string;
   labelIndex?: number;
+  /** Keep live strategy labels inside the price pane. */
+  clampLabel?: boolean;
   labelPrice?: number;
   align?: 'above' | 'below' | 'left';
   size?: string;

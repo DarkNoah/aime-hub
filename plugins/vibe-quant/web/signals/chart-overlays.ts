@@ -1,0 +1,123 @@
+import type { IndicatorDrawing } from '../indicators/types';
+import type { SeriesMarker, UTCTimestamp } from 'lightweight-charts';
+import type { Bar } from '../../shared';
+import type { MarketStrategyHint } from '../../signal-types';
+import { tradeCandleTime } from '../trade-markers';
+import { barLabelTime } from '../chart-time';
+import { pricePrecision } from '../readout-format';
+
+export function strategyHintMarkers(
+  hints: readonly MarketStrategyHint[],
+  bars: Bar[],
+  duration: number,
+  priceTick: number,
+): SeriesMarker<UTCTimestamp>[] {
+  return hints
+    .filter((hint) => hint.config.symbol === bars[0]?.symbol)
+    .flatMap((hint) =>
+      hint.signals.flatMap((signal) => {
+        const anchor = tradeCandleTime(
+          signal.chart_time ?? signal.time,
+          bars,
+          duration,
+        );
+        if (anchor === null) return [];
+        const name =
+          hint.strategy_name.length > 6
+            ? `${hint.strategy_name.slice(0, 6)}…`
+            : hint.strategy_name;
+        const buy = (signal.type === 'entry') === (signal.side !== 'short');
+        return [
+          {
+            id: signal.id,
+            time: barLabelTime(anchor, duration) as UTCTimestamp,
+            position: buy ? ('belowBar' as const) : ('aboveBar' as const),
+            shape: buy ? ('arrowUp' as const) : ('arrowDown' as const),
+            color: signal.type === 'entry' ? '#2563eb' : '#d97706',
+            text: `${name} v${hint.version_number} ${signal.type === 'entry' ? '入场' : '离场'}${signal.price === null ? '' : ` ${signal.symbol !== hint.config.symbol ? '实际 ' : ''}${signal.price.toFixed(pricePrecision(priceTick))}`}`,
+          },
+        ];
+      }),
+    )
+    .sort((a, b) => a.time - b.time || (a.id ?? '').localeCompare(b.id ?? ''));
+}
+export function strategyHintLines(
+  hints: readonly MarketStrategyHint[],
+  symbol: string,
+) {
+  return hints
+    .filter(
+      (hint) =>
+        hint.config.symbol === symbol &&
+        hint.enabled &&
+        hint.status === 'running',
+    )
+    .flatMap((hint) =>
+      hint.overlay.levels.flatMap((level) =>
+        (
+          [
+            ['chart_take_profit', '止盈', '#dc4c5c'],
+            ['chart_stop_loss', '止损', '#16a085'],
+          ] as const
+        ).flatMap(([key, label, color]) =>
+          level[key] === null
+            ? []
+            : [
+                {
+                  id: `${hint.id}:${level.id}:${key}`,
+                  time: level.chart_time ?? level.time,
+                  price: level[key],
+                  color,
+                  lineWidth: 1 as const,
+                  lineStyle: 2 as const,
+                  axisLabelVisible: true,
+                  title: `${hint.strategy_name.slice(0, 12)} v${hint.version_number} ${label}`,
+                },
+              ],
+        ),
+      ),
+    );
+}
+
+/** Use the existing primitive so active protection prices participate in visible-window autoscaling. */
+export function strategyHintDrawings(
+  hints: readonly MarketStrategyHint[],
+  bars: Bar[],
+  duration: number,
+  priceTick: number,
+): IndicatorDrawing[] {
+  if (!bars.length) return [];
+  const groups = new Map<
+    string,
+    { line: ReturnType<typeof strategyHintLines>[number]; titles: Set<string> }
+  >();
+  for (const line of strategyHintLines(hints, bars[0].symbol)) {
+    if (line.time > bars.at(-1)!.time + duration) continue;
+    const key = `${line.price}:${line.color}`;
+    const group = groups.get(key);
+    if (group) {
+      group.line.time = Math.min(group.line.time, line.time);
+      group.titles.add(line.title);
+    } else
+      groups.set(key, { line: { ...line }, titles: new Set([line.title]) });
+  }
+  return [...groups.values()].map(({ line, titles }) => ({
+    id: line.id,
+    kind: 'line',
+    from: Math.max(
+      0,
+      bars.findLastIndex((bar) => bar.time <= line.time),
+    ),
+    to: bars.length,
+    top: line.price,
+    bottom: line.price,
+    color: line.color,
+    lineWidth: 2,
+    style: 'dashed',
+    text: `${[...titles].join(' / ')} ${line.price.toFixed(pricePrecision(priceTick))}`,
+    labelIndex: bars.length,
+    clampLabel: true,
+    align: line.title.endsWith('止盈') ? 'above' : 'below',
+    size: 'small',
+  }));
+}

@@ -1,3 +1,4 @@
+import type { MarketStrategyHint } from '../../signal-types';
 import {
   Button,
   Select,
@@ -44,6 +45,7 @@ export function MarketChartPanel({
   trade,
   markerTimes,
   riskLevels,
+  strategyHints,
   volumeProfileSource,
   latestLabel = '最新行情',
   emptyHint = '首次订阅需要加载历史数据。请确认当前引擎具备此标的行情权限。',
@@ -57,6 +59,7 @@ export function MarketChartPanel({
   trade?: TradeRecord;
   markerTimes?: TradeReplay['markerTimes'];
   riskLevels?: readonly RiskLevelRecord[];
+  strategyHints?: readonly MarketStrategyHint[];
   volumeProfileSource?: VolumeProfileSource;
   latestLabel?: string;
   emptyHint?: string;
@@ -123,6 +126,7 @@ export function MarketChartPanel({
           trade={trade}
           markerTimes={markerTimes}
           riskLevels={riskLevels}
+          strategyHints={strategyHints}
           volumeProfileSource={volumeProfileSource}
         />
         {!bars.length && (

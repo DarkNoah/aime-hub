@@ -4,6 +4,7 @@ import {
   Badge,
   Button,
   ScrollArea,
+  ScrollBar,
   Skeleton,
   Table,
   TableBody,
@@ -27,7 +28,7 @@ import type {
   BacktestRun,
   TradeRecord,
 } from '../../strategy-types';
-import { resultTradeRecords } from '../../strategy-trades';
+import { resultTradeRecords, closedTradeWinRate } from '../../strategy-trades';
 import { dateTime, errorText, number, percent } from './format';
 import { exitReasonLabel } from '../trade-exit';
 import { PeriodReturns } from './period-returns';
@@ -40,6 +41,7 @@ const metricLabels: [string, string, boolean?][] = [
   ['max_drawdown', '最大回撤', true],
   ['sharpe', '夏普比率'],
   ['trade_count', '交易笔数'],
+  ['win_rate', '胜率', true],
   ['final_equity', '最终权益'],
   ['benchmark_return', '基准收益', true],
   ['benchmark_annual_return', '基准年化', true],
@@ -78,6 +80,10 @@ export function ResultView({
     return () => abort.abort();
   }, [pluginId, run.id, run.status, retry]);
   const result = data?.result;
+  const winRate = useMemo(
+    () => (result ? closedTradeWinRate(result) : null),
+    [result],
+  );
   const sortedTrades = useMemo(
     () =>
       (result ? resultTradeRecords(result) : []).sort(
@@ -211,12 +217,17 @@ export function ResultView({
                   className={`mt-1 text-lg font-medium tabular-nums ${key === 'total_pnl' ? ((result.metrics[key] ?? 0) >= 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400') : ''}`}
                 >
                   {ratio
-                    ? percent(result.metrics[key])
+                    ? percent(
+                        key === 'win_rate' ? winRate : result.metrics[key],
+                      )
                     : number(result.metrics[key])}
                 </dd>
               </div>
             ))}
           </dl>
+          <p className="text-xs text-muted-foreground">
+            胜率按已平仓交易的净盈亏计算，盈亏持平计入交易总数，未平仓交易不计入。
+          </p>
           <section className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-medium">净值曲线</h3>
@@ -249,7 +260,7 @@ export function ResultView({
             <TabsContent value="trades" className="mt-3">
               <div className="rounded-md border">
                 <ScrollArea className="w-full">
-                  <Table>
+                  <Table aria-label="历史交易记录">
                     <TableHeader>
                       <TableRow>
                         <TableHead>标的 / 方向</TableHead>
@@ -362,6 +373,7 @@ export function ResultView({
                       )}
                     </TableBody>
                   </Table>
+                  <ScrollBar orientation="horizontal" />
                 </ScrollArea>
               </div>
               {sortedTrades.length > 20 && (

@@ -30,15 +30,20 @@ self.addEventListener('push', (event) => {
       if (url.origin !== self.location.origin) return;
       const chinese = payload.locale === 'zh-CN';
       const title =
-        notification.status === 'succeeded'
-          ? chinese
-            ? '自动化已完成'
-            : 'Automation completed'
-          : chinese
-            ? '自动化执行失败'
-            : 'Automation failed';
+        notification.kind === 'plugin'
+          ? notification.title
+          : notification.status === 'succeeded'
+            ? chinese
+              ? '自动化已完成'
+              : 'Automation completed'
+            : chinese
+              ? '自动化执行失败'
+              : 'Automation failed';
       await self.registration.showNotification(title, {
-        body: notification.taskName,
+        body:
+          notification.kind === 'plugin'
+            ? notification.body
+            : notification.taskName,
         tag: notification.id,
         data: { url: url.href },
         timestamp: Date.parse(notification.createdAt),

@@ -98,6 +98,11 @@ export class IndicatorDrawingPrimitive implements ISeriesPrimitive {
           ctx.stroke();
         }
         if (!drawing.text) continue;
+        if (
+          drawing.clampLabel &&
+          (Math.min(x1, x2) > mediaSize.width || Math.max(x1, x2) < 0)
+        )
+          continue;
         const x = coordinate(drawing.labelIndex ?? drawing.from);
         const y = attached.series.priceToCoordinate(
           drawing.labelPrice ?? drawing.top,
@@ -115,12 +120,23 @@ export class IndicatorDrawingPrimitive implements ISeriesPrimitive {
             : drawing.align === 'left'
               ? 'middle'
               : 'bottom';
-        ctx.fillText(
-          drawing.text,
-          x + (drawing.align === 'left' ? 3 : 0),
+        const maxWidth = Math.max(1, mediaSize.width - 12);
+        const halfWidth =
+          Math.min(ctx.measureText(drawing.text).width, maxWidth) / 2;
+        const labelX = drawing.clampLabel
+          ? Math.max(
+              halfWidth + 6,
+              Math.min(mediaSize.width - halfWidth - 6, mediaSize.width / 2, x),
+            )
+          : x;
+        if (drawing.clampLabel) ctx.textAlign = 'center';
+        const textX = labelX + (drawing.align === 'left' ? 3 : 0);
+        const textY =
           y +
-            (drawing.align === 'below' ? 3 : drawing.align === 'left' ? 0 : -3),
-        );
+          (drawing.align === 'below' ? 3 : drawing.align === 'left' ? 0 : -3);
+        if (drawing.clampLabel)
+          ctx.fillText(drawing.text, textX, textY, maxWidth);
+        else ctx.fillText(drawing.text, textX, textY);
       }
       ctx.restore();
     });

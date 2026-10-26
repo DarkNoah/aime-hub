@@ -1,3 +1,8 @@
+import type { MarketStrategyHint } from '../signal-types';
+import {
+  strategyHintMarkers,
+  strategyHintDrawings,
+} from './signals/chart-overlays';
 import { useEffect, useRef, useState } from 'react';
 import { Badge } from '@app/plugin-ui';
 import {
@@ -52,6 +57,7 @@ export function MarketChart({
   trade,
   markerTimes,
   riskLevels,
+  strategyHints,
   showDrawingTools = true,
   volumeProfileSource,
 }: {
@@ -69,9 +75,11 @@ export function MarketChart({
   trade?: TradeRecord;
   markerTimes?: TradeReplay['markerTimes'];
   riskLevels?: readonly RiskLevelRecord[];
+  strategyHints?: readonly MarketStrategyHint[];
   showDrawingTools?: boolean;
   volumeProfileSource?: VolumeProfileSource;
 }) {
+  const hasStrategyHints = strategyHints !== undefined;
   const container = useRef<HTMLDivElement>(null);
   const readout = useRef<ChartReadoutHandle | null>(null);
   const chart = useRef<IChartApi | null>(null);
@@ -144,7 +152,7 @@ export function MarketChart({
         timeVisible: duration < 86400,
         secondsVisible: false,
         borderVisible: false,
-        rightOffset: 5,
+        rightOffset: hasStrategyHints ? 18 : 5,
         tickMarkFormatter: formatTime,
       },
       localization: {
@@ -294,6 +302,7 @@ export function MarketChart({
     drawingScope,
     drawingSharedScope,
     showDrawingTools,
+    hasStrategyHints,
   ]);
   useEffect(() => {
     if (!prices.current) return;
@@ -451,14 +460,35 @@ export function MarketChart({
     showDrawingTools,
   ]);
   useEffect(() => {
-    riskRenderer.current?.setDrawings(
-      trade && riskLevels
-        ? tradeRiskDrawings(trade, riskLevels, bars, duration, priceTick)
-        : [],
+    const series = prices.current;
+    if (!series || !strategyHints) return;
+    const markers = createSeriesMarkers(
+      series,
+      strategyHintMarkers(strategyHints, bars, duration, priceTick),
     );
+    return () => markers.detach();
+  }, [
+    strategyHints,
+    bars,
+    duration,
+    priceTick,
+    identity,
+    intraday,
+    drawingScope,
+    drawingSharedScope,
+    showDrawingTools,
+  ]);
+  useEffect(() => {
+    riskRenderer.current?.setDrawings([
+      ...(trade && riskLevels
+        ? tradeRiskDrawings(trade, riskLevels, bars, duration, priceTick)
+        : []),
+      ...strategyHintDrawings(strategyHints ?? [], bars, duration, priceTick),
+    ]);
   }, [
     trade,
     riskLevels,
+    strategyHints,
     bars,
     duration,
     identity,

@@ -5,7 +5,10 @@ export { Input } from '../../../apps/web/src/components/ui/input';
 export { Textarea } from '../../../apps/web/src/components/ui/textarea';
 export { Label } from '../../../apps/web/src/components/ui/label';
 export { Switch } from '../../../apps/web/src/components/ui/switch';
-export { ScrollArea } from '../../../apps/web/src/components/ui/scroll-area';
+export {
+  ScrollArea,
+  ScrollBar,
+} from '../../../apps/web/src/components/ui/scroll-area';
 export { PasswordInput } from '../../../apps/web/src/components/password-input';
 export { CodeEditor } from '../../../apps/web/src/components/code-editor';
 export { JsonObjectEditor } from '../../../apps/web/src/components/json-object-editor';
@@ -57,6 +60,7 @@ export {
   TableCell,
 } from '../../../apps/web/src/components/ui/table';
 export { Skeleton } from '../../../apps/web/src/components/ui/skeleton';
+export { useDesktopPush } from '../../../apps/web/src/features/notifications/use-desktop-push';
 export { MarkdownContent } from '../../../apps/web/src/components/markdown-content';
 export {
   ThreadList,

@@ -7,6 +7,10 @@ export default defineConfig({
   format: ['esm'],
   platform: 'node',
   target: 'node22',
+  // Bundled CommonJS plugin dependencies still require Node built-ins.
+  banner: {
+    js: "import { createRequire as __createRequire } from 'node:module';\nconst require = __createRequire(import.meta.url);",
+  },
   define: { __API_DOCS_ENABLED__: 'false' },
   noExternal: ['@aime/auth', '@aime/db', '@aime/shared', '@app/plugin-sdk'],
   external: ['typeorm', 'pg', 'reflect-metadata', 'dotenv', 'zod'],

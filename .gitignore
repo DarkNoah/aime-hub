@@ -29,3 +29,7 @@ plugins/vibe-quant/**/__pycache__/
 !scripts/intelligent-ui-browser.test.mjs
 
 !scripts/group-chats-browser.test.mjs
+!plugins/vibe-quant/tests/strategy-notifications.test.ts
+!plugins/vibe-quant/tests/signal-monitor.test.ts
+
+!plugins/vibe-quant/tests/market-strategy-hints.test.ts

@@ -19,6 +19,7 @@ import {
   type InstalledPlugin,
   type PluginServer,
   type PluginWebServices,
+  type PluginNotifications,
 } from '@app/plugin-sdk/server';
 import type {
   RegisteredTool,
@@ -71,6 +72,7 @@ export class PluginService {
       workspaceRoot: resolve(process.cwd(), 'workspaces'),
     },
     web?: PluginWebServices,
+    notifications?: (pluginId: string) => PluginNotifications,
   ) {
     const ids = new Set<string>();
     for (const definition of definitions) {
@@ -81,6 +83,7 @@ export class PluginService {
         id,
         database,
         web,
+        notifications: notifications?.(id),
         runtime: createPluginRuntime(definition.manifest, runtimeOptions),
         assertEnabled: () => this.assertEnabled(id),
       });

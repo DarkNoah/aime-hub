@@ -1,0 +1,376 @@
+import { randomUUID, createHash } from 'node:crypto';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { z } from 'zod';
+import type { PluginContext } from '@app/plugin-sdk/server';
+import type { SyncStatus } from '../../shared.js';
+import type { StrategySignal } from '../../signal-types.js';
+import { strategyNotifications } from '../../strategy-notifications.js';
+import type { StrategyStore } from '../strategies/store.js';
+import { ensurePython } from '../python.js';
+import type { MonitorStore, StoredMonitor } from './store.js';
+import { runSignalProcess } from './process.js';
+
+const signalSchema = z.object({
+  id: z.string(),
+  type: z.enum(['entry', 'exit']),
+  side: z.enum(['long', 'short', 'unknown']),
+  symbol: z.string(),
+  time: z.number().finite(),
+  reason: z.string(),
+  price: z.number().finite().nullable(),
+  chart_time: z.number().finite().optional(),
+});
+const overlaySchema = z.object({
+  updated_at: z.number().finite(),
+  levels: z.array(
+    z.object({
+      id: z.string(),
+      symbol: z.string(),
+      entry_signal_id: z.string(),
+      chart_time: z.number().finite().optional(),
+      time: z.number().finite(),
+      stop_loss: z.number().finite().nullable(),
+      take_profit: z.number().finite().nullable(),
+      chart_stop_loss: z.number().finite().nullable(),
+      chart_take_profit: z.number().finite().nullable(),
+    }),
+  ),
+});
+type Running = {
+  abort: AbortController;
+  token: string;
+  promise: Promise<void>;
+  status: 'starting' | 'running';
+  message: string;
+};
+export type MarketRequest = (
+  owner: string,
+  path: string,
+  init: RequestInit,
+) => Promise<Response>;
+export class SignalWorker {
+  private current = new Map<string, Running>();
+  private retry = new Map<string, number>();
+  private timer?: ReturnType<typeof setTimeout>;
+  private stopped = true;
+  private ticking?: Promise<void>;
+  constructor(
+    private context: PluginContext,
+    private monitors: MonitorStore,
+    private records: StrategyStore,
+    private market: MarketRequest,
+    private status: () => SyncStatus,
+    private preparePython = ensurePython,
+  ) {}
+  start() {
+    this.stopped = false;
+    this.wake();
+  }
+  wake(retryNow = false) {
+    if (retryNow) this.retry.clear();
+    if (this.stopped || this.ticking) return;
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => {
+      this.ticking = this.tick()
+        .catch(() => {
+          for (const run of this.current.values()) run.abort.abort();
+        })
+        .finally(() => {
+          this.ticking = undefined;
+          if (!this.stopped) this.timer = setTimeout(() => this.wake(), 3000);
+        });
+    }, 0);
+  }
+  async stop() {
+    this.stopped = true;
+    clearTimeout(this.timer);
+    for (const run of this.current.values()) run.abort.abort();
+    await this.ticking;
+    await Promise.allSettled(
+      [...this.current.values()].map((run) => run.promise),
+    );
+  }
+  private async allowed(owner: string) {
+    const [user] = await this.context.database.query(
+      "SELECT id FROM users WHERE id=$1 AND banned IS NOT TRUE AND 'admin'=ANY(string_to_array(COALESCE(role,''),','))",
+      [owner],
+    );
+    return !!user;
+  }
+  private async valid(row: StoredMonitor) {
+    const [current, strategy, allowed] = await Promise.all([
+      this.monitors.get(row.id, row.user_id),
+      this.records.storedStrategy(row.strategy_id, row.user_id),
+      this.allowed(row.user_id),
+    ]);
+    return (
+      current.enabled &&
+      !current.deleted &&
+      strategy.enabled &&
+      (strategy.status ?? 'active') === 'active' &&
+      allowed
+    );
+  }
+  private async tick() {
+    if (this.stopped) return;
+    await this.context.assertEnabled();
+    const rows = await this.monitors.list();
+    const candidates = new Map(
+      rows
+        .filter(
+          (row) =>
+            row.enabled && !row.deleted && row.engine === this.status().engine,
+        )
+        .map((row) => [row.id, row]),
+    );
+    await Promise.all(
+      [...this.current].map(async ([id, run]) => {
+        const row = candidates.get(id);
+        if (
+          !row ||
+          this.status().state === 'standby' ||
+          !(await this.valid(row)) ||
+          !(await this.monitors.heartbeat(
+            id,
+            run.token,
+            run.status,
+            run.message,
+          ))
+        )
+          run.abort.abort();
+      }),
+    );
+    if (this.status().state === 'standby') return;
+    for (const row of candidates.values()) {
+      if (this.stopped || this.current.size >= 8) break;
+      if (
+        this.current.has(row.id) ||
+        (this.retry.get(row.id) ?? 0) > Date.now()
+      )
+        continue;
+      const token = randomUUID();
+      if (!(await this.monitors.acquire(row.id, token))) continue;
+      if (this.stopped || !(await this.valid(row))) {
+        await this.monitors.heartbeat(
+          row.id,
+          token,
+          'paused',
+          '策略已停用、归档或运行权限已撤销',
+          undefined,
+          true,
+        );
+        continue;
+      }
+      const run: Running = {
+        abort: new AbortController(),
+        token,
+        promise: Promise.resolve(),
+        status: 'starting',
+        message: '正在加载历史行情',
+      };
+      this.current.set(row.id, run);
+      run.promise = this.execute(row, run)
+        .catch(async (error) => {
+          this.retry.set(row.id, Date.now() + 30000);
+          await this.monitors
+            .heartbeat(
+              row.id,
+              token,
+              run.abort.signal.aborted ? 'paused' : 'error',
+              run.abort.signal.aborted
+                ? '实时计算已停止'
+                : error instanceof Error
+                  ? error.message
+                  : '实时计算失败',
+              undefined,
+              true,
+            )
+            .catch(() => {});
+        })
+        .finally(() => this.current.delete(row.id));
+    }
+  }
+  private async execute(row: StoredMonitor, run: Running) {
+    const signal = run.abort.signal;
+    const root = join(
+      await this.context.runtime.ensureWorkspace(),
+      'signal-monitors',
+    );
+    await mkdir(root, { recursive: true, mode: 0o700 });
+    const directory = await mkdtemp(join(root, `${row.id}-`));
+    const sessions = new Set<string>();
+    try {
+      const version = await this.records.version(
+        row.user_id,
+        row.config.version_id,
+      );
+      const python = await this.preparePython(this.context.runtime, signal);
+      signal.throwIfAborted();
+      const runtime = await this.monitors.runtime(row.id, true);
+      await writeFile(join(directory, 'strategy.py'), version.source, {
+        mode: 0o600,
+      });
+      await writeFile(
+        join(directory, 'config.json'),
+        JSON.stringify({
+          ...row.config,
+          parameters: { ...version.parameters, ...row.config.parameters },
+        }),
+        { mode: 0o600 },
+      );
+      if (runtime?.checkpoint)
+        await writeFile(
+          join(directory, 'checkpoint.json'),
+          runtime.checkpoint,
+          { mode: 0o600 },
+        );
+      await runSignalProcess(
+        python,
+        [
+          join(
+            this.context.runtime.paths.pluginRoot,
+            'worker/strategy_monitor.py',
+          ),
+          join(this.context.runtime.paths.pluginRoot, 'sdk'),
+          directory,
+        ],
+        directory,
+        signal,
+        async (message) => {
+          signal.throwIfAborted();
+          if (message.kind === 'market') {
+            if (
+              typeof message.path !== 'string' ||
+              !/^\/(?:instruments\/[^/]+|history|contracts|sessions(?:\/[a-f0-9-]+(?:\/events)?)?)$/.test(
+                message.path,
+              )
+            )
+              throw new Error('Invalid market request');
+            const url = new URL('http://monitor' + message.path);
+            if (message.params && typeof message.params === 'object')
+              for (const [key, value] of Object.entries(message.params))
+                url.searchParams.set(key, String(value));
+            const response = await this.market(
+              row.user_id,
+              url.pathname + url.search,
+              {
+                method:
+                  typeof message.method === 'string' ? message.method : 'GET',
+                headers: { 'Content-Type': 'application/json' },
+                body: message.body ? JSON.stringify(message.body) : undefined,
+                signal,
+              },
+            );
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.code ?? '行情读取失败');
+            if (message.path === '/sessions' && typeof result.id === 'string')
+              sessions.add(result.id);
+            return result;
+          }
+          if (message.kind === 'checkpoint') {
+            const checkpoint = JSON.stringify(message.checkpoint);
+            if (checkpoint.length > 32 * 1024 * 1024)
+              throw new Error('检查点过大，请暂停后重新添加此标的');
+            if (
+              !(await this.monitors.heartbeat(
+                row.id,
+                run.token,
+                run.status,
+                run.message,
+                checkpoint,
+              ))
+            )
+              throw new Error('实时计算租约已失效');
+            return true;
+          }
+          if (message.kind === 'overlay') {
+            const overlay = overlaySchema.parse(message.overlay);
+            if (!(await this.monitors.saveOverlay(row.id, run.token, overlay)))
+              throw new Error('实时计算租约已失效');
+            return true;
+          }
+          if (message.kind === 'ready') {
+            run.status = 'running';
+            run.message = '监听新的入场与离场信号';
+            if (
+              !(await this.monitors.heartbeat(
+                row.id,
+                run.token,
+                run.status,
+                run.message,
+              ))
+            )
+              throw new Error('实时计算租约已失效');
+            return true;
+          }
+          if (message.kind === 'signal') {
+            const raw = signalSchema.parse(message.signal);
+            if (!(await this.valid(row))) throw new Error('实时监控已停用');
+            if (
+              !(await this.monitors.heartbeat(
+                row.id,
+                run.token,
+                run.status,
+                run.message,
+              ))
+            )
+              throw new Error('实时计算租约已失效');
+            signal.throwIfAborted();
+            const event: StrategySignal = {
+              ...raw,
+              id: createHash('sha256')
+                .update(`${row.id}:${raw.id}`)
+                .digest('hex'),
+              monitor_id: row.id,
+            };
+            await this.monitors.signal(row.user_id, event);
+            const strategy = await this.records.storedStrategy(
+              row.strategy_id,
+              row.user_id,
+            );
+            const current = await this.monitors.get(row.id, row.user_id);
+            const channels = strategyNotifications(
+              current.notifications ?? strategy.notifications,
+            ).channels;
+            if (
+              current.notifications_enabled !== false &&
+              current.config.events[event.type]
+            ) {
+              if (!this.context.notifications)
+                throw new Error('宿主通知服务不可用');
+              const side =
+                event.side === 'long'
+                  ? '多头'
+                  : event.side === 'short'
+                    ? '空头'
+                    : '';
+              const time = new Date(event.time * 1000).toLocaleString('zh-CN', {
+                timeZone: 'Asia/Shanghai',
+                hour12: false,
+              });
+              await this.context.notifications.publish({
+                userId: row.user_id,
+                eventId: event.id,
+                title: `${strategy.name} · ${side}${event.type === 'entry' ? '入场' : '离场'}信号`,
+                body: `${event.symbol} · v${row.version_number} · ${time}${event.price === null ? '' : ` · 参考价 ${event.price}`}${event.reason ? ` · ${event.reason}` : ''}`,
+                url: `/plugins/vibe-quant/?symbol=${encodeURIComponent(row.config.symbol)}`,
+                toast: channels.toast?.enabled ?? false,
+                desktop: channels.desktop?.enabled ?? false,
+              });
+            }
+            return true;
+          }
+          throw new Error('Invalid monitor command');
+        },
+      );
+    } finally {
+      await Promise.allSettled(
+        [...sessions].map((id) =>
+          this.market(row.user_id, `/sessions/${id}`, { method: 'DELETE' }),
+        ),
+      );
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+}

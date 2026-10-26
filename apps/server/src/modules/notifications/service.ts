@@ -3,6 +3,7 @@ import type { Automation } from '@aime/shared/automations';
 import type {
   BrowserPushSubscription,
   NotificationEvent,
+  PluginNotificationInput,
 } from '@aime/shared/notifications';
 import type { NotificationStore, PushRecipient } from './store.js';
 import { ThreadError } from '../threads/errors.js';
@@ -24,6 +25,7 @@ export interface PushTransport {
 export class NotificationService {
   private subscribers = new Set<Subscriber>();
   private deliveries = new Set<Promise<void>>();
+  private poll?: ReturnType<typeof setInterval>;
   constructor(
     private store: NotificationStore,
     private push?: PushTransport,
@@ -44,6 +46,37 @@ export class NotificationService {
   }
   get(userId: string, id: string) {
     return this.store.get(userId, id);
+  }
+  async publishPlugin(pluginId: string, input: PluginNotificationInput) {
+    if (!input.toast && !input.desktop) return;
+    const prefix = `/plugins/${pluginId}`;
+    if (
+      !/^[a-z][a-z0-9-]{0,39}$/.test(pluginId) ||
+      !(input.url === prefix || input.url.startsWith(`${prefix}/`)) ||
+      input.url.includes('\\') ||
+      input.url.includes('..')
+    )
+      throw new Error('Invalid plugin notification path');
+    const id = createHash('sha256')
+      .update(`plugin:${pluginId}:${input.userId}:${input.eventId}`)
+      .digest('hex');
+    const added = await this.store.put({
+      ownerId: input.userId,
+      scope: { scope: 'personal' },
+      notification: {
+        kind: 'plugin',
+        id,
+        pluginId,
+        title: input.title,
+        body: input.body,
+        url: input.url,
+        createdAt: new Date().toISOString(),
+        toast: input.toast,
+      },
+    });
+    if (!added) return;
+    for (const subscriber of this.subscribers) this.enqueue(subscriber);
+    if (input.desktop && this.push) this.schedulePush(id);
   }
   async publish(
     task: Automation,
@@ -77,14 +110,15 @@ export class NotificationService {
     if (!added) return;
     // In-page delivery is unconditional and never waits for a browser push service.
     for (const subscriber of this.subscribers) this.enqueue(subscriber);
-    if (task.desktopNotification && this.push) {
-      const delivery = this.deliverPush(id)
-        .catch(() => {
-          console.error('Desktop notification delivery failed');
-        })
-        .finally(() => this.deliveries.delete(delivery));
-      this.deliveries.add(delivery);
-    }
+    if (task.desktopNotification && this.push) this.schedulePush(id);
+  }
+  private schedulePush(id: string) {
+    const delivery = this.deliverPush(id)
+      .catch(() => {
+        console.error('Desktop notification delivery failed');
+      })
+      .finally(() => this.deliveries.delete(delivery));
+    this.deliveries.add(delivery);
   }
   private async deliverPush(id: string) {
     const recipients = await this.store.recipients(id);
@@ -129,10 +163,24 @@ export class NotificationService {
       pending: Promise.resolve(),
     };
     this.subscribers.add(subscriber);
+    // Other application instances may publish into the same durable stream.
+    this.poll ??= setInterval(() => {
+      if (!this.subscribers.size) {
+        clearInterval(this.poll);
+        this.poll = undefined;
+        return;
+      }
+      for (const current of this.subscribers) this.enqueue(current);
+    }, 3000);
+    this.poll.unref();
     this.enqueue(subscriber);
     return () => {
       subscriber.active = false;
       this.subscribers.delete(subscriber);
+      if (!this.subscribers.size) {
+        clearInterval(this.poll);
+        this.poll = undefined;
+      }
     };
   }
   private enqueue(subscriber: Subscriber) {
@@ -181,6 +229,8 @@ export class NotificationService {
     ]);
   }
   async close() {
+    clearInterval(this.poll);
+    this.poll = undefined;
     for (const subscriber of this.subscribers) {
       subscriber.active = false;
       subscriber.close();

@@ -1,3 +1,4 @@
+import type { SignalMonitor } from '../../signal-types.js';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import type {
@@ -15,10 +16,16 @@ import { StrategyError } from './schema.js';
 import { sha256, StrategySources } from './sources.js';
 import { decodeArtifact, encodeArtifact } from './artifacts.js';
 import type { OptimizationReport } from '../../optimization-types.js';
+import {
+  strategyNotifications,
+  type StrategyNotifications,
+} from '../../strategy-notifications.js';
 
 export type StoredStrategy = Omit<StrategySummary, 'status'> & {
   /** Records saved before lifecycle support are active. */
   status?: StrategyStatus;
+  /** Legacy records have no notification preferences; channels default to off. */
+  notifications?: StrategyNotifications;
   user_id: string;
   draft_hash: string;
   draft_parameters: Record<string, unknown>;
@@ -194,6 +201,7 @@ export class StrategyStore extends ClickHouseClient {
     const row = await this.storedStrategy(id, owner);
     return {
       ...summary(row),
+      notifications: strategyNotifications(row.notifications),
       draft: {
         source: await this.sources.read(row.draft_hash),
         parameters: row.draft_parameters,
@@ -207,6 +215,7 @@ export class StrategyStore extends ClickHouseClient {
       name: string;
       description: string;
       enabled: boolean;
+      notifications?: StrategyNotifications;
       draft: ScriptDraft;
     },
     id?: string,
@@ -223,6 +232,9 @@ export class StrategyStore extends ClickHouseClient {
       name: value.name,
       description: value.description,
       enabled: value.enabled,
+      notifications: strategyNotifications(
+        value.notifications ?? existing?.notifications,
+      ),
       status: 'active',
       revision: (existing?.revision ?? 0) + 1,
       version_count: existing?.version_count ?? 0,
@@ -357,6 +369,7 @@ export class StrategyStore extends ClickHouseClient {
     id: string,
     before?: string,
     kind: 'backtest' | 'optimization' | 'all' = 'backtest',
+    monitor?: Pick<SignalMonitor, 'engine' | 'config'>,
   ): Promise<BacktestRun[]> {
     await this.storedStrategy(id, owner);
     const cursor = before
@@ -366,12 +379,28 @@ export class StrategyStore extends ClickHouseClient {
     const rows = await this.rows<{ payload: string }>(
       `SELECT payload FROM ${this.table('quant_strategy_runs')} FINAL
        WHERE userId = {owner:String} AND JSONExtractString(payload, 'strategy_id') = {strategy:String}
+       ${
+         monitor
+           ? `AND JSONExtractString(payload, 'version_id') = {version:String}
+         AND JSONExtractString(payload, 'engine') = {engine:String}
+         AND JSONExtractString(payload, 'config', 'symbol') = {symbol:String}
+         AND JSONExtractUInt(payload, 'config', 'duration') = {duration:UInt32}`
+           : ''
+       }
        ${kind === 'all' ? '' : `AND ${kind === 'backtest' ? 'NOT ' : ''}JSONHas(payload, 'config', 'optimization')`}
        ${cursor ? "AND (JSONExtractString(payload, 'created_at'), id) < ({before:String}, {beforeId:String})" : ''}
        ORDER BY JSONExtractString(payload, 'created_at') DESC, id DESC LIMIT 30`,
       {
         owner,
         strategy: id,
+        ...(monitor
+          ? {
+              version: monitor.config.version_id,
+              engine: monitor.engine,
+              symbol: monitor.config.symbol,
+              duration: String(monitor.config.duration),
+            }
+          : {}),
         before: cursor?.value.created_at ?? '',
         beforeId: before ?? '',
       },

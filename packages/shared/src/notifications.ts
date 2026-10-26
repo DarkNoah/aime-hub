@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { automationScopeSchema } from './automations.js';
 
-export const notificationSchema = z.object({
+const taskNotificationSchema = z.object({
   id: z.string(),
   taskId: z.string(),
   taskName: z.string(),
@@ -10,7 +10,31 @@ export const notificationSchema = z.object({
   createdAt: z.string(),
   url: z.string().regex(/^\/(?!\/)[^\\]*$/),
 });
-export type TaskNotification = z.infer<typeof notificationSchema>;
+export type TaskNotification = z.infer<typeof taskNotificationSchema>;
+export const pluginNotificationSchema = z.object({
+  kind: z.literal('plugin'),
+  id: z.string(),
+  pluginId: z.string(),
+  title: z.string(),
+  body: z.string(),
+  createdAt: z.string(),
+  url: z.string().regex(/^\/(?!\/)[^\\]*$/),
+  toast: z.boolean(),
+});
+export const notificationSchema = z.union([
+  taskNotificationSchema,
+  pluginNotificationSchema,
+]);
+export type AppNotification = z.infer<typeof notificationSchema>;
+export interface PluginNotificationInput {
+  userId: string;
+  eventId: string;
+  title: string;
+  body: string;
+  url: string;
+  toast: boolean;
+  desktop: boolean;
+}
 const cursor = z.string().regex(/^\d{1,18}$/);
 export const notificationEventSchema = z.discriminatedUnion('type', [
   z.object({

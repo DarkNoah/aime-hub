@@ -218,7 +218,7 @@ export function StrategyEditor({
       clearTimeout(timer);
     };
   }, [pluginId, initial.id, retry]);
-  const setField = (key: keyof EditState, value: string | boolean) =>
+  const setField = <K extends keyof EditState>(key: K, value: EditState[K]) =>
     setEdit((old) => ({
       ...old,
       [key]: value,
@@ -353,7 +353,7 @@ export function StrategyEditor({
         {readOnly && (
           <p className="mt-2 text-xs text-muted-foreground">
             {record.status === 'deleted' ? '策略已移入回收站' : '策略已归档'}
-            ，脚本、版本和历史结果仍可查看。恢复后可继续编辑或新建任务；已提交的任务会继续执行。
+            ，脚本、版本和历史结果仍可查看。恢复后可继续编辑或新建任务；已提交的回测会继续执行，实时监听暂停。
           </p>
         )}
       </div>
@@ -775,37 +775,52 @@ export function StrategyEditor({
         </Dialog>
       )}
       {settings && (
-        <Dialog open onOpenChange={setSettings}>
-          <DialogContent>
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!busy) setSettings(open);
+          }}
+        >
+          <DialogContent className="flex max-h-[90svh] flex-col">
             <DialogHeader>
               <DialogTitle>策略设置</DialogTitle>
               <DialogDescription>
                 修改与当前草稿一起保存，已发布版本保持不变。
               </DialogDescription>
             </DialogHeader>
-            <Label className="grid gap-2">
-              名称
-              <Input
-                value={edit.name}
-                maxLength={100}
-                onChange={(e) => setField('name', e.target.value)}
-              />
-            </Label>
-            <Label className="grid gap-2">
-              描述
-              <Textarea
-                value={edit.description}
-                maxLength={2000}
-                onChange={(e) => setField('description', e.target.value)}
-              />
-            </Label>
-            <Label className="flex items-center justify-between">
-              允许新建回测
-              <Switch
-                checked={edit.enabled}
-                onCheckedChange={(value) => setField('enabled', value)}
-              />
-            </Label>
+            <ScrollArea
+              className="flex min-h-0 flex-1 flex-col overflow-hidden"
+              viewportProps={{ className: 'min-h-0 flex-1' }}
+            >
+              <div className="space-y-4 p-1">
+                <Label className="grid gap-2">
+                  名称
+                  <Input
+                    value={edit.name}
+                    maxLength={100}
+                    disabled={busy}
+                    onChange={(e) => setField('name', e.target.value)}
+                  />
+                </Label>
+                <Label className="grid gap-2">
+                  描述
+                  <Textarea
+                    value={edit.description}
+                    maxLength={2000}
+                    disabled={busy}
+                    onChange={(e) => setField('description', e.target.value)}
+                  />
+                </Label>
+                <Label className="flex items-center justify-between">
+                  启用策略
+                  <Switch
+                    disabled={busy}
+                    checked={edit.enabled}
+                    onCheckedChange={(value) => setField('enabled', value)}
+                  />
+                </Label>
+              </div>
+            </ScrollArea>
             <DialogFooter>
               <Button
                 disabled={busy}
@@ -817,7 +832,7 @@ export function StrategyEditor({
                   })
                 }
               >
-                保存设置
+                {busy ? '保存中…' : '保存设置'}
               </Button>
             </DialogFooter>
           </DialogContent>

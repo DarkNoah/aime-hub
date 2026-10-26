@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { MAX_BACKTEST_SECONDS } from './limits.js';
 import { optimizationSchema } from './optimization.js';
+import { strategyNotificationsSchema } from '../../strategy-notifications.js';
 
 export const symbol = z.string().regex(/^[A-Za-z0-9_.@-]{1,100}$/);
 export const strategyStatusSchema = z.enum(['active', 'archived', 'deleted']);
@@ -13,6 +14,8 @@ export const strategySchema = z.object({
   name: z.string().trim().min(1).max(100),
   description: z.string().max(2000).default(''),
   enabled: z.boolean().default(true),
+  // Omission preserves existing preferences for older clients and Agent edits.
+  notifications: strategyNotificationsSchema.optional(),
   draft: draftSchema,
 });
 export const backtestSchema = z

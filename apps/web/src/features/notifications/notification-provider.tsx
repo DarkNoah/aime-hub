@@ -6,6 +6,7 @@ import { Toaster } from '@/components/ui/toast';
 import { toast } from '@/components/ui/toast-manager';
 import { refreshDesktopPush } from './desktop-push';
 import { SharedEventSource } from '@/components/realtime/event-source';
+import { toast as signalToast } from 'sonner';
 
 export function NotificationProvider() {
   const { data } = useAuthSession();
@@ -26,6 +27,7 @@ export function NotificationProvider() {
     let source: SharedEventSource;
     let retry: ReturnType<typeof setTimeout>;
     const openToasts = new Set<string>();
+    const signalToasts = new Set<string>();
     const connect = () => {
       if (stopped) return;
       source = new SharedEventSource(
@@ -56,6 +58,22 @@ export function NotificationProvider() {
         }
         if (event.type !== 'notification') return;
         const notification = event.notification;
+        if ('kind' in notification) {
+          if (!notification.toast) return;
+          signalToasts.add(notification.id);
+          signalToast(notification.title, {
+            id: notification.id,
+            description: notification.body,
+            duration: 10000,
+            action: {
+              label: t('notifications.view'),
+              onClick: () => window.location.assign(notification.url),
+            },
+            onDismiss: () => signalToasts.delete(notification.id),
+            onAutoClose: () => signalToasts.delete(notification.id),
+          });
+          return;
+        }
         const id = toast.add({
           id: notification.id,
           title: t(
@@ -94,6 +112,7 @@ export function NotificationProvider() {
       source?.close();
       clearTimeout(retry);
       for (const id of openToasts) toast.close(id);
+      for (const id of signalToasts) signalToast.dismiss(id);
     };
   }, [userId, sessionId, t, i18n.language]);
   return <Toaster />;
