@@ -2,7 +2,7 @@ import type { BacktestInput } from '../../strategy-types.js';
 import type { QuantConfig } from '../config.js';
 import type { StateStore } from '../state-store.js';
 import type { StrategyStore } from './store.js';
-import { StrategyError, backtestSchema } from './schema.js';
+import { StrategyError, parseBacktestConfig } from './schema.js';
 
 /** Shared by HTTP and Agent tools: submitting Python always requires an administrator. */
 export async function enqueueBacktest(
@@ -20,9 +20,7 @@ export async function enqueueBacktest(
   signal?.throwIfAborted();
   if (!actor.isAdmin)
     throw new StrategyError('SCRIPT_EXECUTION_ADMIN_REQUIRED', 403);
-  const parsed = backtestSchema.safeParse(input);
-  if (!parsed.success) throw new StrategyError('INVALID_BACKTEST_CONFIG', 400);
-  const config = parsed.data;
+  const config = parseBacktestConfig(input);
   const item = await market.state.instrument(
     market.config.engine,
     config.symbol,

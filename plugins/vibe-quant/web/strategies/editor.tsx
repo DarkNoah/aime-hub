@@ -34,6 +34,7 @@ import {
   Textarea,
 } from '@app/plugin-ui';
 import {
+  CopyPlus,
   Download,
   FileCode2,
   History,
@@ -41,6 +42,7 @@ import {
   RotateCcw,
   Save,
   Settings2,
+  SlidersHorizontal,
   Square,
   Upload,
 } from 'lucide-react';
@@ -57,6 +59,8 @@ import {
 import { dateTime, errorText, parseObject } from './format';
 import { RunForm } from './run-form';
 import { ResultView } from './result-view';
+import { OptimizationPanel } from './optimization-panel';
+import { LifecycleActions } from './lifecycle-actions';
 
 type EditState = {
   name: string;
@@ -77,15 +81,18 @@ export function StrategyEditor({
   pluginId,
   canRun,
   onUpdate,
+  onOpenStrategy,
 }: {
   initial: StrategyDetail;
   pluginId: string;
   canRun: boolean;
   onUpdate: (item: StrategySummary) => void;
+  onOpenStrategy: (id: string) => void;
 }) {
   const cacheKey = `vibe-quant:strategy-draft:${initial.id}`;
   const [record, setRecord] = useState(initial);
   const [edit, setEdit] = useState<EditState>(() => {
+    if (initial.status !== 'active') return editState(initial);
     try {
       const cached = JSON.parse(sessionStorage.getItem(cacheKey) ?? 'null');
       if (
@@ -110,6 +117,7 @@ export function StrategyEditor({
     return editState(initial);
   });
   const [baseRevision, setBaseRevision] = useState(() => {
+    if (initial.status !== 'active') return initial.revision;
     try {
       const value = JSON.parse(sessionStorage.getItem(cacheKey) ?? 'null');
       if (Number.isInteger(value?.revision)) return value.revision as number;
@@ -134,14 +142,17 @@ export function StrategyEditor({
   const [publish, setPublish] = useState(false);
   const [note, setNote] = useState('');
   const [settings, setSettings] = useState(false);
+  const [optimizationOpen, setOptimizationOpen] = useState(false);
   const [runForm, setRunForm] = useState<{ initial?: BacktestInput } | null>(
     null,
   );
   const upload = useRef<HTMLInputElement>(null);
   const dirty = JSON.stringify(edit) !== JSON.stringify(editState(record));
+  const readOnly = record.status !== 'active';
   const viewed = versions.find((v) => v.id === selectedVersion);
   const run = runs.find((v) => v.id === selectedRun);
   useEffect(() => {
+    if (readOnly) return;
     try {
       if (dirty)
         sessionStorage.setItem(
@@ -152,7 +163,7 @@ export function StrategyEditor({
     } catch {
       /* Server save remains available when browser storage is disabled. */
     }
-  }, [cacheKey, edit, baseRevision, dirty]);
+  }, [cacheKey, edit, baseRevision, dirty, readOnly]);
   useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => {
@@ -269,6 +280,15 @@ export function StrategyEditor({
                 {record.name}
               </h2>
               <Badge variant="outline">Python SDK</Badge>
+              {readOnly && (
+                <Badge
+                  variant={
+                    record.status === 'deleted' ? 'destructive' : 'secondary'
+                  }
+                >
+                  {record.status === 'deleted' ? '已删除' : '已归档'}
+                </Badge>
+              )}
               {dirty && <Badge variant="secondary">草稿未保存</Badge>}
             </div>
             <p className="mt-1 truncate text-xs text-muted-foreground">
@@ -279,6 +299,16 @@ export function StrategyEditor({
             <Button
               size="sm"
               variant="outline"
+              disabled={!loaded || !versions.length}
+              onClick={() => setOptimizationOpen(true)}
+            >
+              <SlidersHorizontal className="size-4" />
+              调优参数
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={readOnly || busy}
               onClick={() => setSettings(true)}
             >
               <Settings2 className="size-4" />
@@ -287,18 +317,43 @@ export function StrategyEditor({
             <Button
               size="sm"
               disabled={
-                !loaded || !versions.length || !record.enabled || !canRun
+                readOnly ||
+                busy ||
+                !loaded ||
+                !versions.length ||
+                !record.enabled ||
+                !canRun
               }
               onClick={() => setRunForm({})}
             >
               <Play className="size-4" />
               新建回测
             </Button>
+            <LifecycleActions
+              pluginId={pluginId}
+              strategy={record}
+              busy={busy}
+              dirty={dirty}
+              onBusy={setBusy}
+              onError={setError}
+              onChanged={(next) => {
+                setRecord((old) => ({ ...old, ...next }));
+                setBaseRevision(next.revision);
+                setError('');
+                onUpdate(next);
+              }}
+            />
           </div>
         </div>
         {!canRun && (
           <p className="mt-2 text-xs text-muted-foreground">
             脚本在服务器插件 venv 中执行，运行操作需要管理员权限。
+          </p>
+        )}
+        {readOnly && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            {record.status === 'deleted' ? '策略已移入回收站' : '策略已归档'}
+            ，脚本、版本和历史结果仍可查看。恢复后可继续编辑或新建任务；已提交的任务会继续执行。
           </p>
         )}
       </div>
@@ -379,7 +434,7 @@ export function StrategyEditor({
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={dirty || busy}
+                  disabled={readOnly || dirty || busy}
                   title={dirty ? '请先保存当前草稿' : undefined}
                   onClick={() => {
                     setEdit((old) => ({
@@ -399,7 +454,7 @@ export function StrategyEditor({
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={busy || !dirty}
+                    disabled={readOnly || busy || !dirty}
                     onClick={() =>
                       void action(async () => {
                         await save();
@@ -412,7 +467,7 @@ export function StrategyEditor({
                   </Button>
                   <Button
                     size="sm"
-                    disabled={busy}
+                    disabled={readOnly || busy}
                     onClick={() => setPublish(true)}
                   >
                     发布版本
@@ -431,7 +486,7 @@ export function StrategyEditor({
                 <Button
                   variant="ghost"
                   size="sm"
-                  disabled={busy}
+                  disabled={readOnly || busy}
                   onClick={() => upload.current?.click()}
                   aria-label="导入 Python 脚本"
                 >
@@ -480,7 +535,7 @@ export function StrategyEditor({
               <JsonObjectEditor
                 key={selectedVersion}
                 label="默认参数"
-                readOnly={!!viewed}
+                readOnly={readOnly || !!viewed}
                 value={
                   viewed
                     ? JSON.stringify(viewed.parameters, null, 2)
@@ -495,10 +550,10 @@ export function StrategyEditor({
               <CodeEditor
                 key={`script-${selectedVersion}`}
                 value={viewed?.source ?? edit.source}
-                readOnly={!!viewed}
+                readOnly={readOnly || !!viewed}
                 onChange={(value) => setField('source', value)}
                 onSave={() => {
-                  if (!viewed && !busy && dirty)
+                  if (!readOnly && !viewed && !busy && dirty)
                     void action(async () => {
                       await save();
                       toast.success('草稿已保存');
@@ -567,7 +622,7 @@ export function StrategyEditor({
                         </Badge>
                       </TableCell>
                       <TableCell className="pr-5 text-right">
-                        <div className="flex justify-end gap-1">
+                        <div className="flex flex-wrap justify-end gap-1">
                           <Button
                             size="sm"
                             variant={
@@ -577,7 +632,26 @@ export function StrategyEditor({
                           >
                             结果
                           </Button>
-                          {activeRun(item.status) ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={
+                              readOnly ||
+                              !canRun ||
+                              !record.enabled ||
+                              !versions.some((v) => v.id === item.version_id)
+                            }
+                            title="将这条记录的参数填入新建回测窗体"
+                            onClick={() =>
+                              setRunForm({
+                                initial: structuredClone(item.config),
+                              })
+                            }
+                          >
+                            <CopyPlus className="size-3.5" />
+                            复用参数
+                          </Button>
+                          {activeRun(item.status) && (
                             <Button
                               size="icon"
                               variant="ghost"
@@ -601,19 +675,6 @@ export function StrategyEditor({
                               }
                             >
                               <Square className="size-3.5" />
-                            </Button>
-                          ) : (
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="size-8"
-                              disabled={!canRun || !record.enabled}
-                              aria-label="使用相同参数重新回测"
-                              onClick={() =>
-                                setRunForm({ initial: item.config })
-                              }
-                            >
-                              <RotateCcw className="size-3.5" />
                             </Button>
                           )}
                         </div>
@@ -834,6 +895,18 @@ export function StrategyEditor({
             setTab('runs');
             setRunForm(null);
           }}
+        />
+      )}
+      {optimizationOpen && (
+        <OptimizationPanel
+          pluginId={pluginId}
+          strategy={record}
+          versions={versions}
+          initial={runs[0]?.config}
+          canRun={canRun}
+          onClose={() => setOptimizationOpen(false)}
+          onDraft={onUpdate}
+          onOpenDraft={onOpenStrategy}
         />
       )}
     </div>

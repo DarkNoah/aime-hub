@@ -8,6 +8,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'sdk'))
 from quant_sdk import Bar, Dataset, Event, Fees, Instrument, LiveRunner, Quote, Roll, RunConfig, Strategy, backtest
 from quant_sdk.data import DataView
+from quant_sdk.execution import PaperBroker
 
 
 def candle(symbol, minute, close, *, day='2026-10-19', volume=1000, open_price=None, offset=0):
@@ -97,6 +98,72 @@ class StrategySDKTest(unittest.TestCase):
         odd = self.execute(Schedule(), [stock], events, params={'symbol': stock.symbol, 'targets': [1]})
         self.assertEqual(odd['orders'][0]['reason'], 'LOT_SIZE')
 
+    def test_fee_modes_apply_to_entries_exits_and_live_replay(self):
+        # Keep both fee components nonzero to catch accidental double charging.
+        for mode, expected in [('fixed', [6, 10]), ('rate', [40, 80]), ('combined', [46, 90])]:
+            with self.subTest(mode=mode):
+                item = Instrument(self.future.symbol, 'future', .2, multiplier=200, margin_rate=.12,
+                                  fees=Fees(mode=mode, per_unit=3, rate=.001,
+                                            close_today_per_unit=5, close_today_rate=.002))
+                events = [candle(item.symbol, minute, 100) for minute in range(3)]
+                config = RunConfig(initial_cash=1_000_000, slippage_ticks=0)
+                params = {'symbol': item.symbol, 'targets': [2, 0]}
+                result = self.execute(Schedule(), [item], events, params=params, config=config)
+                self.assertEqual(result['status'], 'succeeded', result['message'])
+                self.assertEqual([fill['fee'] for fill in result['fills']], expected)
+                self.assertEqual(result['trades'][0]['fees'], sum(expected))
+                self.assertEqual(result['metrics']['total_pnl'], -sum(expected))
+                runner = LiveRunner(Schedule(), [item], params=params, config=config,
+                                    mode='paper', output_dir=self.temp.name)
+                runner.process(events[0])
+                runner.process(events[1])
+                restored = LiveRunner.restore(Schedule(), runner.checkpoint(), output_dir=self.temp.name)
+                runner.finish('cancelled', 'restore fixture')
+                streamed = restored.run(events[2:])
+                for field in ('fills', 'trades', 'metrics'):
+                    self.assertEqual(result[field], streamed[field], field)
+
+    def test_fixed_fee_is_per_unit_and_close_today_zero_does_not_fall_back(self):
+        for override, expected_close in [(None, 9), (0, 0), (5, 15)]:
+            for price in (100, 8000):
+                with self.subTest(override=override, price=price):
+                    item = Instrument(self.future.symbol, 'future', .2, multiplier=200, margin_rate=.12,
+                                      fees=Fees(mode='fixed', per_unit=3, rate=.1,
+                                                close_today_per_unit=override, close_today_rate=.2))
+                    for size in (3, -3):
+                        self.assertEqual(PaperBroker._fee(item, size, price), 9)
+                        self.assertEqual(PaperBroker._fee(item, size, price, closing_today=True), expected_close)
+        stock = Instrument('SSE.600000', 'stock', .01, lot_size=100,
+                           fees=Fees(mode='fixed', per_unit=.03))
+        self.assertEqual(PaperBroker._fee(stock, 200, 10), 6)
+
+    def test_fixed_fee_partial_fills_keep_minimum_and_sell_tax(self):
+        item = Instrument(self.future.symbol, 'future', .2, multiplier=200, margin_rate=.12,
+                          fees=Fees(mode='fixed', per_unit=2, rate=.1, minimum=5, sell_tax_rate=.001))
+        # The two one-lot entry fills each incur the minimum; FIFO closes do too.
+        events = [candle(item.symbol, minute, 100, volume=1) for minute in range(5)]
+        result = self.execute(Schedule(), [item], events,
+                              params={'symbol': item.symbol, 'targets': [2, None, 0]},
+                              config=RunConfig(initial_cash=1_000_000, slippage_ticks=0, participation_rate=1))
+        self.assertEqual(result['status'], 'succeeded', result['message'])
+        self.assertEqual([fill['quantity'] for fill in result['fills']], [1, 1, -1, -1])
+        self.assertEqual([fill['fee'] for fill in result['fills']], [5, 5, 25, 25])
+        self.assertEqual(result['metrics']['total_pnl'], -60)
+        rejected = self.execute(Schedule(), [item], events,
+                                params={'symbol': item.symbol, 'targets': [1]},
+                                config=RunConfig(initial_cash=2404, slippage_ticks=0, participation_rate=1))
+        self.assertEqual(rejected['orders'][0]['reason'], 'INSUFFICIENT_FUNDS')
+        self.assertEqual(rejected['fills'], [])
+
+    def test_fee_mode_validation_and_legacy_combined_default(self):
+        self.assertEqual(Fees().mode, 'combined')
+        for mode in ('unknown', '', None):
+            with self.assertRaisesRegex(ValueError, 'Invalid fee mode'):
+                Fees(mode=mode)
+        for fields in ({'per_unit': -1}, {'rate': float('nan')}, {'close_today_per_unit': -1}):
+            with self.assertRaisesRegex(ValueError, 'Invalid fee'):
+                Fees(mode='fixed', **fields)
+
     def test_stock_and_commodity_use_the_same_strategy(self):
         for item, size in [(Instrument('SZSE.000001', 'stock', .01, lot_size=100), 100),
                            (Instrument('SHFE.rb2611', 'future', 1, multiplier=10, margin_rate=.15), 1)]:
@@ -166,6 +233,21 @@ class StrategySDKTest(unittest.TestCase):
         uninterrupted = LiveRunner(Trend(), [self.future], params=params, config=config, mode='paper', output_dir=self.temp.name).run(events)
         for field in ('signals', 'fills', 'trades', 'metrics'):
             self.assertEqual(result[field], uninterrupted[field], field)
+
+    def test_finished_backtest_keeps_entry_fill_and_open_position_without_closed_trade(self):
+        events = [candle(self.future.symbol, i, 8000 + i) for i in range(3)]
+        result = self.execute(Schedule(), [self.future], events,
+                              params={'symbol': self.future.symbol, 'targets': [1]},
+                              config=RunConfig(initial_cash=1_000_000))
+        self.assertEqual(result['status'], 'succeeded', result['message'])
+        self.assertEqual(result['account']['positions'], {self.future.symbol: 1})
+        self.assertEqual(len(result['fills']), 1)
+        self.assertEqual(result['fills'][0]['offset'], 'open')
+        self.assertEqual(result['trades'], [])
+        self.assertEqual(result['metrics']['trade_count'], 0)
+        saved = json.loads((Path(result['artifacts']) / 'result.json').read_text())
+        self.assertEqual(saved['account']['positions'], result['account']['positions'])
+        self.assertEqual(saved['fills'], result['fills'])
 
     def test_cancellation_persists_a_run(self):
         stop = StopEvent()

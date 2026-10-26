@@ -5,6 +5,7 @@ import type { StateStore } from '../state-store.js';
 import { ClickHouseError } from '../clickhouse-client.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import { MAX_BACKTEST_BARS } from './limits.js';
+import { completeFiveMinuteBars } from './signal-bars.js';
 
 export interface RawSnapshot {
   engine: Engine;
@@ -12,6 +13,13 @@ export interface RawSnapshot {
   instruments: Record<string, Instrument>;
   mappings: Record<string, { time: number; underlying: string }[]>;
   bars: Bar[];
+  derived_bars?: {
+    symbol: string;
+    duration: number;
+    source_duration: number;
+    count: number;
+    replaced: number;
+  }[];
 }
 /** Read through the same market store as the chart, then freeze before user code executes. */
 export async function collectSnapshot(
@@ -159,6 +167,35 @@ export async function collectSnapshot(
         after = next;
       }
       windowStart = before;
+    }
+  }
+  if (config.duration === 300) {
+    for (const symbol of new Set([
+      config.symbol,
+      ...(config.benchmark_symbol ? [config.benchmark_symbol] : []),
+    ])) {
+      const derived = completeFiveMinuteBars(result.bars, symbol, config.end);
+      if (!derived.length) continue;
+      const times = new Set(derived.map((bar) => bar.time));
+      const remaining = result.bars.filter(
+        (bar) =>
+          !(
+            bar.symbol === symbol &&
+            bar.duration === 300 &&
+            times.has(bar.time)
+          ),
+      );
+      const replaced = result.bars.length - remaining.length;
+      if (remaining.length + derived.length > MAX_BACKTEST_BARS)
+        throw new Error('单次回测最多 500,000 根数据 K 线，请缩短区间');
+      result.bars = remaining.concat(derived);
+      (result.derived_bars ??= []).push({
+        symbol,
+        duration: 300,
+        source_duration: 60,
+        count: derived.length,
+        replaced,
+      });
     }
   }
   return result;

@@ -6,7 +6,7 @@ import {
   MONTH_DURATION,
   type Bar,
 } from '../../shared.js';
-import type { Trade, TradeReplay } from '../../strategy-types.js';
+import type { TradeRecord, TradeReplay } from '../../strategy-types.js';
 import { tradeExitAnchor } from '../../strategy-types.js';
 import { periodStart } from '../bar-periods.js';
 
@@ -60,7 +60,7 @@ function nearest(bars: Bar[], time: number) {
 /** Aggregate the immutable execution candles before slicing, never consult current market data. */
 export function replayWindow(
   dataset: ReplayDataset,
-  trade: Trade,
+  trade: TradeRecord,
   query: z.infer<typeof replayQuerySchema>,
 ): Omit<TradeReplay, 'snapshotHash'> {
   const minutes = [
@@ -77,12 +77,13 @@ export function replayWindow(
     ).values(),
   ].sort((a, b) => a.time - b.time);
   const { duration } = query;
+  const exitTime = tradeExitAnchor(trade);
   const time =
     query.around ??
     (query.at === 'latest'
       ? (minutes.at(-1)?.time ?? 0)
       : query.at === 'exit'
-        ? tradeExitAnchor(trade)
+        ? (exitTime ?? trade.entry_time)
         : trade.entry_time);
   const day = minutes[nearest(minutes, time)]?.trading_day;
   const selected =
@@ -159,7 +160,7 @@ export function replayWindow(
       : null,
     markerTimes: {
       entry: anchors.get(trade.entry_time) ?? null,
-      exit: anchors.get(tradeExitAnchor(trade)) ?? null,
+      exit: exitTime === null ? null : (anchors.get(exitTime) ?? null),
     },
   };
 }

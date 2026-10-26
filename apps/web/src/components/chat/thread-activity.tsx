@@ -1,9 +1,77 @@
-import { LoaderCircle } from 'lucide-react';
+import {
+  CircleCheck,
+  CircleMinus,
+  CirclePause,
+  CircleStop,
+  CircleX,
+  Clock3,
+  Hand,
+  Hourglass,
+  LoaderCircle,
+  MessageCircle,
+  ShieldAlert,
+  SkipForward,
+  type LucideIcon,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThreadStatus } from '@aime/shared/threads';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+
+const threadStatusIcons: Record<ThreadStatus, LucideIcon> = {
+  idle: MessageCircle,
+  pending: Clock3,
+  running: LoaderCircle,
+  success: CircleCheck,
+  failed: CircleX,
+  tripwire: ShieldAlert,
+  suspended: Hand,
+  waiting: Hourglass,
+  canceled: CircleStop,
+  bailed: CircleMinus,
+  paused: CirclePause,
+  skipped: SkipForward,
+};
+
+export function ThreadStatusIcon({
+  status,
+  className,
+}: {
+  status: ThreadStatus;
+  className?: string;
+}) {
+  const { t } = useTranslation();
+  const label = t(`chat.status.${status}`);
+  const Icon = threadStatusIcons[status];
+
+  return (
+    <Badge
+      variant="ghost"
+      role="img"
+      aria-label={label}
+      title={label}
+      className={cn(
+        'size-3.5 rounded-none border-0 p-0 text-muted-foreground',
+        (status === 'running' || status === 'pending' || status === 'success') &&
+          'text-primary',
+        (status === 'failed' || status === 'tripwire') && 'text-destructive',
+        (status === 'suspended' || status === 'waiting') &&
+          'text-amber-700 dark:text-amber-400',
+        className,
+      )}
+    >
+      <span
+        className={cn(
+          'inline-flex',
+          status === 'running' && 'motion-safe:animate-spin',
+        )}
+      >
+        <Icon aria-hidden="true" className="size-3.5" />
+      </span>
+    </Badge>
+  );
+}
 
 export function ThreadActivityTitle({
   children,

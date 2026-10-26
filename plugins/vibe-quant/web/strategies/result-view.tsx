@@ -22,7 +22,12 @@ import {
   ChartCandlestick,
   Download,
 } from 'lucide-react';
-import type { BacktestResult, BacktestRun, Trade } from '../../strategy-types';
+import type {
+  BacktestResult,
+  BacktestRun,
+  TradeRecord,
+} from '../../strategy-types';
+import { resultTradeRecords } from '../../strategy-trades';
 import { dateTime, errorText, number, percent } from './format';
 import { exitReasonLabel } from '../trade-exit';
 import { PeriodReturns } from './period-returns';
@@ -56,7 +61,7 @@ export function ResultView({
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const [page, setPage] = useState(0);
-  const [trade, setTrade] = useState<Trade | null>(null);
+  const [trade, setTrade] = useState<TradeRecord | null>(null);
   useEffect(() => {
     const abort = new AbortController();
     pluginRequest<{
@@ -75,10 +80,13 @@ export function ResultView({
   const result = data?.result;
   const sortedTrades = useMemo(
     () =>
-      [...(result?.trades ?? [])].sort(
-        (a, b) => b.exit_time - a.exit_time || b.entry_time - a.entry_time,
+      (result ? resultTradeRecords(result) : []).sort(
+        (a, b) =>
+          Number(b.status === 'open') - Number(a.status === 'open') ||
+          (b.exit_time ?? b.entry_time) - (a.exit_time ?? a.entry_time) ||
+          b.entry_time - a.entry_time,
       ),
-    [result?.trades],
+    [result],
   );
   if (error)
     return (
@@ -174,6 +182,9 @@ export function ResultView({
                 execution_model:
                   run.config.execution_model ?? 'actual_contract',
                 parameters: run.config.parameters,
+                ...(run.config.optimization
+                  ? { optimization: run.config.optimization }
+                  : {}),
                 rules: run.config.rules,
                 annualization: run.config.annualization,
                 risk_free_rate: run.config.risk_free_rate,
@@ -230,7 +241,7 @@ export function ResultView({
           <Tabs defaultValue="trades">
             <TabsList>
               <TabsTrigger value="trades">
-                交易记录 · {result.trades.length}
+                交易记录 · {sortedTrades.length}
               </TabsTrigger>
               <TabsTrigger value="periods">月度 / 年度</TabsTrigger>
               <TabsTrigger value="logs">订单与日志</TabsTrigger>
@@ -242,6 +253,7 @@ export function ResultView({
                     <TableHeader>
                       <TableRow>
                         <TableHead>标的 / 方向</TableHead>
+                        <TableHead>状态</TableHead>
                         <TableHead>入场</TableHead>
                         <TableHead>离场</TableHead>
                         <TableHead>离场原因</TableHead>
@@ -266,6 +278,17 @@ export function ResultView({
                                 {item.side === 'long' ? '多头' : '空头'}
                               </Badge>
                             </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={
+                                  item.status === 'open'
+                                    ? 'secondary'
+                                    : 'outline'
+                                }
+                              >
+                                {item.status === 'open' ? '未平仓' : '已平仓'}
+                              </Badge>
+                            </TableCell>
                             <TableCell className="text-xs tabular-nums">
                               <div>{number(item.entry_price)}</div>
                               <span className="whitespace-nowrap text-muted-foreground">
@@ -287,9 +310,16 @@ export function ResultView({
                               )}
                             </TableCell>
                             <TableCell>
-                              <Badge variant="outline" title={item.exit_reason}>
-                                {exitReasonLabel(item.exit_reason)}
-                              </Badge>
+                              {item.status === 'open' ? (
+                                '—'
+                              ) : (
+                                <Badge
+                                  variant="outline"
+                                  title={item.exit_reason}
+                                >
+                                  {exitReasonLabel(item.exit_reason)}
+                                </Badge>
+                              )}
                               {item.trigger_price != null && (
                                 <div className="mt-1 text-xs text-muted-foreground">
                                   触发价 {number(item.trigger_price)}
@@ -303,7 +333,7 @@ export function ResultView({
                               {number(item.fees)}
                             </TableCell>
                             <TableCell
-                              className={`text-right tabular-nums ${item.net_pnl >= 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}
+                              className={`text-right tabular-nums ${item.net_pnl === null ? 'text-muted-foreground' : item.net_pnl >= 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}
                             >
                               {number(item.net_pnl)}
                             </TableCell>
@@ -312,21 +342,21 @@ export function ResultView({
                                 size="sm"
                                 variant="ghost"
                                 onClick={() => setTrade(item)}
-                                aria-label={`回放 ${item.symbol} ${dateTime(item.entry_time)} 的交易`}
+                                aria-label={`${item.status === 'open' ? '查看入场' : '回放'} ${item.symbol} ${dateTime(item.entry_time)} 的交易`}
                               >
                                 <ChartCandlestick className="size-4" />
-                                回放
+                                {item.status === 'open' ? '查看入场' : '回放'}
                               </Button>
                             </TableCell>
                           </TableRow>
                         ))}
-                      {!result.trades.length && (
+                      {!sortedTrades.length && (
                         <TableRow>
                           <TableCell
-                            colSpan={8}
+                            colSpan={9}
                             className="py-10 text-center text-muted-foreground"
                           >
-                            没有已平仓交易，可在订单与日志中检查信号和拒单原因。
+                            暂无交易记录，可在订单与日志中检查信号和拒单原因。
                           </TableCell>
                         </TableRow>
                       )}
@@ -334,10 +364,10 @@ export function ResultView({
                   </Table>
                 </ScrollArea>
               </div>
-              {result.trades.length > 20 && (
+              {sortedTrades.length > 20 && (
                 <div className="mt-3 flex items-center justify-end gap-3 text-xs text-muted-foreground">
                   <span>
-                    {page + 1} / {Math.ceil(result.trades.length / 20)}
+                    {page + 1} / {Math.ceil(sortedTrades.length / 20)}
                   </span>
                   <Button
                     size="sm"
@@ -351,7 +381,7 @@ export function ResultView({
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={(page + 1) * 20 >= result.trades.length}
+                    disabled={(page + 1) * 20 >= sortedTrades.length}
                     onClick={() => setPage((n) => n + 1)}
                     aria-label="下一页交易"
                   >
@@ -402,6 +432,7 @@ export function ResultView({
           <p className="text-xs leading-5 text-muted-foreground">
             收益已扣费用，未平仓头寸按最新价计入权益；交易笔数按 FIFO
             平仓片段统计。“—”表示样本不足或指标无定义。期货逐日结算采用前一交易日最后观测价。
+            未平仓记录显示回测结束时的剩余数量及对应开仓手续费，净收益在平仓后记录。
           </p>
           {data.manifest?.risk_model != null && (
             <p className="text-xs leading-5 text-muted-foreground">

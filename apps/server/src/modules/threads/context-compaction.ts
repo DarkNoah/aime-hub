@@ -139,20 +139,40 @@ class ContextObservationalMemory extends ObservationalMemory {
 export class ContextCompactionProcessor extends ObservationalMemoryProcessor {
   constructor(
     config: ObservationalMemoryConfig,
-    memory: MemoryContextProvider,
+    private readonly contextMemory: MemoryContextProvider,
     private readonly budget: ContextBudget,
     private readonly resolveLimit: (
       args: ProcessInputStepArgs,
     ) => Promise<number | undefined>,
     private readonly onError: (error: unknown) => void,
   ) {
-    super(new ContextObservationalMemory(config, budget), memory);
+    super(new ContextObservationalMemory(config, budget), contextMemory);
   }
 
   override async processInputStep(args: ProcessInputStepArgs) {
     // This hook runs for every model step, including uninterrupted tool loops.
     // Resolve queued model changes before testing their context capacity.
     try {
+      if (!args.state.resumedToolsPersisted) {
+        // A resumed tool finishes before OM starts its new turn. Persist those
+        // live messages before OM reloads storage; otherwise the old
+        // pending call can replace the answer in the live message list.
+        // Resumed snapshots can classify the updated message as memory-sourced.
+        const completedTools = args.messageList.get.all
+          .db()
+          .filter((message) =>
+            message.content.parts.some(
+              (part) =>
+                part.type === 'tool-invocation' &&
+                ['result', 'output-error', 'output-denied'].includes(
+                  part.toolInvocation.state,
+                ),
+            ),
+          );
+        if (completedTools.length)
+          await this.contextMemory.persistMessages(completedTools);
+        args.state.resumedToolsPersisted = true;
+      }
       this.budget.setLimit(await this.resolveLimit(args));
       return await super.processInputStep(args);
     } catch (error) {

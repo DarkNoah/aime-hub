@@ -11,7 +11,10 @@ import type {
   StrategyDetail,
   StrategyVersion,
 } from '../strategy-types.js';
-import { backtestSchema } from '../server/strategies/schema.js';
+import {
+  backtestSchema,
+  parseBacktestConfig,
+} from '../server/strategies/schema.js';
 import { runPython } from '../server/strategies/runner.js';
 import { collectSnapshot } from '../server/strategies/snapshot.js';
 import { ClickHouseError } from '../server/clickhouse-client.js';
@@ -55,16 +58,74 @@ test('backtest inputs reject invalid chronology, unsafe values and malformed scr
     { ...config, start: config.end - 3661 * 86400 },
     { ...config, execution_model: 'unknown' },
     { ...config, symbol: actual, execution_model: 'continuous_price' },
-    { ...config, end: Date.now() / 1000 + 3600 },
     { ...config, rules: { ...config.rules, margin_rate: 2 } },
   ])
     assert.equal(backtestSchema.safeParse(changed).success, false);
+});
+test('backtest dates may extend beyond now while invalid ranges have a specific error', () => {
+  const now = Math.floor(Date.now() / 1000);
+  const config = {
+    ...input(randomUUID()),
+    start: now - 86400,
+    end: now + 86400,
+  };
+  assert.equal(parseBacktestConfig(config).end, config.end);
+  for (const changed of [
+    { start: null },
+    { end: null },
+    { end: config.start },
+    { end: config.start - 60 },
+    { start: config.end - 3661 * 86400 },
+  ])
+    assert.throws(() => parseBacktestConfig({ ...config, ...changed }), {
+      code: 'INVALID_BACKTEST_TIME_RANGE',
+    });
+  assert.throws(() => parseBacktestConfig({ ...config, initial_cash: -1 }), {
+    code: 'INVALID_BACKTEST_CONFIG',
+  });
+  assert.throws(
+    () =>
+      parseBacktestConfig({
+        ...config,
+        optimization: {
+          search_space: { fast: { type: 'int', low: 2, high: 5 } },
+          validation_start: config.end,
+        },
+      }),
+    { code: 'INVALID_OPTIMIZATION_CONFIG' },
+  );
+});
+test('backtest fee modes survive validation and historical fees remain unchanged', () => {
+  const config = input(randomUUID());
+  assert.deepEqual(backtestSchema.parse(config).rules.fees, config.rules.fees);
+  for (const mode of ['fixed', 'rate', 'combined']) {
+    const fees = { ...config.rules.fees, mode };
+    assert.deepEqual(
+      backtestSchema.parse({ ...config, rules: { ...config.rules, fees } })
+        .rules.fees,
+      fees,
+    );
+  }
+  for (const change of [
+    { mode: 'unknown' },
+    { per_unit: -1 },
+    { close_today_per_unit: -1 },
+  ]) {
+    assert.equal(
+      backtestSchema.safeParse({
+        ...config,
+        rules: { ...config.rules, fees: { ...config.rules.fees, ...change } },
+      }).success,
+      false,
+    );
+  }
 });
 test('explicit continuous-price snapshots paginate main bars without inventing contract mappings', async () => {
   const config = {
     ...input(randomUUID()),
     execution_model: 'continuous_price' as const,
   };
+  config.start = start - 86400;
   config.end = start + 70 * 86400;
   const source = Array.from({ length: 1005 }, (_, i) => ({
     symbol: config.symbol,

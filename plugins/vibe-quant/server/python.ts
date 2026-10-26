@@ -8,7 +8,7 @@ import type { PluginRuntimeContext } from '@app/plugin-sdk/server';
 
 const execute = promisify(execFile);
 const probe =
-  'import sys; assert sys.version_info >= (3, 10); import tqsdk, pytdx, chinese_calendar';
+  'import sys; assert sys.version_info >= (3, 10); import tqsdk, pytdx, chinese_calendar, optuna';
 const exists = (path: string) =>
   access(path).then(
     () => true,

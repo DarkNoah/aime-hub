@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import { MAX_BACKTEST_SECONDS } from './limits.js';
+import { optimizationSchema } from './optimization.js';
 
 export const symbol = z.string().regex(/^[A-Za-z0-9_.@-]{1,100}$/);
+export const strategyStatusSchema = z.enum(['active', 'archived', 'deleted']);
 const nonnegative = z.number().finite().nonnegative();
 export const draftSchema = z.object({
   source: z.string().min(1).max(60_000),
@@ -15,6 +17,7 @@ export const strategySchema = z.object({
 });
 export const backtestSchema = z
   .object({
+    optimization: optimizationSchema.optional(),
     version_id: z.uuid(),
     symbol,
     execution_model: z.enum(['actual_contract', 'continuous_price']).optional(),
@@ -42,6 +45,7 @@ export const backtestSchema = z
       lot_size: z.number().int().positive(),
       t_plus_one: z.boolean(),
       fees: z.object({
+        mode: z.enum(['fixed', 'rate', 'combined']).optional(),
         per_unit: nonnegative,
         rate: nonnegative,
         minimum: nonnegative,
@@ -54,12 +58,19 @@ export const backtestSchema = z
       .record(z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.boolean())
       .optional(),
   })
+  .refine((v) => v.end > v.start && v.end - v.start <= MAX_BACKTEST_SECONDS, {
+    message: '结束时间须晚于开始时间，跨度最多十年',
+    path: ['end'],
+  })
   .refine(
     (v) =>
-      v.end > v.start &&
-      v.end - v.start <= MAX_BACKTEST_SECONDS &&
-      v.end <= Date.now() / 1000,
-    '回测时间需为已过去的有效区间，跨度最多十年',
+      v.optimization?.validation_start === undefined ||
+      (v.optimization.validation_start > v.start &&
+        v.optimization.validation_start < v.end),
+    {
+      message: '验证开始时间必须位于回测区间内',
+      path: ['optimization', 'validation_start'],
+    },
   )
   .refine(
     (v) =>
@@ -74,4 +85,18 @@ export class StrategyError extends Error {
   ) {
     super(code);
   }
+}
+
+/** Keep HTTP forms and Agent submissions on the same validation path. */
+export function parseBacktestConfig(input: unknown) {
+  const parsed = backtestSchema.safeParse(input);
+  if (parsed.success) return parsed.data;
+  const field = parsed.error.issues[0]?.path[0];
+  throw new StrategyError(
+    field === 'start' || field === 'end'
+      ? 'INVALID_BACKTEST_TIME_RANGE'
+      : field === 'optimization'
+        ? 'INVALID_OPTIMIZATION_CONFIG'
+        : 'INVALID_BACKTEST_CONFIG',
+  );
 }

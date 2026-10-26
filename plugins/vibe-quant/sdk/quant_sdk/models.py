@@ -18,9 +18,14 @@ class Fees:
     close_today_per_unit: float | None = None
     close_today_rate: float | None = None
     sell_tax_rate: float = 0.0
+    mode: Literal['fixed', 'rate', 'combined'] = 'combined'
 
     def __post_init__(self):
+        if self.mode not in ('fixed', 'rate', 'combined'):
+            raise ValueError('Invalid fee mode')
         for name, value in asdict(self).items():
+            if name == 'mode':
+                continue
             if value is not None and (not isfinite(value) or value < 0):
                 raise ValueError(f"Invalid fee {name}")
 

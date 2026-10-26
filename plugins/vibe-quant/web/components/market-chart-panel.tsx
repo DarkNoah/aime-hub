@@ -14,7 +14,11 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { DURATIONS, durationLabel } from '../../shared';
-import type { RiskLevelRecord, Trade, TradeReplay } from '../../strategy-types';
+import type {
+  RiskLevelRecord,
+  TradeRecord,
+  TradeReplay,
+} from '../../strategy-types';
 import { MarketChart } from '../chart';
 import { DateJump } from '../date-jump';
 import {
@@ -50,7 +54,7 @@ export function MarketChartPanel({
   period: ChartPeriod;
   onPeriodChange: (period: ChartPeriod) => void;
   priceTick: number;
-  trade?: Trade;
+  trade?: TradeRecord;
   markerTimes?: TradeReplay['markerTimes'];
   riskLevels?: readonly RiskLevelRecord[];
   volumeProfileSource?: VolumeProfileSource;

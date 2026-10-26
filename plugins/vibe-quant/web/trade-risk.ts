@@ -1,11 +1,12 @@
 import { MONTH_DURATION, type Bar } from '../shared';
-import type { RiskLevelRecord, Trade } from '../strategy-types';
+import type { RiskLevelRecord, TradeRecord } from '../strategy-types';
+import { tradeHoldingEnd } from '../strategy-types';
 import type { IndicatorDrawing } from './indicators/types';
 import { pricePrecision } from './readout-format';
 
 /** Stable ordering preserves the last calculation when several share a timestamp. */
 export function tradeRiskLevels(
-  trade: Trade,
+  trade: TradeRecord,
   records: readonly RiskLevelRecord[],
 ) {
   const selected = records
@@ -13,7 +14,7 @@ export function tradeRiskLevels(
       (record) =>
         record.symbol === trade.symbol &&
         record.entry_signal_id === trade.entry_signal_id &&
-        record.time <= trade.exit_time,
+        record.time <= tradeHoldingEnd(trade),
     )
     .sort((a, b) => a.time - b.time);
   // Once triggered, the remaining market close retains that snapshot even if
@@ -62,7 +63,7 @@ function logicalTime(time: number, bars: Bar[], duration: number) {
 
 /** A snapshot only applies forward, until its replacement or the actual exit. */
 export function tradeRiskDrawings(
-  trade: Trade,
+  trade: TradeRecord,
   records: readonly RiskLevelRecord[],
   bars: Bar[],
   duration: number,
@@ -80,7 +81,7 @@ export function tradeRiskDrawings(
     const record = records[i];
     const startTime = Math.max(trade.entry_time, record.time, bars[0].time);
     const endTime = Math.min(
-      trade.exit_time,
+      tradeHoldingEnd(trade),
       records[i + 1]?.time ?? Infinity,
       end,
     );

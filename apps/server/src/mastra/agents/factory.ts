@@ -31,6 +31,7 @@ export type AgentRuntimeOptions = Omit<
     | 'defaultOptions'
     | 'workspace'
     | 'inputProcessors'
+    | 'outputProcessors'
   >;
 };
 

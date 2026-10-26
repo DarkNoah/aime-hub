@@ -28,6 +28,12 @@ import type {
 } from '../../strategy-types';
 import type { Instrument } from '../../shared';
 import { errorText, parseObject } from './format';
+import { FeeSettings } from './fee-settings';
+import {
+  defaultOptimization,
+  OptimizationSettings,
+} from './optimization-settings';
+import type { OptimizationConfig } from '../../optimization-types';
 
 const localTime = (seconds: number) =>
   new Date((seconds + 8 * 3600) * 1000).toISOString().slice(0, 16);
@@ -35,6 +41,7 @@ export function RunForm({
   pluginId,
   strategyId,
   versions,
+  mode = 'backtest',
   initial,
   onClose,
   onCreated,
@@ -42,6 +49,7 @@ export function RunForm({
   pluginId: string;
   strategyId: string;
   versions: StrategyVersion[];
+  mode?: 'backtest' | 'optimization';
   initial?: BacktestInput;
   onClose: () => void;
   onCreated: (run: BacktestRun) => void;
@@ -68,6 +76,7 @@ export function RunForm({
             lot_size: 1,
             t_plus_one: false,
             fees: {
+              mode: 'fixed',
               per_unit: 0,
               rate: 0,
               minimum: 0,
@@ -79,6 +88,20 @@ export function RunForm({
         },
   );
   const [start, setStart] = useState(localTime(config.start));
+  const optimize = mode === 'optimization';
+  const [optimization, setOptimization] = useState(
+    config.optimization ?? defaultOptimization,
+  );
+  const [space, setSpace] = useState(
+    config.optimization
+      ? JSON.stringify(config.optimization.search_space, null, 2)
+      : '',
+  );
+  const [validationStart, setValidationStart] = useState(
+    config.optimization?.validation_start
+      ? localTime(config.optimization.validation_start)
+      : '',
+  );
   const [end, setEnd] = useState(localTime(config.end));
   const [params, setParams] = useState(
     JSON.stringify(config.parameters, null, 2),
@@ -91,6 +114,10 @@ export function RunForm({
   const [searchError, setSearchError] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const selectedVersion = versions.find((v) => v.id === config.version_id);
+  const versionLabel = selectedVersion
+    ? `v${selectedVersion.number} · ${selectedVersion.note || selectedVersion.source_hash.slice(0, 8)}`
+    : '';
   useEffect(() => {
     if (!search.trim()) return;
     const abort = new AbortController();
@@ -117,14 +144,6 @@ export function RunForm({
     setConfig((old) => ({ ...old, [key]: value }));
   const rule = (key: keyof BacktestInput['rules'], value: unknown) =>
     setConfig((old) => ({ ...old, rules: { ...old.rules, [key]: value } }));
-  const fee = (
-    key: keyof BacktestInput['rules']['fees'],
-    value: number | null,
-  ) =>
-    setConfig((old) => ({
-      ...old,
-      rules: { ...old.rules, fees: { ...old.rules.fees, [key]: value } },
-    }));
   const numeric = (
     label: string,
     value: number | null,
@@ -150,6 +169,17 @@ export function RunForm({
       const parsed = parseObject(params);
       const input = {
         ...config,
+        optimization: optimize
+          ? {
+              ...optimization,
+              search_space: parseObject(
+                space,
+              ) as OptimizationConfig['search_space'],
+              validation_start: validationStart
+                ? Date.parse(`${validationStart}:00+08:00`) / 1000
+                : undefined,
+            }
+          : undefined,
         parameters: parsed,
         start: Date.parse(`${start}:00+08:00`) / 1000,
         end: Date.parse(`${end}:00+08:00`) / 1000,
@@ -159,11 +189,15 @@ export function RunForm({
       };
       const run = await pluginRequest<BacktestRun>(
         pluginId,
-        `/strategies/${strategyId}/runs`,
+        `/strategies/${strategyId}/${optimize ? 'optimizations' : 'runs'}`,
         { method: 'POST', body: JSON.stringify(input) },
       );
       onCreated(run);
-      toast.success('已创建回测，参数和版本已固定');
+      toast.success(
+        optimize
+          ? '已开始调优，完成后会创建新的策略草稿'
+          : '已创建回测，参数和版本已固定',
+      );
     } catch (e) {
       setError(errorText(e));
       toast.error(errorText(e));
@@ -180,16 +214,23 @@ export function RunForm({
     >
       <SheetContent className="w-full sm:max-w-2xl gap-0 p-0">
         <SheetHeader className="border-b p-5">
-          <SheetTitle>配置回测</SheetTitle>
+          <SheetTitle>{optimize ? '调优参数' : '配置回测'}</SheetTitle>
           <SheetDescription>
-            时间按北京时间，使用所选成交模式的一分钟 K 线模拟成交。
+            {optimize
+              ? '选定版本和搜索范围，最佳参数将另存为新的策略草稿。时间按北京时间。'
+              : initial
+                ? '已复用该记录的参数，可修改后点击「开始回测」。时间按北京时间。'
+                : '时间按北京时间，使用所选成交模式的一分钟 K 线模拟成交。'}
           </SheetDescription>
         </SheetHeader>
         <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="space-y-6 p-5">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Label className="grid gap-2 text-xs">
+          <ScrollArea
+            className="min-h-0 min-w-0 flex-1"
+            viewportProps={{ className: '[&>div]:block!' }}
+          >
+            <div className="min-w-0 space-y-6 p-5">
+              <div className="grid min-w-0 gap-4 sm:grid-cols-[minmax(0,1fr)_10rem]">
+                <Label className="grid min-w-0 gap-2 text-xs">
                   脚本版本
                   <Select
                     value={config.version_id}
@@ -204,25 +245,40 @@ export function RunForm({
                       );
                     }}
                   >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
+                    <SelectTrigger
+                      className="w-full min-w-0"
+                      title={versionLabel}
+                    >
+                      <SelectValue className="min-w-0 flex-1 text-left">
+                        <span className="truncate">{versionLabel}</span>
+                      </SelectValue>
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent
+                      position="popper"
+                      align="start"
+                      className="w-(--radix-select-trigger-width) max-w-[calc(100vw-2rem)]"
+                    >
                       {versions.map((v) => (
-                        <SelectItem key={v.id} value={v.id}>
-                          v{v.number} · {v.note || v.source_hash.slice(0, 8)}
+                        <SelectItem
+                          key={v.id}
+                          value={v.id}
+                          className="[&>span:last-child]:min-w-0"
+                        >
+                          <span className="min-w-0 whitespace-normal break-words">
+                            v{v.number} · {v.note || v.source_hash.slice(0, 8)}
+                          </span>
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </Label>
-                <Label className="grid gap-2 text-xs">
+                <Label className="grid min-w-0 gap-2 text-xs">
                   信号周期
                   <Select
                     value={String(config.duration)}
                     onValueChange={(v) => field('duration', Number(v))}
                   >
-                    <SelectTrigger className="w-full">
+                    <SelectTrigger className="w-full min-w-0">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -362,6 +418,10 @@ export function RunForm({
                     onChange={(e) => setEnd(e.target.value)}
                   />
                 </Label>
+                <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">
+                  日期可超出已有行情范围，回测使用区间内已收盘的可用 K
+                  线，无数据时会提示。结束时间须晚于开始时间，跨度最多十年。
+                </p>
                 {numeric('初始资金（元）', config.initial_cash, (v) =>
                   field('initial_cash', v),
                 )}
@@ -386,8 +446,7 @@ export function RunForm({
               <section className="space-y-3 border-t pt-5">
                 <h3 className="text-sm font-medium">交易规则与费用假设</h3>
                 <p className="text-xs text-muted-foreground">
-                  以下均为本次回测参数，请按交易品种填写。费率使用小数，0.0001
-                  表示万分之一。
+                  以下均为本次回测参数，请按交易品种填写。
                 </p>
                 <div className="grid gap-4 sm:grid-cols-2">
                   {numeric(
@@ -413,49 +472,11 @@ export function RunForm({
                       onCheckedChange={(v) => rule('t_plus_one', v)}
                     />
                   </Label>
-                  {numeric(
-                    '每手 / 股固定手续费（元）',
-                    config.rules.fees.per_unit,
-                    (v) => fee('per_unit', v),
-                  )}
-                  {numeric('成交额手续费率', config.rules.fees.rate, (v) =>
-                    fee('rate', v),
-                  )}
-                  {numeric('最低手续费（元）', config.rules.fees.minimum, (v) =>
-                    fee('minimum', v),
-                  )}
-                  {numeric('卖出税率', config.rules.fees.sell_tax_rate, (v) =>
-                    fee('sell_tax_rate', v),
-                  )}
-                  <Label className="grid gap-2 text-xs">
-                    平今固定手续费（空则沿用）
-                    <Input
-                      type="number"
-                      step="any"
-                      value={config.rules.fees.close_today_per_unit ?? ''}
-                      onChange={(e) =>
-                        fee(
-                          'close_today_per_unit',
-                          e.target.value === '' ? null : e.target.valueAsNumber,
-                        )
-                      }
-                    />
-                  </Label>
-                  <Label className="grid gap-2 text-xs">
-                    平今手续费率（空则沿用）
-                    <Input
-                      type="number"
-                      step="any"
-                      value={config.rules.fees.close_today_rate ?? ''}
-                      onChange={(e) =>
-                        fee(
-                          'close_today_rate',
-                          e.target.value === '' ? null : e.target.valueAsNumber,
-                        )
-                      }
-                    />
-                  </Label>
                 </div>
+                <FeeSettings
+                  value={config.rules.fees}
+                  onChange={(fees) => rule('fees', fees)}
+                />
               </section>
               <JsonObjectEditor
                 label="策略参数"
@@ -466,6 +487,16 @@ export function RunForm({
                 同名参数覆盖版本默认值，未填写的参数沿用默认值。
                 symbol、duration 和 execution_model 由上方配置统一注入。
               </p>
+              {optimize && (
+                <OptimizationSettings
+                  value={optimization}
+                  onChange={setOptimization}
+                  space={space}
+                  onSpaceChange={setSpace}
+                  validationStart={validationStart}
+                  onValidationChange={setValidationStart}
+                />
+              )}
               <details className="border-t pt-4">
                 <summary className="cursor-pointer text-sm font-medium">
                   统计与交易日历
@@ -514,7 +545,11 @@ export function RunForm({
               </Button>
               <Button type="submit" disabled={busy}>
                 <Play className="size-4" />
-                {busy ? '正在提交…' : '开始回测'}
+                {busy
+                  ? '正在提交…'
+                  : optimize
+                    ? '开始调优并生成草稿'
+                    : '开始回测'}
               </Button>
             </div>
           </div>

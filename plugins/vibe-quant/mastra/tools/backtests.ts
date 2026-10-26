@@ -12,10 +12,15 @@ import {
   StrategyError,
 } from '../../server/strategies/schema.js';
 import { enqueueBacktest } from '../../server/strategies/enqueue.js';
+import { optimizationSchema } from '../../server/strategies/optimization.js';
+import type { OptimizationReport } from '../../optimization-types.js';
 import { quantToolContext, type QuantDependencies } from './context.js';
 
 function runView(run: BacktestRun): BacktestRun {
   return {
+    ...(run.optimization_draft_id
+      ? { optimization_draft_id: run.optimization_draft_id }
+      : {}),
     id: run.id,
     strategy_id: run.strategy_id,
     version_id: run.version_id,
@@ -55,6 +60,12 @@ export const agentBacktestSchema = z.object({
       lot_size: z.number(),
       t_plus_one: z.boolean(),
       fees: z.object({
+        mode: z
+          .enum(['fixed', 'rate', 'combined'])
+          .optional()
+          .describe(
+            'fixed 按手/股固定金额；rate 按成交额；combined 两者叠加（省略时沿用）。最低费用和卖出税费在所有模式下生效。',
+          ),
         per_unit: z.number(),
         rate: z.number(),
         minimum: z.number(),
@@ -81,14 +92,23 @@ export const agentBacktestSchema = z.object({
 });
 
 export class BacktestStartTool extends PluginTool {
-  constructor(context: PluginContext, get: () => QuantDependencies) {
+  constructor(
+    context: PluginContext,
+    get: () => QuantDependencies,
+    optimize = false,
+  ) {
     const execute = quantToolContext(context, get);
     const tool = createTool({
-      id: 'plugin_vibe_quant_backtest_start',
-      title: '提交策略回测',
-      description:
-        '管理员提交历史回测，只需 version_id、symbol、start、end、rules。其余参数可省略：资金 100 万、1 分钟 K 线、滑点 1 tick、参与率 10%。立即返回队列记录，随后查询 status/result。',
-      inputSchema: agentBacktestSchema,
+      id: optimize
+        ? 'plugin_vibe_quant_backtest_optimize'
+        : 'plugin_vibe_quant_backtest_start',
+      title: optimize ? '调优参数并创建新草稿' : '提交策略回测',
+      description: optimize
+        ? '管理员提交独立的 Optuna 参数调优任务，成功后以最佳参数自动新建一个未发布的策略草稿，不覆盖原策略。提供 version_id、symbol、start、end、rules 和 optimization.search_space。默认 30 次、600 秒、TPE 种子 42；可设置 validation_start 留出验证。调优不列入普通回测历史。返回 run_id 后用 backtest_status/result/cancel 查询或取消，完成后 optimization_draft_id 指向新草稿。'
+        : '管理员提交历史回测，只需 version_id、symbol、start、end、rules。其余参数可省略：资金 100 万、1 分钟 K 线、滑点 1 tick、参与率 10%。立即返回队列记录，随后查询 status/result。',
+      inputSchema: optimize
+        ? agentBacktestSchema.extend({ optimization: optimizationSchema })
+        : agentBacktestSchema,
       execute: (input, execution) =>
         execute(execution, async (deps, actor, signal) => {
           if (!actor.isAdmin)
@@ -200,6 +220,7 @@ export class BacktestResultTool extends PluginTool {
             'logs',
             'equity_curve',
             'risk_levels',
+            'optimization_trials',
           ])
           .default('summary'),
         offset: z.number().int().nonnegative().default(0),
@@ -211,7 +232,31 @@ export class BacktestResultTool extends PluginTool {
           // Artifact storage itself has no owner column. Never read it before authorizing the run.
           const artifact = await records.artifact(run.id, 'result');
           const base = { run: runView(run), terminal: !activeRun(run.status) };
-          if (!artifact) return { ...base, result: null };
+          const reportArtifact = run.config.optimization
+            ? await records.artifact(run.id, 'optimization')
+            : null;
+          const report = reportArtifact
+            ? (JSON.parse(reportArtifact.text) as OptimizationReport)
+            : null;
+          const optimization = report
+            ? {
+                ...report,
+                trials: undefined,
+                trial_count: report.trials.length,
+              }
+            : null;
+          if (input.section === 'optimization_trials') {
+            const rows = report?.trials ?? [];
+            const next = input.offset + 50;
+            return {
+              ...base,
+              optimization,
+              data: rows.slice(input.offset, next),
+              total: rows.length,
+              next_offset: next < rows.length ? next : null,
+            };
+          }
+          if (!artifact) return { ...base, result: null, optimization };
           const result = JSON.parse(artifact.text) as BacktestResult;
           if (input.section !== 'summary') {
             const rows = result[input.section] ?? [];
@@ -226,6 +271,7 @@ export class BacktestResultTool extends PluginTool {
           }
           return {
             ...base,
+            optimization,
             result: {
               status: result.status,
               message: result.message,
@@ -281,6 +327,7 @@ export function createBacktestTools(
 ) {
   return [
     new BacktestStartTool(context, get),
+    new BacktestStartTool(context, get, true),
     new BacktestListTool(context, get),
     new BacktestStatusTool(context, get),
     new BacktestResultTool(context, get),

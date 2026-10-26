@@ -1,5 +1,5 @@
 import type { SeriesMarker, UTCTimestamp } from 'lightweight-charts';
-import type { Trade, TradeReplay } from '../strategy-types';
+import type { TradeRecord, TradeReplay } from '../strategy-types';
 import { tradeExitAnchor } from '../strategy-types';
 import { exitMarkerLabel } from './trade-exit';
 import { MONTH_DURATION, type Bar } from '../shared';
@@ -23,7 +23,7 @@ export function tradeCandleTime(time: number, bars: Bar[], duration: number) {
 }
 
 export function tradeMarkers(
-  trade: Trade,
+  trade: TradeRecord,
   bars: Bar[],
   duration: number,
   priceTick = 0.01,
@@ -32,6 +32,7 @@ export function tradeMarkers(
   const times = new Set(bars.map((bar) => bar.time));
   const price = (value: number) => value.toFixed(pricePrecision(priceTick));
   const long = trade.side === 'long';
+  const exitTime = tradeExitAnchor(trade);
   return [
     {
       time: markerTimes
@@ -43,13 +44,19 @@ export function tradeMarkers(
       text: `入场 ${price(trade.entry_price)}`,
     },
     {
-      time: markerTimes
-        ? markerTimes.exit
-        : tradeCandleTime(tradeExitAnchor(trade), bars, duration),
+      time:
+        exitTime === null
+          ? null
+          : markerTimes
+            ? markerTimes.exit
+            : tradeCandleTime(exitTime, bars, duration),
       position: long ? 'aboveBar' : 'belowBar',
       shape: long ? 'arrowDown' : 'arrowUp',
       color: '#d97706',
-      text: `${exitMarkerLabel(trade.exit_reason)} ${price(trade.exit_price)}`,
+      text:
+        trade.exit_price === null
+          ? ''
+          : `${exitMarkerLabel(trade.exit_reason)} ${price(trade.exit_price)}`,
     },
   ]
     .filter((marker) => marker.time !== null && times.has(marker.time))

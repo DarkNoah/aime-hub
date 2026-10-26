@@ -9,6 +9,7 @@ dist/
 workspaces/
 coverage/
 .local/
+/.tmp/
 
 # Local deployment files, documentation, and memory
 /deploy/
@@ -72,3 +73,4 @@ plugins/vibe-quant/**/__pycache__/
 
 !scripts/group-chats.test.ts
 !scripts/group-chats-browser.test.mjs
+!apps/server/src/modules/threads/model-compatibility.test.ts

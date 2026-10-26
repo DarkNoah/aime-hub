@@ -129,7 +129,12 @@ class PaperBroker:
         per_unit = fee.close_today_per_unit if closing_today and fee.close_today_per_unit is not None else fee.per_unit
         rate = fee.close_today_rate if closing_today and fee.close_today_rate is not None else fee.rate
         notional = abs(quantity * price * item.multiplier)
-        return max(fee.minimum, abs(quantity) * per_unit + notional * rate) + (notional * fee.sell_tax_rate if quantity < 0 else 0)
+        commission = 0.0
+        if fee.mode in ('fixed', 'combined'):
+            commission += abs(quantity) * per_unit
+        if fee.mode in ('rate', 'combined'):
+            commission += notional * rate
+        return max(fee.minimum, commission) + (notional * fee.sell_tax_rate if quantity < 0 else 0)
 
     def on_bar(self, bar: Bar) -> None:
         item = self.data.instrument(bar.symbol)

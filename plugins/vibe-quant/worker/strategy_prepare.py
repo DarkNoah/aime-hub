@@ -18,17 +18,33 @@ def prepare(raw):
     proxy_symbol = config['symbol'] if execution_model == 'continuous_price' else None
     if proxy_symbol and (not proxy_symbol.startswith('KQ.m@') or raw['instruments'][proxy_symbol]['kind'] != 'continuous'):
         raise ValueError('Continuous-price simulation requires a main continuous series')
+    bars = [bar for bar in raw['bars'] if config['start'] <= bar['time'] < config['end']]
+    if not bars:
+        raise ValueError('所选回测区间内没有可用行情，请调整日期或先采集/导入数据')
     supplied = config.get('calendar')
     if supplied is None:
         from chinese_calendar import is_holiday
         zone = ZoneInfo('Asia/Shanghai')
-        day = datetime.fromtimestamp(config['start'], zone).date() - timedelta(days=2)
-        last = datetime.fromtimestamp(config['end'], zone).date() + timedelta(days=32)
+        observations = {(bar['time'], raw['instruments'][bar['symbol']]['kind'] != 'stock') for bar in bars}
+        for symbol, mappings in raw['mappings'].items():
+            if symbol != proxy_symbol:
+                observations.update((max(config['start'], row['time']), True) for row in mappings
+                                    if row['time'] < config['end'])
         supplied = {}
-        while day <= last:
-            # Never treat statutory make-up working weekends as exchange sessions.
-            supplied[day.isoformat()] = day.weekday() < 5 and not is_holiday(day)
-            day += timedelta(days=1)
+        # Only observed bars/mappings need calendar dates. Empty portions of a
+        # requested window may extend beyond published holiday calendars.
+        for timestamp, futures in sorted(observations):
+            local = datetime.fromtimestamp(timestamp, zone)
+            day = local.date() + timedelta(days=1 if futures and local.hour >= 18 else 0)
+            overnight = futures and (local.hour >= 18 or local.hour < 6)
+            for _ in range(32 if overnight else 1):
+                key = day.isoformat()
+                if key not in supplied:
+                    # Never treat statutory make-up weekends as exchange sessions.
+                    supplied[key] = day.weekday() < 5 and not is_holiday(day)
+                if supplied[key]:
+                    break
+                day += timedelta(days=1)
     calendar = TradingCalendar(supplied)
 
     class FrozenClient(HubClient):
@@ -42,7 +58,7 @@ def prepare(raw):
             return {**metadata, 'kind': 'future'} if symbol == proxy_symbol else metadata
 
         def history(self, symbol, duration, start, end):
-            return (bar for bar in raw['bars'] if bar['symbol'] == symbol and bar['duration'] == duration and start <= bar['time'] < end)
+            return (bar for bar in bars if bar['symbol'] == symbol and bar['duration'] == duration and start <= bar['time'] < end)
 
         def contracts(self, symbol, start, end):
             return raw['mappings'][symbol]
@@ -61,6 +77,9 @@ def prepare(raw):
                                   duration=config['duration'], calendar=calendar, rules=rules)
     data.metadata.update(engine=raw['engine'], execution_model=execution_model,
                          calendar_source='explicit override' if config.get('calendar') is not None else 'chinese-calendar; weekends excluded')
+    if raw.get('derived_bars'):
+        data.metadata['derived_bars'] = raw['derived_bars']
+        data.metadata['signal_bar_policy'] = 'Five-minute signals use five consecutive closed minute bars when available, sharing the execution price series; stored five-minute bars are fallback; snapshot only'
     if proxy_symbol:
         data.metadata.update(data_policy='Latest-corrected stored-bar snapshot; simulated symbol skips actual-contract Tick reconstruction',
                              simulated_execution_symbol=proxy_symbol,

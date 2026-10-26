@@ -24,7 +24,11 @@ import { ChartReadout, type ChartReadoutHandle } from './chart-readout';
 import { pricePrecision } from './readout-format';
 import { barLabelTime, barStartTime } from './chart-time';
 import { tradeMarkers } from './trade-markers';
-import type { RiskLevelRecord, Trade, TradeReplay } from '../strategy-types';
+import type {
+  RiskLevelRecord,
+  TradeRecord,
+  TradeReplay,
+} from '../strategy-types';
 import { TradeRiskPrimitive } from './trade-risk-primitive';
 import { tradeRiskDrawings } from './trade-risk';
 import { exitMarkerLabel } from './trade-exit';
@@ -62,7 +66,7 @@ export function MarketChart({
   onLoadMore?: (direction: PageDirection) => void;
   drawingScope?: string;
   drawingSharedScope?: string;
-  trade?: Trade;
+  trade?: TradeRecord;
   markerTimes?: TradeReplay['markerTimes'];
   riskLevels?: readonly RiskLevelRecord[];
   showDrawingTools?: boolean;
@@ -418,15 +422,18 @@ export function MarketChart({
         axisLabelVisible: true,
         title: '入场',
       }),
-      series.createPriceLine({
-        price: trade.exit_price,
-        color: '#d97706',
-        lineWidth: 1,
-        lineStyle: 2,
-        axisLabelVisible: true,
-        title: exitMarkerLabel(trade.exit_reason),
-      }),
     ];
+    if (trade.exit_price !== null)
+      lines.push(
+        series.createPriceLine({
+          price: trade.exit_price,
+          color: '#d97706',
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: exitMarkerLabel(trade.exit_reason),
+        }),
+      );
     return () => {
       markers.detach();
       for (const line of lines) series.removePriceLine(line);

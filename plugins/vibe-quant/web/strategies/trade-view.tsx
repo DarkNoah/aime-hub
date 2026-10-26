@@ -9,7 +9,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from '@app/plugin-ui';
-import type { RiskLevelRecord, Trade } from '../../strategy-types';
+import type { RiskLevelRecord, TradeRecord } from '../../strategy-types';
 import { tradeExitAnchor } from '../../strategy-types';
 import { exitReasonLabel } from '../trade-exit';
 import { readChartPeriod } from '../chart-period';
@@ -30,13 +30,14 @@ export default function TradeView({
 }: {
   pluginId: string;
   runId: string;
-  trade: Trade;
+  trade: TradeRecord;
   riskLevels?: RiskLevelRecord[];
   onClose: () => void;
 }) {
   const [period, setPeriod] = useState(readChartPeriod);
   const [retry, setRetry] = useState(0);
   const [showRisk, setShowRisk] = useState(true);
+  const exitTime = tradeExitAnchor(trade);
   const levels = useMemo(
     () => tradeRiskLevels(trade, riskLevels),
     [trade, riskLevels],
@@ -66,9 +67,15 @@ export default function TradeView({
             <Badge variant="outline">
               {trade.side === 'long' ? '多头' : '空头'} · {trade.quantity}
             </Badge>
+            {trade.status === 'open' && (
+              <Badge variant="secondary">未平仓</Badge>
+            )}
           </SheetTitle>
           <SheetDescription>
-            蓝色入场 / 橙色离场 · 拖动图表继续加载前后行情
+            {trade.status === 'open'
+              ? '回测结束时仍未平仓 · 蓝色标记为入场位置'
+              : '蓝色入场 / 橙色离场'}
+            {' · 拖动图表继续加载前后行情'}
           </SheetDescription>
         </SheetHeader>
         <ScrollArea className="min-h-0 flex-1">
@@ -82,25 +89,31 @@ export default function TradeView({
             >
               定位入场 {number(trade.entry_price)}
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={view.loading}
-              title={dateTime(trade.exit_time)}
-              onClick={() => void view.navigate(tradeExitAnchor(trade))}
-            >
-              定位离场 {number(trade.exit_price)}
-            </Button>
-            <Badge variant="outline" title={trade.exit_reason}>
-              离场原因：{exitReasonLabel(trade.exit_reason)}
-            </Badge>
+            {exitTime !== null && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={view.loading}
+                title={dateTime(trade.exit_time)}
+                onClick={() => void view.navigate(exitTime)}
+              >
+                定位离场 {number(trade.exit_price)}
+              </Button>
+            )}
+            {trade.status !== 'open' && (
+              <Badge variant="outline" title={trade.exit_reason}>
+                离场原因：{exitReasonLabel(trade.exit_reason)}
+              </Badge>
+            )}
             {trade.trigger_price != null && (
               <span className="text-xs text-muted-foreground">
                 触发价 {number(trade.trigger_price)}
               </span>
             )}
             <span className="ml-auto text-xs tabular-nums">
-              净收益 {number(trade.net_pnl)}
+              {trade.status === 'open'
+                ? `未平仓数量 ${trade.quantity}`
+                : `净收益 ${number(trade.net_pnl)}`}
             </span>
           </div>
           {trade.exit_time_precision === 'bar' && (

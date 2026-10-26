@@ -59,6 +59,7 @@ import { buildTools, type ToolService } from '../tools/service.js';
 import { CommandSandbox } from '../../mastra/tools/command/sandbox.js';
 import { agentEnvironment } from './agent-environment.js';
 import { AgentsMDProcessor } from '../../mastra/processors/agents-md.js';
+import { ModelCompatibilityProcessor } from '../../mastra/processors/model-compatibility.js';
 import { MemoryMDProcessor } from '../../mastra/processors/memory-md.js';
 import { IncompleteToolCallsProcessor } from '../../mastra/processors/incomplete-tool-calls.js';
 import { AttachmentProcessor } from './attachment-processor.js';
@@ -293,6 +294,15 @@ export function createChatRunner(
           '.agents',
           'memory',
         );
+        const inputProcessors = [
+          compaction,
+          new IncompleteToolCallsProcessor(),
+          new AgentsMDProcessor(commands.workingDirectory),
+          new AttachmentProcessor(attachmentMedia, () =>
+            inputModalities(resolved),
+          ),
+          new MemoryMDProcessor(memoryDirectory),
+        ];
         const agent = await createAgent(config.id, {
           localSubagents: () =>
             loadLocalAgents(workspaceRoot, userId, projectId),
@@ -304,15 +314,7 @@ export function createChatRunner(
           // Matching native processor IDs suppress Memory's default OM processors.
           // Keep the same processor for input and output so native turn cleanup,
           // response ID rotation and observation context injection remain intact.
-          inputProcessors: [
-            compaction,
-            new IncompleteToolCallsProcessor(),
-            new AgentsMDProcessor(commands.workingDirectory),
-            new AttachmentProcessor(attachmentMedia, () =>
-              inputModalities(resolved),
-            ),
-            new MemoryMDProcessor(memoryDirectory),
-          ],
+          inputProcessors,
           outputProcessors: [compaction],
           subagentOptions: (child) => {
             // A null model follows the parent's current selection, including queued changes.
@@ -324,6 +326,7 @@ export function createChatRunner(
                     projectId,
                   )
                 : Promise.resolve(resolved);
+            const compatibility = new ModelCompatibilityProcessor(childModel);
             return {
               // Native delegation already carries the parent's injected context.
               inputProcessors: [
@@ -331,7 +334,9 @@ export function createChatRunner(
                 new AttachmentProcessor(attachmentMedia, async () =>
                   inputModalities(await childModel()),
                 ),
+                compatibility,
               ],
+              outputProcessors: [compatibility],
               instructions: async () =>
                 child.instructions +
                 projectInstructions +
@@ -531,34 +536,8 @@ export function createChatRunner(
             ...(projectId ? { 'X-PROJECT-ID': projectId } : {}),
           };
           let environmentPrompt = '';
-          return {
-            memory: { thread: thread.id, resource: thread.resourceId },
-            abortSignal,
-            requestContext,
-            maxSteps: Infinity,
-            providerOptions: selection.providerOptions,
-            modelSettings: {
-              maxOutputTokens: selection.maxOutputTokens,
-              maxRetries: 1,
-              headers,
-            },
-            savePerStep: true,
-            delegation: {
-              // Each child supplies its own model identity in its environment block.
-              messageFilter: ({ messages }) =>
-                messages.filter(
-                  (message) =>
-                    message.role !== 'system' ||
-                    !(typeof message.content === 'string'
-                      ? message.content === environmentPrompt
-                      : message.content.parts.some(
-                          (part) =>
-                            part.type === 'text' &&
-                            part.text === environmentPrompt,
-                        )),
-                ),
-            },
-            prepareStep: async ({ messageList, stepNumber }) => {
+          const compatibility = new ModelCompatibilityProcessor(
+            async ({ messageList, stepNumber }) => {
               // Native signals have already entered the message list at this point.
               // Read their settings; do not drain or inject application-owned input.
               // OM may have just compacted the signal that carried these settings.
@@ -597,15 +576,44 @@ export function createChatRunner(
               };
               headers['X-USER-ID'] = step.userId;
               return {
-                model: resolved.model,
-                providerOptions: resolved.providerOptions,
-                // prepareStep replaces modelSettings, including request headers.
+                ...resolved,
+                // Preserve per-step settings and request headers after selection.
                 modelSettings: {
                   maxOutputTokens: resolved.maxOutputTokens,
                   maxRetries: 1,
                   headers,
                 },
               };
+            },
+          );
+          return {
+            inputProcessors: [...inputProcessors, compatibility],
+            outputProcessors: [compaction, compatibility],
+            memory: { thread: thread.id, resource: thread.resourceId },
+            abortSignal,
+            requestContext,
+            maxSteps: Infinity,
+            providerOptions: selection.providerOptions,
+            modelSettings: {
+              maxOutputTokens: selection.maxOutputTokens,
+              maxRetries: 1,
+              headers,
+            },
+            savePerStep: true,
+            delegation: {
+              // Each child supplies its own model identity in its environment block.
+              messageFilter: ({ messages }) =>
+                messages.filter(
+                  (message) =>
+                    message.role !== 'system' ||
+                    !(typeof message.content === 'string'
+                      ? message.content === environmentPrompt
+                      : message.content.parts.some(
+                          (part) =>
+                            part.type === 'text' &&
+                            part.text === environmentPrompt,
+                        )),
+                ),
             },
             onStepFinish: async (event) => {
               const chatUsage = getChatUsage(event.usage, step.model);

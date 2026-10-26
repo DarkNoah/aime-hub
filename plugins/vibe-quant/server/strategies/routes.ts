@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { PluginContext, PluginHttpEnv } from '@app/plugin-sdk/server';
 import type { BacktestResult } from '../../strategy-types.js';
+import { resultTradeRecords } from '../../strategy-trades.js';
 import type { QuantConfig } from '../config.js';
 import type { StateStore } from '../state-store.js';
 import type { MarketStore } from '../clickhouse.js';
@@ -11,7 +12,12 @@ import { marketBarsQuery, readMarketBars } from '../market-bars.js';
 import { readVolumeProfile, volumeProfileQuery } from '../volume-profile.js';
 import type { TradeReader } from '../trades/service.js';
 import { StrategyStore } from './store.js';
-import { backtestSchema, StrategyError, strategySchema } from './schema.js';
+import {
+  parseBacktestConfig,
+  StrategyError,
+  strategySchema,
+  strategyStatusSchema,
+} from './schema.js';
 import { enqueueBacktest } from './enqueue.js';
 import {
   replayQuerySchema,
@@ -63,7 +69,13 @@ export function strategyRoutes(
       },
     }),
   );
-  api.get('/', async (c) => c.json(await getRecords().list(c.get('userId'))));
+  api.get('/', async (c) => {
+    const status = strategyStatusSchema
+      .or(z.literal('all'))
+      .safeParse(c.req.query('status') ?? 'active');
+    if (!status.success) return c.json({ code: 'VALIDATION_ERROR' }, 400);
+    return c.json(await getRecords().list(c.get('userId'), status.data));
+  });
   api.post('/', async (c) => {
     const body = strategySchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ code: 'VALIDATION_ERROR' }, 400);
@@ -85,6 +97,23 @@ export function strategyRoutes(
         body.data,
         readId(c.req.param('id')),
         body.data.revision,
+      ),
+    );
+  });
+  api.patch('/:id/status', async (c) => {
+    const body = z
+      .object({
+        revision: z.number().int().positive(),
+        status: strategyStatusSchema,
+      })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ code: 'VALIDATION_ERROR' }, 400);
+    return c.json(
+      await getRecords().setStatus(
+        c.get('userId'),
+        readId(c.req.param('id')),
+        body.data.revision,
+        body.data.status,
       ),
     );
   });
@@ -127,16 +156,85 @@ export function strategyRoutes(
     // A venv is a dependency environment, not a host security boundary.
     if (!c.get('isAdmin'))
       return c.json({ code: 'SCRIPT_EXECUTION_ADMIN_REQUIRED' }, 403);
-    const body = backtestSchema.safeParse(await c.req.json().catch(() => null));
-    if (!body.success) return c.json({ code: 'INVALID_BACKTEST_CONFIG' }, 400);
+    const config = parseBacktestConfig(await c.req.json().catch(() => null));
+    if (config.optimization)
+      return c.json({ code: 'USE_OPTIMIZATION_ENDPOINT' }, 400);
     const run = await enqueueBacktest(
       getRecords(),
       get(),
       { userId: c.get('userId'), isAdmin: c.get('isAdmin') },
       readId(c.req.param('id')),
-      body.data,
+      config,
     );
     return c.json(run, 202);
+  });
+  api.get('/:id/optimizations', async (c) => {
+    const before = c.req.query('before');
+    if (before && !z.uuid().safeParse(before).success)
+      return c.json({ code: 'VALIDATION_ERROR' }, 400);
+    return c.json(
+      await getRecords().runs(
+        c.get('userId'),
+        readId(c.req.param('id')),
+        before,
+        'optimization',
+      ),
+    );
+  });
+  api.post('/:id/optimizations', async (c) => {
+    if (!c.get('isAdmin'))
+      return c.json({ code: 'SCRIPT_EXECUTION_ADMIN_REQUIRED' }, 403);
+    const config = parseBacktestConfig(await c.req.json().catch(() => null));
+    if (!config.optimization)
+      return c.json({ code: 'INVALID_OPTIMIZATION_CONFIG' }, 400);
+    return c.json(
+      await enqueueBacktest(
+        getRecords(),
+        get(),
+        { userId: c.get('userId'), isAdmin: c.get('isAdmin') },
+        readId(c.req.param('id')),
+        config,
+      ),
+      202,
+    );
+  });
+  async function optimizationRun(owner: string, id: string) {
+    const run = await getRecords().run(owner, readId(id));
+    if (!run.config.optimization) throw new StrategyError('RUN_NOT_FOUND', 404);
+    return run;
+  }
+  api.get('/optimizations/:runId/result', async (c) => {
+    const run = await optimizationRun(c.get('userId'), c.req.param('runId'));
+    const artifact = await getRecords().artifact(run.id, 'optimization');
+    let draft = null;
+    if (run.optimization_draft_id) {
+      try {
+        draft = await getRecords().detail(
+          c.get('userId'),
+          run.optimization_draft_id,
+        );
+      } catch (error) {
+        if (!(
+          error instanceof StrategyError && error.code === 'STRATEGY_NOT_FOUND'
+        ))
+          throw error;
+      }
+    }
+    return c.json({
+      run,
+      optimization: artifact ? JSON.parse(artifact.text) : null,
+      draft,
+    });
+  });
+  api.post('/optimizations/:runId/cancel', async (c) => {
+    const run = await optimizationRun(c.get('userId'), c.req.param('runId'));
+    return c.json(await getRecords().cancel(c.get('userId'), run.id));
+  });
+  api.post('/optimizations/:runId/draft', async (c) => {
+    const run = await optimizationRun(c.get('userId'), c.req.param('runId'));
+    return c.json(
+      await getRecords().createOptimizationDraft(c.get('userId'), run.id),
+    );
   });
   api.get('/runs/:runId/status', async (c) =>
     c.json(
@@ -149,7 +247,10 @@ export function strategyRoutes(
     ),
   );
   api.get('/runs/:runId/result', async (c) => {
-    await getRecords().run(c.get('userId'), readId(c.req.param('runId')));
+    const run = await getRecords().run(
+      c.get('userId'),
+      readId(c.req.param('runId')),
+    );
     const artifact = await getRecords().artifact(
       readId(c.req.param('runId')),
       'result',
@@ -158,9 +259,13 @@ export function strategyRoutes(
       readId(c.req.param('runId')),
       'manifest',
     );
+    const optimization = run.config.optimization
+      ? await getRecords().artifact(run.id, 'optimization')
+      : null;
     return c.json({
       result: artifact ? JSON.parse(artifact.text) : null,
       manifest: manifest ? JSON.parse(manifest.text) : null,
+      optimization: optimization ? JSON.parse(optimization.text) : null,
     });
   });
   api.get('/runs/:runId/export', async (c) => {
@@ -168,12 +273,19 @@ export function strategyRoutes(
       c.get('userId'),
       readId(c.req.param('runId')),
     );
-    const [version, dataset, result, manifest] = await Promise.all([
-      getRecords().version(c.get('userId'), run.version_id),
-      getRecords().artifact(run.id, 'dataset'),
-      getRecords().artifact(run.id, 'result'),
-      getRecords().artifact(run.id, 'manifest'),
-    ]);
+    const [version, dataset, result, manifest, optimization, validation] =
+      await Promise.all([
+        getRecords().version(c.get('userId'), run.version_id),
+        getRecords().artifact(run.id, 'dataset'),
+        getRecords().artifact(run.id, 'result'),
+        getRecords().artifact(run.id, 'manifest'),
+        run.config.optimization
+          ? getRecords().artifact(run.id, 'optimization')
+          : null,
+        run.config.optimization
+          ? getRecords().artifact(run.id, 'validation')
+          : null,
+      ]);
     c.header(
       'Content-Disposition',
       `attachment; filename="backtest-${run.id}.json"`,
@@ -185,6 +297,8 @@ export function strategyRoutes(
       dataset_hash: dataset?.hash,
       result: result ? JSON.parse(result.text) : null,
       manifest: manifest ? JSON.parse(manifest.text) : null,
+      optimization: optimization ? JSON.parse(optimization.text) : null,
+      validation: validation ? JSON.parse(validation.text) : null,
     });
   });
   api.get('/runs/:runId/trades/:tradeId/volume-profile', async (c) => {
@@ -197,7 +311,7 @@ export function strategyRoutes(
     const result = await getRecords().artifact(run.id, 'result');
     const trade =
       result &&
-      (JSON.parse(result.text) as BacktestResult).trades.find(
+      resultTradeRecords(JSON.parse(result.text) as BacktestResult).find(
         (item) => item.id === c.req.param('tradeId'),
       );
     if (!trade) throw new StrategyError('NOT_FOUND', 404);
@@ -222,7 +336,7 @@ export function strategyRoutes(
     const result = await getRecords().artifact(run.id, 'result');
     const trade =
       result &&
-      (JSON.parse(result.text) as BacktestResult).trades.find(
+      resultTradeRecords(JSON.parse(result.text) as BacktestResult).find(
         (item) => item.id === c.req.param('tradeId'),
       );
     if (!trade) throw new StrategyError('NOT_FOUND', 404);
@@ -253,7 +367,7 @@ export function strategyRoutes(
     ]);
     const trade =
       result &&
-      (JSON.parse(result.text) as BacktestResult).trades.find(
+      resultTradeRecords(JSON.parse(result.text) as BacktestResult).find(
         (item) => item.id === c.req.param('tradeId'),
       );
     if (!trade || !dataset) return c.json({ code: 'TRADE_NOT_FOUND' }, 404);

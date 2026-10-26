@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import type {
   BacktestInput,
   BacktestRun,
   ScriptDraft,
   StrategyDetail,
   StrategySummary,
+  StrategyStatus,
   StrategyVersion,
 } from '../../strategy-types.js';
 import type { Engine } from '../../shared.js';
@@ -12,8 +14,11 @@ import { ClickHouseClient, ClickHouseError } from '../clickhouse-client.js';
 import { StrategyError } from './schema.js';
 import { sha256, StrategySources } from './sources.js';
 import { decodeArtifact, encodeArtifact } from './artifacts.js';
+import type { OptimizationReport } from '../../optimization-types.js';
 
-export type StoredStrategy = StrategySummary & {
+export type StoredStrategy = Omit<StrategySummary, 'status'> & {
+  /** Records saved before lifecycle support are active. */
+  status?: StrategyStatus;
   user_id: string;
   draft_hash: string;
   draft_parameters: Record<string, unknown>;
@@ -35,10 +40,17 @@ const summary = (row: StoredStrategy): StrategySummary => ({
   name: row.name,
   description: row.description,
   enabled: row.enabled,
+  status: row.status ?? 'active',
   revision: row.revision,
   version_count: row.version_count,
   updated_at: row.updated_at,
 });
+function assertEditable(row: StoredStrategy) {
+  if (row.status === 'deleted')
+    throw new StrategyError('STRATEGY_DELETED', 409);
+  if (row.status === 'archived')
+    throw new StrategyError('STRATEGY_ARCHIVED', 409);
+}
 // Project public fields explicitly without rewriting immutable legacy records.
 const versionDetail = (
   version: Omit<StrategyVersion, 'source'>,
@@ -144,13 +156,38 @@ export class StrategyStore extends ClickHouseClient {
     return row.value;
   }
 
-  async list(owner: string): Promise<StrategySummary[]> {
+  async list(
+    owner: string,
+    status: StrategyStatus | 'all' = 'active',
+  ): Promise<StrategySummary[]> {
     const rows = await this.rows<{ payload: string }>(
       `SELECT payload FROM ${this.table('quant_strategies')} FINAL WHERE userId = {owner:String}
+       ${status === 'all' ? '' : "AND if(JSONExtractString(payload, 'status') = '', 'active', JSONExtractString(payload, 'status')) = {status:String}"}
        ORDER BY JSONExtractString(payload, 'updated_at') DESC, id`,
-      { owner },
+      { owner, status },
     );
     return rows.map((row) => summary(JSON.parse(row.payload)));
+  }
+
+  async setStatus(
+    owner: string,
+    id: string,
+    revision: number,
+    status: StrategyStatus,
+  ): Promise<StrategySummary> {
+    const row = await this.storedStrategy(id, owner);
+    if (row.revision !== revision)
+      throw new StrategyError('STRATEGY_CONFLICT', 409);
+    if ((row.status ?? 'active') === status) return summary(row);
+    const next: StoredStrategy = {
+      ...row,
+      status,
+      revision: revision + 1,
+      updated_at: iso(),
+    };
+    if (!(await this.replace('quant_strategies', next, revision)))
+      throw new StrategyError('STRATEGY_CONFLICT', 409);
+    return summary(next);
   }
 
   async detail(owner: string, id: string): Promise<StrategyDetail> {
@@ -176,6 +213,7 @@ export class StrategyStore extends ClickHouseClient {
     revision?: number,
   ) {
     const existing = id ? await this.storedStrategy(id, owner) : undefined;
+    if (existing) assertEditable(existing);
     if (existing && existing.revision !== revision)
       throw new StrategyError('STRATEGY_CONFLICT', 409);
     const hash = await this.sources.put(value.draft.source);
@@ -185,6 +223,7 @@ export class StrategyStore extends ClickHouseClient {
       name: value.name,
       description: value.description,
       enabled: value.enabled,
+      status: 'active',
       revision: (existing?.revision ?? 0) + 1,
       version_count: existing?.version_count ?? 0,
       updated_at: iso(),
@@ -230,6 +269,7 @@ export class StrategyStore extends ClickHouseClient {
 
   async publish(owner: string, id: string, revision: number, note: string) {
     const row = await this.storedStrategy(id, owner);
+    assertEditable(row);
     if (row.revision !== revision)
       throw new StrategyError('STRATEGY_CONFLICT', 409);
     const source = await this.sources.read(row.draft_hash);
@@ -265,6 +305,7 @@ export class StrategyStore extends ClickHouseClient {
     engine: Engine,
   ) {
     const strategy = await this.storedStrategy(id, owner);
+    assertEditable(strategy);
     if (!strategy.enabled) throw new StrategyError('STRATEGY_DISABLED', 409);
     const version = strategy.versions.find((v) => v.id === config.version_id);
     if (!version) throw new StrategyError('VERSION_NOT_FOUND', 404);
@@ -291,7 +332,8 @@ export class StrategyStore extends ClickHouseClient {
     };
     const condition = `EXISTS (SELECT 1 FROM ${this.table('quant_strategies')} FINAL
       WHERE id = {strategy:String} AND userId = {owner:String} AND revision = {strategyRevision:UInt64}
-      AND JSONExtractBool(payload, 'enabled'))
+      AND JSONExtractBool(payload, 'enabled')
+      AND JSONExtractString(payload, 'status') IN ('', 'active'))
       AND (SELECT count() FROM ${this.table('quant_strategy_runs')} FINAL
         WHERE userId = {owner:String} AND ${activeSql}) < 3`;
     if (
@@ -301,6 +343,7 @@ export class StrategyStore extends ClickHouseClient {
       }))
     ) {
       const current = await this.storedStrategy(id, owner);
+      assertEditable(current);
       if (!current.enabled) throw new StrategyError('STRATEGY_DISABLED', 409);
       if (current.revision !== strategy.revision)
         throw new StrategyError('STRATEGY_CONFLICT', 409);
@@ -313,6 +356,7 @@ export class StrategyStore extends ClickHouseClient {
     owner: string,
     id: string,
     before?: string,
+    kind: 'backtest' | 'optimization' | 'all' = 'backtest',
   ): Promise<BacktestRun[]> {
     await this.storedStrategy(id, owner);
     const cursor = before
@@ -322,6 +366,7 @@ export class StrategyStore extends ClickHouseClient {
     const rows = await this.rows<{ payload: string }>(
       `SELECT payload FROM ${this.table('quant_strategy_runs')} FINAL
        WHERE userId = {owner:String} AND JSONExtractString(payload, 'strategy_id') = {strategy:String}
+       ${kind === 'all' ? '' : `AND ${kind === 'backtest' ? 'NOT ' : ''}JSONHas(payload, 'config', 'optimization')`}
        ${cursor ? "AND (JSONExtractString(payload, 'created_at'), id) < ({before:String}, {beforeId:String})" : ''}
        ORDER BY JSONExtractString(payload, 'created_at') DESC, id DESC LIMIT 30`,
       {
@@ -340,17 +385,98 @@ export class StrategyStore extends ClickHouseClient {
     return row.value;
   }
 
+  /** Reserve a target ID before insertion so retries/concurrent requests cannot clone twice. */
+  async createOptimizationDraft(
+    owner: string,
+    id: string,
+  ): Promise<StrategyDetail> {
+    const run = await this.run(owner, id);
+    if (
+      !run.config.optimization ||
+      run.status !== 'completed' ||
+      run.cancel_requested
+    )
+      throw new StrategyError('OPTIMIZATION_NOT_COMPLETED', 409);
+    const artifact = await this.artifact(id, 'optimization');
+    const report =
+      artifact && (JSON.parse(artifact.text) as OptimizationReport | null);
+    if (
+      !report ||
+      report.status !== 'completed' ||
+      !report.best_parameters ||
+      typeof report.best_parameters !== 'object' ||
+      Array.isArray(report.best_parameters) ||
+      Object.keys(run.config.optimization.search_space).some(
+        (key) => !Object.hasOwn(report.best_parameters!, key),
+      )
+    )
+      throw new StrategyError('OPTIMIZATION_RESULT_MISSING', 409);
+    const version = await this.version(owner, run.version_id);
+    if (version.source_hash !== run.source_hash)
+      throw new Error('策略版本哈希不匹配');
+    const original = await this.storedStrategy(run.strategy_id, owner);
+    await this.updateRun(id, (current) =>
+      current.user_id === owner &&
+      current.status === 'completed' &&
+      !current.optimization_draft_id
+        ? { ...current, optimization_draft_id: randomUUID() }
+        : undefined,
+    );
+    const linked = await this.run(owner, id);
+    const draftId = linked.optimization_draft_id;
+    if (!draftId) throw new StrategyError('OPTIMIZATION_NOT_COMPLETED', 409);
+    const existing = await this.record<StoredStrategy>(
+      'quant_strategies',
+      draftId,
+      owner,
+    );
+    if (existing) return this.detail(owner, draftId);
+    const parameters = { ...version.parameters, ...run.config.parameters };
+    for (const key of Object.keys(run.config.optimization.search_space))
+      parameters[key] = report.best_parameters[key];
+    const row: StoredStrategy = {
+      id: draftId,
+      user_id: owner,
+      name: `${original.name.split(' · ')[0].slice(0, 120)} · 调优草稿`,
+      description: `基于「${original.name}」v${version.number} 的 Optuna 调优草稿。\n目标：${report.metric}，最佳值 ${report.best_value}；有效试验 ${report.completed_trials}/${report.requested_trials}。\n${report.validation ? `留出验证：${report.validation.status}，目标值 ${report.validation.metrics[report.metric] ?? '未定义'}。` : '仅样本内搜索，尚未做留出验证。'}\n来源任务：${id}。源码保留所选版本，尚未发布。`,
+      enabled: true,
+      status: 'active',
+      revision: 1,
+      version_count: 0,
+      updated_at: iso(),
+      draft_hash: version.source_hash,
+      draft_parameters: parameters,
+      versions: [],
+    };
+    await this.replace('quant_strategies', row, 0);
+    return this.detail(owner, draftId);
+  }
+
   private async updateRun(
     id: string,
     update: (run: StoredRun) => StoredRun | undefined,
   ) {
     for (let attempt = 0; attempt < 30; attempt++) {
-      const row = await this.record<StoredRun>('quant_strategy_runs', id);
-      if (!row) return;
-      const next = update(row.value);
-      if (!next) return;
-      if (await this.replace('quant_strategy_runs', next, row.revision))
-        return next;
+      try {
+        const row = await this.record<StoredRun>('quant_strategy_runs', id);
+        if (!row) return;
+        const next = update(row.value);
+        if (!next) return;
+        if (await this.replace('quant_strategy_runs', next, row.revision))
+          return next;
+      } catch (error) {
+        // Read/CAS retry is safe even if a timed-out statement committed: the
+        // next attempt reloads the latest row and rechecks ownership/status.
+        if (
+          attempt === 29 ||
+          !(
+            (error instanceof ClickHouseError && error.code === 241) ||
+            (error instanceof Error && error.name === 'TimeoutError')
+          )
+        )
+          throw error;
+        await delay(Math.min(attempt + 1, 4) * 250);
+      }
     }
     throw new Error('回测状态并发更新繁忙，请重试');
   }

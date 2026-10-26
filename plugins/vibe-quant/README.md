@@ -202,18 +202,69 @@ Tick 测试另外覆盖最近窗口完整读取、多 Tick 合并到达、纳秒
 
 入口：侧边栏 **Vibe Quant → 策略**（`/plugins/vibe-quant/strategies`）。支持创建策略、编辑或导入 `.py` 脚本、下载脚本、保存草稿、发布固定版本、从旧版本恢复到草稿、停用新回测。
 
+- **归档与软删除**：列表可切换「当前策略 / 已归档 / 回收站」，策略右上角操作菜单支持归档、删除和恢复。删除只移入回收站，源码、参数、版本、回测与调优记录和结果均保留；恢复回到当前策略并保留原启用/停用设置。归档与回收站内的策略只读，不可保存、发布或发起新任务，已提交任务继续执行。操作需要最新 revision，按用户隔离；旧记录缺少状态时视为当前策略，无需表结构迁移。HTTP `GET /strategies?status=active|archived|deleted|all` 默认只返回当前策略；`PATCH /strategies/:id/status` 接受 `{ "status": "archived", "revision": 1 }`，其中 status 也可为 `active`（恢复）或 `deleted`（软删除）。
+
 - **策略编辑**：默认参数和回测参数共用表单 / JSON 编辑器，保留数字、文本、布尔和嵌套 JSON 类型，错误输入不能切换成有效表单或保存。Python 脚本支持带行号的语法高亮预览、编辑和复制；历史版本只读。入口无需配置，运行时自动选择本文件中唯一可实例化的 `Strategy` 子类（同一继承链选择最末级）；多个独立策略类需拆分为单独脚本。旧记录中的入口字段不再影响新回测。
 - **脚本与版本解耦**：ClickHouse `quant_strategy_sources` 以 SHA-256 存放脚本正文，读写均校验哈希。`quant_strategies` 保存所有者、策略信息、草稿引用及已发布版本列表（固定正文哈希、默认参数和说明）。发布版本和更新 revision 在同一条记录中原子完成，已发布版本不可覆盖。保存草稿使用 revision 防止多个窗口相互覆盖；标签页内的未保存编辑可恢复。SDK 接口类仍随插件源码发布，不存入数据库。
 - **每次运行都有记录**：ClickHouse `quant_strategy_runs` 固定用户、版本、数据引擎、时间区间、策略参数、资金、保证金、乘数、滑点、成交量参与率、手续费和基准，并保存队列状态、执行者与心跳。策略可调项集中在版本的默认参数中，脚本通过 `ctx.params` 读取；新回测先合并版本默认参数与本次覆盖值，再冻结完整参数，HTTP、页面和 Agent 工具保持一致。失败与取消同样保留，历史记录可用原参数创建新回测。
 - **冻结数据**：执行前保存原始行情与 SDK Dataset，完成后保存结果和 SDK manifest；这些 JSON 存入 ClickHouse `quant_strategy_run_artifacts`；大产物在传输前使用带版本前缀的 gzip/base64 编码，并以单线程解析入库，降低数据库解析内存，表层仍使用 ZSTD。读取兼容旧明文 JSON，解压受大小上限约束，按运行 ID 和产物类型保持不可覆盖，并校验原始 JSON 的 SHA-256。与当前行情解耦，也不依赖某个服务进程的临时文件。导出包含版本源码、运行参数、Dataset、结果及 manifest。SDK manifest 记录 Python/SDK 版本和运行时源码哈希。
 - **使用插件 venv**：调用现有 `ensurePython()`，运行 `<WORKSPACE_ROOT>/plugins/vibe-quant/.venv/bin/python`（Windows 为 `Scripts/python.exe`），要求 Python 3.10+。行情采集和回测共用环境，初始化/修复有文件锁。SDK 源码复制到本次运行目录并加入 Python 导入路径；用户额外依赖可安装到此 venv。
 - **执行权限**：venv 是依赖环境，不是安全沙箱。只有管理员可提交运行服务器 Python 代码的回测；策略、版本、结果 API 均按所有者隔离。子进程不继承数据库、行情账号、会话等环境变量。工作目录位于插件空间 `strategy-runs/`，产物入库后移除临时副本；脚本仍是具有宿主文件访问能力的受信任代码。
-- **队列生命周期**：ClickHouse 的单条条件 INSERT 同时检查修订号或用户队列容量，并写入新状态；通过共享查询 ID 串行执行这些单条语句，不把跨请求读写当成事务。此机制沿用“同一台 ClickHouse 24.8+ 服务器”的要求，不支持多节点负载均衡。每进程同时认领一个与自身行情引擎匹配的任务，每用户最多三个未完成任务；两秒心跳用于取消和断线发现。执行超时五分钟；取消先请求 SDK 停止，再终止不响应的进程组。服务异常退出后超时的记录标记为失败，不自动重复执行。插件停用会停止本进程运行。
-- **结果与回放**：显示总收益/收益率、年化、最大回撤、夏普、交易笔数、最终权益、基准收益/年化、索提诺、卡玛、PF、净值曲线、月度/年度收益和交易表。交易回放与行情页共用完整的 `MarketChartPanel`，包含分时/多周期 K 线、指标及参数、划线、日期跳转和边缘分页，额外提供入场/离场定位。K 线通过 `useMarketBars` 和行情页相同的历史数据查询按需加载实际成交合约，使用该次回测的数据引擎，不受回测起止时间限制。成交标记仍取自回测记录，行情库后续修订不会改写成交结果。划线按回测、标的、周期保存，支持跨周期显示，与实时行情的划线隔离。打开时定位入场，入场/离场按钮只跳转视窗；拖至边缘继续双向加载，每页 200 根并保留视窗位置。冻结快照仍随回测保留、供导出和结果核验使用，不再限制图表可浏览的范围。
+- **队列生命周期**：ClickHouse 的单条条件 INSERT 同时检查修订号或用户队列容量，并写入新状态；通过共享查询 ID 串行执行这些单条语句，不把跨请求读写当成事务。此机制沿用“同一台 ClickHouse 24.8+ 服务器”的要求，不支持多节点负载均衡。每进程同时认领一个与自身行情引擎匹配的任务，每用户最多三个未完成任务；两秒心跳用于取消和断线发现。普通回测和每次调参试验执行上限五分钟；取消先请求 SDK 停止，再终止不响应的进程组。服务异常退出后超时的记录标记为失败，不自动重复执行。插件停用会停止本进程运行。
+- **结果与回放**：显示总收益/收益率、年化、最大回撤、夏普、交易笔数、最终权益、基准收益/年化、索提诺、卡玛、PF、净值曲线、月度/年度收益和交易表。交易表同时展示已平仓及未平仓记录，未平仓按已保存的开仓成交减去对应平仓数量还原，历史回测无需重新运行；部分平仓只展示剩余数量及其开仓手续费，离场与净收益留空。点击「查看入场」可定位原始入场 K 线，未平仓回放不绘制离场标记，止盈止损范围截止本次回测最后观测时间；交易笔数仍按已平仓片段统计，权益与总收益继续计入未平仓头寸的市值变化。交易回放与行情页共用完整的 `MarketChartPanel`，包含分时/多周期 K 线、指标及参数、划线、日期跳转和边缘分页，额外提供入场/离场定位。K 线通过 `useMarketBars` 和行情页相同的历史数据查询按需加载实际成交合约，使用该次回测的数据引擎，不受回测起止时间限制。成交标记仍取自回测记录，行情库后续修订不会改写成交结果。划线按回测、标的、周期保存，支持跨周期显示，与实时行情的划线隔离。打开时定位入场，入场/离场按钮只跳转视窗；拖至边缘继续双向加载，每页 200 根并保留视窗位置。冻结快照仍随回测保留、供导出和结果核验使用，不再限制图表可浏览的范围。
 
-回测仅使用已经采集/导入的行情。默认 `actual_contract` 模式缺少历史主力映射或对应实际合约分钟线时明确失败，不替换成当前主力。显式选择 `continuous_price` 时，将所选主连作为保留原符号的合成期货，按主连价格模拟成交；原始行情目录不变，配置、Dataset、manifest 和结果页标明模拟口径，不计实际合约价差及换月成交成本，策略需支持此模式。单次最多十年（3,660 天）、500,000 根输入 K 线、24 个实际合约；单份产物最多 128 MiB。默认交易日历使用 venv 中 `chinese-calendar` 的已公布节假日并排除周末；可在配置中提供完整日期到布尔值的交易所日历以覆盖特殊休市，未知日期失败。股票与期货交易规则需要根据品种明确填写；目录选择股票会填入 100 股、T+1、全额资金的默认配置。保证金和手续费都是回测假设，不代表交易所或经纪商当前标准。
+回测仅使用已经采集/导入的行情。所选日期可以超出已有数据范围，结束时间也可晚于当前时间；仅处理区间内已收盘的可用 K 线，不要求数据覆盖起止边界，没有可用行情时明确提示。默认 `actual_contract` 模式缺少历史主力映射或对应实际合约分钟线时明确失败，不替换成当前主力。显式选择 `continuous_price` 时，将所选主连作为保留原符号的合成期货，按主连价格模拟成交；原始行情目录不变，配置、Dataset、manifest 和结果页标明模拟口径，不计实际合约价差及换月成交成本，策略需支持此模式。单次最多十年（3,660 天）、500,000 根输入 K 线、24 个实际合约；单份产物最多 128 MiB。默认交易日历按实际行情和历史映射所需日期生成，使用 venv 中 `chinese-calendar` 的已公布节假日并排除周末，不因所选区间内无数据的未来日期要求额外日历；可在配置中提供完整日期到布尔值的交易所日历以覆盖特殊休市，未知日期失败。股票与期货交易规则需要根据品种明确填写；目录选择股票会填入 100 股、T+1、全额资金的默认配置。保证金和手续费都是回测假设，不代表交易所或经纪商当前标准。
 
-数据模型与撮合范围沿用 [Python SDK](./sdk/README.md)。这里提供回测管理，不接入实盘委托；参数优化与实时监控的管理界面可在固定版本和运行记录上继续扩展。
+数据模型与撮合范围沿用 [Python SDK](./sdk/README.md)。这里提供回测管理，不接入实盘委托；支持固定版本上的 Optuna 参数优化；实时监控管理可继续扩展。
+
+5 分钟回测在冻结快照时，若有同标的的五根连续、已收完的 1 分钟 K 线，会优先以它们聚合信号 K 线，使信号与分钟成交使用同一价格序列；没有完整分钟数据时保留已存 5 分钟 K 线。缺分钟、跨休市或尚未收完的组合不会聚合，也不会改写行情表。原始快照和 Dataset 元数据记录派生来源、数量及替换数量，避免较短或不同口径的 5 分钟历史影响回测。
+
+### Optuna 参数调优
+
+点击策略页独立的 **调优参数** 按钮，或调用 `plugin_vibe_quant_backtest_optimize`。调优任务在独立面板查看，不出现在普通回测记录中；底层共用执行队列、固定版本、所有权和交易规则，占用一个任务名额。
+
+成功后自动创建一条新的、未发布的策略草稿：复制本次固定版本的源码和参数，仅替换参与搜索的参数；原策略的默认参数、已有草稿和已发布版本均保持不变。重复请求只返回同一份新草稿，不覆盖后续编辑。关闭页面不影响后台创建；如果保存失败，可在调优面板重试「生成调优草稿」。取消或失败的任务不自动生成草稿。
+
+HTTP 使用 `GET/POST /strategies/:id/optimizations` 查询和提交，`/strategies/optimizations/:runId/result`、`/cancel`、`/draft` 获取结果、取消和重试保存草稿；普通 `/strategies/:id/runs` 仅返回普通回测并拒绝带 `optimization` 的提交。Agent 为兼容既有调用保留工具 ID，状态/结果中返回 `optimization_draft_id`。
+
+`optimization` 配置示例（HTTP 与 Agent 共用）：
+
+```json
+{
+  "search_space": {
+    "fast": { "type": "int", "low": 2, "high": 10 },
+    "slow": { "type": "int", "low": 15, "high": 60 },
+    "stop_loss_pct": {
+      "type": "float",
+      "low": 0.005,
+      "high": 0.03,
+      "step": 0.005
+    },
+    "trailing_stop": { "type": "categorical", "choices": [false, true] }
+  },
+  "metric": "sharpe",
+  "n_trials": 30,
+  "timeout_seconds": 600,
+  "seed": 42,
+  "min_trades": 1
+}
+```
+
+- 使用固定版本、同一份冻结 Dataset 和固定费用/滑点；每次试验启动新的 Python 进程，重置策略模块、实例和账户。未搜索的参数沿用回测参数。行情标的、周期、成交模式不参与搜索。
+- 使用 Optuna 4.5.0 的 `TPESampler`，最多 200 次、搜索时间最多 3600 秒，先达到的限制结束搜索；单次试验最多 300 秒。默认种子 42；策略自身的随机源仍需策略自行固定。每次试验仅保留指标和参数，最佳训练试验保留原始完整结果及 manifest，不通过重跑替代最佳结果。
+- 目标可选 `sharpe`、`total_return`、`annual_return`、`max_drawdown`、`sortino`、`calmar`、`profit_factor`。最大回撤取最小，其余取最大。交易不足或指标为 null 的试验不入选；策略错误记录为失败，继续其余试验。全部无效时整个任务失败。
+- 可选 `validation_start`（UTC epoch 秒）将区间按时间拆分：之前用于搜索，之后只用最佳参数验证一次。验证重新初始化资金和仓位，之前的行情仅用于 SDK 历史预热，不调用交易回调；建议按完整交易日划分。验证另有 300 秒上限。未设置时明确标记为仅样本内；这是单次留出验证，不是 walk-forward，训练最佳值不代表泛化表现。
+- 调优面板单独展示训练目标、验证指标、最佳参数和分页试验记录，完成后可直接打开新草稿。发布该草稿后可按普通流程创建回测。训练/验证的完整结果和 manifest 仍作为内部产物保存，`optimization` / `validation` 使用现有产物表，无需新表。
+- 运行中通过状态消息显示试验进度；用户取消、插件停止或超时后尽可能保存最后完成的试验和最佳结果，状态仍为取消/失败。不会自动续跑崩溃任务。Agent 可使用现有 `backtest_status`、`backtest_cancel`；`backtest_result` 的 `optimization` 返回摘要，`section=optimization_trials` 每页 50 条。
+- 插件 Python 环境按 requirements 指纹自动安装/更新 Optuna；离线部署的 wheel 包需包含更新后的 `worker/requirements.txt` 及其依赖。
+
+验证真实 Optuna 和 Worker 产物保存：
+
+```sh
+<plugin-venv>/bin/python -B -m unittest discover -s plugins/vibe-quant/tests -p test_strategy_optimize.py -v
+QUANT_OPTUNA_PYTHON=<plugin-venv>/bin/python node --import tsx --test plugins/vibe-quant/tests/optimization-worker.test.ts
+node --import tsx --test plugins/vibe-quant/tests/optimization.test.ts plugins/vibe-quant/tests/quant-agent.test.ts
+```
 
 升级时先停止旧版本执行进程，再启用新版插件。首次启用自动创建上述 ClickHouse 表和 `quant_strategy_migrations`，读取旧 PostgreSQL 策略、版本、任务与 gzip 产物，分批复制并校验，完成后记录迁移指纹。中断可重试，已有 ClickHouse 记录不会被旧数据覆盖；旧 PostgreSQL 表保留为备份，正常策略业务不再读写这些表。旧的排队任务继续排队，迁移时仍在执行的任务标记失败，避免重复运行。宿主账号、插件配置和连接凭据仍由宿主管理。
 
@@ -222,8 +273,8 @@ Tick 测试另外覆盖最近窗口完整读取、多 Tick 合并到达、纳秒
 验证命令（集成测试使用本地 18124 ClickHouse 的独立数据库和 PostgreSQL schema 并自动清理，`QUANT_PYTHON` 可指定测试用插件 venv）：
 
 ```sh
-node --import tsx --test plugins/vibe-quant/tests/strategies.test.ts plugins/vibe-quant/tests/strategy-storage.test.ts
-QUANT_STRATEGY_INTEGRATION=1 node --import dotenv/config --import tsx --test plugins/vibe-quant/tests/strategies.test.ts plugins/vibe-quant/tests/strategy-storage.test.ts
+node --import tsx --test plugins/vibe-quant/tests/strategies.test.ts plugins/vibe-quant/tests/strategy-storage.test.ts plugins/vibe-quant/tests/strategy-lifecycle.test.ts
+QUANT_STRATEGY_INTEGRATION=1 node --import dotenv/config --import tsx --test plugins/vibe-quant/tests/strategies.test.ts plugins/vibe-quant/tests/strategy-storage.test.ts plugins/vibe-quant/tests/strategy-lifecycle.test.ts
 # 加 QUANT_INTEGRATION=1 可连接既有测试约定的 localhost:18124 ClickHouse 验证真实快照查询。
 ```
 
@@ -243,12 +294,13 @@ QUANT_STRATEGY_INTEGRATION=1 node --import dotenv/config --import tsx --test plu
 | `strategy_versions`、`strategy_publish` | 查看版本摘要、固定当前草稿版本                                     |
 | `backtest_start`、`backtest_list`       | 提交回测、分页读取历史记录                                         |
 | `backtest_status`、`backtest_result`    | 等待进度、指标与说明、分页读取交易/委托/成交/信号/日志/权益/风险线 |
+| `backtest_optimize`                     | 提交独立的 Optuna 调优任务，成功后创建新的策略草稿                 |
 | `backtest_cancel`                       | 取消排队或运行中的回测                                             |
 | `news_search`、`news_read`              | 搜索已采集资讯、读取正文及来源；采集关闭后仍可读取已有数据         |
 
 典型流程是 `guide → list/read → create/update → publish → backtest_start → status → result`。创建策略只需 `name`、`source`，`parameters` 默认空对象；更新传 `strategy_id`、`revision` 和要改的字段，`source`、`parameters` 直接放在顶层，无需 `draft`。省略字段保留原值，`parameters` 如提供则整体替换。读取结果仍保留 `strategy.draft` 结构。
 
-回测只需 `version_id`、`symbol`、`start`、`end`、`rules`，策略归属由版本自动确定；仍兼容可选 `strategy_id` 并校验归属。`backtest_start.parameters` 覆盖固定版本的同名参数。默认使用 1 分钟 K 线、初始资金 100 万、滑点 1 tick、参与率 10%、年化交易日 252，均为可覆盖的研究假设；乘数、保证金、手数、T+1 和手续费规则必须明确提供。日期使用 UTC epoch 秒。工具参数保持简单，实际保存和回测仍执行后端校验；参数错误会返回具体字段或错误码。结果明细每页固定 50 条，用 `next_offset` 继续。数据缺失、执行错误和无成交保留为实际结果，不会被当作验证成功。
+回测只需 `version_id`、`symbol`、`start`、`end`、`rules`，策略归属由版本自动确定；仍兼容可选 `strategy_id` 并校验归属。`backtest_start.parameters` 覆盖固定版本的同名参数。默认使用 1 分钟 K 线、初始资金 100 万、滑点 1 tick、参与率 10%、年化交易日 252，均为可覆盖的研究假设；乘数、保证金、手数、T+1 和手续费规则必须明确提供。`rules.fees.mode` 可选 `fixed`（按手／股固定金额）、`rate`（按成交额比例）、`combined`（两者叠加，省略时沿用历史口径）；页面新建回测默认选择固定模式，最低手续费与卖出税费在所有模式下生效。日期使用 UTC epoch 秒。工具参数保持简单，实际保存和回测仍执行后端校验；参数错误会返回具体字段或错误码。结果明细每页固定 50 条，用 `next_offset` 继续。数据缺失、执行错误和无成交保留为实际结果，不会被当作验证成功。
 
 资讯查询无需策略指南：`news_search` 可直接留空查看最新资讯，或传 `query` 和可选行业名称/`industry` key，每页 20 条，用 `next_cursor` 继续。把返回的资讯 `id` 传给 `news_read.article_id` 读取正文；返回原文链接、来源、发布时间、采集时间及正文状态，不触发额外抓取。引用时区分发布时间与采集时间，说明正文缺失、截断或同步关闭的限制。
 

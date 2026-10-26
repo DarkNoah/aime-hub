@@ -2,6 +2,7 @@
 from collections import OrderedDict
 from dataclasses import asdict
 from hashlib import sha256
+from itertools import islice
 import json
 from pathlib import Path
 from typing import Iterable
@@ -40,8 +41,12 @@ class DataView:
         end = self.now if as_of is None else as_of
         if end > self.now:
             raise ValueError('Future data is unavailable')
-        return tuple(bar for bar in self._bars.get((symbol, duration), {}).values()
-                     if bar.is_final and bar.end_time <= end)[-count:]
+        # Read only the requested tail, preserving filtering and chronological order.
+        # A long backtest otherwise scans the entire retained history on every bar.
+        values = self._bars.get((symbol, duration), {}).values()
+        tail = tuple(islice((bar for bar in reversed(values)
+                            if bar.is_final and bar.end_time <= end), count))
+        return tuple(reversed(tail))
 
     def quote(self, symbol: str) -> Quote | None:
         self.instrument(symbol)

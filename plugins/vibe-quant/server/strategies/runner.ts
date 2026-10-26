@@ -5,6 +5,7 @@ import { cp, mkdir, mkdtemp, open, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import type { PluginContext } from '@app/plugin-sdk/server';
 import type { BacktestResult, BacktestRun } from '../../strategy-types.js';
+import type { OptimizationReport } from '../../optimization-types.js';
 import type { QuantConfig } from '../config.js';
 import type { MarketStore } from '../clickhouse.js';
 import type { StateStore } from '../state-store.js';
@@ -13,6 +14,12 @@ import { ClickHouseError } from '../clickhouse-client.js';
 import { collectSnapshot } from './snapshot.js';
 import { StrategyStore } from './store.js';
 import { MAX_ARTIFACT_BYTES } from './limits.js';
+
+class HeartbeatError extends Error {
+  constructor() {
+    super('数据库心跳持续失败，回测已停止；已保留完成的试验');
+  }
+}
 
 /** Process isolation and cancellation, NOT a security sandbox. Only admins may enqueue code. */
 export function runPython(
@@ -77,7 +84,11 @@ export function runPython(
       kill('SIGKILL'); // Do not leave script-created children after a normal parent exit.
       if (signal.aborted) reject(new Error('用户中止了操作'));
       else if (timedOut)
-        reject(new Error('回测超过 5 分钟执行上限，请缩短区间'));
+        reject(
+          new Error(
+            `回测超过 ${Math.ceil(timeout / 60_000)} 分钟执行上限，请缩短区间`,
+          ),
+        );
       else if (code !== 0)
         reject(
           new Error(stderr.trim().split('\n').at(-1) || 'Python 执行失败'),
@@ -143,13 +154,18 @@ export class BacktestWorker {
     this.current = abort;
     if (this.stopped) abort.abort();
     let heartbeatBusy = false;
+    let confirmedAt = Date.now();
     const timer = setInterval(async () => {
       if (heartbeatBusy) return;
       heartbeatBusy = true;
       try {
         if (!(await this.records.heartbeat(job.id, this.id))) abort.abort();
+        else confirmedAt = Date.now();
       } catch {
-        abort.abort();
+        // A transient memory/query failure is not a user cancellation. Retry
+        // within the 90-second lease, then stop before another worker can claim it.
+        if (Date.now() - confirmedAt >= 60_000)
+          abort.abort(new HeartbeatError());
       } finally {
         heartbeatBusy = false;
       }
@@ -160,14 +176,18 @@ export class BacktestWorker {
       await this.records.status(
         job.id,
         this.id,
-        abort.signal.aborted ? 'cancelled' : 'failed',
-        abort.signal.aborted
-          ? this.stopped
-            ? '插件停止，运行已中止'
-            : '用户中止了操作'
-          : error instanceof Error
-            ? error.message
-            : '回测失败',
+        abort.signal.aborted && !(abort.signal.reason instanceof HeartbeatError)
+          ? 'cancelled'
+          : 'failed',
+        abort.signal.reason instanceof HeartbeatError
+          ? abort.signal.reason.message
+          : abort.signal.aborted
+            ? this.stopped
+              ? '插件停止，运行已中止'
+              : '用户中止了操作'
+            : error instanceof Error
+              ? error.message
+              : '回测失败',
       );
     } finally {
       clearInterval(timer);
@@ -249,6 +269,9 @@ export class BacktestWorker {
           annualization,
           risk_free_rate,
           benchmark_symbol,
+          ...(job.config.optimization
+            ? { optimization: job.config.optimization }
+            : {}),
           parameters: {
             ...job.config.parameters,
             symbol: job.config.symbol,
@@ -264,17 +287,122 @@ export class BacktestWorker {
       signal.throwIfAborted();
       stage = '执行策略';
       await this.records.status(job.id, this.id, 'running');
-      await runPython(
-        python,
-        [
-          join(this.context.runtime.paths.pluginRoot, 'worker/strategy_run.py'),
-          sdk,
+      const optimizing = !!job.config.optimization;
+      let progressTask: Promise<void> | undefined;
+      let lastMessage = '';
+      const progress = optimizing
+        ? setInterval(() => {
+            if (progressTask || signal.aborted) return;
+            progressTask = (async () => {
+              const report = JSON.parse(
+                await readArtifact(join(directory, 'optimization.json')),
+              ) as OptimizationReport;
+              if (report.message !== lastMessage) {
+                await this.records.status(
+                  job.id,
+                  this.id,
+                  'running',
+                  report.message,
+                );
+                lastMessage = report.message;
+              }
+            })()
+              .catch(() => {
+                /* The first atomic progress file may not exist yet. */
+              })
+              .finally(() => {
+                progressTask = undefined;
+              });
+          }, 2000)
+        : undefined;
+      let executionError: unknown;
+      try {
+        await runPython(
+          python,
+          [
+            join(
+              this.context.runtime.paths.pluginRoot,
+              optimizing
+                ? 'worker/strategy_optimize.py'
+                : 'worker/strategy_run.py',
+            ),
+            sdk,
+            directory,
+          ],
           directory,
-        ],
-        directory,
-        signal,
+          signal,
+          optimizing
+            ? (job.config.optimization!.timeout_seconds + 310) * 1000
+            : 300_000,
+        );
+      } catch (error) {
+        executionError = error;
+      } finally {
+        clearInterval(progress);
+        await progressTask;
+      }
+      let optimization: OptimizationReport | undefined;
+      if (optimizing) {
+        const text = await readArtifact(
+          join(directory, 'optimization.json'),
+        ).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return null;
+          throw error;
+        });
+        if (text) {
+          optimization = JSON.parse(text) as OptimizationReport;
+          if (signal.aborted || executionError) {
+            optimization.status =
+              signal.aborted && !(signal.reason instanceof HeartbeatError)
+                ? 'cancelled'
+                : 'failed';
+            optimization.message =
+              signal.reason instanceof HeartbeatError
+                ? signal.reason.message
+                : signal.aborted
+                  ? '用户中止了操作；已保留完成的试验'
+                  : '调参进程异常结束；已保留完成的试验';
+          }
+          await this.records.putArtifact(
+            job.id,
+            'optimization',
+            JSON.stringify(optimization),
+          );
+          const validation = await readArtifact(
+            join(directory, 'validation.json'),
+          ).catch((error: NodeJS.ErrnoException) => {
+            if (error.code === 'ENOENT') return null;
+            throw error;
+          });
+          if (validation)
+            await this.records.putArtifact(job.id, 'validation', validation);
+        }
+      }
+      if (executionError && !optimization) throw executionError;
+      if (optimization && optimization.best_trial === null) {
+        await this.records.status(
+          job.id,
+          this.id,
+          optimization.status === 'cancelled' ? 'cancelled' : 'failed',
+          optimization.message,
+        );
+        return;
+      }
+      if (
+        optimization &&
+        !/^[a-f0-9]{32}$/.test(optimization.best_run_id ?? '')
+      )
+        throw new Error('调参返回了无效的最佳试验 ID');
+      const resultText = await readArtifact(
+        optimization
+          ? join(
+              directory,
+              'artifacts',
+              optimization.best_run_id!,
+              'result.json',
+            )
+          : join(directory, 'result.json'),
       );
-      const resultText = await readArtifact(join(directory, 'result.json'));
       const result = JSON.parse(resultText) as BacktestResult;
       if (
         !result.metrics ||
@@ -300,11 +428,19 @@ export class BacktestWorker {
       await this.records.status(
         job.id,
         this.id,
-        result.status === 'succeeded'
-          ? 'completed'
-          : (result.status as BacktestRun['status']),
-        result.message,
+        optimization
+          ? optimization.status === 'running'
+            ? 'failed'
+            : optimization.status
+          : result.status === 'succeeded'
+            ? 'completed'
+            : (result.status as BacktestRun['status']),
+        optimization?.message ?? result.message,
       );
+      // A final heartbeat may observe the completed status and abort the lease.
+      // Draft creation checks durable completion/cancellation itself.
+      if (optimization?.status === 'completed')
+        await this.records.createOptimizationDraft(job.user_id, job.id);
     } catch (error) {
       if (error instanceof ClickHouseError)
         throw new Error(

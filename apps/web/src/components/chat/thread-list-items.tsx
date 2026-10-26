@@ -3,7 +3,7 @@ import { Clock3, MoreHorizontal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ThreadSummary } from '@aime/shared/threads';
 import { Item, ItemActions, ItemGroup } from '@/components/ui/item';
-import { ThreadActivityTitle, ThreadStatusBadge } from './thread-activity';
+import { ThreadActivityTitle, ThreadStatusIcon } from './thread-activity';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,6 +48,9 @@ export function ThreadListItems({
               title={thread.title || t('chat.new')}
               onClick={() => onSelect(thread.id)}
             >
+              {thread.status !== 'idle' && thread.status !== 'success' && (
+                <ThreadStatusIcon status={thread.status} />
+              )}
               {thread.id.startsWith('schedule:') && (
                 <span
                   className="inline-flex shrink-0 text-muted-foreground"
@@ -58,27 +61,12 @@ export function ThreadListItems({
                   <Clock3 className="size-3.5" aria-hidden="true" />
                 </span>
               )}
-              {isThreadActive(thread.status) && (
-                <ThreadStatusBadge
-                  status={thread.status}
-                  className="shrink-0 px-1 py-0 text-[10px]"
-                />
-              )}
               <ThreadActivityTitle
                 active={isThreadActive(thread.status)}
                 className="text-[13px]"
               >
                 {thread.title || t('chat.new')}
               </ThreadActivityTitle>
-              {thread.status !== 'idle' &&
-                thread.status !== 'success' &&
-                thread.status !== 'canceled' &&
-                !isThreadActive(thread.status) && (
-                  <ThreadStatusBadge
-                    status={thread.status}
-                    className="shrink-0 px-1 py-0 text-[10px]"
-                  />
-                )}
             </button>
           </Item>
           {(!canManage || canManage(thread)) && (

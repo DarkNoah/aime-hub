@@ -12,15 +12,22 @@ import {
   Input,
   Label,
   ScrollArea,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Skeleton,
   Textarea,
 } from '@app/plugin-ui';
 import { Code2, FileCode2, Plus, Search } from 'lucide-react';
 import { toast } from 'sonner';
-import type {
-  ScriptDraft,
-  StrategyDetail,
-  StrategySummary,
+import {
+  STRATEGY_STATUS_LABELS,
+  type ScriptDraft,
+  type StrategyDetail,
+  type StrategyStatus,
+  type StrategySummary,
 } from '../../strategy-types';
 import { errorText } from './format';
 import { StrategyEditor } from './editor';
@@ -30,6 +37,7 @@ export default function StrategiesPage({ pluginId }: PluginPageProps) {
   const [items, setItems] = useState<StrategySummary[] | null>(null);
   const [template, setTemplate] = useState<Template | null>(null);
   const [selected, setSelected] = useState('');
+  const [status, setStatus] = useState<StrategyStatus>('active');
   const [query, setQuery] = useState('');
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
@@ -37,7 +45,7 @@ export default function StrategiesPage({ pluginId }: PluginPageProps) {
   useEffect(() => {
     const abort = new AbortController();
     Promise.all([
-      pluginRequest<StrategySummary[]>(pluginId, '/strategies', {
+      pluginRequest<StrategySummary[]>(pluginId, '/strategies?status=all', {
         signal: abort.signal,
       }),
       pluginRequest<Template>(pluginId, '/strategies/template', {
@@ -47,7 +55,10 @@ export default function StrategiesPage({ pluginId }: PluginPageProps) {
       .then(([rows, example]) => {
         setItems(rows);
         setTemplate(example);
-        setSelected((old) => old || rows[0]?.id || '');
+        setSelected(
+          (old) =>
+            old || rows.find((item) => item.status === 'active')?.id || '',
+        );
         setError('');
       })
       .catch((e) => {
@@ -61,11 +72,22 @@ export default function StrategiesPage({ pluginId }: PluginPageProps) {
         ? old.map((v) => (v.id === item.id ? item : v))
         : [item, ...(old ?? [])],
     );
-  const filtered = items?.filter((item) =>
-    `${item.name} ${item.description}`
-      .toLowerCase()
-      .includes(query.toLowerCase()),
+  const filtered = items?.filter(
+    (item) =>
+      item.status === status &&
+      `${item.name} ${item.description}`
+        .toLowerCase()
+        .includes(query.toLowerCase()),
   );
+  const selectedId =
+    filtered?.find((item) => item.id === selected)?.id ??
+    filtered?.[0]?.id ??
+    '';
+  const openStrategy = (id: string) => {
+    setStatus(items?.find((item) => item.id === id)?.status ?? 'active');
+    setQuery('');
+    setSelected(id);
+  };
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-4 sm:px-6">
@@ -93,6 +115,27 @@ export default function StrategiesPage({ pluginId }: PluginPageProps) {
       ) : (
         <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] lg:grid-rows-1 lg:grid-cols-[250px_minmax(0,1fr)]">
           <aside className="flex min-h-0 flex-col border-b bg-muted/15 lg:border-b-0 lg:border-r">
+            <div className="mx-3 mt-3">
+              <Select
+                value={status}
+                onValueChange={(value) => setStatus(value as StrategyStatus)}
+              >
+                <SelectTrigger className="w-full" aria-label="策略分类">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(STRATEGY_STATUS_LABELS).map(
+                    ([value, label]) => (
+                      <SelectItem key={value} value={value}>
+                        {label} ·{' '}
+                        {items?.filter((item) => item.status === value)
+                          .length ?? 0}
+                      </SelectItem>
+                    ),
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="relative m-3">
               <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
               <Input
@@ -119,18 +162,30 @@ export default function StrategiesPage({ pluginId }: PluginPageProps) {
                       key={item.id}
                       type="button"
                       onClick={() => setSelected(item.id)}
-                      className={`w-full rounded-md border p-3 text-left transition-colors ${selected === item.id ? 'border-border bg-background shadow-xs' : 'border-transparent hover:bg-accent'}`}
-                      aria-current={selected === item.id ? 'page' : undefined}
+                      className={`w-full rounded-md border p-3 text-left transition-colors ${selectedId === item.id ? 'border-border bg-background shadow-xs' : 'border-transparent hover:bg-accent'}`}
+                      aria-current={selectedId === item.id ? 'page' : undefined}
                     >
                       <div className="flex items-center gap-2">
                         <span className="min-w-0 flex-1 truncate text-sm font-medium">
                           {item.name}
                         </span>
                         <Badge
-                          variant={item.enabled ? 'secondary' : 'outline'}
+                          variant={
+                            item.status === 'deleted'
+                              ? 'destructive'
+                              : item.status === 'active' && item.enabled
+                                ? 'secondary'
+                                : 'outline'
+                          }
                           className="text-[10px]"
                         >
-                          {item.enabled ? '启用' : '停用'}
+                          {item.status === 'deleted'
+                            ? '已删除'
+                            : item.status === 'archived'
+                              ? '已归档'
+                              : item.enabled
+                                ? '启用'
+                                : '停用'}
                         </Badge>
                       </div>
                       <p className="mt-1.5 truncate text-xs text-muted-foreground">
@@ -153,37 +208,55 @@ export default function StrategiesPage({ pluginId }: PluginPageProps) {
                 )}
                 {items && !filtered?.length && (
                   <p className="px-3 py-8 text-center text-xs text-muted-foreground">
-                    {query ? '没有匹配的策略' : '创建策略后会显示在这里'}
+                    {query
+                      ? '没有匹配的策略'
+                      : status === 'active'
+                        ? '创建策略后会显示在这里'
+                        : status === 'archived'
+                          ? '暂无归档策略'
+                          : '回收站为空'}
                   </p>
                 )}
               </div>
             </ScrollArea>
           </aside>
           <main className="min-h-0 min-w-0">
-            {selected && template ? (
+            {selectedId && template ? (
               <DetailLoader
-                key={selected}
+                key={selectedId}
                 pluginId={pluginId}
-                id={selected}
+                id={selectedId}
                 canRun={template.canRun}
                 onUpdate={update}
+                onOpenStrategy={openStrategy}
               />
-            ) : items && !items.length ? (
+            ) : items && !filtered?.length ? (
               <div className="flex h-full min-h-80 flex-col items-center justify-center px-6 text-center">
                 <FileCode2 className="mb-4 size-9 text-muted-foreground" />
-                <h2 className="text-base font-medium">从一份策略脚本开始</h2>
+                <h2 className="text-base font-medium">
+                  {query
+                    ? '没有匹配的策略'
+                    : status === 'archived'
+                      ? '暂无归档策略'
+                      : status === 'deleted'
+                        ? '回收站为空'
+                        : '从一份策略脚本开始'}
+                </h2>
                 <p className="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
-                  保存草稿，发布版本，再配置回测。内置均线模板可用于 IM
-                  主连、商品主连和股票。
+                  {status === 'active'
+                    ? '保存草稿，发布版本，再配置回测。内置均线模板可用于 IM 主连、商品主连和股票。'
+                    : '策略的脚本、版本和回测记录会保留，可随时恢复到当前策略。'}
                 </p>
-                <Button
-                  className="mt-5"
-                  disabled={!template}
-                  onClick={() => setCreate(true)}
-                >
-                  <Plus className="size-4" />
-                  创建第一份策略
-                </Button>
+                {status === 'active' && !query && (
+                  <Button
+                    className="mt-5"
+                    disabled={!template}
+                    onClick={() => setCreate(true)}
+                  >
+                    <Plus className="size-4" />
+                    新建策略
+                  </Button>
+                )}
               </div>
             ) : (
               <div className="space-y-4 p-6">
@@ -201,6 +274,8 @@ export default function StrategiesPage({ pluginId }: PluginPageProps) {
           onClose={() => setCreate(false)}
           onCreated={(item) => {
             update(item);
+            setStatus('active');
+            setQuery('');
             setSelected(item.id);
             setCreate(false);
           }}
@@ -322,11 +397,13 @@ function DetailLoader({
   id,
   canRun,
   onUpdate,
+  onOpenStrategy,
 }: {
   pluginId: string;
   id: string;
   canRun: boolean;
   onUpdate: (item: StrategySummary) => void;
+  onOpenStrategy: (id: string) => void;
 }) {
   const [item, setItem] = useState<StrategyDetail | null>(null);
   const [error, setError] = useState('');
@@ -364,6 +441,7 @@ function DetailLoader({
       pluginId={pluginId}
       canRun={canRun}
       onUpdate={onUpdate}
+      onOpenStrategy={onOpenStrategy}
     />
   ) : (
     <div className="space-y-4 p-6">

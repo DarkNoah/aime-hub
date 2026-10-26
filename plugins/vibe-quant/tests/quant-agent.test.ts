@@ -49,6 +49,7 @@ const article: NewsArticle = {
   nextRetryAt: 0,
 };
 const original: StrategyDetail = {
+  status: 'active',
   id: strategyId,
   name: '原始策略',
   description: '保留描述',
@@ -260,7 +261,7 @@ function fixture() {
   };
 }
 
-test('plugin registers a selectable quant-agent and 15 valid tools without starting resources', () => {
+test('plugin registers a selectable quant-agent and 16 valid tools without starting resources', () => {
   const f = fixture();
   const server = createServer(f.context);
   assert.equal(server.agents?.[0].id, 'plugin:vibe-quant:quant-agent');
@@ -270,7 +271,7 @@ test('plugin registers a selectable quant-agent and 15 valid tools without start
     ),
   );
   assert.ok(agentInputSchema.safeParse(agent).success);
-  assert.equal(server.tools?.length, 15);
+  assert.equal(server.tools?.length, 16);
   for (const tool of server.tools!) {
     assert.ok(tool instanceof PluginTool);
     assert.ok(tool instanceof BaseTool);
@@ -403,7 +404,7 @@ test('backtest requires a current admin and same-strategy version, merges parame
     ...config,
     end: config.start,
   });
-  assert.equal(invalid.error, 'INVALID_BACKTEST_CONFIG');
+  assert.equal(invalid.error, 'INVALID_BACKTEST_TIME_RANGE');
 });
 
 test('minimal backtest input resolves its strategy and keeps defaults and backend validation', async () => {
@@ -432,6 +433,19 @@ test('minimal backtest input resolves its strategy and keeps defaults and backen
     },
   );
   assert.equal(f.calls.filter((c) => c.name === 'enqueue').length, 1);
+});
+
+test('backtest agent preserves explicit fixed, rate and combined fee settings', async () => {
+  const f = fixture();
+  const config = input(versionId);
+  for (const mode of ['fixed', 'rate', 'combined']) {
+    const fees = { ...config.rules.fees, mode, close_today_per_unit: 0 };
+    const result = await f.call('backtest_start', {
+      ...config,
+      rules: { ...config.rules, fees },
+    });
+    assert.deepEqual(result.run.config.rules.fees, fees);
+  }
 });
 
 test('news search uses saved data, accepts industry names and follows an opaque cursor', async () => {
@@ -725,3 +739,62 @@ test(
     }
   },
 );
+
+test('Optuna tool shares authorization, immutable parameters, queue cancellation and result pagination', async () => {
+  const f = fixture();
+  const config = {
+    ...input(versionId),
+    parameters: { fast: 3 },
+    optimization: {
+      search_space: { fast: { type: 'int', low: 2, high: 4 } },
+    },
+  };
+  f.role('user');
+  assert.deepEqual(await f.call('backtest_optimize', config), {
+    error: 'SCRIPT_EXECUTION_ADMIN_REQUIRED',
+  });
+  f.role('admin');
+  assert.deepEqual(await f.call('backtest_optimize', config, 'bob'), {
+    error: 'STRATEGY_NOT_FOUND',
+  });
+  const started = await f.call('backtest_optimize', config);
+  assert.equal(started.run.config.optimization.n_trials, 30);
+  assert.deepEqual(started.run.config.parameters, { fast: 3, slow: 5 });
+  assert.equal(f.calls.filter((c) => c.name === 'enqueue').length, 1);
+  f.records.run = async () => ({ ...started.run, status: 'failed' });
+  f.records.artifact = async (_id, kind) =>
+    kind === 'optimization'
+      ? {
+          hash: 'report-hash',
+          text: JSON.stringify({
+            status: 'failed',
+            best_trial: null,
+            trials: Array.from({ length: 60 }, (_, number) => ({
+              number,
+              state: 'failed',
+            })),
+          }),
+        }
+      : null;
+  const result = await f.call('backtest_result', { run_id: runId });
+  assert.equal(result.result, null);
+  assert.equal(result.optimization.status, 'failed');
+  assert.equal(result.optimization.trial_count, 60);
+  assert.equal(result.optimization.trials, undefined);
+  const page = await f.call('backtest_result', {
+    run_id: runId,
+    section: 'optimization_trials',
+    offset: 50,
+  });
+  assert.equal(page.data.length, 10);
+  assert.equal(page.data[0].number, 50);
+  assert.equal(page.next_offset, null);
+  const controller = new AbortController();
+  controller.abort();
+  assert.equal(
+    (await f.call('backtest_optimize', config, 'alice', controller.signal))
+      .message,
+    '用户中止了操作',
+  );
+  assert.equal(f.calls.filter((c) => c.name === 'enqueue').length, 1);
+});

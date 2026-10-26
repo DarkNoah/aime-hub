@@ -51,7 +51,7 @@ export class StrategyGuideTool extends PluginTool {
               durations: [60, 180, 300, 900, 1800, 3600, 86400],
               time: 'start/end 为 UTC epoch 秒；单次区间不超过十年，end 不晚于当前时间。',
               rules:
-                'rules 必填：multiplier、margin_rate、lot_size、t_plus_one、fees（per_unit/rate/minimum/close_today_per_unit/close_today_rate/sell_tax_rate）。所有费率用小数；平今字段可为 null。须使用用户给定或已核实的规则。',
+                'rules 必填：multiplier、margin_rate、lot_size、t_plus_one、fees（per_unit/rate/minimum/close_today_per_unit/close_today_rate/sell_tax_rate）。fees.mode 可选 fixed（按手/股固定金额）、rate（按成交额）、combined（两者叠加，省略时沿用）。最低费用和卖出税费始终生效。所有费率用小数；平今字段可为 null。须使用用户给定或已核实的规则。',
               data: '仅使用已采集的历史数据；不隐式下载缺失数据，主连需要历史映射和实际合约 K 线。暂不支持期权回测。',
             },
           };

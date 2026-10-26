@@ -1,14 +1,22 @@
 import type { Bar, Engine } from './shared.js';
+import type { OptimizationConfig } from './optimization-types.js';
 
 export interface ScriptDraft {
   source: string;
   parameters: Record<string, unknown>;
 }
+export type StrategyStatus = 'active' | 'archived' | 'deleted';
+export const STRATEGY_STATUS_LABELS: Record<StrategyStatus, string> = {
+  active: '当前策略',
+  archived: '已归档',
+  deleted: '回收站',
+};
 export interface StrategySummary {
   id: string;
   name: string;
   description: string;
   enabled: boolean;
+  status: StrategyStatus;
   revision: number;
   version_count: number;
   updated_at: string;
@@ -25,6 +33,7 @@ export interface StrategyVersion extends ScriptDraft {
   created_at: string;
 }
 export interface BacktestInput {
+  optimization?: OptimizationConfig;
   version_id: string;
   symbol: string;
   duration: number;
@@ -45,6 +54,8 @@ export interface BacktestInput {
     lot_size: number;
     t_plus_one: boolean;
     fees: {
+      /** Omitted on historical runs: per-unit and notional fees are combined. */
+      mode?: 'fixed' | 'rate' | 'combined';
       per_unit: number;
       rate: number;
       minimum: number;
@@ -59,6 +70,8 @@ export interface BacktestInput {
 export type RunStatus =
   'queued' | 'preparing' | 'running' | 'completed' | 'failed' | 'cancelled';
 export interface BacktestRun {
+  /** A successful optimization creates a separate, unpublished strategy. */
+  optimization_draft_id?: string;
   id: string;
   strategy_id: string;
   version_id: string;
@@ -74,6 +87,7 @@ export interface BacktestRun {
   finished_at: string | null;
 }
 export interface Trade {
+  status?: 'closed';
   id: string;
   symbol: string;
   side: 'long' | 'short';
@@ -97,9 +111,30 @@ export interface Trade {
   trigger_bar_time?: number | null;
   trigger_time_precision?: 'open' | 'bar' | null;
 }
+export interface OpenTrade extends Omit<
+  Trade,
+  | 'status'
+  | 'exit_time'
+  | 'exit_price'
+  | 'gross_pnl'
+  | 'net_pnl'
+  | 'exit_signal_id'
+> {
+  status: 'open';
+  exit_time: null;
+  exit_price: null;
+  gross_pnl: null;
+  net_pnl: null;
+  exit_signal_id: null;
+  /** Last observed account time; risk drawings must not extend beyond the run. */
+  observed_until: number;
+}
+export type TradeRecord = Trade | OpenTrade;
 /** Intrabar execution is anchored to its source candle, not the next candle. */
-export const tradeExitAnchor = (trade: Trade) =>
-  trade.exit_bar_time ?? trade.exit_time;
+export const tradeExitAnchor = (trade: TradeRecord) =>
+  trade.status === 'open' ? null : (trade.exit_bar_time ?? trade.exit_time);
+export const tradeHoldingEnd = (trade: TradeRecord) =>
+  trade.status === 'open' ? trade.observed_until : trade.exit_time;
 export interface BacktestResult {
   schema_version: number;
   run_id: string;
@@ -134,7 +169,7 @@ export interface RiskLevelRecord {
   take_profit: number | null;
 }
 export interface TradeReplay {
-  trade: Trade;
+  trade: TradeRecord;
   bars: Bar[];
   priceTick: number;
   snapshotHash: string;
