@@ -182,23 +182,24 @@ test('legacy records read as disabled and retain preferences through lifecycle c
   );
   assert.equal(
     (await request(`/${saved.id}`, 'GET', undefined, 'bob')).status,
-    404,
+    200,
   );
   assert.equal(
     (
       await request(
         `/${saved.id}`,
         'PUT',
-        { ...body, revision: 5, notifications: strategyNotifications() },
+        { ...body, revision: 4, notifications: strategyNotifications() },
         'bob',
       )
     ).status,
-    404,
+    200,
   );
   assert.deepEqual(
     (await records.detail('alice', saved.id)).notifications,
-    configured,
+    strategyNotifications(),
   );
+  assert.equal(records.data.get(saved.id)?.user_id, 'alice');
 });
 
 test('malformed preferences are rejected without replacing saved channels', async () => {

@@ -148,7 +148,7 @@ export class BacktestListTool extends PluginTool {
       id: 'plugin_vibe_quant_backtest_list',
       title: '查询回测历史',
       description:
-        '读取当前用户指定策略最近 30 条回测；before 为上一页最后一条回测 ID。',
+        '读取指定共享策略最近 30 条回测；before 为上一页最后一条回测 ID。',
       inputSchema: z.object({
         strategy_id: z.uuid(),
         before: z.uuid().optional(),
@@ -177,7 +177,7 @@ export class BacktestStatusTool extends PluginTool {
       id: 'plugin_vibe_quant_backtest_status',
       title: '查询回测进度',
       description:
-        '查询当前用户回测状态。wait=true 时最多等待 10 秒或直至结束，仍在运行则继续查询同一 ID。中止此等待不会取消后台回测。',
+        '查询共享回测状态。wait=true 时最多等待 10 秒或直至结束，仍在运行则继续查询同一 ID。中止此等待不会取消后台回测。',
       inputSchema: z.object({
         run_id: z.uuid(),
         wait: z.boolean().default(false),
@@ -229,7 +229,7 @@ export class BacktestResultTool extends PluginTool {
         execute(execution, async ({ records }, actor, signal) => {
           const run = await records.run(actor.userId, input.run_id);
           signal?.throwIfAborted();
-          // Artifact storage itself has no owner column. Never read it before authorizing the run.
+          // Resolve the shared run before reading its artifacts; authentication is checked by tool context.
           const artifact = await records.artifact(run.id, 'result');
           const base = { run: runView(run), terminal: !activeRun(run.status) };
           const reportArtifact = run.config.optimization
@@ -310,7 +310,7 @@ export class BacktestCancelTool extends PluginTool {
       id: 'plugin_vibe_quant_backtest_cancel',
       title: '取消策略回测',
       description:
-        '取消当前用户的回测。排队任务立即取消；运行任务提交取消请求，由后台停止，之后查询 status 确认终态。',
+        '取消共享策略的回测。排队任务立即取消；运行任务提交取消请求，由后台停止，之后查询 status 确认终态。',
       inputSchema: z.object({ run_id: z.uuid() }),
       execute: (input, execution) =>
         execute(execution, async ({ records }, actor) => ({

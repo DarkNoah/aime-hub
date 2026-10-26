@@ -101,7 +101,7 @@ export class SignalWorker {
   private async valid(row: StoredMonitor) {
     const [current, strategy, allowed] = await Promise.all([
       this.monitors.get(row.id, row.user_id),
-      this.records.storedStrategy(row.strategy_id, row.user_id),
+      this.records.storedStrategy(row.strategy_id),
       this.allowed(row.user_id),
     ]);
     return (
@@ -325,10 +325,7 @@ export class SignalWorker {
               monitor_id: row.id,
             };
             await this.monitors.signal(row.user_id, event);
-            const strategy = await this.records.storedStrategy(
-              row.strategy_id,
-              row.user_id,
-            );
+            const strategy = await this.records.storedStrategy(row.strategy_id);
             const current = await this.monitors.get(row.id, row.user_id);
             const channels = strategyNotifications(
               current.notifications ?? strategy.notifications,

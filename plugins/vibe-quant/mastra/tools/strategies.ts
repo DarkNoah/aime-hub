@@ -46,7 +46,7 @@ export class StrategyGuideTool extends PluginTool {
               },
             },
             workflow:
-              'create/update → publish → backtest_start → backtest_status → backtest_result。策略及回测按用户隔离，已发布版本不可变。',
+              'create/update → publish → backtest_start → backtest_status → backtest_result。策略及回测在同一数据库内共享，已发布版本不可变。',
             backtest: {
               durations: [60, 180, 300, 900, 1800, 3600, 86400],
               time: 'start/end 为 UTC epoch 秒；单次区间不超过十年，end 不晚于当前时间。',
@@ -94,7 +94,7 @@ export class StrategyListTool extends PluginTool {
       id: 'plugin_vibe_quant_strategy_list',
       title: '查询策略列表',
       description:
-        '查询当前用户的策略摘要（含 ID、revision、启用状态、版本数），可按名称或描述筛选。',
+        '查询共享策略摘要（含 ID、revision、启用状态、版本数），可按名称或描述筛选。',
       inputSchema: z.object({
         query: z.string().default(''),
         offset: z.number().int().nonnegative().default(0),
@@ -126,7 +126,7 @@ export class StrategyReadTool extends PluginTool {
       id: 'plugin_vibe_quant_strategy_read',
       title: '读取策略',
       description:
-        '读取当前用户策略的草稿源码、参数及 revision；可附带 version_id 读取指定不可变版本。更新前必须读取。',
+        '读取共享策略的草稿源码、参数及 revision；可附带 version_id 读取指定不可变版本。更新前必须读取。',
       inputSchema: z.object({
         strategy_id: id,
         version_id: z.string().optional(),

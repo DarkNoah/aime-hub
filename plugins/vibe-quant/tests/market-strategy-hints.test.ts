@@ -145,10 +145,10 @@ test('market API scopes hints by owner, instrument and engine; muting preserves 
       config: { engine: 'tqsdk' } as QuantConfig,
       state: {} as StateStore,
       records: {
-        storedStrategy: async (_id: string, owner: string) => {
-          assert.equal(owner, 'alice');
-          return { name: '测试策略', notifications: { channels: {} } };
-        },
+        storedStrategy: async () => ({
+          name: '测试策略',
+          notifications: { channels: {} },
+        }),
       } as unknown as StrategyStore,
       monitors: {
         list: async (owner: string) => {

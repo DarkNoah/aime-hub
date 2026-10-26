@@ -7,7 +7,7 @@ export const sha256 = (value: string | Buffer) =>
 
 type Source = { hash: string; source: string };
 
-/** Immutable, content-addressed scripts. Ownership is checked by StrategyStore. */
+/** Immutable, content-addressed scripts shared through authenticated strategy APIs. */
 export class StrategySources extends ClickHouseClient {
   async initialize() {
     try {

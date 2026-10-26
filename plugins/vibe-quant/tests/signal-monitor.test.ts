@@ -23,7 +23,7 @@ import type {
 
 const config = () =>
   monitorSchema.parse({ ...input(randomUUID(), actual), warmup_days: 1 });
-test('monitor creation enforces owner, administrator, version binding and parameter validation', async () => {
+test('monitor creation uses shared strategies and enforces administrator, version binding and parameter validation', async () => {
   const value = config(),
     calls: unknown[] = [];
   const app = new Hono<PluginHttpEnv>();
@@ -45,10 +45,7 @@ test('monitor creation enforces owner, administrator, version binding and parame
         }),
       } as unknown as StateStore,
       records: {
-        storedStrategy: async (_id: string, owner: string) => {
-          assert.equal(owner, 'alice');
-          return { enabled: true, status: 'active' };
-        },
+        storedStrategy: async () => ({ enabled: true, status: 'active' }),
         version: async () => ({
           strategy_id: 'strategy',
           number: 1,

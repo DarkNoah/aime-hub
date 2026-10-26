@@ -26,12 +26,14 @@ export type StoredStrategy = Omit<StrategySummary, 'status'> & {
   status?: StrategyStatus;
   /** Legacy records have no notification preferences; channels default to off. */
   notifications?: StrategyNotifications;
+  /** Creator attribution only; strategies are shared across authenticated users. */
   user_id: string;
   draft_hash: string;
   draft_parameters: Record<string, unknown>;
   versions: Omit<StrategyVersion, 'source'>[];
 };
 export type StoredRun = BacktestRun & {
+  /** Submitter attribution and per-user queue limit, not an access boundary. */
   user_id: string;
   worker_id: string | null;
   heartbeat_at: string | null;
@@ -73,7 +75,7 @@ const versionDetail = (
   source,
 });
 
-/** All durable strategy state lives in ClickHouse, including published versions and queue state. */
+/** Shared strategy library in ClickHouse. Caller IDs attribute writes, not access. */
 export class StrategyStore extends ClickHouseClient {
   get sources() {
     return new StrategySources(this.config);
@@ -111,11 +113,10 @@ export class StrategyStore extends ClickHouseClient {
     }
   }
 
-  private async record<T>(table: string, id: string, owner?: string) {
+  private async record<T>(table: string, id: string) {
     const [row] = await this.rows<RecordRow>(
-      `SELECT payload, revision FROM ${this.table(table)} FINAL WHERE id = {id:String}
-       ${owner === undefined ? '' : 'AND userId = {owner:String}'}`,
-      { id, ...(owner === undefined ? {} : { owner }) },
+      `SELECT payload, revision FROM ${this.table(table)} FINAL WHERE id = {id:String}`,
+      { id },
     );
     return row
       ? { value: JSON.parse(row.payload) as T, revision: Number(row.revision) }
@@ -153,36 +154,32 @@ export class StrategyStore extends ClickHouseClient {
     return result.writtenRows === 1;
   }
 
-  async storedStrategy(id: string, owner?: string): Promise<StoredStrategy> {
-    const row = await this.record<StoredStrategy>(
-      'quant_strategies',
-      id,
-      owner,
-    );
+  async storedStrategy(id: string): Promise<StoredStrategy> {
+    const row = await this.record<StoredStrategy>('quant_strategies', id);
     if (!row) throw new StrategyError('STRATEGY_NOT_FOUND', 404);
     return row.value;
   }
 
   async list(
-    owner: string,
+    _actor: string,
     status: StrategyStatus | 'all' = 'active',
   ): Promise<StrategySummary[]> {
     const rows = await this.rows<{ payload: string }>(
-      `SELECT payload FROM ${this.table('quant_strategies')} FINAL WHERE userId = {owner:String}
-       ${status === 'all' ? '' : "AND if(JSONExtractString(payload, 'status') = '', 'active', JSONExtractString(payload, 'status')) = {status:String}"}
+      `SELECT payload FROM ${this.table('quant_strategies')} FINAL
+       ${status === 'all' ? '' : "WHERE if(JSONExtractString(payload, 'status') = '', 'active', JSONExtractString(payload, 'status')) = {status:String}"}
        ORDER BY JSONExtractString(payload, 'updated_at') DESC, id`,
-      { owner, status },
+      { status },
     );
     return rows.map((row) => summary(JSON.parse(row.payload)));
   }
 
   async setStatus(
-    owner: string,
+    _actor: string,
     id: string,
     revision: number,
     status: StrategyStatus,
   ): Promise<StrategySummary> {
-    const row = await this.storedStrategy(id, owner);
+    const row = await this.storedStrategy(id);
     if (row.revision !== revision)
       throw new StrategyError('STRATEGY_CONFLICT', 409);
     if ((row.status ?? 'active') === status) return summary(row);
@@ -197,8 +194,8 @@ export class StrategyStore extends ClickHouseClient {
     return summary(next);
   }
 
-  async detail(owner: string, id: string): Promise<StrategyDetail> {
-    const row = await this.storedStrategy(id, owner);
+  async detail(_actor: string, id: string): Promise<StrategyDetail> {
+    const row = await this.storedStrategy(id);
     return {
       ...summary(row),
       notifications: strategyNotifications(row.notifications),
@@ -221,14 +218,14 @@ export class StrategyStore extends ClickHouseClient {
     id?: string,
     revision?: number,
   ) {
-    const existing = id ? await this.storedStrategy(id, owner) : undefined;
+    const existing = id ? await this.storedStrategy(id) : undefined;
     if (existing) assertEditable(existing);
     if (existing && existing.revision !== revision)
       throw new StrategyError('STRATEGY_CONFLICT', 409);
     const hash = await this.sources.put(value.draft.source);
     const row: StoredStrategy = {
       id: id ?? randomUUID(),
-      user_id: owner,
+      user_id: existing?.user_id ?? owner,
       name: value.name,
       description: value.description,
       enabled: value.enabled,
@@ -248,8 +245,8 @@ export class StrategyStore extends ClickHouseClient {
     return this.detail(owner, row.id);
   }
 
-  async versions(owner: string, id: string): Promise<StrategyVersion[]> {
-    const row = await this.storedStrategy(id, owner);
+  async versions(_actor: string, id: string): Promise<StrategyVersion[]> {
+    const row = await this.storedStrategy(id);
     const sources = await this.sources.readMany(
       row.versions.map((v) => v.source_hash),
     );
@@ -263,12 +260,12 @@ export class StrategyStore extends ClickHouseClient {
       });
   }
 
-  async version(owner: string, id: string): Promise<StrategyVersion> {
+  async version(_actor: string, id: string): Promise<StrategyVersion> {
     const [row] = await this.rows<{ payload: string }>(
       `SELECT payload FROM ${this.table('quant_strategies')} FINAL
-       WHERE userId = {owner:String} AND arrayExists(v -> JSONExtractString(v, 'id') = {id:String},
+       WHERE arrayExists(v -> JSONExtractString(v, 'id') = {id:String},
          JSONExtractArrayRaw(payload, 'versions')) LIMIT 1`,
-      { owner, id },
+      { id },
     );
     const version =
       row &&
@@ -280,7 +277,7 @@ export class StrategyStore extends ClickHouseClient {
   }
 
   async publish(owner: string, id: string, revision: number, note: string) {
-    const row = await this.storedStrategy(id, owner);
+    const row = await this.storedStrategy(id);
     assertEditable(row);
     if (row.revision !== revision)
       throw new StrategyError('STRATEGY_CONFLICT', 409);
@@ -316,7 +313,7 @@ export class StrategyStore extends ClickHouseClient {
     config: BacktestInput,
     engine: Engine,
   ) {
-    const strategy = await this.storedStrategy(id, owner);
+    const strategy = await this.storedStrategy(id);
     assertEditable(strategy);
     if (!strategy.enabled) throw new StrategyError('STRATEGY_DISABLED', 409);
     const version = strategy.versions.find((v) => v.id === config.version_id);
@@ -343,7 +340,7 @@ export class StrategyStore extends ClickHouseClient {
       finished_at: null,
     };
     const condition = `EXISTS (SELECT 1 FROM ${this.table('quant_strategies')} FINAL
-      WHERE id = {strategy:String} AND userId = {owner:String} AND revision = {strategyRevision:UInt64}
+      WHERE id = {strategy:String} AND revision = {strategyRevision:UInt64}
       AND JSONExtractBool(payload, 'enabled')
       AND JSONExtractString(payload, 'status') IN ('', 'active'))
       AND (SELECT count() FROM ${this.table('quant_strategy_runs')} FINAL
@@ -354,7 +351,7 @@ export class StrategyStore extends ClickHouseClient {
         strategyRevision: String(strategy.revision),
       }))
     ) {
-      const current = await this.storedStrategy(id, owner);
+      const current = await this.storedStrategy(id);
       assertEditable(current);
       if (!current.enabled) throw new StrategyError('STRATEGY_DISABLED', 409);
       if (current.revision !== strategy.revision)
@@ -365,20 +362,20 @@ export class StrategyStore extends ClickHouseClient {
   }
 
   async runs(
-    owner: string,
+    _actor: string,
     id: string,
     before?: string,
     kind: 'backtest' | 'optimization' | 'all' = 'backtest',
     monitor?: Pick<SignalMonitor, 'engine' | 'config'>,
   ): Promise<BacktestRun[]> {
-    await this.storedStrategy(id, owner);
+    await this.storedStrategy(id);
     const cursor = before
-      ? await this.record<StoredRun>('quant_strategy_runs', before, owner)
+      ? await this.record<StoredRun>('quant_strategy_runs', before)
       : undefined;
     if (before && (!cursor || cursor.value.strategy_id !== id)) return [];
     const rows = await this.rows<{ payload: string }>(
       `SELECT payload FROM ${this.table('quant_strategy_runs')} FINAL
-       WHERE userId = {owner:String} AND JSONExtractString(payload, 'strategy_id') = {strategy:String}
+       WHERE JSONExtractString(payload, 'strategy_id') = {strategy:String}
        ${
          monitor
            ? `AND JSONExtractString(payload, 'version_id') = {version:String}
@@ -391,7 +388,6 @@ export class StrategyStore extends ClickHouseClient {
        ${cursor ? "AND (JSONExtractString(payload, 'created_at'), id) < ({before:String}, {beforeId:String})" : ''}
        ORDER BY JSONExtractString(payload, 'created_at') DESC, id DESC LIMIT 30`,
       {
-        owner,
         strategy: id,
         ...(monitor
           ? {
@@ -408,8 +404,8 @@ export class StrategyStore extends ClickHouseClient {
     return rows.map((row) => JSON.parse(row.payload));
   }
 
-  async run(owner: string, id: string): Promise<BacktestRun> {
-    const row = await this.record<StoredRun>('quant_strategy_runs', id, owner);
+  async run(_actor: string, id: string): Promise<BacktestRun> {
+    const row = await this.record<StoredRun>('quant_strategy_runs', id);
     if (!row) throw new StrategyError('RUN_NOT_FOUND', 404);
     return row.value;
   }
@@ -443,11 +439,9 @@ export class StrategyStore extends ClickHouseClient {
     const version = await this.version(owner, run.version_id);
     if (version.source_hash !== run.source_hash)
       throw new Error('策略版本哈希不匹配');
-    const original = await this.storedStrategy(run.strategy_id, owner);
+    const original = await this.storedStrategy(run.strategy_id);
     await this.updateRun(id, (current) =>
-      current.user_id === owner &&
-      current.status === 'completed' &&
-      !current.optimization_draft_id
+      current.status === 'completed' && !current.optimization_draft_id
         ? { ...current, optimization_draft_id: randomUUID() }
         : undefined,
     );
@@ -457,7 +451,6 @@ export class StrategyStore extends ClickHouseClient {
     const existing = await this.record<StoredStrategy>(
       'quant_strategies',
       draftId,
-      owner,
     );
     if (existing) return this.detail(owner, draftId);
     const parameters = { ...version.parameters, ...run.config.parameters };
@@ -495,7 +488,7 @@ export class StrategyStore extends ClickHouseClient {
           return next;
       } catch (error) {
         // Read/CAS retry is safe even if a timed-out statement committed: the
-        // next attempt reloads the latest row and rechecks ownership/status.
+        // next attempt reloads the latest row and rechecks worker ownership/status.
         if (
           attempt === 29 ||
           !(

@@ -56,8 +56,8 @@ export function signalRoutes(
       ? c.json({ code: error.code }, error.status)
       : c.json({ code: 'STRATEGY_SERVICE_UNAVAILABLE' }, 503),
   );
-  const editable = async (owner: string, id: string) => {
-    const row = await get().records.storedStrategy(id, owner);
+  const editable = async (id: string) => {
+    const row = await get().records.storedStrategy(id);
     if ((row.status ?? 'active') !== 'active')
       throw new StrategyError(
         row.status === 'deleted' ? 'STRATEGY_DELETED' : 'STRATEGY_ARCHIVED',
@@ -126,7 +126,7 @@ export function signalRoutes(
         rows.map(async (row) => {
           const [monitor, strategy, signals, overlay] = await Promise.all([
             monitors.view(row),
-            records.storedStrategy(row.strategy_id, owner),
+            records.storedStrategy(row.strategy_id),
             monitors.signals(owner, row.id),
             monitors.overlay(row.id),
           ]);
@@ -145,7 +145,7 @@ export function signalRoutes(
   });
   api.get('/:strategyId/monitors', async (c) => {
     const { records, monitors } = get();
-    await records.storedStrategy(c.req.param('strategyId'), c.get('userId'));
+    await records.storedStrategy(c.req.param('strategyId'));
     return c.json(
       await Promise.all(
         (await monitors.list(c.get('userId'), c.req.param('strategyId'))).map(
@@ -164,7 +164,7 @@ export function signalRoutes(
     const { records, monitors, state, config, wake } = get();
     const owner = c.get('userId'),
       strategyId = c.req.param('strategyId');
-    await editable(owner, strategyId);
+    await editable(strategyId);
     const version = await records.version(owner, parsed.data.version_id);
     if (version.strategy_id !== strategyId)
       throw new StrategyError('VERSION_NOT_FOUND', 404);
@@ -236,7 +236,7 @@ export function signalRoutes(
     if (parsed.data.enabled && !parsed.data.deleted && !row.enabled) {
       if (!c.get('isAdmin'))
         throw new StrategyError('SCRIPT_EXECUTION_ADMIN_REQUIRED', 403);
-      await editable(owner, row.strategy_id);
+      await editable(row.strategy_id);
     }
     const result = await monitors.update(
       owner,
