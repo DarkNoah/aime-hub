@@ -23,54 +23,9 @@ coverage/
 # Generated plugin skill bundles (refreshed before dev/build)
 apps/server/src/modules/plugins/bundled-skills/
 
-!apps/server/src/modules/plugins/*.test.ts
-!scripts/plugins.test.ts
-!scripts/plugin-threads.test.ts
-!scripts/chat-drawing.test.ts
 !scripts/chat-image-edit-browser.test.mjs
-!scripts/realtime.test.ts
-!scripts/chat-context-usage.test.ts
-!plugins/vibe-quant/tests/*.test.ts
 plugins/vibe-quant/**/__pycache__/
 
-!apps/server/src/modules/automations/tools.test.ts
-!scripts/chat-automation-preview.test.ts
-!apps/server/src/modules/threads/browser.test.ts
-!apps/server/src/modules/threads/context-compaction.test.ts
-!apps/server/src/modules/threads/attachment-processor.test.ts
-!apps/server/src/modules/threads/runner-attachments.test.ts
-
-!apps/server/src/modules/tools/audio.test.ts
-!apps/server/src/modules/tools/audio-cancellation.test.ts
-!apps/server/src/modules/tools/audio-cleanup.test.ts
-!apps/server/src/modules/tools/transcriptions-subtitles.test.ts
-!apps/server/src/modules/tools/speech.test.ts
-!apps/server/src/modules/tools/speech-playback.test.ts
-!scripts/chat-speech-preview.test.ts
-!scripts/chat-transcriptions-preview.test.ts
-!scripts/chat-voice-input.test.ts
-!scripts/paddleocr.test.ts
-!scripts/paddleocr-settings.test.ts
-!apps/server/src/modules/tools/read-file.test.ts
-!apps/server/src/modules/tools/registry.test.ts
-!apps/server/src/modules/tools/extract.test.ts
-!apps/server/src/modules/tools/file-content.test.ts
-!scripts/tool-config.test.ts
-!scripts/file-preview.test.ts
-!scripts/chat-workspace-attachments.test.ts
-!scripts/e2b-desktop-settings.test.ts
-!apps/server/src/modules/agents/local.test.ts
-!apps/server/src/modules/threads/runner-local-agents.test.ts
-!apps/server/src/modules/threads/incomplete-tool-calls.test.ts
-!apps/server/src/modules/threads/runner-incomplete-tool-calls.test.ts
-!apps/server/src/modules/threads/turn-history.test.ts
-!scripts/chat-turns.test.ts
-!apps/server/src/modules/knowledge/images.test.ts
-!scripts/web-fetch.test.ts
-!scripts/wechat-fetch.test.ts
-!apps/server/src/modules/threads/intelligent-ui.test.ts
 !scripts/intelligent-ui-browser.test.mjs
 
-!scripts/group-chats.test.ts
 !scripts/group-chats-browser.test.mjs
-!apps/server/src/modules/threads/model-compatibility.test.ts
