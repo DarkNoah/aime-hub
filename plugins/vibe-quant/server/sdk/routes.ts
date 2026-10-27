@@ -49,7 +49,7 @@ export function strategyDataRoutes(get: () => Dependencies) {
         before: z.coerce.number().finite().positive(),
         limit: z.coerce.number().int().min(1).max(5000).default(1000),
         execution_model: z
-          .enum(['actual_contract', 'continuous_price'])
+          .enum(['actual_contract', 'continuous_price', 'points'])
           .optional(),
       })
       .safeParse(c.req.query());
@@ -70,7 +70,9 @@ export function strategyDataRoutes(get: () => Dependencies) {
         after: Math.floor(after),
         before: Math.ceil(before),
         limit,
-        ...(parsed.data.execution_model === 'continuous_price'
+        ...(['continuous_price', 'points'].includes(
+          parsed.data.execution_model ?? '',
+        )
           ? { rebuildTicks: false }
           : {}),
       })

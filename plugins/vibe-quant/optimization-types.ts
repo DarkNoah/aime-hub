@@ -1,4 +1,6 @@
 export const OPTIMIZATION_METRICS = {
+  total_points: '累计收益（点）',
+  max_drawdown_points: '最大回撤（点）',
   sharpe: '夏普比率',
   total_return: '收益率',
   annual_return: '年化收益',
@@ -8,6 +10,11 @@ export const OPTIMIZATION_METRICS = {
   profit_factor: '盈亏比 PF',
 } as const;
 export type OptimizationMetric = keyof typeof OPTIMIZATION_METRICS;
+export const POINT_OPTIMIZATION_METRICS: OptimizationMetric[] = [
+  'total_points',
+  'max_drawdown_points',
+  'profit_factor',
+];
 export type SearchParameter =
   | {
       type: 'int' | 'float';
@@ -36,6 +43,7 @@ export interface OptimizationTrial {
   message: string;
 }
 export interface OptimizationReport {
+  pnl_unit?: 'currency' | 'points';
   engine: 'optuna';
   optuna_version: string;
   sampler: 'TPESampler';

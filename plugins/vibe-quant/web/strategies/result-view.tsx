@@ -49,6 +49,17 @@ const metricLabels: [string, string, boolean?][] = [
   ['calmar', '卡玛比率'],
   ['profit_factor', 'PF'],
 ];
+const pointMetricLabels: [string, string, boolean?][] = [
+  ['total_points', '累计收益（点）'],
+  ['realized_points', '已实现收益（点）'],
+  ['unrealized_points', '未平仓净收益（点）'],
+  ['max_drawdown_points', '最大回撤（点）'],
+  ['average_trade_points', '平均每笔（点）'],
+  ['trade_count', '交易笔数'],
+  ['win_rate', '胜率', true],
+  ['profit_factor', 'PF'],
+  ['benchmark_points', '基准涨跌（点）'],
+];
 export function ResultView({
   pluginId,
   run,
@@ -80,6 +91,7 @@ export function ResultView({
     return () => abort.abort();
   }, [pluginId, run.id, run.status, retry]);
   const result = data?.result;
+  const points = run.config.execution_model === 'points';
   const winRate = useMemo(
     () => (result ? closedTradeWinRate(result) : null),
     [result],
@@ -115,6 +127,7 @@ export function ResultView({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <Badge variant="outline">v{run.version_number}</Badge>
+          {points && <Badge variant="secondary">点数回测 · 固定 1 单位</Badge>}
           {run.config.execution_model === 'continuous_price' && (
             <Badge variant="secondary">主连价格模拟</Badge>
           )}
@@ -152,23 +165,37 @@ export function ResultView({
         <dl className="mt-3 grid grid-cols-1 gap-2 text-muted-foreground sm:grid-cols-2">
           <div className="sm:col-span-2">
             成交模式：
-            {run.config.execution_model === 'continuous_price'
-              ? '主连价格模拟（不计实际合约价差和换月成交成本）'
-              : '实际合约价格'}
+            {points
+              ? '点数回测（固定 1 单位，按多空价格点差记账）'
+              : run.config.execution_model === 'continuous_price'
+                ? '主连价格模拟（不计实际合约价差和换月成交成本）'
+                : '实际合约价格'}
           </div>
           <div>
             区间：{dateTime(run.config.start)} — {dateTime(run.config.end)}
           </div>
+          {points ? (
+            <div>
+              单边成本：{number(run.config.point_cost ?? 0)} 点 · 滑点：
+              {run.config.slippage_ticks} 跳
+            </div>
+          ) : (
+            <div>
+              资金：{number(run.config.initial_cash)} 元 · 滑点：
+              {run.config.slippage_ticks} 跳
+            </div>
+          )}
+          {!points && (
+            <div>
+              乘数：{run.config.rules.multiplier} · 保证金：
+              {percent(run.config.rules.margin_rate)}
+            </div>
+          )}
           <div>
-            资金：{number(run.config.initial_cash)} 元 · 滑点：
-            {run.config.slippage_ticks} 跳
-          </div>
-          <div>
-            乘数：{run.config.rules.multiplier} · 保证金：
-            {percent(run.config.rules.margin_rate)}
-          </div>
-          <div>
-            成交量参与率：{percent(run.config.participation_rate)} · 基准：
+            {!points && (
+              <>成交量参与率：{percent(run.config.participation_rate)} · </>
+            )}
+            基准：
             {run.config.benchmark_symbol ?? '无'}
           </div>
           <div className="break-all sm:col-span-2">
@@ -191,9 +218,16 @@ export function ResultView({
                 ...(run.config.optimization
                   ? { optimization: run.config.optimization }
                   : {}),
-                rules: run.config.rules,
-                annualization: run.config.annualization,
-                risk_free_rate: run.config.risk_free_rate,
+                ...(points
+                  ? {
+                      point_cost: run.config.point_cost ?? 0,
+                      position_units: 1,
+                    }
+                  : {
+                      rules: run.config.rules,
+                      annualization: run.config.annualization,
+                      risk_free_rate: run.config.risk_free_rate,
+                    }),
               },
               null,
               2,
@@ -210,27 +244,31 @@ export function ResultView({
       ) : (
         <>
           <dl className="grid grid-cols-2 divide-x divide-y rounded-lg border sm:grid-cols-3 xl:grid-cols-4">
-            {metricLabels.map(([key, label, ratio]) => (
-              <div key={key} className="px-4 py-3">
-                <dt className="text-xs text-muted-foreground">{label}</dt>
-                <dd
-                  className={`mt-1 text-lg font-medium tabular-nums ${key === 'total_pnl' ? ((result.metrics[key] ?? 0) >= 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400') : ''}`}
-                >
-                  {ratio
-                    ? percent(
-                        key === 'win_rate' ? winRate : result.metrics[key],
-                      )
-                    : number(result.metrics[key])}
-                </dd>
-              </div>
-            ))}
+            {(points ? pointMetricLabels : metricLabels).map(
+              ([key, label, ratio]) => (
+                <div key={key} className="px-4 py-3">
+                  <dt className="text-xs text-muted-foreground">{label}</dt>
+                  <dd
+                    className={`mt-1 text-lg font-medium tabular-nums ${['total_pnl', 'total_points'].includes(key) ? ((result.metrics[key] ?? 0) >= 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400') : ''}`}
+                  >
+                    {ratio
+                      ? percent(
+                          key === 'win_rate' ? winRate : result.metrics[key],
+                        )
+                      : number(result.metrics[key])}
+                  </dd>
+                </div>
+              ),
+            )}
           </dl>
           <p className="text-xs text-muted-foreground">
             胜率按已平仓交易的净盈亏计算，盈亏持平计入交易总数，未平仓交易不计入。
           </p>
           <section className="space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium">净值曲线</h3>
+              <h3 className="text-sm font-medium">
+                {points ? '累计点数曲线' : '净值曲线'}
+              </h3>
               <div className="flex gap-3 text-xs text-muted-foreground">
                 <span>● 策略</span>
                 <span>— 基准</span>
@@ -240,6 +278,7 @@ export function ResultView({
               <Suspense fallback={<Skeleton className="h-72" />}>
                 <EquityChart
                   points={result.equity_curve}
+                  pointMode={points}
                   initial={run.config.initial_cash}
                 />
               </Suspense>
@@ -269,8 +308,12 @@ export function ResultView({
                         <TableHead>离场</TableHead>
                         <TableHead>离场原因</TableHead>
                         <TableHead className="text-right">数量</TableHead>
-                        <TableHead className="text-right">手续费</TableHead>
-                        <TableHead className="text-right">净收益</TableHead>
+                        <TableHead className="text-right">
+                          {points ? '成本（点）' : '手续费'}
+                        </TableHead>
+                        <TableHead className="text-right">
+                          {points ? '净收益（点）' : '净收益'}
+                        </TableHead>
                         <TableHead className="sticky right-0 bg-background text-right">
                           行情
                         </TableHead>
@@ -404,6 +447,7 @@ export function ResultView({
             </TabsContent>
             <TabsContent value="periods" className="mt-3">
               <PeriodReturns
+                points={points}
                 monthly={result.monthly_returns}
                 yearly={result.yearly_returns}
               />
@@ -442,16 +486,19 @@ export function ResultView({
             </TabsContent>
           </Tabs>
           <p className="text-xs leading-5 text-muted-foreground">
-            收益已扣费用，未平仓头寸按最新价计入权益；交易笔数按 FIFO
-            平仓片段统计。“—”表示样本不足或指标无定义。期货逐日结算采用前一交易日最后观测价。
-            未平仓记录显示回测结束时的剩余数量及对应开仓手续费，净收益在平仓后记录。
+            {points
+              ? '点数收益已扣单边成本与滑点，未平仓头寸按最新价计入累计点数。每个标的固定 1 单位，忽略下单数量大小及资金、保证金、乘数、成交量、T+1 限制；不表示真实资金收益。未平仓净收益含已付开仓成本。'
+              : '收益已扣费用，未平仓头寸按最新价计入权益；交易笔数按 FIFO 平仓片段统计。期货逐日结算采用前一交易日最后观测价。未平仓记录显示剩余数量及对应开仓手续费，净收益在平仓后记录。'}
+            “—”表示样本不足或指标无定义。
           </p>
           {data.manifest?.risk_model != null && (
             <p className="text-xs leading-5 text-muted-foreground">
               止盈止损从计算后的下一根执行 K
               线生效；跳空按开盘价，同根同时触及按止损优先。
-              成交计入滑点与费用，并受成交量和 T+1 限制。盘中触发按该根 K
-              线结束时间记账，回放定位触发 K 线。
+              {points
+                ? '成交计入滑点与点数成本。'
+                : '成交计入滑点与费用，并受成交量和 T+1 限制。'}
+              盘中触发按该根 K 线结束时间记账，回放定位触发 K 线。
             </p>
           )}
         </>
@@ -463,6 +510,7 @@ export function ResultView({
             pluginId={pluginId}
             runId={run.id}
             trade={trade}
+            points={points}
             riskLevels={result?.risk_levels}
             onClose={() => setTrade(null)}
           />

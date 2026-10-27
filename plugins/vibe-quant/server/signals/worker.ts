@@ -398,6 +398,7 @@ export class SignalWorker {
                 url: `/plugins/vibe-quant/?symbol=${encodeURIComponent(row.config.symbol)}`,
                 toast: channels.toast?.enabled ?? false,
                 desktop: channels.desktop?.enabled ?? false,
+                ...(channels.sound?.enabled ? { sound: event.type } : {}),
               });
             }
             return true;

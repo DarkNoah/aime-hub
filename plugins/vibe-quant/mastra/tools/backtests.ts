@@ -9,6 +9,7 @@ import {
 } from '../../strategy-types.js';
 import {
   backtestSchema,
+  parseBacktestConfig,
   StrategyError,
 } from '../../server/strategies/schema.js';
 import { enqueueBacktest } from '../../server/strategies/enqueue.js';
@@ -74,15 +75,20 @@ export const agentBacktestSchema = z.object({
         sell_tax_rate: z.number(),
       }),
     })
-    .describe(
-      '用户给定或核实的乘数、保证金、手数、T+1 与手续费规则，不能猜测；费率用小数',
-    ),
-  execution_model: z
-    .enum(['actual_contract', 'continuous_price'])
     .optional()
     .describe(
-      '默认 actual_contract 使用历史实际合约；用户确认后可选 continuous_price，用主连价格模拟成交，不计实际合约价差及换月成交成本。',
+      '资金回测须提供用户给定或核实的交易规则，费率用小数；点数回测可省略',
     ),
+  execution_model: z
+    .enum(['actual_contract', 'continuous_price', 'points'])
+    .optional()
+    .describe(
+      '默认 actual_contract 使用历史实际合约；continuous_price 用主连价格模拟；points 按固定 1 单位计算价格点差，支持指数，忽略资金、保证金、乘数、成交量和 T+1，结果单位为点。',
+    ),
+  point_cost: z
+    .number()
+    .default(0)
+    .describe('点数回测每次开仓或平仓的成本（点），往返扣两次'),
   slippage_ticks: z.number().default(1),
   participation_rate: z.number().default(0.1),
   annualization: z.number().default(252),
@@ -128,10 +134,10 @@ export class BacktestStartTool extends PluginTool {
             deps,
             actor,
             version.strategy_id,
-            {
+            parseBacktestConfig({
               ...input,
               parameters: { ...version.parameters, ...input.parameters },
-            },
+            }),
             signal,
           );
           return { run: runView(run) };
@@ -274,6 +280,7 @@ export class BacktestResultTool extends PluginTool {
             optimization,
             result: {
               status: result.status,
+              pnl_unit: result.pnl_unit ?? 'currency',
               message: result.message,
               metrics: result.metrics,
               metric_notes: result.metric_notes,

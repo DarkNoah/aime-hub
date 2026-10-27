@@ -8,10 +8,12 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'sdk'))
 sys.path.insert(0, str(ROOT / 'worker'))
-from quant_sdk import Bar, Event, Fees, HubClient, Instrument, LiveRunner, RunConfig, Strategy, TradingCalendar
+from quant_sdk import Bar, DataError, Event, Fees, HubClient, Instrument, LiveRunner, RunConfig, Strategy, TradingCalendar
 from quant_sdk.metrics import summarize
+from quant_sdk.point_metrics import summarize_points
+from quant_sdk.runtime import Runner
 from signal_history import MonitorHistory, history_events
-from strategy_monitor import SignalOutput
+from strategy_monitor import BridgeClient, SignalOutput
 
 
 class Cycle(Strategy):
@@ -55,7 +57,141 @@ class ProtectedCycle(Cycle):
             ctx.orders.target_position(bar.symbol, 0)
 
 
+class ClosedEntryLevels(Cycle):
+    def on_bar(self, ctx, bar):
+        n = ctx.state.get('n', 0)
+        ctx.state['n'] = n + 1
+        if n == 0:
+            ctx.state['entry'] = ctx.orders.target_position(bar.symbol, 1)
+            ctx.set_risk_levels(bar.symbol, entry_id=ctx.state['entry'], take_profit=105)
+        elif n == 2:
+            # Strategy callbacks can still refer to an entry after its protective
+            # exit. A compact monitor must resolve the same ID as a full run.
+            ctx.set_risk_levels(bar.symbol, entry_id=ctx.state['entry'], stop_loss=95)
+
+
+class OrderAliasLifetime(Cycle):
+    def on_bar(self, ctx, bar):
+        n = ctx.state.get('n', 0)
+        ctx.state['n'] = n + 1
+        if n == 0:
+            ctx.state['entry'] = ctx.orders.target_position(bar.symbol, 1)
+        elif n == 1 and ctx.params['close']:
+            ctx.orders.target_position(bar.symbol, 0)
+        else:
+            ctx.emit('sample', symbol=bar.symbol, sequence=n)
+        if n == 220 and not ctx.params['close']:
+            ctx.set_risk_levels(bar.symbol, entry_id=ctx.state['entry'], stop_loss=90)
+
+
 class MonitorHistoryTests(unittest.TestCase):
+    def test_order_alias_retention_is_bounded_and_preserves_active_entries(self):
+        for close in (False, True):
+            with self.subTest(close=close), tempfile.TemporaryDirectory() as directory:
+                item = Instrument('CFFEX.IM2611', 'future', price_tick=1, multiplier=10, margin_rate=.1)
+                config = RunConfig(initial_cash=10000, start=1792373400)
+                runner = Runner(OrderAliasLifetime(), [item], config=config,
+                                params={'close': close}, output_dir=directory)
+                history = MonitorHistory(Sink(), runner, config.start)
+                try:
+                    for n in range(225):
+                        t = config.start + n * 60
+                        runner.process(Event(str(n), t + 60, Bar(item.symbol, t, t + 60, '2026-10-19',
+                                       60, 100, 101, 99, 100, 1000)))
+                        history.flush(force=True)
+                        if n == 2:
+                            self.assertIn(runner.context.state['entry'], [o.id for o in runner.broker.orders])
+                    self.assertEqual(len(runner.broker.orders), 0 if close else 1)
+                    self.assertEqual(len(runner.signals), 200 if close else 201)
+                    if not close:
+                        self.assertEqual(runner.broker.orders[0].id, runner.context.state['entry'])
+                finally:
+                    runner.journal.close()
+
+    def test_closed_entry_order_id_survives_compaction_and_checkpoint_restore(self):
+        for points in (False, True):
+            with self.subTest(points=points), tempfile.TemporaryDirectory() as directory:
+                item = Instrument('CFFEX.IM2611', 'future', price_tick=1, multiplier=10, margin_rate=.1)
+                config = RunConfig(initial_cash=10000, start=1792373400,
+                                   pnl_mode='points' if points else 'currency')
+                baseline = Runner(ClosedEntryLevels(), [item], config=config, output_dir=directory)
+                runner = Runner(ClosedEntryLevels(), [item], config=config, output_dir=directory)
+                sink = Sink()
+                history = MonitorHistory(sink, runner, config.start)
+                try:
+                    for n in range(3):
+                        t = config.start + n * 60
+                        event = Event(str(n), t + 60, Bar(item.symbol, t, t + 60, '2026-10-19', 60,
+                                      100, 106 if n == 1 else 101, 99, 100, 1000))
+                        baseline.process(event)
+                        runner.process(event)
+                        history.flush(force=True)
+                        if n == 1:
+                            self.assertEqual(runner.broker.position(item.symbol), 0)
+                            checkpoint = runner.checkpoint()
+                            state = copy.deepcopy(history.state)
+                            runner.journal.close()
+                            runner = Runner.restore(ClosedEntryLevels(), checkpoint, output_dir=directory)
+                            history = MonitorHistory(sink, runner, config.start, state)
+                    self.assertEqual(runner.signals, baseline.signals)
+                    self.assertEqual(history.summary()['metrics']['trade_count'], 1)
+                    self.assertEqual(history.summary()['open_trades'], [])
+                    self.assertEqual([r for (kind, _), r in sink.records.items() if kind == 'trade'][0]['net_pnl'],
+                                     baseline.broker.trades[0]['net_pnl'])
+                finally:
+                    baseline.journal.close()
+                    runner.journal.close()
+
+    def test_index_rule_adaptation_is_scoped_to_point_monitor_symbol(self):
+        class Client(BridgeClient):
+            def request(self, *args, **kwargs):
+                return {'kind': 'stock', 'priceTick': .01}
+        def rules(symbol, metadata):
+            return Instrument(symbol, metadata['kind'], price_tick=.01, multiplier=1, margin_rate=1)
+        points = Client('SSE.000852', 'points')
+        self.assertEqual(points.rules('SSE.000852', rules).kind, 'future')
+        with self.assertRaisesRegex(DataError, 'cannot be traded'):
+            points.rules('SZSE.399006', rules)
+        with self.assertRaisesRegex(DataError, 'cannot be traded'):
+            Client().rules('SSE.000852', rules)
+
+    def test_point_metrics_match_full_run_through_compaction_and_restore(self):
+        with tempfile.TemporaryDirectory() as directory:
+            item = Instrument('CFFEX.IM2611', 'future', price_tick=1, multiplier=200, margin_rate=.12)
+            config = RunConfig(pnl_mode='points', initial_cash=1, point_cost=.5, start=1792373400)
+            baseline = Runner(Cycle(), [item], config=config, output_dir=directory, params={'execution_model': 'points'})
+            sink = Sink()
+            runner = Runner(Cycle(), [item], config=config, output_dir=directory, params={'execution_model': 'points'})
+            history = MonitorHistory(sink, runner, config.start)
+            self.assertEqual(history.summary()['metrics']['total_points'], 0)
+            for n in range(96):
+                t = config.start + n * 60
+                price = 100 + n % 9
+                event = Event(str(n), t + 60, Bar(item.symbol, t, t + 60, '2026-10-19', 60,
+                              price, price + 1, price - 1, price, 0))
+                baseline.process(event)
+                runner.process(event)
+                history.flush(force=True)
+                if n == 49:
+                    checkpoint = runner.checkpoint()
+                    state = copy.deepcopy(history.state)
+                    runner.journal.close()
+                    runner = Runner.restore(Cycle(), checkpoint, output_dir=directory)
+                    history = MonitorHistory(sink, runner, config.start, state)
+                    self.assertEqual(len(history.summary()['open_trades']), 1)
+            expected = summarize_points(baseline.curve, baseline.broker.trades)
+            actual = history.summary()
+            self.assertEqual(actual['pnl_unit'], 'points')
+            self.assertEqual(actual['execution_model'], 'points')
+            self.assertEqual(actual['metrics'], expected['metrics'])
+            self.assertEqual(actual['monthly_returns'], expected['monthly_returns'])
+            self.assertEqual(actual['yearly_returns'], expected['yearly_returns'])
+            self.assertGreater(actual['metrics']['max_drawdown_points'], 0)
+            self.assertIsNone(actual['metrics']['max_drawdown'])
+            self.assertEqual([value for (kind, _), value in sink.records.items() if kind == 'trade'], baseline.broker.trades)
+            runner.journal.close()
+            baseline.journal.close()
+
     def test_protection_path_survives_checkpoint_and_position_close(self):
         with tempfile.TemporaryDirectory() as directory:
             item = Instrument('CFFEX.IM2611', 'future', price_tick=1, multiplier=10, margin_rate=.1)

@@ -11,6 +11,12 @@ import {
 } from '../../strategy-notifications.js';
 import { supports } from '../symbols.js';
 import type { MonitorStore } from './store.js';
+import {
+  isIndexSymbol,
+  monitorExecutionModel,
+  strategyHintDuration,
+} from '../../signal-types.js';
+import { POINT_BACKTEST_RULES } from '../../strategy-types.js';
 
 const shape = backtestSchema.shape;
 export const monitorSchema = z.object({
@@ -21,6 +27,8 @@ export const monitorSchema = z.object({
   rules: shape.rules,
   initial_cash: shape.initial_cash,
   calendar: shape.calendar,
+  execution_model: shape.execution_model,
+  point_cost: shape.point_cost,
   notifications: strategyNotificationsSchema.optional(),
   notifications_enabled: z.boolean().optional(),
   warmup_days: z.number().int().min(1).max(90).default(7),
@@ -28,9 +36,10 @@ export const monitorSchema = z.object({
     .object({ entry: z.boolean(), exit: z.boolean() })
     .default({ entry: true, exit: true }),
 });
-// Market hints only need an instrument, a timeframe and a published version.
+// Market hints use the published version's timeframe, independently of the chart.
 // Keep full input support for existing callers and immutable stored monitors.
 const createMonitorSchema = monitorSchema.extend({
+  duration: shape.duration.optional(),
   parameters: shape.parameters.optional(),
   rules: shape.rules.optional(),
   initial_cash: shape.initial_cash.optional(),
@@ -148,16 +157,20 @@ export function signalRoutes(
     if (version.strategy_id !== strategyId)
       throw new StrategyError('VERSION_NOT_FOUND', 404);
     const item = await state.instrument(config.engine, parsed.data.symbol);
+    const executionModel = monitorExecutionModel(parsed.data);
     if (
       !item ||
       item.expired ||
       item.kind === 'option' ||
-      /^(SSE\.000|SZSE\.399)/.test(item.symbol) ||
+      (isIndexSymbol(item.symbol) && executionModel !== 'points') ||
+      (executionModel === 'continuous_price' &&
+        (item.kind !== 'continuous' || !item.symbol.startsWith('KQ.m@'))) ||
       !supports(config.engine, item) ||
       (item.kind === 'continuous' && !item.symbol.startsWith('KQ.m@'))
     )
       throw new StrategyError('UNSUPPORTED_INSTRUMENT');
     const stock = item.kind === 'stock';
+    const points = executionModel === 'points';
     const rules = parsed.data.rules ?? {
       multiplier: stock ? 1 : 200,
       margin_rate: stock ? 1 : 0.12,
@@ -176,9 +189,22 @@ export function signalRoutes(
     const { notifications, notifications_enabled, ...monitorConfig } =
       monitorSchema.parse({
         ...parsed.data,
+        // The simple market picker reuses the published version. Full legacy
+        // callers supply explicit parameters and retain their requested period.
+        duration:
+          parsed.data.parameters === undefined
+            ? (strategyHintDuration(version.parameters) ?? 60)
+            : (parsed.data.duration ??
+              strategyHintDuration(version.parameters) ??
+              60),
+        ...(points ? { execution_model: 'points' } : {}),
         parameters: parsed.data.parameters ?? version.parameters,
-        initial_cash: parsed.data.initial_cash ?? 1_000_000,
-        rules: stock ? { ...rules, multiplier: 1, margin_rate: 1 } : rules,
+        initial_cash: points ? 1 : (parsed.data.initial_cash ?? 1_000_000),
+        rules: points
+          ? structuredClone(POINT_BACKTEST_RULES)
+          : stock
+            ? { ...rules, multiplier: 1, margin_rate: 1 }
+            : rules,
       });
     const monitor = await monitors.create(
       owner,

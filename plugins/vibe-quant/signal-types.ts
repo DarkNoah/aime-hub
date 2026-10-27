@@ -1,6 +1,17 @@
 import type { StrategyNotifications } from './strategy-notifications.js';
 import type { BacktestInput, TradeRecord } from './strategy-types.js';
 import type { Engine } from './shared.js';
+import { DURATIONS, MONTH_DURATION } from './shared.js';
+
+/** Published parameters set the calculation period independently of chart zoom. */
+export function strategyHintDuration(parameters?: Record<string, unknown>) {
+  const value = parameters?.duration;
+  const duration =
+    typeof value === 'number' || typeof value === 'string'
+      ? Number(value)
+      : NaN;
+  return DURATIONS.find((item) => item !== MONTH_DURATION && item === duration);
+}
 
 export interface SignalMonitorInput extends Pick<
   BacktestInput,
@@ -12,6 +23,7 @@ export interface SignalMonitorInput extends Pick<
   | 'initial_cash'
   | 'calendar'
   | 'execution_model'
+  | 'point_cost'
 > {
   warmup_days: number;
   events: { entry: boolean; exit: boolean };
@@ -21,8 +33,15 @@ export function monitorExecutionModel(
 ) {
   return (
     config.execution_model ??
-    (config.symbol.startsWith('KQ.m@') ? 'continuous_price' : 'actual_contract')
+    (isIndexSymbol(config.symbol)
+      ? 'points'
+      : config.symbol.startsWith('KQ.m@')
+        ? 'continuous_price'
+        : 'actual_contract')
   );
+}
+export function isIndexSymbol(symbol: string) {
+  return /^(SSE\.000|SZSE\.399)/.test(symbol);
 }
 export interface SignalMonitor {
   id: string;

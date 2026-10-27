@@ -58,11 +58,13 @@ function HistoryTab({
 function Trades({
   rows,
   open = false,
+  points = false,
   jumping,
   onJumpToEntry,
 }: {
   rows: (Trade | OpenTrade)[];
   open?: boolean;
+  points?: boolean;
   jumping: string | null;
   onJumpToEntry: (trade: Trade | OpenTrade) => void;
 }) {
@@ -79,7 +81,7 @@ function Trades({
               <TableHead>离场时间</TableHead>
               <TableHead>离场价</TableHead>
               {!open && <TableHead>离场原因</TableHead>}
-              <TableHead>净收益</TableHead>
+              <TableHead>{points ? '净收益（点）' : '净收益'}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -264,6 +266,7 @@ export function HintPerformance({
   }
   const summary = page?.summary;
   const monitor = page?.monitor ?? item;
+  const points = monitorExecutionModel(monitor.config) === 'points';
   const computing = monitor.status === 'starting' || summary?.replaying;
   return (
     <Sheet
@@ -310,6 +313,12 @@ export function HintPerformance({
                 入场、离场和持仓按主连价格模拟，不代表实际合约成交，不计合约价差与换月成本。
               </p>
             )}
+            {points && (
+              <p>
+                <Badge variant="secondary">点数模拟</Badge> 固定 1
+                单位模拟多空，收益与回撤以点数统计。
+              </p>
+            )}
             <p>移除该策略提示会清除全部历史记录，再次加入将重新计算。</p>
           </div>
           {error && (
@@ -345,6 +354,7 @@ export function HintPerformance({
                   <h3 className="text-sm font-medium">当前持仓</h3>
                   <Trades
                     rows={summary.open_trades}
+                    points={points}
                     open
                     jumping={jumping}
                     onJumpToEntry={(trade) => void jumpToEntry(trade)}
@@ -354,6 +364,7 @@ export function HintPerformance({
                   <h3 className="text-sm font-medium">入场与离场记录</h3>
                   <Trades
                     rows={trades}
+                    points={points}
                     jumping={jumping}
                     onJumpToEntry={(trade) => void jumpToEntry(trade)}
                   />
@@ -426,17 +437,42 @@ export function HintPerformance({
               </HistoryTab>
               <HistoryTab value="overview">
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  {(
-                    [
-                      ['累计收益', percent(summary.metrics.total_return)],
-                      ['净收益', number(summary.metrics.total_pnl)],
-                      ['已完成交易', number(summary.metrics.trade_count)],
-                      ['胜率', percent(summary.metrics.win_rate)],
-                      ['最大回撤', percent(summary.metrics.max_drawdown)],
-                      ['账户权益', number(summary.metrics.final_equity)],
-                      ['当前持仓', String(summary.open_trades.length)],
-                      ['初始资金', number(summary.initial_cash)],
-                    ] as const
+                  {(points
+                    ? [
+                        [
+                          '累计收益（点）',
+                          number(summary.metrics.total_points),
+                        ],
+                        [
+                          '已实现收益（点）',
+                          number(summary.metrics.realized_points),
+                        ],
+                        ['已完成交易', number(summary.metrics.trade_count)],
+                        ['胜率', percent(summary.metrics.win_rate)],
+                        [
+                          '最大回撤（点）',
+                          number(summary.metrics.max_drawdown_points),
+                        ],
+                        [
+                          '未实现收益（点）',
+                          number(summary.metrics.unrealized_points),
+                        ],
+                        ['当前持仓', String(summary.open_trades.length)],
+                        [
+                          '平均每笔（点）',
+                          number(summary.metrics.average_trade_points),
+                        ],
+                      ]
+                    : [
+                        ['累计收益', percent(summary.metrics.total_return)],
+                        ['净收益', number(summary.metrics.total_pnl)],
+                        ['已完成交易', number(summary.metrics.trade_count)],
+                        ['胜率', percent(summary.metrics.win_rate)],
+                        ['最大回撤', percent(summary.metrics.max_drawdown)],
+                        ['账户权益', number(summary.metrics.final_equity)],
+                        ['当前持仓', String(summary.open_trades.length)],
+                        ['初始资金', number(summary.initial_cash)],
+                      ]
                   ).map(([label, value]) => (
                     <div key={label} className="rounded-md border p-3">
                       <p className="text-xs text-muted-foreground">{label}</p>
@@ -449,6 +485,7 @@ export function HintPerformance({
                 <section className="space-y-2">
                   <h3 className="text-sm font-medium">月度与年度收益</h3>
                   <PeriodReturns
+                    points={points}
                     monthly={summary.monthly_returns}
                     yearly={summary.yearly_returns}
                   />

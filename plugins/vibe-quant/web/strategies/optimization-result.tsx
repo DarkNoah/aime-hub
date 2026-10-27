@@ -23,6 +23,7 @@ const states = {
   cancelled: '已取消',
 };
 export function OptimizationResult({ report }: { report: OptimizationReport }) {
+  const points = report.pnl_unit === 'points';
   const [page, setPage] = useState(0);
   const ratio = ['total_return', 'annual_return', 'max_drawdown'].includes(
     report.metric,
@@ -87,9 +88,14 @@ export function OptimizationResult({ report }: { report: OptimizationReport }) {
             </dd>
             <dd className="mt-2">
               目标值 {score(report.validation.metrics[report.metric])} · 收益{' '}
-              {percent(report.validation.metrics.total_return)} · 回撤{' '}
-              {percent(report.validation.metrics.max_drawdown)} ·{' '}
-              {number(report.validation.metrics.trade_count)} 笔交易
+              {points
+                ? `${number(report.validation.metrics.total_points)} 点`
+                : percent(report.validation.metrics.total_return)}{' '}
+              · 回撤{' '}
+              {points
+                ? `${number(report.validation.metrics.max_drawdown_points)} 点`
+                : percent(report.validation.metrics.max_drawdown)}{' '}
+              · {number(report.validation.metrics.trade_count)} 笔交易
             </dd>
             {report.validation.message && (
               <dd className="mt-1 text-muted-foreground">

@@ -11,6 +11,8 @@ const taskNotificationSchema = z.object({
   url: z.string().regex(/^\/(?!\/)[^\\]*$/),
 });
 export type TaskNotification = z.infer<typeof taskNotificationSchema>;
+export const notificationSoundSchema = z.enum(['entry', 'exit']);
+export type NotificationSound = z.infer<typeof notificationSoundSchema>;
 export const pluginNotificationSchema = z.object({
   kind: z.literal('plugin'),
   id: z.string(),
@@ -20,6 +22,7 @@ export const pluginNotificationSchema = z.object({
   createdAt: z.string(),
   url: z.string().regex(/^\/(?!\/)[^\\]*$/),
   toast: z.boolean(),
+  sound: notificationSoundSchema.optional(),
 });
 export const notificationSchema = z.union([
   taskNotificationSchema,
@@ -34,6 +37,7 @@ export interface PluginNotificationInput {
   url: string;
   toast: boolean;
   desktop: boolean;
+  sound?: NotificationSound;
 }
 const cursor = z.string().regex(/^\d{1,18}$/);
 export const notificationEventSchema = z.discriminatedUnion('type', [

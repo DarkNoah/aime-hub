@@ -1,6 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
-import { toast } from 'sonner';
-import { pluginRequest } from '@app/plugin-sdk/web';
+import { lazy, Suspense, useState } from 'react';
 import {
   Badge,
   Button,
@@ -13,14 +11,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
   Label,
   ScrollArea,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Skeleton,
   Switch,
 } from '@app/plugin-ui';
@@ -32,13 +26,12 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { Instrument } from '../../shared';
-import { durationLabel, MONTH_DURATION } from '../../shared';
+import { durationLabel } from '../../shared';
 import type { MarketStrategyHint, SignalMonitor } from '../../signal-types';
 import { monitorExecutionModel } from '../../signal-types';
-import type { StrategySummary, StrategyVersion } from '../../strategy-types';
+import { StrategyPicker } from './strategy-picker';
 import { strategyNotifications } from '../../strategy-notifications';
 import { StrategyNotificationSettings } from './notification-settings';
-import { errorText } from '../strategies/format';
 import type { useStrategyHints } from './use-strategy-hints';
 
 const HintPerformance = lazy(() =>
@@ -55,13 +48,11 @@ const labels = {
 export function StrategyHints({
   pluginId,
   instrument,
-  duration,
   hints,
   onJumpToEntry,
 }: {
   pluginId: string;
   instrument: Instrument;
-  duration: number;
   hints: ReturnType<typeof useStrategyHints>;
   onJumpToEntry: (time: number) => Promise<boolean>;
 }) {
@@ -104,22 +95,25 @@ export function StrategyHints({
             <Skeleton className="m-2 h-8" />
           ) : !hints.items.length ? (
             <p className="px-2 py-3 text-xs text-muted-foreground">
-              暂无策略，点击旁边的 ＋ 添加。
+              暂无策略，点击下方「添加策略」开始添加。
             </p>
           ) : (
             <ScrollArea
-              viewportProps={{ className: 'max-h-[min(60dvh,360px)]' }}
+              className="w-full min-w-0"
+              viewportProps={{
+                className: 'max-h-[min(60dvh,360px)] [&>div]:block!',
+              }}
             >
               {hints.items.map((item) => (
                 <div
                   key={item.id}
                   role="group"
                   aria-label={item.strategy_name}
-                  className="flex min-w-0 items-center gap-1 rounded-sm px-2 py-1"
+                  className="flex w-full min-w-0 items-center gap-1 rounded-sm px-2 py-1"
                 >
                   <span
                     className="min-w-0 flex-1 truncate pr-2 text-xs font-medium"
-                    title={`${item.strategy_name} · v${item.version_number} · ${durationLabel(item.config.duration)}${monitorExecutionModel(item.config) === 'continuous_price' ? ' · 主连价格模拟' : ''}`}
+                    title={`${item.strategy_name} · v${item.version_number} · ${durationLabel(item.config.duration)}${monitorExecutionModel(item.config) === 'points' ? ' · 点数模拟' : monitorExecutionModel(item.config) === 'continuous_price' ? ' · 主连价格模拟' : ''}`}
                   >
                     {item.strategy_name} · v{item.version_number}
                   </span>
@@ -186,24 +180,22 @@ export function StrategyHints({
               ))}
             </ScrollArea>
           )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            aria-label="添加策略提示"
+            onSelect={() => setAdding(true)}
+          >
+            <Plus className="size-3.5" />
+            添加策略
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <Button
-        size="icon-sm"
-        variant="ghost"
-        aria-label="添加策略提示"
-        title="添加策略提示"
-        onClick={() => setAdding(true)}
-      >
-        <Plus className="size-3.5" />
-      </Button>
       {adding && (
         <StrategyPicker
           pluginId={pluginId}
           symbolName={instrument.name}
           onClose={() => setAdding(false)}
           symbol={instrument.symbol}
-          duration={duration}
           onCreated={(item, strategy) => {
             hints.add({
               ...item,
@@ -278,6 +270,7 @@ function HintSettings({
             {durationLabel(item.config.duration)}
             {monitorExecutionModel(item.config) === 'continuous_price' &&
               ' · 主连价格模拟'}
+            {monitorExecutionModel(item.config) === 'points' && ' · 点数模拟'}
           </DialogDescription>
         </DialogHeader>
         <ScrollArea
@@ -306,7 +299,8 @@ function HintSettings({
                     checked &&
                     !(
                       value.channels.toast?.enabled ||
-                      value.channels.desktop?.enabled
+                      value.channels.desktop?.enabled ||
+                      value.channels.sound?.enabled
                     )
                   )
                     setValue(
@@ -342,223 +336,6 @@ function HintSettings({
             }
           >
             保存设置
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-function StrategyPicker({
-  pluginId,
-  symbolName,
-  symbol,
-  duration,
-  onClose,
-  onCreated,
-}: {
-  pluginId: string;
-  symbolName: string;
-  symbol: string;
-  duration: number;
-  onClose: () => void;
-  onCreated: (item: SignalMonitor, strategy: StrategySummary) => void;
-}) {
-  const calculationDuration = duration === MONTH_DURATION ? 86400 : duration;
-  const [items, setItems] = useState<StrategySummary[]>();
-  const [selected, setSelected] = useState('');
-  const [versions, setVersions] = useState<{
-    strategyId: string;
-    items: StrategyVersion[];
-  }>();
-  const [versionId, setVersionId] = useState('');
-  const [canRun, setCanRun] = useState(false);
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const availableVersions =
-    versions?.strategyId === selected ? versions.items : undefined;
-  useEffect(() => {
-    const abort = new AbortController();
-    void Promise.all([
-      pluginRequest<StrategySummary[]>(pluginId, '/strategies', {
-        signal: abort.signal,
-      }),
-      pluginRequest<{ canRun: boolean }>(pluginId, '/strategies/template', {
-        signal: abort.signal,
-      }),
-    ])
-      .then(([rows, permissions]) => {
-        if (abort.signal.aborted) return;
-        const usable = rows.filter(
-          (row) =>
-            row.status === 'active' && row.enabled && row.version_count > 0,
-        );
-        setItems(usable);
-        setSelected(usable[0]?.id ?? '');
-        setCanRun(permissions.canRun);
-      })
-      .catch((error) => {
-        if (!abort.signal.aborted) setError(errorText(error));
-      });
-    return () => abort.abort();
-  }, [pluginId]);
-  useEffect(() => {
-    if (!selected) return;
-    const abort = new AbortController();
-    void pluginRequest<StrategyVersion[]>(
-      pluginId,
-      `/strategies/${selected}/versions`,
-      { signal: abort.signal },
-    )
-      .then((rows) => {
-        if (abort.signal.aborted) return;
-        const sorted = [...rows].sort((a, b) => b.number - a.number);
-        setVersions({ strategyId: selected, items: sorted });
-        setVersionId(sorted[0]?.id ?? '');
-      })
-      .catch((error) => {
-        if (!abort.signal.aborted) setError(errorText(error));
-      });
-    return () => abort.abort();
-  }, [pluginId, selected]);
-  async function add() {
-    const strategy = items?.find((item) => item.id === selected);
-    if (
-      !strategy ||
-      !availableVersions?.some((version) => version.id === versionId) ||
-      busy
-    )
-      return;
-    setBusy(true);
-    setError('');
-    try {
-      const item = await pluginRequest<SignalMonitor>(
-        pluginId,
-        `/strategies/${strategy.id}/monitors`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            version_id: versionId,
-            symbol,
-            duration: calculationDuration,
-          }),
-        },
-      );
-      onCreated(item, strategy);
-      toast.success('已添加策略提示，开始计算全量历史并监听实时行情');
-    } catch (error) {
-      setError(errorText(error));
-      toast.error(errorText(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open && !busy) onClose();
-      }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>添加策略提示 · {symbolName}</DialogTitle>
-          <DialogDescription>
-            使用所选版本的参数，按 {durationLabel(calculationDuration)}{' '}
-            周期计算全部已存行情，完成后持续实时更新。
-            {symbol.startsWith('KQ.m@') &&
-              '主连按主连价格模拟，不计实际合约价差与换月成本。'}
-            {duration === MONTH_DURATION
-              ? '月线视图使用日线计算信号。'
-              : '周期取自当前行情图表。'}
-          </DialogDescription>
-        </DialogHeader>
-        {error && (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        )}
-        {!items ? (
-          <Skeleton className="h-9" />
-        ) : items.length ? (
-          <>
-            <Label className="grid min-w-0 grid-cols-1 gap-2">
-              策略
-              <Select
-                value={selected}
-                disabled={busy}
-                onValueChange={(value) => {
-                  setSelected(value);
-                  setVersionId('');
-                  setError('');
-                }}
-              >
-                <SelectTrigger className="w-full" aria-label="选择提示策略">
-                  <SelectValue className="min-w-0 truncate" />
-                </SelectTrigger>
-                <SelectContent>
-                  {items.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {item.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Label>
-            <Label className="grid min-w-0 grid-cols-1 gap-2">
-              版本
-              <Select
-                value={versionId}
-                disabled={busy || !availableVersions?.length}
-                onValueChange={setVersionId}
-              >
-                <SelectTrigger className="w-full" aria-label="选择策略版本">
-                  <SelectValue
-                    placeholder={
-                      !availableVersions ? '正在加载版本…' : '暂无已发布版本'
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableVersions?.map((version) => (
-                    <SelectItem key={version.id} value={version.id}>
-                      v{version.number}
-                      {version.note ? ` · ${version.note}` : ''}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Label>
-          </>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            暂无可用策略，请先到
-            <a
-              className="ml-1 underline"
-              href={`/plugins/${pluginId}/strategies`}
-            >
-              策略页面
-            </a>
-            发布并启用一个版本。
-          </p>
-        )}
-        {items && !canRun && (
-          <p className="text-xs text-muted-foreground">
-            运行策略需要管理员权限。
-          </p>
-        )}
-        <DialogFooter>
-          <Button variant="outline" disabled={busy} onClick={onClose}>
-            取消
-          </Button>
-          <Button
-            disabled={
-              !availableVersions?.some((version) => version.id === versionId) ||
-              !canRun ||
-              busy
-            }
-            onClick={() => void add()}
-          >
-            {busy ? '正在添加…' : '添加'}
           </Button>
         </DialogFooter>
       </DialogContent>

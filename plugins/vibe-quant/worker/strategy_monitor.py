@@ -18,16 +18,24 @@ from signal_history import BufferedEvents, MonitorHistory, history_events
 
 
 class BridgeClient(HubClient):
-    def __init__(self, simulated_symbol=None):
+    def __init__(self, simulated_symbol=None, execution_model='actual_contract'):
         self.sequence = 0
         self.lock = Lock()
         self.simulated_symbol = simulated_symbol
+        self.execution_model = execution_model
 
     def instrument(self, symbol):
         metadata = super().instrument(symbol)
         # Adapt only this explicitly simulated monitor's catalog, as frozen
         # continuous-price backtests do. The shared market catalog is untouched.
         return {**metadata, 'kind': 'future'} if symbol == self.simulated_symbol else metadata
+
+    def rules(self, symbol, resolver):
+        # Index orders exist only inside this point simulation. Ordinary SDK
+        # sessions retain the catalog's non-tradable index checks.
+        if self.execution_model == 'points' and symbol == self.simulated_symbol:
+            return resolver(symbol, self.instrument(symbol))
+        return super().rules(symbol, resolver)
 
     def call(self, kind, **value):
         with self.lock:
@@ -49,7 +57,7 @@ class BridgeClient(HubClient):
         if path == '/history' and params:
             params = {**params, 'limit': 5000}
         if path == '/history' and params and params.get('symbol') == self.simulated_symbol:
-            params = {**params, 'execution_model': 'continuous_price'}
+            params = {**params, 'execution_model': self.execution_model}
         return self.call('market', path=path, method=method, params=params, body=body)
 
 
@@ -168,13 +176,17 @@ def main():
     directory = Path(sys.argv[2])
     config = json.loads((directory / 'config.json').read_text())
     saved = json.loads((directory / 'checkpoint.json').read_text()) if (directory / 'checkpoint.json').exists() else None
-    # Rebuild legacy monitor history once to add the protection paths used by
-    # the existing trade chart. Stable trade/signal IDs replace the same records.
-    if saved and saved.get('history_version') != 2:
+    # Rebuild pre-v3 checkpoints once under the corrected SDK restore lifecycle.
+    # Keep SDK fingerprint checks intact; stable trade/signal IDs replace the
+    # same history records and historical replay never sends notifications.
+    if saved and saved.get('history_version') != 3:
         saved = None
     execution_model = config.get('execution_model', 'actual_contract')
-    simulated = execution_model == 'continuous_price'
-    if simulated and not config['symbol'].startswith('KQ.m@'):
+    if execution_model not in ('actual_contract', 'continuous_price', 'points'):
+        raise ValueError('Unknown execution model')
+    points = execution_model == 'points'
+    simulated = execution_model in ('continuous_price', 'points')
+    if execution_model == 'continuous_price' and not config['symbol'].startswith('KQ.m@'):
         raise ValueError('主连价格模拟仅适用于主连标的')
     if saved and saved['runner']['manifest']['params'].get('execution_model', 'actual_contract') != execution_model:
         raise ValueError('历史计算口径已变更，请移除后重新添加策略提示')
@@ -185,10 +197,13 @@ def main():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     strategy = resolve_strategy(module, Strategy)()
-    client = BridgeClient(config['symbol'] if simulated else None)
+    client = BridgeClient(config['symbol'] if simulated else None, execution_model)
     calendar = ExchangeCalendar(config.get('calendar'))
 
     def rules(symbol, metadata):
+        if points and symbol == config['symbol']:
+            return Instrument(symbol, 'future', price_tick=metadata['priceTick'],
+                              multiplier=1, margin_rate=1, lot_size=1, t_plus_one=False)
         values = dict(config['rules'])
         values['fees'] = Fees(**values['fees'])
         if metadata['kind'] == 'stock':
@@ -209,7 +224,9 @@ def main():
                 runner = Runner.restore(strategy, checkpoint, output_dir=directory / 'runs', on_event=output)
             else:
                 runner = Runner(strategy, stream.instruments, mode='backtest' if simulated else 'paper',
-                    config=RunConfig(initial_cash=config['initial_cash'], start=first, checkpoint_interval=60, benchmark_symbol=config['symbol']),
+                    config=RunConfig(initial_cash=config['initial_cash'], start=first, checkpoint_interval=60,
+                                     benchmark_symbol=config['symbol'], pnl_mode='points' if points else 'currency',
+                                     point_cost=config.get('point_cost', 0)),
                     params={**config['parameters'], 'symbol':config['symbol'], 'duration':config['duration'], 'execution_model':execution_model},
                     output_dir=directory / 'runs', on_event=output)
             output.runner = runner
@@ -234,7 +251,7 @@ def main():
                 result = checkpoint()
                 client.call('checkpoint', checkpoint={'runner': json.loads(result.read_text()),
                     'targets': output.targets, 'risk_times': output.risk_times,
-                    'history_version': 2, 'history': history.state})
+                    'history_version': 3, 'history': history.state})
                 checkpoint_at = monotonic()
                 return result
             runner.checkpoint = persist

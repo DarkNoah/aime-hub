@@ -73,10 +73,11 @@ def optimize(root, sdk, stop):
     raw = read_json(root / 'config.json')
     options = raw.pop('optimization')
     metric = options['metric']
-    direction = 'minimize' if metric == 'max_drawdown' else 'maximize'
+    direction = 'minimize' if metric in ('max_drawdown', 'max_drawdown_points') else 'maximize'
     split = options.get('validation_start')
     training = {**raw, 'end': split - 1 if split is not None else raw['end']}
     report = {
+        'pnl_unit': 'points' if raw.get('pnl_mode') == 'points' else 'currency',
         'engine': 'optuna', 'optuna_version': optuna.__version__, 'sampler': 'TPESampler',
         'seed': options['seed'], 'metric': metric, 'direction': direction,
         'status': 'running', 'message': '正在准备调参', 'requested_trials': options['n_trials'],

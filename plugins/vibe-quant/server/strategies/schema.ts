@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { MAX_BACKTEST_SECONDS } from './limits.js';
 import { optimizationSchema } from './optimization.js';
 import { strategyNotificationsSchema } from '../../strategy-notifications.js';
+import { POINT_OPTIMIZATION_METRICS } from '../../optimization-types.js';
+import { POINT_BACKTEST_RULES } from '../../strategy-types.js';
 
 export const symbol = z.string().regex(/^[A-Za-z0-9_.@-]{1,100}$/);
 export const strategyStatusSchema = z.enum(['active', 'archived', 'deleted']);
@@ -23,7 +25,10 @@ export const backtestSchema = z
     optimization: optimizationSchema.optional(),
     version_id: z.uuid(),
     symbol,
-    execution_model: z.enum(['actual_contract', 'continuous_price']).optional(),
+    execution_model: z
+      .enum(['actual_contract', 'continuous_price', 'points'])
+      .optional(),
+    point_cost: nonnegative.optional(),
     duration: z.union([
       z.literal(60),
       z.literal(180),
@@ -79,6 +84,16 @@ export const backtestSchema = z
     (v) =>
       v.execution_model !== 'continuous_price' || v.symbol.startsWith('KQ.m@'),
     '主连价格模拟仅支持主连标的',
+  )
+  .refine(
+    (v) =>
+      !v.optimization ||
+      (v.execution_model === 'points'
+        ? POINT_OPTIMIZATION_METRICS.includes(v.optimization.metric)
+        : !['total_points', 'max_drawdown_points'].includes(
+            v.optimization.metric,
+          )),
+    { message: '优化目标须匹配回测的收益单位', path: ['optimization'] },
   );
 
 export class StrategyError extends Error {
@@ -92,6 +107,23 @@ export class StrategyError extends Error {
 
 /** Keep HTTP forms and Agent submissions on the same validation path. */
 export function parseBacktestConfig(input: unknown) {
+  if (
+    input &&
+    typeof input === 'object' &&
+    'execution_model' in input &&
+    input.execution_model === 'points'
+  ) {
+    // Point accounting has no financial assumptions. Drop hidden stale form values
+    // and allow API callers to omit money-related settings entirely.
+    input = {
+      ...input,
+      initial_cash: 1,
+      participation_rate: 1,
+      annualization: 252,
+      risk_free_rate: 0,
+      rules: structuredClone(POINT_BACKTEST_RULES),
+    };
+  }
   const parsed = backtestSchema.safeParse(input);
   if (parsed.success) return parsed.data;
   const field = parsed.error.issues[0]?.path[0];

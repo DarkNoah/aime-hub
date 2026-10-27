@@ -169,8 +169,15 @@ class RunConfig:
     execution_duration: int = 60
     checkpoint_interval: float = 5.0
     dedup_limit: int = 50_000
+    pnl_mode: Literal['currency', 'points'] = 'currency'
+    point_cost: float = 0.0
 
     def __post_init__(self):
+        if self.pnl_mode not in ('currency', 'points'):
+            raise ValueError('Invalid P&L mode')
+        finite(self.point_cost, 'point_cost')
+        if self.point_cost < 0:
+            raise ValueError('Point cost must be nonnegative')
         finite(self.initial_cash, 'initial_cash', True)
         finite(self.slippage_ticks, 'slippage_ticks')
         finite(self.risk_free_rate, 'risk_free_rate')

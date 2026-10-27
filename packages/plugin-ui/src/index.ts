@@ -70,3 +70,9 @@ export {
   ThreadSidebar,
   type ThreadSidebarProps,
 } from '../../../apps/web/src/components/chat/thread-sidebar';
+
+export {
+  enableNotificationSound,
+  previewNotificationSound,
+  notificationSoundSupported,
+} from '../../../apps/web/src/features/notifications/notification-sound';

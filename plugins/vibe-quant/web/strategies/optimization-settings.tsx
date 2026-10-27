@@ -10,6 +10,7 @@ import {
 } from '@app/plugin-ui';
 import {
   OPTIMIZATION_METRICS,
+  POINT_OPTIMIZATION_METRICS,
   type OptimizationConfig,
   type OptimizationMetric,
 } from '../../optimization-types';
@@ -30,6 +31,7 @@ export function OptimizationSettings({
   onSpaceChange,
   validationStart,
   onValidationChange,
+  points = false,
 }: {
   value: OptimizationConfig;
   onChange: (value: OptimizationConfig) => void;
@@ -37,6 +39,7 @@ export function OptimizationSettings({
   onSpaceChange: (space: string) => void;
   validationStart: string;
   onValidationChange: (value: string) => void;
+  points?: boolean;
 }) {
   return (
     <section className="space-y-4 border-t pt-5">
@@ -58,12 +61,22 @@ export function OptimizationSettings({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {Object.entries(OPTIMIZATION_METRICS).map(([key, label]) => (
-                  <SelectItem key={key} value={key}>
-                    {label}
-                    {key === 'max_drawdown' ? '（越小越好）' : '（越大越好）'}
-                  </SelectItem>
-                ))}
+                {Object.entries(OPTIMIZATION_METRICS)
+                  .filter(([key]) =>
+                    points
+                      ? POINT_OPTIMIZATION_METRICS.includes(
+                          key as OptimizationMetric,
+                        )
+                      : !['total_points', 'max_drawdown_points'].includes(key),
+                  )
+                  .map(([key, label]) => (
+                    <SelectItem key={key} value={key}>
+                      {label}
+                      {key.startsWith('max_drawdown')
+                        ? '（越小越好）'
+                        : '（越大越好）'}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           </Label>

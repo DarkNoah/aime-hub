@@ -262,6 +262,9 @@ export class BacktestWorker {
         join(directory, 'config.json'),
         JSON.stringify({
           initial_cash,
+          pnl_mode:
+            job.config.execution_model === 'points' ? 'points' : 'currency',
+          point_cost: job.config.point_cost ?? 0,
           start,
           end,
           slippage_ticks,

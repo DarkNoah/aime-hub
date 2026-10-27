@@ -48,7 +48,7 @@ export class NotificationService {
     return this.store.get(userId, id);
   }
   async publishPlugin(pluginId: string, input: PluginNotificationInput) {
-    if (!input.toast && !input.desktop) return;
+    if (!input.toast && !input.desktop && !input.sound) return;
     const prefix = `/plugins/${pluginId}`;
     if (
       !/^[a-z][a-z0-9-]{0,39}$/.test(pluginId) ||
@@ -72,6 +72,7 @@ export class NotificationService {
         url: input.url,
         createdAt: new Date().toISOString(),
         toast: input.toast,
+        ...(input.sound ? { sound: input.sound } : {}),
       },
     });
     if (!added) return;

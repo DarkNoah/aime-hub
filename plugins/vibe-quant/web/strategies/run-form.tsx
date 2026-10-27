@@ -33,7 +33,10 @@ import {
   defaultOptimization,
   OptimizationSettings,
 } from './optimization-settings';
-import type { OptimizationConfig } from '../../optimization-types';
+import {
+  POINT_OPTIMIZATION_METRICS,
+  type OptimizationConfig,
+} from '../../optimization-types';
 
 const localTime = (seconds: number) =>
   new Date((seconds + 8 * 3600) * 1000).toISOString().slice(0, 16);
@@ -114,6 +117,17 @@ export function RunForm({
   const [searchError, setSearchError] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const points = config.execution_model === 'points';
+  const currentOptimization = {
+    ...optimization,
+    metric: points
+      ? POINT_OPTIMIZATION_METRICS.includes(optimization.metric)
+        ? optimization.metric
+        : ('total_points' as const)
+      : ['total_points', 'max_drawdown_points'].includes(optimization.metric)
+        ? ('sharpe' as const)
+        : optimization.metric,
+  };
   const selectedVersion = versions.find((v) => v.id === config.version_id);
   const versionLabel = selectedVersion
     ? `v${selectedVersion.number} · ${selectedVersion.note || selectedVersion.source_hash.slice(0, 8)}`
@@ -171,7 +185,7 @@ export function RunForm({
         ...config,
         optimization: optimize
           ? {
-              ...optimization,
+              ...currentOptimization,
               search_space: parseObject(
                 space,
               ) as OptimizationConfig['search_space'],
@@ -321,12 +335,20 @@ export function RunForm({
                       <SelectItem value="continuous_price">
                         主连价格模拟
                       </SelectItem>
+                      <SelectItem value="points">点数回测</SelectItem>
                     </SelectContent>
                   </Select>
                 </Label>
                 {config.execution_model === 'continuous_price' && (
                   <p className="text-xs text-muted-foreground">
                     使用主连价格模拟成交，不计实际合约价差和换月成交成本。仅用于历史回测，策略需支持此模式。
+                  </p>
+                )}
+                {points && (
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    按固定 1
+                    单位计算多空价格点差，支持指数、股票和期货。忽略资金、保证金、合约乘数、成交量和
+                    T+1；保留止盈止损与滑点。策略下单数量仅用于判断方向。
                   </p>
                 )}
                 <Label className="grid gap-2 text-xs">
@@ -393,10 +415,13 @@ export function RunForm({
                   </div>
                 )}
                 <p className="text-xs leading-5 text-muted-foreground">
-                  {config.execution_model === 'continuous_price'
-                    ? '主连同时用于信号和模拟成交。'
-                    : '主连产生信号，交易历史映射的实际合约。'}
-                  股票数量单位为股，期货为手；商品期货请核对合约乘数。
+                  {points
+                    ? '信号与成交使用所选标的价格，结果单位为点。主连不做实际合约映射。'
+                    : config.execution_model === 'continuous_price'
+                      ? '主连同时用于信号和模拟成交。'
+                      : '主连产生信号，交易历史映射的实际合约。'}
+                  {!points &&
+                    '股票数量单位为股，期货为手；商品期货请核对合约乘数。'}
                 </p>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -422,17 +447,25 @@ export function RunForm({
                   日期可超出已有行情范围，回测使用区间内已收盘的可用 K
                   线，无数据时会提示。结束时间须晚于开始时间，跨度最多十年。
                 </p>
-                {numeric('初始资金（元）', config.initial_cash, (v) =>
-                  field('initial_cash', v),
-                )}
+                {!points &&
+                  numeric('初始资金（元）', config.initial_cash, (v) =>
+                    field('initial_cash', v),
+                  )}
+                {points &&
+                  numeric(
+                    '单边成本（点，往返扣两次）',
+                    config.point_cost ?? 0,
+                    (v) => field('point_cost', v),
+                  )}
                 {numeric('滑点（最小跳动数）', config.slippage_ticks, (v) =>
                   field('slippage_ticks', v),
                 )}
-                {numeric(
-                  '成交量参与率（0–1）',
-                  config.participation_rate,
-                  (v) => field('participation_rate', v),
-                )}
+                {!points &&
+                  numeric(
+                    '成交量参与率（0–1）',
+                    config.participation_rate,
+                    (v) => field('participation_rate', v),
+                  )}
                 <Label className="grid gap-2 text-xs">
                   基准标的（可留空）
                   <Input
@@ -443,41 +476,43 @@ export function RunForm({
                   />
                 </Label>
               </div>
-              <section className="space-y-3 border-t pt-5">
-                <h3 className="text-sm font-medium">交易规则与费用假设</h3>
-                <p className="text-xs text-muted-foreground">
-                  以下均为本次回测参数，请按交易品种填写。
-                </p>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {numeric(
-                    '合约乘数（股票固定为 1）',
-                    config.rules.multiplier,
-                    (v) => rule('multiplier', v),
-                  )}
-                  {numeric(
-                    '保证金比例（0–1，股票固定为 1）',
-                    config.rules.margin_rate,
-                    (v) => rule('margin_rate', v),
-                  )}
-                  {numeric(
-                    '最小交易单位',
-                    config.rules.lot_size,
-                    (v) => rule('lot_size', v),
-                    '1',
-                  )}
-                  <Label className="flex items-center justify-between gap-3 text-xs">
-                    T+1 限制
-                    <Switch
-                      checked={config.rules.t_plus_one}
-                      onCheckedChange={(v) => rule('t_plus_one', v)}
-                    />
-                  </Label>
-                </div>
-                <FeeSettings
-                  value={config.rules.fees}
-                  onChange={(fees) => rule('fees', fees)}
-                />
-              </section>
+              {!points && (
+                <section className="space-y-3 border-t pt-5">
+                  <h3 className="text-sm font-medium">交易规则与费用假设</h3>
+                  <p className="text-xs text-muted-foreground">
+                    以下均为本次回测参数，请按交易品种填写。
+                  </p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {numeric(
+                      '合约乘数（股票固定为 1）',
+                      config.rules.multiplier,
+                      (v) => rule('multiplier', v),
+                    )}
+                    {numeric(
+                      '保证金比例（0–1，股票固定为 1）',
+                      config.rules.margin_rate,
+                      (v) => rule('margin_rate', v),
+                    )}
+                    {numeric(
+                      '最小交易单位',
+                      config.rules.lot_size,
+                      (v) => rule('lot_size', v),
+                      '1',
+                    )}
+                    <Label className="flex items-center justify-between gap-3 text-xs">
+                      T+1 限制
+                      <Switch
+                        checked={config.rules.t_plus_one}
+                        onCheckedChange={(v) => rule('t_plus_one', v)}
+                      />
+                    </Label>
+                  </div>
+                  <FeeSettings
+                    value={config.rules.fees}
+                    onChange={(fees) => rule('fees', fees)}
+                  />
+                </section>
+              )}
               <JsonObjectEditor
                 label="策略参数"
                 value={params}
@@ -489,7 +524,8 @@ export function RunForm({
               </p>
               {optimize && (
                 <OptimizationSettings
-                  value={optimization}
+                  value={currentOptimization}
+                  points={points}
                   onChange={setOptimization}
                   space={space}
                   onSpaceChange={setSpace}
@@ -502,15 +538,17 @@ export function RunForm({
                   统计与交易日历
                 </summary>
                 <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                  {numeric(
-                    '每年交易日数',
-                    config.annualization,
-                    (v) => field('annualization', v),
-                    '1',
-                  )}
-                  {numeric('年化无风险利率', config.risk_free_rate, (v) =>
-                    field('risk_free_rate', v),
-                  )}
+                  {!points &&
+                    numeric(
+                      '每年交易日数',
+                      config.annualization,
+                      (v) => field('annualization', v),
+                      '1',
+                    )}
+                  {!points &&
+                    numeric('年化无风险利率', config.risk_free_rate, (v) =>
+                      field('risk_free_rate', v),
+                    )}
                   <Label className="grid gap-2 text-xs sm:col-span-2">
                     覆盖交易日历（可留空，JSON 日期 → 布尔值）
                     <Textarea

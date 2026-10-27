@@ -26,12 +26,14 @@ export default function TradeView({
   runId,
   trade,
   riskLevels = EMPTY_RISK_LEVELS,
+  points = false,
   onClose,
 }: {
   pluginId: string;
   runId: string;
   trade: TradeRecord;
   riskLevels?: RiskLevelRecord[];
+  points?: boolean;
   onClose: () => void;
 }) {
   const [period, setPeriod] = useState(readChartPeriod);
@@ -113,7 +115,7 @@ export default function TradeView({
             <span className="ml-auto text-xs tabular-nums">
               {trade.status === 'open'
                 ? `未平仓数量 ${trade.quantity}`
-                : `净收益 ${number(trade.net_pnl)}`}
+                : `净收益 ${number(trade.net_pnl)}${points ? ' 点' : ''}`}
             </span>
           </div>
           {trade.exit_time_precision === 'bar' && (

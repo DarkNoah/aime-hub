@@ -34,3 +34,5 @@ plugins/vibe-quant/**/__pycache__/
 
 !plugins/vibe-quant/tests/market-strategy-hints.test.ts
 !plugins/vibe-quant/tests/strategy-sharing.test.ts
+
+!scripts/notification-sound-browser.test.mjs

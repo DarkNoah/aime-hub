@@ -117,6 +117,23 @@ class OptimizationTest(unittest.TestCase):
             self.assertEqual(report['best_value'], min(t['value'] for t in report['trials'] if t['state'] == 'complete'))
             self.assertTrue(all(0.01 <= t['parameters']['risk'] <= 0.1 for t in report['trials']))
 
+    def test_points_optimization_uses_absolute_metrics_and_validation_units(self):
+        for metric in ('total_points', 'max_drawdown_points'):
+            with self.subTest(metric=metric), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                self.setup_run(root, metric=metric, n_trials=2,
+                               search_space={'size': {'type': 'int', 'low': 1, 'high': 2}})
+                config = json.loads((root / 'config.json').read_text())
+                config.update(pnl_mode='points', initial_cash=1, point_cost=.5)
+                (root / 'config.json').write_text(json.dumps(config))
+                report = self.run_search(root)
+                self.assertEqual(report['status'], 'completed', report)
+                self.assertEqual(report['pnl_unit'], 'points')
+                self.assertEqual(report['direction'], 'minimize' if metric == 'max_drawdown_points' else 'maximize')
+                self.assertEqual(report['validation']['status'], 'succeeded')
+                self.assertIsNone(report['validation']['metrics']['total_return'])
+                self.assertEqual(report['validation']['metrics']['total_points'], -11)
+
     def test_empty_holdout_is_a_validation_failure_with_training_result_preserved(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

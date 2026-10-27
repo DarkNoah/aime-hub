@@ -59,6 +59,7 @@ const configured = {
   channels: {
     toast: { enabled: true },
     desktop: { enabled: false, future_option: 'preserved' },
+    sound: { enabled: true },
     future_channel: { enabled: true, options: { mode: 'digest' } },
   },
 };
@@ -98,7 +99,11 @@ function fixture() {
 
 test('notification channels default off and preserve future channel options', () => {
   assert.deepEqual(strategyNotifications(), {
-    channels: { toast: { enabled: false }, desktop: { enabled: false } },
+    channels: {
+      toast: { enabled: false },
+      desktop: { enabled: false },
+      sound: { enabled: false },
+    },
   });
   assert.deepEqual(strategyNotificationsSchema.parse(configured), configured);
   const first = strategyNotifications();
@@ -127,6 +132,7 @@ test('strategy HTTP saves persist preferences, omitted updates preserve them, ex
   assert.deepEqual(next.notifications, configured);
   const disabled = structuredClone(configured);
   disabled.channels.toast.enabled = false;
+  disabled.channels.sound.enabled = false;
   const updated = await request(`/${saved.id}`, 'PUT', {
     ...body,
     revision: next.revision,

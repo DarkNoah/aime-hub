@@ -5,6 +5,7 @@ from quant_sdk import Bar
 from quant_sdk.models import Roll
 from quant_sdk.hub import DataError, convert_bar, event_for, three_minute
 from quant_sdk.metrics import summarize
+from quant_sdk.point_metrics import summarize_points
 
 
 def history_events(client, runner, symbol, duration, start, end, calendar, rules):
@@ -70,7 +71,7 @@ def history_events(client, runner, symbol, duration, start, end, calendar, rules
 class MonitorHistory:
     def __init__(self, client, runner, start, saved=None):
         self.client, self.runner = client, runner
-        self.state = saved or {'start': start, 'daily': {}, 'peak': runner.config.initial_cash,
+        self.state = saved or {'start': start, 'daily': {}, 'peak': 0 if runner.broker.points else runner.config.initial_cash,
                               'drawdown': 0, 'count': 0, 'wins': 0, 'positive': 0, 'negative': 0}
         self.state.setdefault('risk_levels', {})
         self.pending = []
@@ -90,7 +91,8 @@ class MonitorHistory:
         for point in runner.curve:
             state['daily'][point['trading_day']] = point
             state['peak'] = max(state['peak'], point['equity'])
-            state['drawdown'] = max(state['drawdown'], (state['peak'] - point['equity']) / state['peak'])
+            drawdown = state['peak'] - point['equity']
+            state['drawdown'] = max(state['drawdown'], drawdown if runner.broker.points else drawdown / state['peak'])
         runner.curve.clear()
         for trade in runner.broker.trades:
             state['count'] += 1
@@ -106,14 +108,19 @@ class MonitorHistory:
         active.update(order.signal_id for order in runner.broker.orders if order.status == 'pending')
         active.update(order.risk_entry_signal_id for order in runner.broker.orders
                       if order.status == 'pending' and order.risk_entry_signal_id)
-        # Strategies may continue updating protection via the original order ID.
-        runner.broker.orders[:] = [order for order in runner.broker.orders
-                                   if order.status == 'pending' or order.signal_id in active]
         state['risk_levels'] = {key: record for key, record in risk_snapshots.items()
                                 if record['entry_signal_id'] in active}
         # Active entry identities and causal protection levels survive compaction.
         runner.signals[:] = [value for value in runner.signals[:-200] if value['id'] in active] + runner.signals[-200:]
         runner.signal_ids = {value['id'] for value in runner.signals}
+        # target_position returns an order ID in simulated execution. Keep its
+        # signal mapping for exactly as long as the retained entry signal, even
+        # after closing; strategies may still publish a final protection update.
+        # Otherwise the same valid reference works in a full backtest but fails
+        # after monitor compaction or checkpoint recovery.
+        retained = active | runner.signal_ids
+        runner.broker.orders[:] = [order for order in runner.broker.orders
+                                   if order.status == 'pending' or order.signal_id in retained]
         risk = {}
         boundary = runner.data.now - 86400
         for value in runner.risk_levels:
@@ -153,13 +160,21 @@ class MonitorHistory:
     def summary(self):
         runner, state = self.runner, self.state
         daily = [value for _, value in sorted(state['daily'].items())]
-        result = summarize(daily, [], runner.config)
+        points = runner.broker.points
+        result = summarize_points(daily, []) if points else summarize(daily, [], runner.config)
         result['metrics'].update(trade_count=state['count'],
             win_rate=state['wins'] / state['count'] if state['count'] else None,
-            profit_factor=state['positive'] / state['negative'] if state['negative'] else None,
-            max_drawdown=state['drawdown'])
-        annual = result['metrics']['annual_return']
-        result['metrics']['calmar'] = annual / state['drawdown'] if annual is not None and state['drawdown'] else None
+            profit_factor=state['positive'] / state['negative'] if state['negative'] else None)
+        if points:
+            realized = state['positive'] - state['negative']
+            result['metrics'].update(realized_points=realized,
+                unrealized_points=result['metrics']['total_points'] - realized,
+                average_trade_points=realized / state['count'] if state['count'] else None,
+                max_drawdown_points=state['drawdown'])
+        else:
+            result['metrics']['max_drawdown'] = state['drawdown']
+            annual = result['metrics']['annual_return']
+            result['metrics']['calmar'] = annual / state['drawdown'] if annual is not None and state['drawdown'] else None
         opened = []
         for index, lot in enumerate(runner.broker.lots):
             opened.append({'id': f'open:{lot.signal_id}:{lot.entry_time}:{index}', 'status': 'open',
@@ -172,6 +187,7 @@ class MonitorHistory:
         return {key: result[key] for key in ('metrics', 'monthly_returns', 'yearly_returns')} | {
             'start': state['start'], 'through': runner.data.now, 'initial_cash': runner.config.initial_cash,
             'replaying': self.replaying, 'equity_curve': daily, 'open_trades': opened,
+            'pnl_unit': 'points' if points else 'currency',
             'execution_model': runner.context.params.get('execution_model', 'actual_contract')}
 
     def flush(self, force=False):

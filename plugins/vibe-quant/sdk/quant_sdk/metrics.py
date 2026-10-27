@@ -6,6 +6,9 @@ from statistics import mean, stdev
 
 
 def summarize(curve: list[dict], trades: list[dict], config) -> dict:
+    if config.pnl_mode == 'points':
+        from .point_metrics import summarize_points
+        return summarize_points(curve, trades)
     initial = config.initial_cash
     daily = {}
     for point in curve:

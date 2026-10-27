@@ -13,10 +13,11 @@ from quant_sdk import Fees, HubClient, Instrument, TradingCalendar
 def prepare(raw):
     config = raw['config']
     execution_model = config.get('execution_model', 'actual_contract')
-    if execution_model not in ('actual_contract', 'continuous_price'):
+    if execution_model not in ('actual_contract', 'continuous_price', 'points'):
         raise ValueError('Unknown execution model')
-    proxy_symbol = config['symbol'] if execution_model == 'continuous_price' else None
-    if proxy_symbol and (not proxy_symbol.startswith('KQ.m@') or raw['instruments'][proxy_symbol]['kind'] != 'continuous'):
+    points = execution_model == 'points'
+    proxy_symbol = config['symbol'] if execution_model in ('continuous_price', 'points') else None
+    if execution_model == 'continuous_price' and (not proxy_symbol.startswith('KQ.m@') or raw['instruments'][proxy_symbol]['kind'] != 'continuous'):
         raise ValueError('Continuous-price simulation requires a main continuous series')
     bars = [bar for bar in raw['bars'] if config['start'] <= bar['time'] < config['end']]
     if not bars:
@@ -53,9 +54,14 @@ def prepare(raw):
 
         def instrument(self, symbol):
             metadata = raw['instruments'][symbol]
-            # This frozen backtest alone treats the continuous series as a
-            # synthetic future. Keep its real symbol and the raw catalog intact.
+            # Synthetic execution exists only in this frozen historical snapshot.
+            # The live catalog and ordinary index order checks remain unchanged.
             return {**metadata, 'kind': 'future'} if symbol == proxy_symbol else metadata
+
+        def rules(self, symbol, resolver):
+            if points and symbol == proxy_symbol:
+                return resolver(symbol, self.instrument(symbol))
+            return super().rules(symbol, resolver)
 
         def history(self, symbol, duration, start, end):
             return (bar for bar in bars if bar['symbol'] == symbol and bar['duration'] == duration and start <= bar['time'] < end)
@@ -64,6 +70,9 @@ def prepare(raw):
             return raw['mappings'][symbol]
 
     def rules(symbol, metadata):
+        if points and symbol == proxy_symbol:
+            return Instrument(symbol, 'future', price_tick=metadata['priceTick'],
+                              multiplier=1, margin_rate=1, lot_size=1, t_plus_one=False)
         values = dict(config['rules'])
         values['fees'] = Fees(**values['fees'])
         if metadata['kind'] == 'stock':
@@ -85,6 +94,10 @@ def prepare(raw):
                              simulated_execution_symbol=proxy_symbol,
                              mapping_policy=f'{proxy_symbol}: continuous prices, no actual-contract mapping; other symbols retain observed mappings',
                              execution_policy='Synthetic continuous-price fills; excludes actual-contract basis and roll execution costs')
+    if points:
+        data.metadata.update(pnl_unit='points',
+                             mapping_policy=f'{proxy_symbol}: direct price-point simulation without contract mapping',
+                             execution_policy='Fixed one unit per direction; price differences net of point costs and slippage; no capital, multiplier, margin, volume or T+1 constraints')
     return data
 
 

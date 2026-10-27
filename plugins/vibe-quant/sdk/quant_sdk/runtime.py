@@ -15,6 +15,7 @@ from .execution import Lot, Order, PaperBroker
 from .metrics import summarize
 from .models import Bar, Event, Fees, Instrument, Quote, Roll, RunConfig
 from .risk import RiskLevels, accept, publish
+from .state_codec import encode_state, decode_state
 
 
 class Strategy:
@@ -43,6 +44,8 @@ class Execution:
         if ctx.warming_up or not ctx.event_id:
             raise ValueError('Orders are only allowed inside active event callbacks')
         ctx._runner.broker.validate_target(symbol, quantity)
+        if ctx._runner.broker.points:
+            quantity = (quantity > 0) - (quantity < 0)
         signal_id = ctx.emit('target_position', symbol=symbol, target=quantity, reason=reason)
         if ctx.mode == 'monitor':
             return signal_id
@@ -104,6 +107,8 @@ class Runner:
         if mode not in ('backtest', 'paper', 'monitor'):
             raise ValueError('Unsupported execution mode')
         self.strategy, self.config, self.mode = strategy, config or RunConfig(), mode
+        if self.config.pnl_mode == 'points' and mode != 'backtest':
+            raise ValueError('Point accounting is only supported in historical backtests')
         self.data = DataView(instruments, self.config.history_limit)
         self.run_id = run_id or uuid4().hex
         self.directory = Path(output_dir) / self.run_id
@@ -144,6 +149,10 @@ class Runner:
                          },
                          'settlement_model': 'previous_trading_day_last_observed_close',
                          'end_policy': 'mark_open_positions; cancel_pending_orders'}
+        if self.broker.points:
+            self.manifest.update(pnl_unit='points', position_model='fixed_one_unit_per_direction',
+                                 fill_model='next_bar_open_with_slippage; no_cash_margin_volume_or_T_plus_one_constraints')
+            self.manifest['risk_model']['constraints'] = 'fixed_one_unit; no_volume_or_T_plus_one_constraints'
         _write(self.directory / 'manifest.json', self.manifest)
         self.journal = (self.directory / 'events.jsonl').open('a', encoding='utf-8')
         _write(self.directory / 'status.json', {'status': self.status})
@@ -245,7 +254,8 @@ class Runner:
         if isinstance(value, Bar) and value.is_final:
             account = self.broker.account()
             self.curve.append({'time': ctx.now, 'trading_day': ctx.trading_day, **account,
-                               'benchmark_equity': self.config.initial_cash * self.benchmark_price / self.benchmark_start
+                               'benchmark_equity': (self.benchmark_price - self.benchmark_start if self.broker.points else
+                                                    self.config.initial_cash * self.benchmark_price / self.benchmark_start)
                                if self.benchmark_start and self.benchmark_price is not None else None})
         # Checkpoint precedes delivery. Consumers deduplicate by stable event/signal ID.
         self._maybe_checkpoint()
@@ -261,7 +271,7 @@ class Runner:
         self._checkpoint_at = self.data.now
         self.manifest['instruments'] = [asdict(i) for i in self.data._instruments.values()]
         _write(path, {'schema_version': 1, 'manifest': self.manifest,
-                      'now': self.data.now, 'state': self.context.state,
+                      'now': self.data.now, 'state_encoding': 1, 'state': encode_state(self.context.state),
                       'trading_day': self.context.trading_day, 'event_id': self.context.event_id,
                       'ready': self.ready, 'seen': self.seen, 'signals': self.signals,
                       'risk_levels': self.risk_levels,
@@ -295,6 +305,7 @@ class Runner:
         except Exception as error:
             self.status, self.message = 'failed', f'Output delivery failed: {type(error).__name__}'
         self.result = {'schema_version': 1, 'run_id': self.run_id, 'status': self.status, 'message': self.message,
+                       'pnl_unit': 'points' if self.broker.points else 'currency',
                        **summarize(self.curve, self.broker.trades, self.config),
                        'equity_curve': self.curve, 'trades': self.broker.trades,
                        'orders': [asdict(o) for o in self.broker.orders], 'fills': self.broker.fills,
@@ -313,6 +324,8 @@ class Runner:
         value = json.loads(Path(checkpoint).read_text(encoding='utf-8'))
         if value['schema_version'] != 1:
             raise ValueError('Unsupported checkpoint')
+        if value.get('state_encoding') not in (None, 1):
+            raise ValueError('Unsupported checkpoint state encoding')
         manifest = value['manifest']
         instruments = [Instrument(**{**item, 'fees': Fees(**item['fees'])}) for item in manifest['instruments']]
         runner = cls(strategy, instruments, config=RunConfig(**manifest['config']), params=manifest['params'],
@@ -323,6 +336,15 @@ class Runner:
             raise ValueError('Strategy source differs from checkpoint')
         runner.manifest['resumed_from'] = str(Path(checkpoint).resolve())
         _write(runner.directory / 'manifest.json', runner.manifest)
+        # Recreate transient attributes (parameters, caches, context references)
+        # on the new strategy instance before hydrating durable trading state.
+        # Initialization runs with an empty event/warm-up context, so it cannot
+        # emit signals or place orders against the restored portfolio.
+        try:
+            runner.start()
+        except BaseException:
+            runner.journal.close()
+            raise
         for raw in value['bars']:
             bar = Bar(**raw)
             runner.data._apply(Event(f'restore:{bar.symbol}:{bar.duration}:{bar.time}', bar.end_time, bar))
@@ -331,7 +353,9 @@ class Runner:
         runner.data._roll_times = value.get('roll_times', {})
         runner.data._subscriptions = {tuple(s) for s in value['subscriptions']}
         runner.data.now = value['now']
-        runner.context.state = value['state']
+        state = decode_state(value['state']) if value.get('state_encoding') == 1 else value['state']
+        runner.context.state.clear()
+        runner.context.state.update(state)
         runner.context.trading_day = value['trading_day']
         runner.context.event_id = value['event_id']
         runner.context.warming_up = False

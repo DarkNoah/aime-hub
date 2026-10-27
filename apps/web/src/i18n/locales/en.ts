@@ -604,6 +604,11 @@ export const en = {
     'Could not enable desktop notifications. Check your browser permission and try again.',
   'notifications.unavailable':
     'Could not load notification settings. Reopen this dialog to retry.',
+  'notifications.soundBlocked':
+    'Notification sound is not enabled in this browser',
+  'notifications.enableSound': 'Enable sound',
+  'notifications.soundUnavailable':
+    "Unable to play sound. Check your browser's sound settings.",
   'notifications.completed': 'Automation completed',
   'notifications.failed': 'Automation failed',
   'notifications.view': 'View result',

@@ -40,7 +40,9 @@ export interface BacktestInput {
   symbol: string;
   duration: number;
   /** Actual historical contracts by default; continuous prices are an explicit backtest approximation. */
-  execution_model?: 'actual_contract' | 'continuous_price';
+  execution_model?: 'actual_contract' | 'continuous_price' | 'points';
+  /** Per-side cost in price points, only for fixed-one-unit point backtests. */
+  point_cost?: number;
   start: number;
   end: number;
   initial_cash: number;
@@ -71,6 +73,21 @@ export interface BacktestInput {
 }
 export type RunStatus =
   'queued' | 'preparing' | 'running' | 'completed' | 'failed' | 'cancelled';
+export const POINT_BACKTEST_RULES: BacktestInput['rules'] = {
+  multiplier: 1,
+  margin_rate: 1,
+  lot_size: 1,
+  t_plus_one: false,
+  fees: {
+    mode: 'fixed',
+    per_unit: 0,
+    rate: 0,
+    minimum: 0,
+    close_today_per_unit: null,
+    close_today_rate: null,
+    sell_tax_rate: 0,
+  },
+};
 export interface BacktestRun {
   /** A successful optimization creates a separate, unpublished strategy. */
   optimization_draft_id?: string;
@@ -140,6 +157,7 @@ export const tradeExitAnchor = (trade: TradeRecord) =>
 export const tradeHoldingEnd = (trade: TradeRecord) =>
   trade.status === 'open' ? trade.observed_until : trade.exit_time;
 export interface BacktestResult {
+  pnl_unit?: 'currency' | 'points';
   schema_version: number;
   run_id: string;
   status: string;
@@ -151,8 +169,8 @@ export interface BacktestResult {
     equity: number;
     benchmark_equity: number | null;
   }[];
-  monthly_returns: { period: string; return: number; pnl: number }[];
-  yearly_returns: { period: string; return: number; pnl: number }[];
+  monthly_returns: { period: string; return: number | null; pnl: number }[];
+  yearly_returns: { period: string; return: number | null; pnl: number }[];
   trades: Trade[];
   orders: Record<string, unknown>[];
   fills: Record<string, unknown>[];

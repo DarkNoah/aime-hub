@@ -8,6 +8,8 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import type { PluginHttpEnv } from '@app/plugin-sdk/server';
 import { signalRoutes, monitorSchema } from '../server/signals/routes.js';
+import { strategyDataRoutes } from '../server/sdk/routes.js';
+import { monitorExecutionModel } from '../signal-types.js';
 import { runSignalProcess } from '../server/signals/process.js';
 import { input, start, actual } from './strategy-fixture.js';
 import { StrategyStore } from '../server/strategies/store.js';
@@ -26,6 +28,7 @@ const config = () =>
 test('monitor creation uses shared strategies and enforces administrator, version binding and parameter validation', async () => {
   const value = config(),
     calls: unknown[] = [];
+  let versionParameters: Record<string, unknown> = { lookback: 42 };
   const app = new Hono<PluginHttpEnv>();
   app.use('*', async (c, next) => {
     c.set('userId', 'alice');
@@ -49,7 +52,7 @@ test('monitor creation uses shared strategies and enforces administrator, versio
         version: async () => ({
           strategy_id: 'strategy',
           number: 1,
-          parameters: { lookback: 42 },
+          parameters: versionParameters,
         }),
       } as unknown as StrategyStore,
       monitors: {
@@ -99,12 +102,71 @@ test('monitor creation uses shared strategies and enforces administrator, versio
     value,
     'explicit legacy configuration remains intact',
   );
+  versionParameters = { lookback: 42, duration: 300 };
+  assert.equal(
+    (
+      await request({
+        version_id: value.version_id,
+        symbol: value.symbol,
+        duration: 60,
+      })
+    ).status,
+    201,
+  );
+  const fixed = (calls[4] as unknown[])[4] as ReturnType<typeof config>;
+  assert.equal(
+    fixed.duration,
+    300,
+    'published strategy duration takes priority over the chart in minimal market hints',
+  );
+  assert.equal(fixed.parameters.duration, 300);
+  assert.equal((await request(value)).status, 201);
+  assert.deepEqual(
+    (calls[6] as unknown[])[4],
+    value,
+    'explicit legacy calculation inputs remain authoritative',
+  );
+  for (const duration of [undefined, 900, 86400]) {
+    assert.equal(
+      (
+        await request({
+          version_id: value.version_id,
+          symbol: value.symbol,
+          duration,
+        })
+      ).status,
+      201,
+    );
+    assert.equal(
+      ((calls.at(-2) as unknown[])[4] as ReturnType<typeof config>).duration,
+      300,
+      'market hints derive the strategy period even when an old client sends a different chart period',
+    );
+  }
+  versionParameters = { lookback: 42 };
+  assert.equal(
+    (
+      await request({
+        version_id: value.version_id,
+        symbol: value.symbol,
+        duration: 900,
+      })
+    ).status,
+    201,
+  );
+  assert.equal(
+    ((calls.at(-2) as unknown[])[4] as ReturnType<typeof config>).duration,
+    60,
+    'versions without a configured duration use the SDK minute default, independently of chart period',
+  );
 });
 
 for (const [monitorSymbol, executionModel] of [
   [actual, 'actual_contract'],
   ['KQ.m@CFFEX.IM', 'actual_contract'],
   ['KQ.m@CFFEX.IM', 'continuous_price'],
+  ['SSE.000852', 'points'],
+  ['SZSE.399006', 'points'],
 ] as const)
   test(
     `real Python ${monitorSymbol} ${executionModel}: full-history replay, entry/reversal/risk exits and checkpoint recovery`,
@@ -116,17 +178,22 @@ for (const [monitorSymbol, executionModel] of [
           new URL('../worker/strategy_monitor.py', import.meta.url),
         );
       const settings = { ...config(), execution_model: executionModel };
-      const simulated = executionModel === 'continuous_price';
+      const points = executionModel === 'points';
+      const simulated = executionModel !== 'actual_contract';
       settings.symbol = monitorSymbol;
       settings.calendar = { ...settings.calendar, '2026-10-18': false };
       const source = `from quant_sdk import Strategy
 class Signals(Strategy):
     def on_start(self, ctx):
-        if ctx.params['execution_model'] == 'continuous_price':
+        self._duration = int(ctx.params['duration'])
+        ctx.state['n'] = 0
+        if ctx.params['execution_model'] in ('continuous_price', 'points'):
             assert ctx.mode == 'backtest'
             assert ctx.data.instrument(ctx.params['symbol']).kind == 'future'
         ctx.data.subscribe(ctx.params['symbol'], 60)
     def on_bar(self, ctx, bar):
+        if bar.duration != self._duration:
+            return
         contract = ctx.data.resolve_contract(bar.symbol)
         n = ctx.state.get('n', 0) + 1
         ctx.state['n'] = n
@@ -145,7 +212,7 @@ class Signals(Strategy):
         high,
         low: 99,
         close: 101,
-        volume: 10000,
+        volume: points ? 0 : 10000,
       });
       const chartBar = (value: ReturnType<typeof bar>, symbol: string) => ({
         ...value,
@@ -221,7 +288,11 @@ class Signals(Strategy):
                 if (path.startsWith('/instruments/'))
                   return {
                     symbol: decodeURIComponent(path.split('/').at(-1)!),
-                    kind: path.includes('KQ') ? 'continuous' : 'future',
+                    kind: path.includes('KQ')
+                      ? 'continuous'
+                      : points
+                        ? 'stock'
+                        : 'future',
                     priceTick: 0.2,
                   };
                 if (path === '/sessions' && message.method === 'POST')
@@ -256,7 +327,13 @@ class Signals(Strategy):
                   };
                 }
                 if (path === '/history/range') return { start, end: cutoff };
-                if (path === '/history')
+                if (path === '/history') {
+                  if (simulated)
+                    assert.equal(
+                      (message.params as { execution_model: string })
+                        .execution_model,
+                      executionModel,
+                    );
                   return {
                     bars: (resume ? [...warmup, ...live] : warmup).map((bar) =>
                       chartBar(
@@ -266,6 +343,7 @@ class Signals(Strategy):
                     ),
                     next: null,
                   };
+                }
                 if (path === '/sessions/a1/events') {
                   polled++;
                   return {
@@ -341,6 +419,20 @@ class Signals(Strategy):
         );
         assert.ok(checkpoint);
         assert.equal(summaries.at(-1)?.execution_model, executionModel);
+        if (points) {
+          const summary = summaries.at(-1)!;
+          assert.equal(summary.pnl_unit, 'points');
+          const metrics = summary.metrics as Record<string, number | null>;
+          assert.equal(metrics.total_return, null);
+          assert.equal(metrics.max_drawdown, null);
+          assert.ok(Number.isFinite(metrics.total_points));
+          assert.ok(Number.isFinite(metrics.max_drawdown_points));
+          assert.ok(
+            [...history.entries()]
+              .filter(([id]) => id.startsWith('trade'))
+              .every(([, trade]) => trade.quantity === 1),
+          );
+        }
         assert.ok(
           overlays.some((value) =>
             value.levels.some((level) => level.stop_loss === 105),
@@ -363,6 +455,36 @@ class Signals(Strategy):
           1,
           'recovery never replays historical notifications',
         );
+        const saved = checkpoint as {
+          history_version: number;
+          runner: { manifest: { runtime_hash: string } };
+        };
+        assert.equal(saved.history_version, 3);
+        // Old checkpoints need a fresh replay under the corrected SDK. Do not
+        // bypass the fingerprint check to reuse an incompatible runner state.
+        const legacy = structuredClone(saved);
+        legacy.history_version = 2;
+        legacy.runner.manifest.runtime_hash = 'previous-sdk';
+        const priorHistory = [...history.entries()];
+        const priorMetrics = summaries.at(-1)?.metrics;
+        await writeFile(
+          join(directory, 'checkpoint.json'),
+          JSON.stringify(legacy),
+        );
+        await execute(true);
+        assert.equal(ready, 3);
+        assert.equal(
+          signals.length,
+          1,
+          'legacy replay does not send historical notifications',
+        );
+        assert.deepEqual(
+          [...history.entries()],
+          priorHistory,
+          'legacy replay reuses stable record IDs',
+        );
+        assert.deepEqual(summaries.at(-1)?.metrics, priorMetrics);
+        assert.equal((checkpoint as typeof saved).history_version, 3);
       } finally {
         await rm(directory, { recursive: true, force: true });
       }
@@ -772,6 +894,18 @@ test('host notification channels deduplicate per owner and Service Worker shows 
     desktop: false,
   });
   assert.equal(records.length, 2);
+  await service.publishPlugin('vibe-quant', {
+    ...input,
+    eventId: 'sound-only',
+    toast: false,
+    desktop: false,
+    sound: 'entry',
+  });
+  const audible = records.at(-1)!.notification;
+  assert.ok('kind' in audible);
+  assert.equal(audible.sound, 'entry');
+  assert.equal(audible.toast, false);
+  assert.equal(records.length, 3);
   await service.settled();
   assert.equal(pushes, 1);
   assert.notEqual(records[0].notification.id, records[1].notification.id);
@@ -833,4 +967,129 @@ test('host notification channels deduplicate per owner and Service Worker shows 
   assert.equal(displayed.title, input.title);
   assert.equal(displayed.options.body, input.body);
   await service.close();
+});
+
+test('index hints use point simulation while existing instruments keep their execution model', async () => {
+  const created: Record<string, unknown>[] = [];
+  let wakeups = 0;
+  const app = new Hono<PluginHttpEnv>();
+  app.use('*', async (c, next) => {
+    c.set('userId', 'admin');
+    c.set('isAdmin', true);
+    await next();
+  });
+  app.route(
+    '/strategies',
+    signalRoutes(
+      () =>
+        ({
+          config: { engine: 'tdx' },
+          state: {
+            instrument: async (_engine: string, symbol: string) =>
+              symbol === 'missing'
+                ? null
+                : {
+                    symbol,
+                    kind: symbol === 'option' ? 'option' : 'stock',
+                    expired: symbol === 'expired',
+                  },
+          },
+          records: {
+            storedStrategy: async () => ({ enabled: true, status: 'active' }),
+            version: async () => ({
+              strategy_id: 's1',
+              number: 3,
+              parameters: { lookback: 19 },
+            }),
+          },
+          monitors: {
+            create: async (
+              _owner: string,
+              _id: string,
+              _version: number,
+              _engine: string,
+              config: Record<string, unknown>,
+            ) => {
+              created.push(config);
+              return { id: 'm1', config };
+            },
+          },
+          wake: () => {
+            wakeups++;
+          },
+        }) as unknown as ReturnType<Parameters<typeof signalRoutes>[0]>,
+    ),
+  );
+  const request = (symbol: string, extra = {}) =>
+    app.request('/strategies/s1/monitors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        version_id: randomUUID(),
+        symbol,
+        duration: 60,
+        ...extra,
+      }),
+    });
+  for (const symbol of ['SSE.000852', 'SZSE.399006']) {
+    const response = await request(symbol);
+    assert.equal(response.status, 201, await response.text());
+    const config = created.at(-1)!;
+    assert.equal(config.execution_model, 'points');
+    assert.deepEqual(config.parameters, { lookback: 19 });
+    assert.equal(config.initial_cash, 1);
+    assert.equal((config.rules as { lot_size: number }).lot_size, 1);
+    assert.equal((config.rules as { t_plus_one: boolean }).t_plus_one, false);
+  }
+  assert.equal((await request('SSE.600000')).status, 201);
+  assert.equal(
+    monitorExecutionModel(created.at(-1)! as { symbol: string }),
+    'actual_contract',
+  );
+  assert.equal(
+    monitorExecutionModel({ symbol: 'KQ.m@CFFEX.IM' }),
+    'continuous_price',
+  );
+  for (const symbol of ['missing', 'option', 'expired'])
+    assert.equal((await request(symbol)).status, 400);
+  assert.equal(
+    (await request('SSE.000852', { execution_model: 'actual_contract' }))
+      .status,
+    400,
+  );
+  assert.equal(
+    (await request('SSE.000852', { execution_model: 'continuous_price' }))
+      .status,
+    400,
+  );
+  assert.equal(wakeups, 3);
+});
+
+test('point history reads stored index prices without contract Tick reconstruction', async () => {
+  let bounds: { rebuildTicks?: boolean } = {};
+  const api = strategyDataRoutes(
+    () =>
+      ({
+        config: { engine: 'tdx' },
+        state: {
+          instrument: async () => ({ symbol: 'SSE.000852', kind: 'stock' }),
+        },
+        store: {
+          bars: async (
+            _engine: string,
+            _symbol: string,
+            _duration: number,
+            query: typeof bounds,
+          ) => {
+            bounds = query;
+            return [];
+          },
+        },
+      }) as unknown as ReturnType<Parameters<typeof strategyDataRoutes>[0]>,
+  );
+  const response = await api.request(
+    '/history?symbol=SSE.000852&duration=60&after=1&before=1000&execution_model=points',
+  );
+  assert.equal(response.status, 200, await response.text());
+  assert.equal(bounds.rebuildTicks, false);
 });

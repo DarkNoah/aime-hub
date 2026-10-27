@@ -433,7 +433,6 @@ export function MarketPage({ pluginId }: PluginPageProps) {
                     key={`${status?.engine}:${selected}`}
                     pluginId={pluginId}
                     instrument={item}
-                    duration={duration}
                     hints={hints}
                     onJumpToEntry={marketBars.navigate}
                   />

@@ -56,6 +56,27 @@ class Schedule(Strategy):
             ctx.orders.target_position(bar.symbol, targets[n])
 
 
+class InitializedTrend(Trend):
+    def on_start(self, ctx):
+        assert ctx.warming_up and not ctx.event_id
+        self._duration = int(ctx.params['duration'])
+        self._starts = getattr(self, '_starts', 0) + 1
+        self._state = ctx.state
+        ctx.state.update(bars=0, ready_calls=0)
+        super().on_start(ctx)
+
+    def on_ready(self, ctx):
+        ctx.state['ready_calls'] += 1
+
+    def on_bar(self, ctx, bar):
+        assert self._state is ctx.state
+        if bar.duration == self._duration:
+            super().on_bar(ctx, bar)
+
+    def on_fill(self, ctx, fill):
+        assert self._duration == 60
+
+
 class StrategySDKTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -231,6 +252,32 @@ class StrategySDKTest(unittest.TestCase):
         runner.finish('cancelled', 'restart fixture')
         result = restored.run(events[2:])
         uninterrupted = LiveRunner(Trend(), [self.future], params=params, config=config, mode='paper', output_dir=self.temp.name).run(events)
+        for field in ('signals', 'fills', 'trades', 'metrics'):
+            self.assertEqual(result[field], uninterrupted[field], field)
+
+    def test_restore_initializes_instance_attributes_without_resetting_saved_state(self):
+        events = [candle(self.future.symbol, i, p) for i, p in enumerate([8000, 8001, 8002, 8000, 7999])]
+        params = {'symbol': self.future.symbol, 'duration': 60}
+        config = RunConfig(initial_cash=1_000_000)
+        runner = LiveRunner(InitializedTrend(), [self.future], params=params,
+                            config=config, mode='paper', output_dir=self.temp.name)
+        for event in events[:3]:
+            runner.process(event)
+        checkpoint = runner.checkpoint()
+        self.assertEqual(runner.context.state, {'bars': 2, 'ready_calls': 1})
+        self.assertEqual(runner.broker.position(self.future.symbol), 1)
+        runner.journal.close()
+        restored = LiveRunner.restore(InitializedTrend(), checkpoint, output_dir=self.temp.name)
+        self.addCleanup(restored.journal.close)
+        self.assertEqual(restored.strategy._duration, 60)
+        self.assertEqual(restored.strategy._starts, 1)
+        self.assertEqual(restored.context.state, runner.context.state)
+        result = restored.run(events[2:])
+        self.assertEqual(result['status'], 'succeeded', result['message'])
+        self.assertEqual(restored.strategy._starts, 1)
+        self.assertEqual(restored.context.state['ready_calls'], 1)
+        uninterrupted = LiveRunner(InitializedTrend(), [self.future], params=params,
+                                   config=config, mode='paper', output_dir=self.temp.name).run(events)
         for field in ('signals', 'fills', 'trades', 'metrics'):
             self.assertEqual(result[field], uninterrupted[field], field)
 

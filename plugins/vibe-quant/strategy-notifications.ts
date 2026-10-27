@@ -17,6 +17,11 @@ export const STRATEGY_NOTIFICATION_CHANNELS = [
     label: '桌面通知',
     description: '通过浏览器显示系统桌面通知。',
   },
+  {
+    id: 'sound',
+    label: '提示音',
+    description: '应用页面打开时播放，入场与离场使用不同声音。',
+  },
 ] as const;
 
 export function strategyNotifications(

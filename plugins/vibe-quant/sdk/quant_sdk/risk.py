@@ -34,7 +34,7 @@ def publish(context, levels: RiskLevels) -> None:
     if context.warming_up or not context.event_id:
         raise ValueError('Risk levels require an active event callback')
     item = context.data.instrument(levels.symbol)
-    if not item.tradable or item.kind == 'continuous':
+    if not runner.broker.points and (not item.tradable or item.kind == 'continuous'):
         raise ValueError('Risk levels require the actual tradable instrument')
     if levels.entry_id is None:
         entries = sorted({lot.signal_id for lot in runner.broker.lots if lot.symbol == levels.symbol})

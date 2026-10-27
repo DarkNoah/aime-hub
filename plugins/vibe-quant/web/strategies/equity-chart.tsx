@@ -10,9 +10,11 @@ import type { BacktestResult } from '../../strategy-types';
 export default function EquityChart({
   points,
   initial,
+  pointMode = false,
 }: {
   points: BacktestResult['equity_curve'];
   initial: number;
+  pointMode?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -52,13 +54,13 @@ export default function EquityChart({
       .addSeries(LineSeries, {
         color: '#248659',
         lineWidth: 2,
-        title: '策略净值',
+        title: pointMode ? '累计收益（点）' : '策略净值',
         priceFormat: { type: 'price', precision: 4, minMove: 0.0001 },
       })
       .setData(
         ordered.map((p) => ({
           time: p.time as UTCTimestamp,
-          value: p.equity / initial,
+          value: pointMode ? p.equity : p.equity / initial,
         })),
       );
     chart
@@ -68,7 +70,9 @@ export default function EquityChart({
           .filter((p) => p.benchmark_equity != null)
           .map((p) => ({
             time: p.time as UTCTimestamp,
-            value: p.benchmark_equity! / initial,
+            value: pointMode
+              ? p.benchmark_equity!
+              : p.benchmark_equity! / initial,
           })),
       );
     // Tabs may mount before their final width is known. Fit once a real size
@@ -86,13 +90,15 @@ export default function EquityChart({
       observer.disconnect();
       chart.remove();
     };
-  }, [points, initial]);
+  }, [points, initial, pointMode]);
   return (
     <div
       ref={host}
       className="h-72 min-w-0"
       role="img"
-      aria-label="策略和基准归一化净值曲线"
+      aria-label={
+        pointMode ? '策略和基准累计点数曲线' : '策略和基准归一化净值曲线'
+      }
     />
   );
 }

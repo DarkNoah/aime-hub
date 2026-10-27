@@ -79,7 +79,7 @@ export async function collectSnapshot(
     request(symbol, config.duration);
     if (
       item.kind !== 'continuous' ||
-      (config.execution_model === 'continuous_price' &&
+      (['continuous_price', 'points'].includes(config.execution_model ?? '') &&
         symbol === config.symbol)
     )
       request(symbol, 60);
@@ -153,8 +153,9 @@ export async function collectSnapshot(
             // Continuous-price research freezes the stored main bars and
             // deliberately has no dependency on actual-contract Tick history.
             rebuildTicks: !(
-              config.execution_model === 'continuous_price' &&
-              symbol === config.symbol
+              ['continuous_price', 'points'].includes(
+                config.execution_model ?? '',
+              ) && symbol === config.symbol
             ),
           }),
         );

@@ -8,6 +8,8 @@ from .runtime import Runner, _write
 def run(strategy, data: Dataset, *, params=None, config=None, output_dir='.quant-runs', on_event=None, stop_event=None):
     """Every invocation writes its source, input snapshot, config and result."""
     config = config or RunConfig()
+    if data.metadata.get('execution_model') == 'points' and config.pnl_mode != 'points':
+        raise ValueError('Point snapshots require point accounting')
     if config.start is None and data.events:
         config = replace(config, start=data.events[0].available_at)
     runner = Runner(strategy, data.instruments, params=params, config=config,

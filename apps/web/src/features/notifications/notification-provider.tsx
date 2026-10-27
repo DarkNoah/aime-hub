@@ -4,6 +4,10 @@ import { notificationEventSchema } from '@aime/shared/notifications';
 import { useAuthSession } from '@/features/auth/session-context';
 import { Toaster } from '@/components/ui/toast';
 import { toast } from '@/components/ui/toast-manager';
+import {
+  createNotificationSoundSession,
+  enableNotificationSound,
+} from './notification-sound';
 import { refreshDesktopPush } from './desktop-push';
 import { SharedEventSource } from '@/components/realtime/event-source';
 import { toast as signalToast } from 'sonner';
@@ -28,6 +32,7 @@ export function NotificationProvider() {
     let retry: ReturnType<typeof setTimeout>;
     const openToasts = new Set<string>();
     const signalToasts = new Set<string>();
+    const sounds = createNotificationSoundSession(userId);
     const connect = () => {
       if (stopped) return;
       source = new SharedEventSource(
@@ -59,6 +64,26 @@ export function NotificationProvider() {
         if (event.type !== 'notification') return;
         const notification = event.notification;
         if ('kind' in notification) {
+          void sounds.notify(notification).then((result) => {
+            if (
+              stopped ||
+              result !== 'blocked' ||
+              document.visibilityState !== 'visible'
+            )
+              return;
+            signalToast(t('notifications.soundBlocked'), {
+              id: 'notification-sound-unlock',
+              duration: 10000,
+              action: {
+                label: t('notifications.enableSound'),
+                onClick: async () => {
+                  if (await enableNotificationSound())
+                    signalToast.dismiss('notification-sound-unlock');
+                  else signalToast.error(t('notifications.soundUnavailable'));
+                },
+              },
+            });
+          });
           if (!notification.toast) return;
           signalToasts.add(notification.id);
           signalToast(notification.title, {
@@ -96,6 +121,7 @@ export function NotificationProvider() {
       });
       source.addEventListener('expired', () => {
         stopped = true;
+        sounds.dispose();
         source.close();
       });
       source.onerror = () => {
@@ -109,6 +135,8 @@ export function NotificationProvider() {
     });
     return () => {
       stopped = true;
+      sounds.dispose();
+      signalToast.dismiss('notification-sound-unlock');
       source?.close();
       clearTimeout(retry);
       for (const id of openToasts) toast.close(id);
