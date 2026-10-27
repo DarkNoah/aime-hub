@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { pluginRequest } from '@app/plugin-sdk/web';
 import {
   Button,
@@ -19,16 +19,17 @@ import {
   Switch,
   Textarea,
 } from '@app/plugin-ui';
-import { Play, Search } from 'lucide-react';
+import { Play } from 'lucide-react';
 import { toast } from 'sonner';
 import type {
   BacktestInput,
   BacktestRun,
   StrategyVersion,
 } from '../../strategy-types';
-import type { Instrument } from '../../shared';
+import { InstrumentInput } from '../components/instrument-input';
 import { errorText, parseObject } from './format';
 import { FeeSettings } from './fee-settings';
+import { VersionSelect } from './version-select';
 import {
   defaultOptimization,
   OptimizationSettings,
@@ -112,12 +113,10 @@ export function RunForm({
   const [calendar, setCalendar] = useState(
     config.calendar ? JSON.stringify(config.calendar, null, 2) : '',
   );
-  const [search, setSearch] = useState('');
-  const [matches, setMatches] = useState<Instrument[]>([]);
-  const [searchError, setSearchError] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const points = config.execution_model === 'points';
+  const native = !optimize && config.backtest_engine === 'tqsdk';
   const currentOptimization = {
     ...optimization,
     metric: points
@@ -128,32 +127,6 @@ export function RunForm({
         ? ('sharpe' as const)
         : optimization.metric,
   };
-  const selectedVersion = versions.find((v) => v.id === config.version_id);
-  const versionLabel = selectedVersion
-    ? `v${selectedVersion.number} · ${selectedVersion.note || selectedVersion.source_hash.slice(0, 8)}`
-    : '';
-  useEffect(() => {
-    if (!search.trim()) return;
-    const abort = new AbortController();
-    const timer = setTimeout(() => {
-      pluginRequest<Instrument[]>(
-        pluginId,
-        `/instruments?q=${encodeURIComponent(search)}`,
-        { signal: abort.signal },
-      )
-        .then((rows) => {
-          setMatches(rows.filter((item) => item.kind !== 'option'));
-          setSearchError('');
-        })
-        .catch((e) => {
-          if (!abort.signal.aborted) setSearchError(errorText(e));
-        });
-    }, 250);
-    return () => {
-      clearTimeout(timer);
-      abort.abort();
-    };
-  }, [pluginId, search]);
   const field = (key: keyof BacktestInput, value: unknown) =>
     setConfig((old) => ({ ...old, [key]: value }));
   const rule = (key: keyof BacktestInput['rules'], value: unknown) =>
@@ -183,6 +156,8 @@ export function RunForm({
       const parsed = parseObject(params);
       const input = {
         ...config,
+        backtest_engine: native ? 'tqsdk' : 'builtin',
+        tq_options: native ? config.tq_options : undefined,
         optimization: optimize
           ? {
               ...currentOptimization,
@@ -197,7 +172,7 @@ export function RunForm({
         parameters: parsed,
         start: Date.parse(`${start}:00+08:00`) / 1000,
         end: Date.parse(`${end}:00+08:00`) / 1000,
-        ...(calendar.trim()
+        ...(!native && calendar.trim()
           ? { calendar: parseObject(calendar) }
           : { calendar: undefined }),
       };
@@ -226,7 +201,18 @@ export function RunForm({
         if (!open && !busy) onClose();
       }}
     >
-      <SheetContent className="w-full sm:max-w-2xl gap-0 p-0">
+      <SheetContent
+        className="w-full sm:max-w-2xl gap-0 p-0"
+        onEscapeKeyDown={(event) => {
+          // Let the autocomplete dismiss its suggestions before closing the form.
+          if (
+            event.target instanceof HTMLElement &&
+            event.target.matches('[role="combobox"][aria-expanded="true"]')
+          ) {
+            event.preventDefault();
+          }
+        }}
+      >
         <SheetHeader className="border-b p-5">
           <SheetTitle>{optimize ? '调优参数' : '配置回测'}</SheetTitle>
           <SheetDescription>
@@ -234,7 +220,7 @@ export function RunForm({
               ? '选定版本和搜索范围，最佳参数将另存为新的策略草稿。时间按北京时间。'
               : initial
                 ? '已复用该记录的参数，可修改后点击「开始回测」。时间按北京时间。'
-                : '时间按北京时间，使用所选成交模式的一分钟 K 线模拟成交。'}
+                : '时间按北京时间，可选择内置回测或天勤模拟账户回测。'}
           </SheetDescription>
         </SheetHeader>
         <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
@@ -243,10 +229,50 @@ export function RunForm({
             viewportProps={{ className: '[&>div]:block!' }}
           >
             <div className="min-w-0 space-y-6 p-5">
-              <div className="grid min-w-0 gap-4 sm:grid-cols-[minmax(0,1fr)_10rem]">
+              {!optimize && (
+                <Label className="grid gap-2 text-xs">
+                  回测引擎
+                  <Select
+                    value={config.backtest_engine ?? 'builtin'}
+                    onValueChange={(value) => {
+                      setConfig((old) => ({
+                        ...old,
+                        backtest_engine:
+                          value as BacktestInput['backtest_engine'],
+                        ...(value === 'tqsdk'
+                          ? {
+                              execution_model: 'actual_contract',
+                              benchmark_symbol: null,
+                            }
+                          : {}),
+                      }));
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="builtin">
+                        内置回测 · 历史行情快照
+                      </SelectItem>
+                      <SelectItem value="tqsdk">
+                        天勤回测 · TqBacktest + TqSim
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {native && (
+                    <span className="font-normal leading-5 text-muted-foreground">
+                      从天勤获取历史行情，使用本地模拟账户。首版支持单个期货实际合约；请先在插件设置中配置天勤账号。主连、股票和参数调优暂不支持。
+                    </span>
+                  )}
+                </Label>
+              )}
+              <div className="grid min-w-0 items-start gap-4 sm:grid-cols-[minmax(0,1fr)_10rem]">
                 <Label className="grid min-w-0 gap-2 text-xs">
                   脚本版本
-                  <Select
+                  <VersionSelect
+                    versions={versions}
+                    disabled={busy}
                     value={config.version_id}
                     onValueChange={(id) => {
                       field('version_id', id);
@@ -258,33 +284,7 @@ export function RunForm({
                         ),
                       );
                     }}
-                  >
-                    <SelectTrigger
-                      className="w-full min-w-0"
-                      title={versionLabel}
-                    >
-                      <SelectValue className="min-w-0 flex-1 text-left">
-                        <span className="truncate">{versionLabel}</span>
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent
-                      position="popper"
-                      align="start"
-                      className="w-(--radix-select-trigger-width) max-w-[calc(100vw-2rem)]"
-                    >
-                      {versions.map((v) => (
-                        <SelectItem
-                          key={v.id}
-                          value={v.id}
-                          className="[&>span:last-child]:min-w-0"
-                        >
-                          <span className="min-w-0 whitespace-normal break-words">
-                            v{v.number} · {v.note || v.source_hash.slice(0, 8)}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  />
                 </Label>
                 <Label className="grid min-w-0 gap-2 text-xs">
                   信号周期
@@ -317,6 +317,7 @@ export function RunForm({
                 <Label className="grid gap-2 text-xs">
                   成交模式
                   <Select
+                    disabled={native}
                     value={config.execution_model ?? 'actual_contract'}
                     onValueChange={(value) =>
                       field(
@@ -351,76 +352,41 @@ export function RunForm({
                     T+1；保留止盈止损与滑点。策略下单数量仅用于判断方向。
                   </p>
                 )}
-                <Label className="grid gap-2 text-xs">
-                  信号标的
-                  <Input
-                    required
-                    value={config.symbol}
-                    onChange={(e) => field('symbol', e.target.value)}
-                    placeholder="KQ.m@CFFEX.IM / KQ.m@SHFE.rb / SSE.600000"
-                  />
-                </Label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
-                  <Input
-                    aria-label="搜索行情标的"
-                    className="pl-9"
-                    placeholder="从行情目录搜索，例如 IM、螺纹钢"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                  />
-                </div>
-                {search && (
-                  <div className="rounded-md border">
-                    <ScrollArea className="max-h-40">
-                      {matches.slice(0, 12).map((item) => (
-                        <button
-                          type="button"
-                          key={item.symbol}
-                          className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs hover:bg-accent"
-                          onClick={() => {
-                            const stock = item.kind === 'stock';
-                            setConfig((old) => ({
-                              ...old,
-                              symbol: item.symbol,
-                              benchmark_symbol: item.symbol,
-                              rules: {
-                                ...old.rules,
-                                multiplier: stock
-                                  ? 1
-                                  : item.symbol.includes('CFFEX.IM')
-                                    ? 200
-                                    : old.rules.multiplier,
-                                lot_size: stock ? 100 : 1,
-                                margin_rate: stock ? 1 : old.rules.margin_rate,
-                                t_plus_one: stock,
-                              },
-                            }));
-                            setSearch('');
-                            setMatches([]);
-                          }}
-                        >
-                          <span>{item.name}</span>
-                          <span className="font-mono text-muted-foreground">
-                            {item.symbol}
-                          </span>
-                        </button>
-                      ))}
-                      {!matches.length && (
-                        <p className="p-3 text-xs text-muted-foreground">
-                          {searchError || '未找到匹配标的'}
-                        </p>
-                      )}
-                    </ScrollArea>
-                  </div>
-                )}
+                <InstrumentInput
+                  pluginId={pluginId}
+                  value={config.symbol}
+                  futuresOnly={native}
+                  onChange={(symbol) => field('symbol', symbol)}
+                  onSelect={(item) => {
+                    const stock = item.kind === 'stock';
+                    setConfig((old) => ({
+                      ...old,
+                      symbol: item.symbol,
+                      benchmark_symbol: native ? null : item.symbol,
+                      rules: {
+                        ...old.rules,
+                        multiplier: stock
+                          ? 1
+                          : item.symbol.includes('CFFEX.IM')
+                            ? 200
+                            : old.rules.multiplier,
+                        lot_size: stock ? 100 : 1,
+                        margin_rate: stock ? 1 : old.rules.margin_rate,
+                        t_plus_one: stock,
+                      },
+                    }));
+                  }}
+                />
                 <p className="text-xs leading-5 text-muted-foreground">
-                  {points
-                    ? '信号与成交使用所选标的价格，结果单位为点。主连不做实际合约映射。'
-                    : config.execution_model === 'continuous_price'
-                      ? '主连同时用于信号和模拟成交。'
-                      : '主连产生信号，交易历史映射的实际合约。'}
+                  {native
+                    ? '信号与成交均使用所选实际合约；历史合约可手动输入，回测日期须位于合约存续期内。'
+                    : points
+                      ? '信号与成交使用所选标的价格，结果单位为点。主连不做实际合约映射。'
+                      : config.execution_model === 'continuous_price'
+                        ? '主连同时用于信号和模拟成交。'
+                        : '主连产生信号，交易历史映射的实际合约。'}
                   {!points &&
+                    !native &&
                     '股票数量单位为股，期货为手；商品期货请核对合约乘数。'}
                 </p>
               </div>
@@ -444,8 +410,10 @@ export function RunForm({
                   />
                 </Label>
                 <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">
-                  日期可超出已有行情范围，回测使用区间内已收盘的可用 K
-                  线，无数据时会提示。结束时间须晚于开始时间，跨度最多十年。
+                  {native
+                    ? '历史数据由天勤提供，受账号权限与合约历史覆盖限制。'
+                    : '日期可超出已有行情范围，回测使用区间内已收盘的可用 K 线，无数据时会提示。'}
+                  结束时间须晚于开始时间，跨度最多十年。
                 </p>
                 {!points &&
                   numeric('初始资金（元）', config.initial_cash, (v) =>
@@ -461,22 +429,66 @@ export function RunForm({
                   field('slippage_ticks', v),
                 )}
                 {!points &&
+                  !native &&
                   numeric(
                     '成交量参与率（0–1）',
                     config.participation_rate,
                     (v) => field('participation_rate', v),
                   )}
-                <Label className="grid gap-2 text-xs">
-                  基准标的（可留空）
-                  <Input
-                    value={config.benchmark_symbol ?? ''}
-                    onChange={(e) =>
-                      field('benchmark_symbol', e.target.value || null)
-                    }
-                  />
-                </Label>
+                {!native && (
+                  <Label className="grid gap-2 text-xs">
+                    基准标的（可留空）
+                    <Input
+                      value={config.benchmark_symbol ?? ''}
+                      onChange={(e) =>
+                        field('benchmark_symbol', e.target.value || null)
+                      }
+                    />
+                  </Label>
+                )}
               </div>
-              {!points && (
+              {native && (
+                <section className="space-y-3 border-t pt-5">
+                  <h3 className="text-sm font-medium">天勤账户与撮合</h3>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    乘数与最小跳动取自合约信息。费用与保证金留空时沿用插件默认值，插件未设置时使用天勤默认值，结果会记录实际取值；不代表历史费率表。滑点在对手价上增加，TqSim
+                    不模拟部分成交或成交量参与率。
+                  </p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {(
+                      [
+                        ['commission_per_lot', '每手单边手续费（元）'],
+                        ['margin_per_lot', '每手保证金（元）'],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <Label key={key} className="grid gap-2 text-xs">
+                        {label}
+                        <Input
+                          type="number"
+                          step="any"
+                          min={key === 'commission_per_lot' ? 0 : undefined}
+                          value={config.tq_options?.[key] ?? ''}
+                          placeholder="使用 TqSim 默认值"
+                          onChange={(e) =>
+                            field('tq_options', {
+                              ...config.tq_options,
+                              [key]:
+                                e.target.value === ''
+                                  ? undefined
+                                  : e.target.valueAsNumber,
+                            })
+                          }
+                        />
+                      </Label>
+                    ))}
+                  </div>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    止盈止损按回放行情的最新价触发，再提交模拟委托。K
+                    线回放无法还原完整盘中路径，结果可能与内置的高低价触发规则不同。
+                  </p>
+                </section>
+              )}
+              {!points && !native && (
                 <section className="space-y-3 border-t pt-5">
                   <h3 className="text-sm font-medium">交易规则与费用假设</h3>
                   <p className="text-xs text-muted-foreground">
@@ -539,6 +551,7 @@ export function RunForm({
                 </summary>
                 <div className="mt-4 grid gap-4 sm:grid-cols-2">
                   {!points &&
+                    !native &&
                     numeric(
                       '每年交易日数',
                       config.annualization,
@@ -546,22 +559,30 @@ export function RunForm({
                       '1',
                     )}
                   {!points &&
+                    !native &&
                     numeric('年化无风险利率', config.risk_free_rate, (v) =>
                       field('risk_free_rate', v),
                     )}
-                  <Label className="grid gap-2 text-xs sm:col-span-2">
-                    覆盖交易日历（可留空，JSON 日期 → 布尔值）
-                    <Textarea
-                      className="min-h-28 font-mono text-xs"
-                      value={calendar}
-                      onChange={(e) => setCalendar(e.target.value)}
-                      placeholder={'{"2026-10-19": true, "2026-10-20": true}'}
-                    />
-                    <span className="font-normal leading-5 text-muted-foreground">
-                      默认使用插件内 chinese-calendar
-                      公布的节假日并排除周末。特殊休市可提供完整区间日历；夜盘按下一交易日结算，未覆盖的日期会报错。
-                    </span>
-                  </Label>
+                  {native ? (
+                    <p className="text-xs text-muted-foreground sm:col-span-2">
+                      使用天勤交易日历、结算规则与 TqSim / TqReport
+                      原生指标；年化、回撤及胜率均按天勤口径。
+                    </p>
+                  ) : (
+                    <Label className="grid gap-2 text-xs sm:col-span-2">
+                      覆盖交易日历（可留空，JSON 日期 → 布尔值）
+                      <Textarea
+                        className="min-h-28 font-mono text-xs"
+                        value={calendar}
+                        onChange={(e) => setCalendar(e.target.value)}
+                        placeholder={'{"2026-10-19": true, "2026-10-20": true}'}
+                      />
+                      <span className="font-normal leading-5 text-muted-foreground">
+                        默认使用插件内 chinese-calendar
+                        公布的节假日并排除周末。特殊休市可提供完整区间日历；夜盘按下一交易日结算，未覆盖的日期会报错。
+                      </span>
+                    </Label>
+                  )}
                 </div>
               </details>
             </div>

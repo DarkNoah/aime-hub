@@ -25,7 +25,7 @@ const [
 ]);
 
 test(
-  'notification sounds: preview, sound-only delivery, replay suppression, cross-tab/account isolation and cleanup',
+  'signal notifications: acknowledgement, direction, responsive layout, sound preview, deduplication and cleanup',
   { timeout: 120000 },
   async (t) => {
     const fixture = await mkdtemp(
@@ -58,13 +58,13 @@ window.deliver=value=>{for(const source of window.sources??[])if(!source.closed)
       path.join(fixture, 'entry.tsx'),
       `
 import React,{useState} from 'react';import {createRoot} from 'react-dom/client';import {Toaster} from 'sonner';
-import {initializeI18n} from '/src/i18n';import '/src/index.css';
+import {initializeI18n,i18n} from '/src/i18n';import '/src/index.css';
 import {NotificationProvider} from '/src/features/notifications/notification-provider';
 import {StrategyNotificationSettings} from '/@fs/${root}/plugins/vibe-quant/web/signals/notification-settings.tsx';
 import {strategyNotifications} from '/@fs/${root}/plugins/vibe-quant/strategy-notifications.ts';
-await initializeI18n();
+await initializeI18n();window.testI18n=i18n;
 function App(){const[online,setOnline]=useState(true);const[value,setValue]=useState(()=>strategyNotifications(JSON.parse(localStorage.getItem('test-sound-settings')??'null')??{channels:{future:{enabled:true,option:'keep'}}}));
-return <main className="mx-auto max-w-lg p-5">{online&&<NotificationProvider/>}<Toaster/>
+return <main className="mx-auto max-w-lg p-5">{online&&<NotificationProvider/>}<Toaster position="top-center" closeButton/>
 <button onClick={()=>setOnline(false)}>退出测试账号</button>
 <StrategyNotificationSettings value={value} onChange={next=>{setValue(next);localStorage.setItem('test-sound-settings',JSON.stringify(next));}}/>
 </main>;}
@@ -91,7 +91,12 @@ createRoot(document.getElementById('root')!).render(<App/>);`,
       },
       optimizeDeps: { entries: [path.join(fixture, 'index.html')] },
       plugins: [react(), tailwindcss()],
-      server: { host: '127.0.0.1', port: 0, fs: { allow: [root] } },
+      server: {
+        watch: null,
+        host: '127.0.0.1',
+        port: 0,
+        fs: { allow: [root] },
+      },
     });
     await vite.listen();
     const port = vite.httpServer.address().port;
@@ -125,6 +130,9 @@ createRoot(document.getElementById('root')!).render(<App/>);`,
         };
       }
       window.tones = [];
+      window.toneStarts = [];
+      window.toneStops = [];
+      window.waveforms = [];
       window.audioContexts = [];
       window.gains = [];
       const Native = window.AudioContext;
@@ -139,7 +147,14 @@ createRoot(document.getElementById('root')!).render(<App/>);`,
           const original = node.frequency.setValueAtTime.bind(node.frequency);
           node.frequency.setValueAtTime = (value, at) => {
             window.tones.push(value);
+            window.toneStarts.push(at);
             return original(value, at);
+          };
+          const stop = node.stop.bind(node);
+          node.stop = (at) => {
+            window.toneStops.push(at);
+            window.waveforms.push(node.type);
+            return stop(at);
           };
           return node;
         }
@@ -208,19 +223,36 @@ createRoot(document.getElementById('root')!).render(<App/>);`,
       'keep',
     );
     await page.getByRole('button', { name: '试听入场', exact: true }).click();
-    await page.waitForFunction(() => window.tones.length === 2);
-    assert.deepEqual(await page.evaluate(() => window.tones), [660, 880]);
-    await page.getByRole('button', { name: '试听离场', exact: true }).click();
-    await page.waitForFunction(() => window.tones.length === 4);
+    await page.waitForFunction(() => window.tones.length === 6);
     assert.deepEqual(
-      await page.evaluate(() => window.tones.slice(-2)),
-      [880, 660],
+      await page.evaluate(() => window.tones),
+      [660, 880, 660, 880, 660, 880],
+    );
+    assert.ok(
+      await page.evaluate(
+        () => window.toneStops[5] - window.toneStarts[0] >= 1.8,
+      ),
+    );
+    assert.ok(
+      await page.evaluate(() =>
+        window.waveforms.every((type) => type === 'triangle'),
+      ),
+    );
+    await page.getByRole('button', { name: '试听离场', exact: true }).click();
+    await page.waitForFunction(() => window.tones.length === 12);
+    assert.deepEqual(
+      await page.evaluate(() => window.tones.slice(-6)),
+      [880, 660, 880, 660, 880, 660],
+    );
+    await page.waitForFunction(
+      () =>
+        window.audioContexts[0].currentTime >= Math.max(...window.toneStops),
     );
     await page.evaluate(
       (value) => window.deliver(value),
       event('only-audio', 'entry'),
     );
-    await page.waitForFunction(() => window.tones.length === 6);
+    await page.waitForFunction(() => window.tones.length === 18);
     assert.equal(
       await page.getByText('声音验证 only-audio', { exact: true }).count(),
       0,
@@ -238,7 +270,127 @@ createRoot(document.getElementById('root')!).render(<App/>);`,
       event('toast-only', undefined, true),
     );
     await page.getByText('声音验证 toast-only', { exact: true }).waitFor();
-    assert.equal(await page.evaluate(() => window.tones.length), 6);
+    assert.equal(await page.evaluate(() => window.tones.length), 18);
+    const legacyToast = page
+      .locator('[data-sonner-toast]')
+      .filter({ hasText: '声音验证 toast-only' });
+    assert.equal(await legacyToast.getAttribute('data-dismissible'), 'false');
+    assert.equal(await legacyToast.locator('[data-close-button]').count(), 0);
+    await legacyToast
+      .getByRole('button', { name: '确认', exact: true })
+      .click();
+    await legacyToast.waitFor({ state: 'hidden', timeout: 3000 });
+
+    const showSignal = async (id, type, side, overrides = {}) => {
+      const value = event(id, undefined, true);
+      value.notification.marketSignal = {
+        type,
+        side,
+        strategyName: '开盘区间突破策略',
+        version: 3,
+        symbol: 'CFFEX.IM2611',
+        time: Date.parse('2026-10-27T09:31:00+08:00') / 1000,
+        price: 6588.2,
+        reason: '价格突破开盘区间',
+        ...overrides,
+      };
+      await page.evaluate((value) => window.deliver(value), value);
+      const card = page.locator('[data-sonner-toast]').filter({
+        has: page.getByRole('region', {
+          name: '声音验证 ' + id,
+          exact: true,
+        }),
+      });
+      await card.waitFor();
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector('[data-sonner-toast][data-front="true"]')
+            ?.getAttribute('data-mounted') === 'true',
+      );
+      // Wait for the entrance transition before measuring the card on mobile.
+      await card.getByRole('button', { name: '确认', exact: true }).hover();
+      return card;
+    };
+    const entryToast = await showSignal('long-entry', 'entry', 'long');
+    await entryToast
+      .getByRole('heading', { name: '入场信号', exact: true })
+      .waitFor();
+    assert.match(
+      await entryToast.getByText('多头', { exact: true }).getAttribute('class'),
+      /text-red-700/,
+    );
+    await entryToast.getByText('开盘区间突破策略', { exact: false }).waitFor();
+    await entryToast.getByText('CFFEX.IM2611', { exact: true }).waitFor();
+    // Beyond both the old 10s lifetime and Sonner's default, without hovering.
+    await page.mouse.move(5, 700);
+    await page.waitForTimeout(11000);
+    assert.equal(await entryToast.isVisible(), true);
+    await page.evaluate(() => window.testI18n.changeLanguage('en'));
+    await entryToast
+      .getByRole('heading', { name: 'Entry signal', exact: true })
+      .waitFor();
+    await page.evaluate(() => window.testI18n.changeLanguage('zh-CN'));
+    await entryToast
+      .getByRole('heading', { name: '入场信号', exact: true })
+      .waitFor();
+    await page.keyboard.press('Escape');
+    const bounds = await entryToast.boundingBox();
+    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 30);
+    await page.mouse.down();
+    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y - 180, {
+      steps: 8,
+    });
+    await page.mouse.up();
+    await page.evaluate(() => window.getSelection()?.removeAllRanges());
+    assert.equal(await entryToast.getAttribute('data-removed'), 'false');
+    await entryToast.getByRole('button', { name: '确认', exact: true }).click();
+    await entryToast.waitFor({ state: 'hidden' });
+
+    const exitToast = await showSignal('short-exit', 'exit', 'short');
+    await exitToast
+      .getByRole('heading', { name: '离场信号', exact: true })
+      .waitFor();
+    assert.match(
+      await exitToast.getByText('空头', { exact: true }).getAttribute('class'),
+      /text-emerald-800/,
+    );
+    await page.screenshot({
+      path: path.join(root, '.tmp/notification-signal-desktop.png'),
+      animations: 'disabled',
+    });
+    await exitToast.getByRole('button', { name: '确认', exact: true }).click();
+    await exitToast.waitFor({ state: 'hidden' });
+    await page.setViewportSize({ width: 390, height: 740 });
+    await page.evaluate(() => document.documentElement.classList.add('dark'));
+    const mobileToast = await showSignal('mobile', 'entry', 'short', {
+      strategyName: '很长的策略名称'.repeat(6),
+      price: 0,
+      reason: '触发原因'.repeat(100),
+    });
+    assert(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    );
+    const mobileConfirm = await mobileToast
+      .getByRole('button', { name: '确认', exact: true })
+      .boundingBox();
+    assert(
+      mobileConfirm.y >= 0 && mobileConfirm.y + mobileConfirm.height <= 740,
+    );
+    await page.screenshot({
+      path: path.join(root, '.tmp/notification-signal-mobile-dark.png'),
+      animations: 'disabled',
+    });
+    await mobileToast
+      .getByRole('button', { name: '确认', exact: true })
+      .click();
+    await mobileToast.waitFor({ state: 'hidden' });
+    await page.evaluate(() =>
+      document.documentElement.classList.remove('dark'),
+    );
+    await page.setViewportSize({ width: 1280, height: 720 });
     await page.getByRole('switch', { name: '提示音', exact: true }).click();
     await page.waitForFunction(
       () =>
@@ -260,7 +412,7 @@ createRoot(document.getElementById('root')!).render(<App/>);`,
     const second = await context.newPage();
     await second.goto(base);
     await second.getByRole('button', { name: '试听入场', exact: true }).click();
-    await second.waitForFunction(() => window.tones.length === 2);
+    await second.waitForFunction(() => window.tones.length === 6);
     const shared = event('same-across-tabs', 'exit');
     await Promise.all([
       page.evaluate((value) => window.deliver(value), shared),
@@ -286,8 +438,8 @@ createRoot(document.getElementById('root')!).render(<App/>);`,
     assert.equal(
       (await page.evaluate(() => window.tones.length)) +
         (await second.evaluate(() => window.tones.length)),
-      4,
-      'one two-note sound across both tabs',
+      12,
+      'one six-note alert across both tabs',
     );
     const locked = await context.newPage();
     await locked.goto(base);
@@ -300,7 +452,7 @@ createRoot(document.getElementById('root')!).render(<App/>);`,
     const previous = await second.evaluate(() => window.tones.length);
     await second.evaluate((value) => window.deliver(value), fallback);
     await second.waitForFunction(
-      (count) => window.tones.length === count + 2,
+      (count) => window.tones.length === count + 6,
       previous,
     );
     assert.equal(await locked.evaluate(() => window.tones.length), 0);
@@ -312,10 +464,12 @@ createRoot(document.getElementById('root')!).render(<App/>);`,
       ...shared,
       cursor: String(++cursor),
     });
-    await bob.waitForFunction(() => window.tones.length === 4);
+    await bob.waitForFunction(() => window.tones.length === 12);
     assert.ok(
-      await bob.evaluate(() =>
-        window.gains.every((value) => value > 0 && value <= 0.08),
+      await bob.evaluate(
+        () =>
+          window.gains.every((value) => value > 0 && value <= 0.24) &&
+          window.gains.includes(0.24),
       ),
     );
     await bob
@@ -328,7 +482,7 @@ createRoot(document.getElementById('root')!).render(<App/>);`,
       (value) => window.deliver(value),
       event('after-logout', 'entry'),
     );
-    assert.equal(await bob.evaluate(() => window.tones.length), 4);
+    assert.equal(await bob.evaluate(() => window.tones.length), 12);
     await page.bringToFront();
     await page.setViewportSize({ width: 390, height: 740 });
     assert.equal(

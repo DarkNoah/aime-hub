@@ -13,6 +13,20 @@ const taskNotificationSchema = z.object({
 export type TaskNotification = z.infer<typeof taskNotificationSchema>;
 export const notificationSoundSchema = z.enum(['entry', 'exit']);
 export type NotificationSound = z.infer<typeof notificationSoundSchema>;
+export const marketSignalNotificationSchema = z.object({
+  type: z.enum(['entry', 'exit']),
+  side: z.enum(['long', 'short', 'unknown']),
+  strategyName: z.string(),
+  version: z.number(),
+  symbol: z.string(),
+  time: z.number(),
+  price: z.number().nullable(),
+  reason: z.string(),
+  replay: z.boolean().optional(),
+});
+export type MarketSignalNotification = z.infer<
+  typeof marketSignalNotificationSchema
+>;
 export const pluginNotificationSchema = z.object({
   kind: z.literal('plugin'),
   id: z.string(),
@@ -23,6 +37,7 @@ export const pluginNotificationSchema = z.object({
   url: z.string().regex(/^\/(?!\/)[^\\]*$/),
   toast: z.boolean(),
   sound: notificationSoundSchema.optional(),
+  marketSignal: marketSignalNotificationSchema.optional(),
 });
 export const notificationSchema = z.union([
   taskNotificationSchema,
@@ -38,6 +53,7 @@ export interface PluginNotificationInput {
   toast: boolean;
   desktop: boolean;
   sound?: NotificationSound;
+  marketSignal?: MarketSignalNotification;
 }
 const cursor = z.string().regex(/^\d{1,18}$/);
 export const notificationEventSchema = z.discriminatedUnion('type', [

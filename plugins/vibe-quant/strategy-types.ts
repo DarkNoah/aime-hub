@@ -35,6 +35,10 @@ export interface StrategyVersion extends ScriptDraft {
   created_at: string;
 }
 export interface BacktestInput {
+  /** Omitted on existing runs: the original snapshot/PaperBroker engine. */
+  backtest_engine?: 'builtin' | 'tqsdk';
+  /** TqSim overrides in yuan per lot; omitted values use TqSim defaults. */
+  tq_options?: { commission_per_lot?: number; margin_per_lot?: number };
   optimization?: OptimizationConfig;
   version_id: string;
   symbol: string;
@@ -89,6 +93,8 @@ export const POINT_BACKTEST_RULES: BacktestInput['rules'] = {
   },
 };
 export interface BacktestRun {
+  /** Compact result metrics for successful runs; absent on legacy records. */
+  metrics?: { profit_factor: number | null; sharpe: number | null };
   /** A successful optimization creates a separate, unpublished strategy. */
   optimization_draft_id?: string;
   id: string;
@@ -125,12 +131,12 @@ export interface Trade {
   /** Optional for historical results created before protective execution. */
   exit_reason?: string;
   exit_bar_time?: number;
-  exit_time_precision?: 'open' | 'bar';
+  exit_time_precision?: 'open' | 'bar' | 'quote';
   risk_level_id?: string | null;
   trigger_price?: number | null;
   trigger_time?: number | null;
   trigger_bar_time?: number | null;
-  trigger_time_precision?: 'open' | 'bar' | null;
+  trigger_time_precision?: 'open' | 'bar' | 'quote' | null;
 }
 export interface OpenTrade extends Omit<
   Trade,
@@ -157,6 +163,9 @@ export const tradeExitAnchor = (trade: TradeRecord) =>
 export const tradeHoldingEnd = (trade: TradeRecord) =>
   trade.status === 'open' ? trade.observed_until : trade.exit_time;
 export interface BacktestResult {
+  metrics_source?: 'TqSim/TqReport';
+  native_metrics?: Record<string, unknown>;
+  backtest_engine?: 'builtin' | 'tqsdk';
   pnl_unit?: 'currency' | 'points';
   schema_version: number;
   run_id: string;

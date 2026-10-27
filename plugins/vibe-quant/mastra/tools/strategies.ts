@@ -48,11 +48,16 @@ export class StrategyGuideTool extends PluginTool {
             workflow:
               'create/update → publish → backtest_start → backtest_status → backtest_result。策略及回测在同一数据库内共享，已发布版本不可变。',
             backtest: {
+              engines: {
+                builtin: '默认；已保存历史快照与内置 PaperBroker。',
+                tqsdk:
+                  'backtest_engine=tqsdk；TqBacktest 历史行情 + TqSim 本地账户。仅支持单个期货实际合约；可输入已到期合约。rules 与 participation_rate 不适用；tq_options.commission_per_lot / margin_per_lot 为每手金额覆盖，省略使用 TqSim 默认。需要插件配置天勤账号；暂不支持主连、点数、调优、自定义日历或其他基准标的。',
+              },
               durations: [60, 180, 300, 900, 1800, 3600, 86400],
-              time: 'start/end 为 UTC epoch 秒；单次区间不超过十年，end 不晚于当前时间。',
+              time: 'start/end 为 UTC epoch 秒；单次区间不超过十年，仅回测已有历史数据。',
               rules:
-                'rules 必填：multiplier、margin_rate、lot_size、t_plus_one、fees（per_unit/rate/minimum/close_today_per_unit/close_today_rate/sell_tax_rate）。fees.mode 可选 fixed（按手/股固定金额）、rate（按成交额）、combined（两者叠加，省略时沿用）。最低费用和卖出税费始终生效。所有费率用小数；平今字段可为 null。须使用用户给定或已核实的规则。',
-              data: '仅使用已采集的历史数据；不隐式下载缺失数据，主连需要历史映射和实际合约 K 线。暂不支持期权回测。',
+                '内置资金回测 rules 必填：multiplier、margin_rate、lot_size、t_plus_one、fees（per_unit/rate/minimum/close_today_per_unit/close_today_rate/sell_tax_rate）。fees.mode 可选 fixed、rate、combined（省略时沿用）。最低费用和卖出税费始终生效。所有费率用小数；平今字段可为 null。天勤引擎使用 tq_options 与原生合约信息；不适用 rules。',
+              data: '内置引擎仅使用已采集数据，主连需要历史映射和实际合约 K 线。天勤引擎直接获取供应商历史数据并保存快照；兼容原 Strategy 回调，但撮合和保护单按回放报价执行，结果可能不同。暂不支持期权回测。',
             },
           };
         }),

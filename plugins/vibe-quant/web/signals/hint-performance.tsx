@@ -158,16 +158,22 @@ export function HintPerformance({
   item,
   onClose,
   onJumpToEntry,
+  replayPage,
 }: {
   pluginId: string;
   item: MarketStrategyHint;
   onClose: () => void;
   onJumpToEntry: (time: number) => Promise<boolean>;
+  replayPage?: SignalHistoryPage | null;
 }) {
-  const [page, setPage] = useState<SignalHistoryPage | null>(null);
-  const [trades, setTrades] = useState<Trade[]>([]);
+  const [livePage, setPage] = useState<SignalHistoryPage | null>(null);
+  const [liveTrades, setTrades] = useState<Trade[]>([]);
   const [next, setNext] = useState<string | null>(null);
-  const [signals, setSignals] = useState<MarketStrategyHint['signals']>([]);
+  const [liveSignals, setSignals] = useState<MarketStrategyHint['signals']>([]);
+  const replaying = replayPage !== undefined;
+  const page = replaying ? replayPage : livePage;
+  const trades = replaying ? (replayPage?.trades ?? []) : liveTrades;
+  const signals = replaying ? (replayPage?.signals ?? []) : liveSignals;
   const [signalsNext, setSignalsNext] = useState<string | null>(null);
   const [older, setOlder] = useState<'trade' | 'signal' | null>(null);
   const [error, setError] = useState('');
@@ -176,6 +182,7 @@ export function HintPerformance({
   const lifecycle = useRef<AbortController | null>(null);
   const path = `/strategies/monitors/${item.id}/history`;
   useEffect(() => {
+    if (replaying) return;
     const abort = new AbortController();
     lifecycle.current = abort;
     let timer: ReturnType<typeof setTimeout>;
@@ -213,13 +220,13 @@ export function HintPerformance({
       abort.abort();
       clearTimeout(timer);
     };
-  }, [pluginId, path]);
+  }, [pluginId, path, replaying]);
   async function jumpToEntry(trade: Trade | OpenTrade) {
     if (jumping !== null) return;
     setJumping(trade.id);
-    const signal = lifecycle.current?.signal;
+    const signal = replaying ? undefined : lifecycle.current?.signal;
     try {
-      const success = await onJumpToEntry(trade.entry_time);
+      const success = await onJumpToEntry(Math.floor(trade.entry_time));
       if (signal?.aborted) return;
       if (success) onClose();
     } catch (error) {
@@ -267,7 +274,9 @@ export function HintPerformance({
   const summary = page?.summary;
   const monitor = page?.monitor ?? item;
   const points = monitorExecutionModel(monitor.config) === 'points';
-  const computing = monitor.status === 'starting' || summary?.replaying;
+  const native = monitor.config.simulation_engine === 'tqsdk';
+  const computing =
+    !replaying && (monitor.status === 'starting' || summary?.replaying);
   return (
     <Sheet
       open
@@ -277,11 +286,17 @@ export function HintPerformance({
     >
       <SheetContent className="w-full gap-0 p-0 sm:max-w-5xl">
         <SheetHeader className="border-b px-5 py-4 pr-12">
-          <SheetTitle>{item.strategy_name} · 历史记录</SheetTitle>
+          <SheetTitle>
+            {item.strategy_name} · {replaying ? '回放记录' : '历史记录'}
+          </SheetTitle>
           <SheetDescription>
             {item.config.symbol} · v{item.version_number} ·{' '}
             {durationLabel(item.config.duration)}
-            。加入后自动计算全部已存行情，并持续更新当前入场、离场与持仓。
+            {replaying
+              ? '。仅显示当前回放时点已产生的信号、持仓和交易，回退时同步恢复。'
+              : native
+                ? '。历史由 TqBacktest 回放，实时由 TqSim 模拟交易；绩效取自天勤报告。'
+                : '。加入后自动计算全部已存行情，并持续更新当前入场、离场与持仓。'}
           </SheetDescription>
         </SheetHeader>
         <div className="space-y-2 border-b px-4 py-3 sm:px-5">
@@ -290,13 +305,15 @@ export function HintPerformance({
               <Badge
                 variant={monitor.status === 'error' ? 'destructive' : 'outline'}
               >
-                {monitor.status === 'error'
-                  ? '计算异常'
-                  : monitor.status === 'paused'
-                    ? '已暂停'
-                    : computing
-                      ? '计算全量历史中'
-                      : '实时更新'}
+                {replaying
+                  ? '回放'
+                  : monitor.status === 'error'
+                    ? '计算异常'
+                    : monitor.status === 'paused'
+                      ? '已暂停'
+                      : computing
+                        ? '计算全量历史中'
+                        : '实时更新'}
               </Badge>
               {computing && <Loader2 className="size-3 animate-spin" />}
               <span>{monitor.message}</span>
@@ -319,7 +336,9 @@ export function HintPerformance({
                 单位模拟多空，收益与回撤以点数统计。
               </p>
             )}
-            <p>移除该策略提示会清除全部历史记录，再次加入将重新计算。</p>
+            {!replaying && (
+              <p>移除该策略提示会清除全部历史记录，再次加入将重新计算。</p>
+            )}
           </div>
           {error && (
             <p role="alert" className="text-sm text-destructive">
@@ -368,7 +387,7 @@ export function HintPerformance({
                     jumping={jumping}
                     onJumpToEntry={(trade) => void jumpToEntry(trade)}
                   />
-                  {next && (
+                  {!replaying && next && (
                     <Button
                       size="sm"
                       variant="ghost"
@@ -423,7 +442,7 @@ export function HintPerformance({
                       </p>
                     )}
                   </div>
-                  {signalsNext && (
+                  {!replaying && signalsNext && (
                     <Button
                       size="sm"
                       variant="ghost"
@@ -466,8 +485,14 @@ export function HintPerformance({
                     : [
                         ['累计收益', percent(summary.metrics.total_return)],
                         ['净收益', number(summary.metrics.total_pnl)],
-                        ['已完成交易', number(summary.metrics.trade_count)],
-                        ['胜率', percent(summary.metrics.win_rate)],
+                        [
+                          native ? '平仓成交笔数（天勤）' : '已完成交易',
+                          number(summary.metrics.trade_count),
+                        ],
+                        [
+                          native ? '胜率（天勤按手数）' : '胜率',
+                          percent(summary.metrics.win_rate),
+                        ],
                         ['最大回撤', percent(summary.metrics.max_drawdown)],
                         ['账户权益', number(summary.metrics.final_equity)],
                         ['当前持仓', String(summary.open_trades.length)],

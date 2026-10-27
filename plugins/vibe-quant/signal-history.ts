@@ -10,11 +10,14 @@ export interface SignalHistorySummary extends Pick<
   initial_cash: number;
   replaying: boolean;
   open_trades: OpenTrade[];
+  metrics_source?: 'TqSim/TqReport';
+  native_metrics?: Record<string, unknown>;
+  account?: Record<string, unknown>;
   execution_model?: SignalMonitor['config']['execution_model'];
 }
 export interface SignalHistoryBatch {
   records: {
-    kind: 'trade' | 'signal' | 'summary';
+    kind: 'trade' | 'signal' | 'summary' | 'order' | 'fill';
     id: string;
     time: number;
     payload: object;

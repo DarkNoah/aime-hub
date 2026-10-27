@@ -92,9 +92,12 @@ export function ResultView({
   }, [pluginId, run.id, run.status, retry]);
   const result = data?.result;
   const points = run.config.execution_model === 'points';
+  const native = run.config.backtest_engine === 'tqsdk';
+  const tqRules = data?.manifest?.tq_rules as
+    Record<string, number> | undefined;
   const winRate = useMemo(
-    () => (result ? closedTradeWinRate(result) : null),
-    [result],
+    () => (!native && result ? closedTradeWinRate(result) : null),
+    [result, native],
   );
   const sortedTrades = useMemo(
     () =>
@@ -127,6 +130,9 @@ export function ResultView({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <Badge variant="outline">v{run.version_number}</Badge>
+          <Badge variant="secondary">
+            {native ? '天勤回测 · TqSim' : '内置回测'}
+          </Badge>
           {points && <Badge variant="secondary">点数回测 · 固定 1 单位</Badge>}
           {run.config.execution_model === 'continuous_price' && (
             <Badge variant="secondary">主连价格模拟</Badge>
@@ -185,14 +191,21 @@ export function ResultView({
               {run.config.slippage_ticks} 跳
             </div>
           )}
-          {!points && (
+          {native && (
+            <div className="sm:col-span-2">
+              乘数：{number(tqRules?.multiplier)} · 每手保证金：
+              {number(tqRules?.margin_per_lot)} 元 · 每手单边手续费：
+              {number(tqRules?.commission_per_lot)} 元
+            </div>
+          )}
+          {!points && !native && (
             <div>
               乘数：{run.config.rules.multiplier} · 保证金：
               {percent(run.config.rules.margin_rate)}
             </div>
           )}
           <div>
-            {!points && (
+            {!points && !native && (
               <>成交量参与率：{percent(run.config.participation_rate)} · </>
             )}
             基准：
@@ -203,7 +216,11 @@ export function ResultView({
           </div>
           {data.manifest && (
             <div className="break-all sm:col-span-2">
-              SDK：{String(data.manifest.sdk_version ?? '0.1.0')} · 数据快照：
+              SDK：
+              {native
+                ? `TqSdk ${String(data.manifest.tqsdk_version ?? '—')}`
+                : String(data.manifest.sdk_version ?? '0.1.0')}{' '}
+              · 数据快照：
               {String(data.manifest.data_snapshot_hash ?? '—')}
             </div>
           )}
@@ -214,6 +231,7 @@ export function ResultView({
               {
                 execution_model:
                   run.config.execution_model ?? 'actual_contract',
+                backtest_engine: run.config.backtest_engine ?? 'builtin',
                 parameters: run.config.parameters,
                 ...(run.config.optimization
                   ? { optimization: run.config.optimization }
@@ -224,7 +242,9 @@ export function ResultView({
                       position_units: 1,
                     }
                   : {
-                      rules: run.config.rules,
+                      ...(native
+                        ? { tq_rules: data.manifest?.tq_rules }
+                        : { rules: run.config.rules }),
                       annualization: run.config.annualization,
                       risk_free_rate: run.config.risk_free_rate,
                     }),
@@ -235,6 +255,13 @@ export function ResultView({
           </pre>
         </ScrollArea>
       </details>
+      {native && (
+        <p className="text-xs leading-5 text-muted-foreground">
+          资金与成交取自
+          TqSim。委托按对手价加滑点提交，不模拟部分成交或成交量参与率；止盈止损按回放行情最新价触发，K
+          线回放不还原完整盘中路径。手续费与保证金采用上方记录的设置，不代表历史费率表。
+        </p>
+      )}
       {!result ? (
         <div className="py-10 text-center text-sm text-muted-foreground">
           {['queued', 'preparing', 'running'].includes(run.status)
@@ -244,25 +271,46 @@ export function ResultView({
       ) : (
         <>
           <dl className="grid grid-cols-2 divide-x divide-y rounded-lg border sm:grid-cols-3 xl:grid-cols-4">
-            {(points ? pointMetricLabels : metricLabels).map(
-              ([key, label, ratio]) => (
-                <div key={key} className="px-4 py-3">
-                  <dt className="text-xs text-muted-foreground">{label}</dt>
-                  <dd
-                    className={`mt-1 text-lg font-medium tabular-nums ${['total_pnl', 'total_points'].includes(key) ? ((result.metrics[key] ?? 0) >= 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400') : ''}`}
-                  >
-                    {ratio
-                      ? percent(
-                          key === 'win_rate' ? winRate : result.metrics[key],
-                        )
-                      : number(result.metrics[key])}
-                  </dd>
-                </div>
-              ),
-            )}
+            {(points
+              ? pointMetricLabels
+              : native
+                ? metricLabels.map(([key, label, ratio]) =>
+                    key === 'profit_factor'
+                      ? (['profit_loss_ratio', '盈亏额比例（天勤）', false] as [
+                          string,
+                          string,
+                          boolean?,
+                        ])
+                      : key === 'trade_count'
+                        ? ([key, '平仓成交笔数（天勤）', ratio] as [
+                            string,
+                            string,
+                            boolean?,
+                          ])
+                        : ([key, label, ratio] as [string, string, boolean?]),
+                  )
+                : metricLabels
+            ).map(([key, label, ratio]) => (
+              <div key={key} className="px-4 py-3">
+                <dt className="text-xs text-muted-foreground">{label}</dt>
+                <dd
+                  className={`mt-1 text-lg font-medium tabular-nums ${['total_pnl', 'total_points'].includes(key) ? ((result.metrics[key] ?? 0) >= 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400') : ''}`}
+                >
+                  {ratio
+                    ? percent(
+                        key === 'win_rate' && !native
+                          ? winRate
+                          : result.metrics[key],
+                      )
+                    : number(result.metrics[key])}
+                </dd>
+              </div>
+            ))}
           </dl>
           <p className="text-xs text-muted-foreground">
-            胜率按已平仓交易的净盈亏计算，盈亏持平计入交易总数，未平仓交易不计入。
+            {native
+              ? '绩效指标直接使用天勤报告：胜率按平仓手数及毛盈亏计算，持平计为盈利；回撤、年化与风险指标采用天勤口径。'
+              : '胜率按已平仓交易的净盈亏计算，盈亏持平计入交易总数，未平仓交易不计入。'}
           </p>
           <section className="space-y-3">
             <div className="flex items-center justify-between">
@@ -488,10 +536,12 @@ export function ResultView({
           <p className="text-xs leading-5 text-muted-foreground">
             {points
               ? '点数收益已扣单边成本与滑点，未平仓头寸按最新价计入累计点数。每个标的固定 1 单位，忽略下单数量大小及资金、保证金、乘数、成交量、T+1 限制；不表示真实资金收益。未平仓净收益含已付开仓成本。'
-              : '收益已扣费用，未平仓头寸按最新价计入权益；交易笔数按 FIFO 平仓片段统计。期货逐日结算采用前一交易日最后观测价。未平仓记录显示剩余数量及对应开仓手续费，净收益在平仓后记录。'}
+              : native
+                ? '资金、保证金与逐日结算取自 TqSim；交易明细按实际成交进行 FIFO 归并，手续费计入净收益。未平仓记录显示剩余数量及对应开仓手续费。'
+                : '收益已扣费用，未平仓头寸按最新价计入权益；交易笔数按 FIFO 平仓片段统计。期货逐日结算采用前一交易日最后观测价。未平仓记录显示剩余数量及对应开仓手续费，净收益在平仓后记录。'}
             “—”表示样本不足或指标无定义。
           </p>
-          {data.manifest?.risk_model != null && (
+          {!native && data.manifest?.risk_model != null && (
             <p className="text-xs leading-5 text-muted-foreground">
               止盈止损从计算后的下一根执行 K
               线生效；跳空按开盘价，同根同时触及按止损优先。
@@ -511,6 +561,7 @@ export function ResultView({
             runId={run.id}
             trade={trade}
             points={points}
+            native={native}
             riskLevels={result?.risk_levels}
             onClose={() => setTrade(null)}
           />

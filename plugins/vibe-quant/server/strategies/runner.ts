@@ -28,13 +28,14 @@ export function runPython(
   cwd: string,
   signal: AbortSignal,
   timeout = 300_000,
+  privateInput?: { tqUser: string; tqPassword: string },
 ): Promise<void> {
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     const child = spawn(python, ['-B', '-u', ...args], {
       cwd,
       detached: process.platform !== 'win32',
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [privateInput ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       // No provider credentials, database URL, session cookie or host environment inheritance.
       env: {
         PATH: `${dirname(python)}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH ?? ''}`,
@@ -50,6 +51,11 @@ export function runPython(
           : {}),
       },
     });
+    // Credentials travel only over an anonymous pipe, never argv, env, or artifacts.
+    child.stdin?.on('error', () => {
+      /* Early process failure is handled by close. */
+    });
+    if (privateInput) child.stdin?.end(JSON.stringify(privateInput));
     let stderr = '';
     let timedOut = false;
     let escalation: ReturnType<typeof setTimeout> | undefined;
@@ -70,14 +76,17 @@ export function runPython(
       stop();
     }, timeout);
     signal.addEventListener('abort', stop, { once: true });
-    child.stdout.on('data', () => {
+    child.stdout?.on('data', () => {
       /* Drain script output without storing unbounded logs. */
     });
-    child.stderr.on('data', (data: Buffer) => {
+    child.stderr?.on('data', (data: Buffer) => {
       stderr = (stderr + data.toString()).slice(-4000);
     });
     child.on('error', reject);
     child.on('close', (code) => {
+      if (privateInput)
+        for (const secret of Object.values(privateInput))
+          if (secret) stderr = stderr.split(secret).join('[redacted]');
       clearTimeout(timer);
       clearTimeout(escalation);
       signal.removeEventListener('abort', stop);
@@ -198,10 +207,15 @@ export class BacktestWorker {
     job: BacktestRun & { user_id: string },
     signal: AbortSignal,
   ) {
-    if (job.engine !== this.market.config.engine)
+    const native = job.config.backtest_engine === 'tqsdk';
+    if (!native && job.engine !== this.market.config.engine)
       throw new Error('数据引擎已变更，请重新创建回测');
     signal.throwIfAborted();
-    const version = await this.records.version(job.user_id, job.version_id);
+    const version = await this.records.version(
+      job.user_id,
+      job.version_id,
+      true,
+    );
     const root = await this.context.runtime.ensureWorkspace();
     const work = join(root, 'strategy-runs');
     await mkdir(work, { recursive: true, mode: 0o700 });
@@ -209,62 +223,56 @@ export class BacktestWorker {
     let stage = '初始化 Python';
     try {
       const python = await this.preparePython(this.context.runtime, signal);
-      stage = '读取历史行情';
-      const raw = await collectSnapshot(
-        this.market.store,
-        this.market.state,
-        job.engine,
-        job.config,
-        signal,
-      );
-      stage = '保存原始行情快照';
-      await this.records.putArtifact(job.id, 'market', JSON.stringify(raw));
       const sdk = join(directory, 'sdk');
       await cp(
         join(this.context.runtime.paths.pluginRoot, 'sdk/quant_sdk'),
         join(sdk, 'quant_sdk'),
         { recursive: true, filter: (path) => !path.includes('__pycache__') },
       );
-      await writeFile(join(directory, 'market.json'), JSON.stringify(raw), {
-        mode: 0o600,
-      });
-      await runPython(
-        python,
-        [
-          join(
-            this.context.runtime.paths.pluginRoot,
-            'worker/strategy_prepare.py',
-          ),
-          sdk,
-          join(directory, 'market.json'),
-          join(directory, 'dataset.json'),
-        ],
-        directory,
-        signal,
-      );
-      stage = '保存 SDK 数据快照';
-      await this.records.putArtifact(
-        job.id,
-        'dataset',
-        await readArtifact(join(directory, 'dataset.json')),
-      );
-      const {
-        initial_cash,
-        start,
-        end,
-        slippage_ticks,
-        participation_rate,
-        annualization,
-        risk_free_rate,
-        benchmark_symbol,
-      } = job.config;
-      await writeFile(
-        join(directory, 'config.json'),
-        JSON.stringify({
+      if (native) {
+        if (!this.market.config.tqUser || !this.market.config.tqPassword)
+          throw new Error('请先在插件设置中配置天勤账号和密码');
+        await writeFile(
+          join(directory, 'config.json'),
+          JSON.stringify(job.config),
+          { mode: 0o600 },
+        );
+      } else {
+        stage = '读取历史行情';
+        const raw = await collectSnapshot(
+          this.market.store,
+          this.market.state,
+          job.engine,
+          job.config,
+          signal,
+        );
+        stage = '保存原始行情快照';
+        await this.records.putArtifact(job.id, 'market', JSON.stringify(raw));
+        await writeFile(join(directory, 'market.json'), JSON.stringify(raw), {
+          mode: 0o600,
+        });
+        await runPython(
+          python,
+          [
+            join(
+              this.context.runtime.paths.pluginRoot,
+              'worker/strategy_prepare.py',
+            ),
+            sdk,
+            join(directory, 'market.json'),
+            join(directory, 'dataset.json'),
+          ],
+          directory,
+          signal,
+        );
+        stage = '保存 SDK 数据快照';
+        await this.records.putArtifact(
+          job.id,
+          'dataset',
+          await readArtifact(join(directory, 'dataset.json')),
+        );
+        const {
           initial_cash,
-          pnl_mode:
-            job.config.execution_model === 'points' ? 'points' : 'currency',
-          point_cost: job.config.point_cost ?? 0,
           start,
           end,
           slippage_ticks,
@@ -272,18 +280,34 @@ export class BacktestWorker {
           annualization,
           risk_free_rate,
           benchmark_symbol,
-          ...(job.config.optimization
-            ? { optimization: job.config.optimization }
-            : {}),
-          parameters: {
-            ...job.config.parameters,
-            symbol: job.config.symbol,
-            duration: job.config.duration,
-            execution_model: job.config.execution_model ?? 'actual_contract',
-          },
-        }),
-        { mode: 0o600 },
-      );
+        } = job.config;
+        await writeFile(
+          join(directory, 'config.json'),
+          JSON.stringify({
+            initial_cash,
+            pnl_mode:
+              job.config.execution_model === 'points' ? 'points' : 'currency',
+            point_cost: job.config.point_cost ?? 0,
+            start,
+            end,
+            slippage_ticks,
+            participation_rate,
+            annualization,
+            risk_free_rate,
+            benchmark_symbol,
+            ...(job.config.optimization
+              ? { optimization: job.config.optimization }
+              : {}),
+            parameters: {
+              ...job.config.parameters,
+              symbol: job.config.symbol,
+              duration: job.config.duration,
+              execution_model: job.config.execution_model ?? 'actual_contract',
+            },
+          }),
+          { mode: 0o600 },
+        );
+      }
       await writeFile(join(directory, 'strategy.py'), version.source, {
         mode: 0o600,
       });
@@ -325,9 +349,11 @@ export class BacktestWorker {
           [
             join(
               this.context.runtime.paths.pluginRoot,
-              optimizing
-                ? 'worker/strategy_optimize.py'
-                : 'worker/strategy_run.py',
+              native
+                ? 'worker/strategy_tq.py'
+                : optimizing
+                  ? 'worker/strategy_optimize.py'
+                  : 'worker/strategy_run.py',
             ),
             sdk,
             directory,
@@ -336,7 +362,15 @@ export class BacktestWorker {
           signal,
           optimizing
             ? (job.config.optimization!.timeout_seconds + 310) * 1000
-            : 300_000,
+            : native
+              ? 900_000
+              : 300_000,
+          native
+            ? {
+                tqUser: this.market.config.tqUser,
+                tqPassword: this.market.config.tqPassword,
+              }
+            : undefined,
         );
       } catch (error) {
         executionError = error;
@@ -382,6 +416,14 @@ export class BacktestWorker {
         }
       }
       if (executionError && !optimization) throw executionError;
+      if (native) {
+        stage = '保存天勤历史行情快照';
+        await this.records.putArtifact(
+          job.id,
+          'dataset',
+          await readArtifact(join(directory, 'dataset.json')),
+        );
+      }
       if (optimization && optimization.best_trial === null) {
         await this.records.status(
           job.id,
@@ -439,6 +481,7 @@ export class BacktestWorker {
             ? 'completed'
             : (result.status as BacktestRun['status']),
         optimization?.message ?? result.message,
+        result.metrics,
       );
       // A final heartbeat may observe the completed status and abort the lease.
       // Draft creation checks durable completion/cancellation itself.

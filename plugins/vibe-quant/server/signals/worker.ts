@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import type { PluginContext } from '@app/plugin-sdk/server';
 import type { SyncStatus } from '../../shared.js';
+import type { QuantConfig } from '../config.js';
 import type { StrategySignal } from '../../signal-types.js';
 import { monitorExecutionModel } from '../../signal-types.js';
 import { strategyNotifications } from '../../strategy-notifications.js';
@@ -65,6 +66,7 @@ export class SignalWorker {
     private market: MarketRequest,
     private status: () => SyncStatus,
     private preparePython = ensurePython,
+    private config?: () => QuantConfig,
   ) {}
   start() {
     this.stopped = false;
@@ -124,7 +126,10 @@ export class SignalWorker {
       rows
         .filter(
           (row) =>
-            row.enabled && !row.deleted && row.engine === this.status().engine,
+            row.enabled &&
+            !row.deleted &&
+            (row.config.simulation_engine === 'tqsdk' ||
+              row.engine === this.status().engine),
         )
         .map((row) => [row.id, row]),
     );
@@ -133,7 +138,8 @@ export class SignalWorker {
         const row = candidates.get(id);
         if (
           !row ||
-          this.status().state === 'standby' ||
+          (this.status().state === 'standby' &&
+            row.config.simulation_engine !== 'tqsdk') ||
           !(await this.valid(row)) ||
           !(await this.monitors.heartbeat(
             id,
@@ -145,8 +151,12 @@ export class SignalWorker {
           run.abort.abort();
       }),
     );
-    if (this.status().state === 'standby') return;
     for (const row of candidates.values()) {
+      if (
+        this.status().state === 'standby' &&
+        row.config.simulation_engine !== 'tqsdk'
+      )
+        continue;
       if (this.stopped || this.current.size >= 8) break;
       if (
         this.current.has(row.id) ||
@@ -197,6 +207,10 @@ export class SignalWorker {
   }
   private async execute(row: StoredMonitor, run: Running) {
     const signal = run.abort.signal;
+    const native = row.config.simulation_engine === 'tqsdk';
+    const credentials = native ? this.config?.() : undefined;
+    if (native && (!credentials?.tqUser || !credentials?.tqPassword))
+      throw new Error('请先在插件设置中配置天勤账号和密码');
     const root = join(
       await this.context.runtime.ensureWorkspace(),
       'signal-monitors',
@@ -219,6 +233,7 @@ export class SignalWorker {
         join(directory, 'config.json'),
         JSON.stringify({
           ...row.config,
+          monitor_id: row.id,
           execution_model: monitorExecutionModel(row.config),
           parameters: { ...version.parameters, ...row.config.parameters },
         }),
@@ -230,181 +245,230 @@ export class SignalWorker {
           runtime.checkpoint,
           { mode: 0o600 },
         );
+      const handle = async (
+        message: Record<string, unknown>,
+      ): Promise<unknown> => {
+        signal.throwIfAborted();
+        if (message.kind === 'credentials' && native)
+          return {
+            tqUser: credentials!.tqUser,
+            tqPassword: credentials!.tqPassword,
+          };
+        if (message.kind === 'commit' && native) {
+          const checkpoint = message.checkpoint as {
+            outbox?: {
+              batch?: SignalHistoryBatch;
+              overlay?: unknown;
+              signals?: unknown[];
+            };
+          };
+          if (!checkpoint || !checkpoint.outbox)
+            throw new Error('Invalid native checkpoint');
+          await handle({ kind: 'checkpoint', checkpoint });
+          const outbox = checkpoint.outbox;
+          if (outbox.batch)
+            await handle({ kind: 'history', batch: outbox.batch });
+          if (outbox.overlay)
+            await handle({ kind: 'overlay', overlay: outbox.overlay });
+          for (const signal of outbox.signals ?? [])
+            await handle({ kind: 'signal', signal });
+          return true;
+        }
+        if (message.kind === 'pulse' && native) return true;
+
+        if (message.kind === 'market') {
+          if (
+            typeof message.path !== 'string' ||
+            !/^\/(?:instruments\/[^/]+|history(?:\/range)?|contracts|sessions(?:\/[a-f0-9-]+(?:\/events)?)?)$/.test(
+              message.path,
+            )
+          )
+            throw new Error('Invalid market request');
+          const url = new URL('http://monitor' + message.path);
+          if (message.params && typeof message.params === 'object')
+            for (const [key, value] of Object.entries(message.params))
+              url.searchParams.set(key, String(value));
+          const request = () =>
+            this.market(row.user_id, url.pathname + url.search, {
+              method:
+                typeof message.method === 'string' ? message.method : 'GET',
+              headers: { 'Content-Type': 'application/json' },
+              body: message.body ? JSON.stringify(message.body) : undefined,
+              signal,
+            });
+          let response = await request();
+          for (
+            let attempt = 0;
+            response.status >= 500 &&
+            (message.method ?? 'GET') === 'GET' &&
+            attempt < 2;
+            attempt++
+          ) {
+            await response.body?.cancel();
+            await delay(500 * (attempt + 1), undefined, { signal });
+            response = await request();
+          }
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok)
+            throw new Error(
+              result.code ??
+                `行情读取失败（HTTP ${response.status}，${message.path}）`,
+            );
+          if (message.path === '/sessions' && typeof result.id === 'string')
+            sessions.add(result.id);
+          return result;
+        }
+        if (message.kind === 'checkpoint') {
+          const checkpoint = JSON.stringify(message.checkpoint);
+          if (checkpoint.length > 32 * 1024 * 1024)
+            throw new Error('检查点过大，请暂停后重新添加此标的');
+          if (
+            !(await this.monitors.heartbeat(
+              row.id,
+              run.token,
+              run.status,
+              run.message,
+              checkpoint,
+            ))
+          )
+            throw new Error('实时计算租约已失效');
+          return true;
+        }
+        if (message.kind === 'history') {
+          const batch = message.batch as SignalHistoryBatch;
+          if (
+            !batch ||
+            !Array.isArray(batch.records) ||
+            batch.records.length > 2000
+          )
+            throw new Error('Invalid history batch');
+          for (const record of batch.records) {
+            if (
+              !(
+                native
+                  ? ['signal', 'trade', 'order', 'fill']
+                  : ['signal', 'trade']
+              ).includes(record.kind) ||
+              typeof record.id !== 'string' ||
+              !Number.isFinite(record.time)
+            )
+              throw new Error('Invalid history record');
+            if (record.kind === 'signal') {
+              const raw = signalSchema.parse(record.payload);
+              record.id = createHash('sha256')
+                .update(`${row.id}:${raw.id}`)
+                .digest('hex');
+              record.payload = { ...raw, id: record.id, monitor_id: row.id };
+            }
+          }
+          await this.monitors.history.save(row.id, run.token, batch);
+          return true;
+        }
+        if (message.kind === 'overlay') {
+          const overlay = overlaySchema.parse(message.overlay);
+          if (!(await this.monitors.saveOverlay(row.id, run.token, overlay)))
+            throw new Error('实时计算租约已失效');
+          return true;
+        }
+        if (message.kind === 'ready') {
+          run.status = 'running';
+          run.message = native
+            ? '天勤历史已计算，TqSim 实时模拟交易中'
+            : '全量历史已计算，实时更新入场与离场记录';
+          if (
+            !(await this.monitors.heartbeat(
+              row.id,
+              run.token,
+              run.status,
+              run.message,
+            ))
+          )
+            throw new Error('实时计算租约已失效');
+          return true;
+        }
+        if (message.kind === 'signal') {
+          const raw = signalSchema.parse(message.signal);
+          if (!(await this.valid(row))) throw new Error('实时监控已停用');
+          if (
+            !(await this.monitors.heartbeat(
+              row.id,
+              run.token,
+              run.status,
+              run.message,
+            ))
+          )
+            throw new Error('实时计算租约已失效');
+          signal.throwIfAborted();
+          const event: StrategySignal = {
+            ...raw,
+            id: createHash('sha256')
+              .update(`${row.id}:${raw.id}`)
+              .digest('hex'),
+            monitor_id: row.id,
+          };
+          await this.monitors.signal(row.user_id, event, run.token);
+          const strategy = await this.records.storedStrategy(row.strategy_id);
+          const current = await this.monitors.get(row.id, row.user_id);
+          const channels = strategyNotifications(
+            current.notifications ?? strategy.notifications,
+          ).channels;
+          if (
+            current.notifications_enabled !== false &&
+            current.config.events[event.type]
+          ) {
+            if (!this.context.notifications)
+              throw new Error('宿主通知服务不可用');
+            const side =
+              event.side === 'long'
+                ? '多头'
+                : event.side === 'short'
+                  ? '空头'
+                  : '';
+            const time = new Date(event.time * 1000).toLocaleString('zh-CN', {
+              timeZone: 'Asia/Shanghai',
+              hour12: false,
+            });
+            await this.context.notifications.publish({
+              userId: row.user_id,
+              eventId: event.id,
+              title: `${strategy.name} · ${side}${event.type === 'entry' ? '入场' : '离场'}信号`,
+              body: `${event.symbol} · v${row.version_number} · ${time}${event.price === null ? '' : ` · 参考价 ${event.price}`}${event.reason ? ` · ${event.reason}` : ''}`,
+              url: `/plugins/vibe-quant/?symbol=${encodeURIComponent(row.config.display_symbol ?? row.config.symbol)}`,
+              toast: channels.toast?.enabled ?? false,
+              desktop: channels.desktop?.enabled ?? false,
+              ...(channels.sound?.enabled ? { sound: event.type } : {}),
+              marketSignal: {
+                type: event.type,
+                side: event.side,
+                strategyName: strategy.name,
+                version: row.version_number,
+                symbol: event.symbol,
+                time: event.time,
+                price: event.price,
+                reason: event.reason,
+              },
+            });
+          }
+          return true;
+        }
+        throw new Error('Invalid monitor command');
+      };
       await runSignalProcess(
         python,
         [
           join(
             this.context.runtime.paths.pluginRoot,
-            'worker/strategy_monitor.py',
+            native
+              ? 'worker/strategy_tq_monitor.py'
+              : 'worker/strategy_monitor.py',
           ),
           join(this.context.runtime.paths.pluginRoot, 'sdk'),
           directory,
         ],
         directory,
         signal,
-        async (message) => {
-          signal.throwIfAborted();
-          if (message.kind === 'market') {
-            if (
-              typeof message.path !== 'string' ||
-              !/^\/(?:instruments\/[^/]+|history(?:\/range)?|contracts|sessions(?:\/[a-f0-9-]+(?:\/events)?)?)$/.test(
-                message.path,
-              )
-            )
-              throw new Error('Invalid market request');
-            const url = new URL('http://monitor' + message.path);
-            if (message.params && typeof message.params === 'object')
-              for (const [key, value] of Object.entries(message.params))
-                url.searchParams.set(key, String(value));
-            const request = () =>
-              this.market(row.user_id, url.pathname + url.search, {
-                method:
-                  typeof message.method === 'string' ? message.method : 'GET',
-                headers: { 'Content-Type': 'application/json' },
-                body: message.body ? JSON.stringify(message.body) : undefined,
-                signal,
-              });
-            let response = await request();
-            for (
-              let attempt = 0;
-              response.status >= 500 &&
-              (message.method ?? 'GET') === 'GET' &&
-              attempt < 2;
-              attempt++
-            ) {
-              await response.body?.cancel();
-              await delay(500 * (attempt + 1), undefined, { signal });
-              response = await request();
-            }
-            const result = await response.json().catch(() => ({}));
-            if (!response.ok)
-              throw new Error(
-                result.code ??
-                  `行情读取失败（HTTP ${response.status}，${message.path}）`,
-              );
-            if (message.path === '/sessions' && typeof result.id === 'string')
-              sessions.add(result.id);
-            return result;
-          }
-          if (message.kind === 'checkpoint') {
-            const checkpoint = JSON.stringify(message.checkpoint);
-            if (checkpoint.length > 32 * 1024 * 1024)
-              throw new Error('检查点过大，请暂停后重新添加此标的');
-            if (
-              !(await this.monitors.heartbeat(
-                row.id,
-                run.token,
-                run.status,
-                run.message,
-                checkpoint,
-              ))
-            )
-              throw new Error('实时计算租约已失效');
-            return true;
-          }
-          if (message.kind === 'history') {
-            const batch = message.batch as SignalHistoryBatch;
-            if (
-              !batch ||
-              !Array.isArray(batch.records) ||
-              batch.records.length > 2000
-            )
-              throw new Error('Invalid history batch');
-            for (const record of batch.records) {
-              if (
-                !['signal', 'trade'].includes(record.kind) ||
-                typeof record.id !== 'string' ||
-                !Number.isFinite(record.time)
-              )
-                throw new Error('Invalid history record');
-              if (record.kind === 'signal') {
-                const raw = signalSchema.parse(record.payload);
-                record.id = createHash('sha256')
-                  .update(`${row.id}:${raw.id}`)
-                  .digest('hex');
-                record.payload = { ...raw, id: record.id, monitor_id: row.id };
-              }
-            }
-            await this.monitors.history.save(row.id, run.token, batch);
-            return true;
-          }
-          if (message.kind === 'overlay') {
-            const overlay = overlaySchema.parse(message.overlay);
-            if (!(await this.monitors.saveOverlay(row.id, run.token, overlay)))
-              throw new Error('实时计算租约已失效');
-            return true;
-          }
-          if (message.kind === 'ready') {
-            run.status = 'running';
-            run.message = '全量历史已计算，实时更新入场与离场记录';
-            if (
-              !(await this.monitors.heartbeat(
-                row.id,
-                run.token,
-                run.status,
-                run.message,
-              ))
-            )
-              throw new Error('实时计算租约已失效');
-            return true;
-          }
-          if (message.kind === 'signal') {
-            const raw = signalSchema.parse(message.signal);
-            if (!(await this.valid(row))) throw new Error('实时监控已停用');
-            if (
-              !(await this.monitors.heartbeat(
-                row.id,
-                run.token,
-                run.status,
-                run.message,
-              ))
-            )
-              throw new Error('实时计算租约已失效');
-            signal.throwIfAborted();
-            const event: StrategySignal = {
-              ...raw,
-              id: createHash('sha256')
-                .update(`${row.id}:${raw.id}`)
-                .digest('hex'),
-              monitor_id: row.id,
-            };
-            await this.monitors.signal(row.user_id, event, run.token);
-            const strategy = await this.records.storedStrategy(row.strategy_id);
-            const current = await this.monitors.get(row.id, row.user_id);
-            const channels = strategyNotifications(
-              current.notifications ?? strategy.notifications,
-            ).channels;
-            if (
-              current.notifications_enabled !== false &&
-              current.config.events[event.type]
-            ) {
-              if (!this.context.notifications)
-                throw new Error('宿主通知服务不可用');
-              const side =
-                event.side === 'long'
-                  ? '多头'
-                  : event.side === 'short'
-                    ? '空头'
-                    : '';
-              const time = new Date(event.time * 1000).toLocaleString('zh-CN', {
-                timeZone: 'Asia/Shanghai',
-                hour12: false,
-              });
-              await this.context.notifications.publish({
-                userId: row.user_id,
-                eventId: event.id,
-                title: `${strategy.name} · ${side}${event.type === 'entry' ? '入场' : '离场'}信号`,
-                body: `${event.symbol} · v${row.version_number} · ${time}${event.price === null ? '' : ` · 参考价 ${event.price}`}${event.reason ? ` · ${event.reason}` : ''}`,
-                url: `/plugins/vibe-quant/?symbol=${encodeURIComponent(row.config.symbol)}`,
-                toast: channels.toast?.enabled ?? false,
-                desktop: channels.desktop?.enabled ?? false,
-                ...(channels.sound?.enabled ? { sound: event.type } : {}),
-              });
-            }
-            return true;
-          }
-          throw new Error('Invalid monitor command');
-        },
+        handle,
+        credentials ? [credentials.tqUser, credentials.tqPassword] : [],
       );
     } finally {
       await Promise.allSettled(

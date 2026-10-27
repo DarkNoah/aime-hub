@@ -11,7 +11,7 @@ import type { IndicatorDrawing } from './types';
 
 type DrawTarget = Parameters<IPrimitivePaneRenderer['draw']>[0];
 
-/** Draw on the candle pane without introducing new timestamps or price bounds. */
+/** Draw on the attached series pane without introducing timestamps or price bounds. */
 export class IndicatorDrawingPrimitive implements ISeriesPrimitive {
   private attachedTo?: SeriesAttachedParameter;
   private drawings: IndicatorDrawing[] = [];
@@ -134,6 +134,20 @@ export class IndicatorDrawingPrimitive implements ISeriesPrimitive {
         const textY =
           y +
           (drawing.align === 'below' ? 3 : drawing.align === 'left' ? 0 : -3);
+        if (drawing.labelBackground) {
+          const textWidth = ctx.measureText(drawing.text).width;
+          const left = ctx.textAlign === 'left' ? textX : textX - textWidth / 2;
+          const top =
+            ctx.textBaseline === 'top'
+              ? textY
+              : ctx.textBaseline === 'middle'
+                ? textY - size / 2
+                : textY - size;
+          const textColor = ctx.fillStyle;
+          ctx.fillStyle = drawing.labelBackground;
+          ctx.fillRect(left - 3, top - 2, textWidth + 6, size + 4);
+          ctx.fillStyle = textColor;
+        }
         if (drawing.clampLabel)
           ctx.fillText(drawing.text, textX, textY, maxWidth);
         else ctx.fillText(drawing.text, textX, textY);

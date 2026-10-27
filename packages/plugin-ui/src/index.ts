@@ -1,7 +1,9 @@
 // Supported browser-only host exports. Plugin server code must never import this entry.
 export { Button } from '../../../apps/web/src/components/ui/button';
 export { Badge } from '../../../apps/web/src/components/ui/badge';
+export { showMarketSignalToast } from '../../../apps/web/src/features/notifications/market-signal-toast';
 export { Input } from '../../../apps/web/src/components/ui/input';
+export { AutocompleteInput } from '../../../apps/web/src/components/autocomplete-input';
 export { Textarea } from '../../../apps/web/src/components/ui/textarea';
 export { Label } from '../../../apps/web/src/components/ui/label';
 export { Switch } from '../../../apps/web/src/components/ui/switch';
@@ -74,5 +76,6 @@ export {
 export {
   enableNotificationSound,
   previewNotificationSound,
+  playNotificationSound,
   notificationSoundSupported,
 } from '../../../apps/web/src/features/notifications/notification-sound';

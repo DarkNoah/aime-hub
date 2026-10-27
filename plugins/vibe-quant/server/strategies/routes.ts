@@ -22,6 +22,7 @@ import { enqueueBacktest } from './enqueue.js';
 import {
   replayQuerySchema,
   replayWindow,
+  nativeMarketWindow,
   type ReplayDataset,
 } from './replay.js';
 
@@ -138,6 +139,20 @@ export function strategyRoutes(
         body.data.note,
       ),
       201,
+    );
+  });
+  api.delete('/:id/versions/:versionId', async (c) => {
+    const body = z
+      .object({ revision: z.number().int().positive() })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ code: 'VALIDATION_ERROR' }, 400);
+    return c.json(
+      await getRecords().deleteVersion(
+        c.get('userId'),
+        readId(c.req.param('id')),
+        readId(c.req.param('versionId')),
+        body.data.revision,
+      ),
     );
   });
   api.get('/:id/runs', async (c) => {
@@ -275,7 +290,7 @@ export function strategyRoutes(
     );
     const [version, dataset, result, manifest, optimization, validation] =
       await Promise.all([
-        getRecords().version(c.get('userId'), run.version_id),
+        getRecords().version(c.get('userId'), run.version_id, true),
         getRecords().artifact(run.id, 'dataset'),
         getRecords().artifact(run.id, 'result'),
         getRecords().artifact(run.id, 'manifest'),
@@ -341,6 +356,18 @@ export function strategyRoutes(
       );
     if (!trade) throw new StrategyError('NOT_FOUND', 404);
     // A user's recorded trade authorizes its actual contract, even if it is no longer in their watchlist.
+    if (run.config?.backtest_engine === 'tqsdk') {
+      const dataset = await getRecords().artifact(run.id, 'dataset');
+      if (!dataset) throw new StrategyError('NOT_FOUND', 404);
+      return c.json(
+        nativeMarketWindow(
+          JSON.parse(dataset.text) as ReplayDataset,
+          trade,
+          query.data,
+          c.req.query('snapshot_intraday') === 'true',
+        ),
+      );
+    }
     const { store, state } = get();
     const [data, instrument] = await Promise.all([
       readMarketBars(store, run.engine, trade.symbol, query.data),

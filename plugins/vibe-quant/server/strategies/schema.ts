@@ -22,6 +22,13 @@ export const strategySchema = z.object({
 });
 export const backtestSchema = z
   .object({
+    backtest_engine: z.enum(['builtin', 'tqsdk']).optional(),
+    tq_options: z
+      .object({
+        commission_per_lot: nonnegative.optional(),
+        margin_per_lot: z.number().finite().positive().optional(),
+      })
+      .optional(),
     optimization: optimizationSchema.optional(),
     version_id: z.uuid(),
     symbol,
@@ -107,6 +114,35 @@ export class StrategyError extends Error {
 
 /** Keep HTTP forms and Agent submissions on the same validation path. */
 export function parseBacktestConfig(input: unknown) {
+  if (
+    input &&
+    typeof input === 'object' &&
+    'backtest_engine' in input &&
+    input.backtest_engine === 'tqsdk'
+  ) {
+    const value = input as Record<string, unknown>;
+    if (value.execution_model && value.execution_model !== 'actual_contract')
+      throw new StrategyError('TQ_ACTUAL_FUTURES_ONLY');
+    if (
+      typeof value.symbol !== 'string' ||
+      !/^(CFFEX|SHFE|DCE|CZCE|INE|GFEX)\.[A-Za-z]+\d{3,4}$/.test(value.symbol)
+    )
+      throw new StrategyError('TQ_ACTUAL_FUTURES_ONLY');
+    if (value.optimization)
+      throw new StrategyError('TQ_OPTIMIZATION_UNSUPPORTED');
+    if (value.calendar) throw new StrategyError('TQ_CALENDAR_UNSUPPORTED');
+    if (value.benchmark_symbol && value.benchmark_symbol !== value.symbol)
+      throw new StrategyError('TQ_BENCHMARK_UNSUPPORTED');
+    // The native account owns fees, contract metadata and margin. These legacy
+    // placeholders are not financial assumptions; tq_options is the only override.
+    input = {
+      ...value,
+      execution_model: 'actual_contract',
+      participation_rate: 1,
+      point_cost: 0,
+      rules: structuredClone(POINT_BACKTEST_RULES),
+    };
+  }
   if (
     input &&
     typeof input === 'object' &&

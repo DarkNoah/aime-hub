@@ -73,6 +73,7 @@ export class NotificationService {
         createdAt: new Date().toISOString(),
         toast: input.toast,
         ...(input.sound ? { sound: input.sound } : {}),
+        ...(input.marketSignal ? { marketSignal: input.marketSignal } : {}),
       },
     });
     if (!added) return;

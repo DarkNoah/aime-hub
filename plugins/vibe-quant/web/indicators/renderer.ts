@@ -14,6 +14,7 @@ import type { Bar } from '../../shared';
 import { barLabelTime } from '../chart-time';
 import { INDICATORS } from './registry';
 import { IndicatorDrawingPrimitive } from './drawing-primitive';
+import { IndicatorPlotPrimitive } from './plot-primitive';
 import type {
   IndicatorContext,
   IndicatorOverlay,
@@ -22,9 +23,13 @@ import type {
   IndicatorPreferences,
 } from './types';
 
-type PlotSeries =
+type PlotSeries = (
   | { type: 'line'; api: ISeriesApi<'Line'>; zeroLine?: IPriceLine }
-  | { type: 'histogram'; api: ISeriesApi<'Histogram'> };
+  | { type: 'histogram'; api: ISeriesApi<'Histogram'> }
+) & {
+  primitive?: IndicatorPlotPrimitive;
+  referenceLines?: Map<number, IPriceLine>;
+};
 
 interface Instance {
   pane: IPaneApi<Time>;
@@ -65,8 +70,7 @@ export class IndicatorRenderer {
     for (const [id, instance] of this.instances) {
       if (definitions.some((definition) => definition.id === id)) continue;
       if (instance.primitive) this.prices.detachPrimitive(instance.primitive);
-      for (const plot of instance.plots.values())
-        this.chart.removeSeries(plot.api);
+      for (const plot of instance.plots.values()) this.removePlot(plot);
       this.instances.delete(id);
     }
     let subIndex = 1;
@@ -115,13 +119,17 @@ export class IndicatorRenderer {
           : definition.type === 'main' &&
               definition.priceFormat !== 'oscillator'
             ? this.priceFormat
-            : { type: 'price', precision: 4, minMove: 0.0001 };
+            : {
+                type: 'price',
+                precision: definition.precision ?? 4,
+                minMove: 10 ** -(definition.precision ?? 4),
+              };
       // Keep the pane while reconciling a script whose set of plots changes.
       instance.pane.setPreserveEmptyPane(true);
       for (const [id, series] of instance.plots) {
         if (plots.some((plot) => plot.id === id && plot.type === series.type))
           continue;
-        this.chart.removeSeries(series.api);
+        this.removePlot(series);
         instance.plots.delete(id);
       }
       for (const plot of plots) {
@@ -216,13 +224,50 @@ export class IndicatorRenderer {
         time: barLabelTime(point.time, this.duration) as UTCTimestamp,
       })),
     );
+    const referenceLines = (series.referenceLines ??= new Map());
+    for (const [value, line] of referenceLines) {
+      if (plot.referenceLines?.some((reference) => reference.value === value))
+        continue;
+      series.api.removePriceLine(line);
+      referenceLines.delete(value);
+    }
+    for (const reference of plot.referenceLines ?? []) {
+      const options = {
+        price: reference.value,
+        color: reference.color,
+        lineWidth: 1 as const,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+      };
+      const line = referenceLines.get(reference.value);
+      if (line) line.applyOptions(options);
+      else
+        referenceLines.set(
+          reference.value,
+          series.api.createPriceLine(options),
+        );
+    }
+    if (plot.overlay) {
+      if (!series.primitive) {
+        series.primitive = new IndicatorPlotPrimitive();
+        series.api.attachPrimitive(series.primitive);
+      }
+      series.primitive.setOverlay(plot.overlay);
+    } else if (series.primitive) {
+      series.api.detachPrimitive(series.primitive);
+      series.primitive = undefined;
+    }
+  }
+
+  private removePlot(series: PlotSeries) {
+    if (series.primitive) series.api.detachPrimitive(series.primitive);
+    this.chart.removeSeries(series.api);
   }
 
   dispose() {
     for (const instance of this.instances.values()) {
       if (instance.primitive) this.prices.detachPrimitive(instance.primitive);
-      for (const series of instance.plots.values())
-        this.chart.removeSeries(series.api);
+      for (const series of instance.plots.values()) this.removePlot(series);
     }
     this.instances.clear();
     this.previousBars = undefined;

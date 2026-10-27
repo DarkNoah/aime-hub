@@ -15,7 +15,8 @@ export function strategyHintMarkers(
   priceTick: number,
 ): SeriesMarker<UTCTimestamp>[] {
   const visibleHints = hints.filter(
-    (hint) => hint.config.symbol === bars[0]?.symbol,
+    (hint) =>
+      (hint.config.display_symbol ?? hint.config.symbol) === bars[0]?.symbol,
   );
   return visibleHints
     .flatMap((hint) =>
@@ -32,7 +33,11 @@ export function strategyHintMarkers(
             : hint.strategy_name;
         const buy = (signal.type === 'entry') === (signal.side !== 'short');
         const prefix =
-          visibleHints.length > 1 ? `${name} v${hint.version_number} ` : '';
+          hint.config.symbol !== bars[0]?.symbol
+            ? `${hint.config.symbol} ${name} `
+            : visibleHints.length > 1
+              ? `${name} v${hint.version_number} `
+              : '';
         return [
           {
             id: signal.id,
@@ -43,7 +48,7 @@ export function strategyHintMarkers(
               signal.type === 'entry'
                 ? '#2563eb'
                 : exitReasonColor(signal.reason),
-            text: `${prefix}${signal.type === 'entry' ? '入场' : exitMarkerLabel(signal.reason)}${signal.price === null ? '' : ` ${signal.symbol !== hint.config.symbol ? '实际 ' : ''}${signal.price.toFixed(pricePrecision(priceTick))}`}`,
+            text: `${prefix}${signal.type === 'entry' ? '入场' : exitMarkerLabel(signal.reason)}${signal.price === null ? '' : ` ${signal.symbol !== hint.config.symbol ? '实际 ' : ''}${hint.config.symbol === bars[0]?.symbol ? signal.price.toFixed(pricePrecision(priceTick)) : signal.price.toString()}`}`,
           },
         ];
       }),

@@ -10,7 +10,7 @@ export const STRATEGY_NOTIFICATION_CHANNELS = [
   {
     id: 'toast',
     label: '前台 Toast',
-    description: '在应用页面内显示通知。',
+    description: '显示方向、入场或离场及策略信息，点击确认后关闭。',
   },
   {
     id: 'desktop',
@@ -20,7 +20,7 @@ export const STRATEGY_NOTIFICATION_CHANNELS = [
   {
     id: 'sound',
     label: '提示音',
-    description: '应用页面打开时播放，入场与离场使用不同声音。',
+    description: '应用页面打开时播放约 2 秒的增强提示音，入场上扬、离场下降。',
   },
 ] as const;
 

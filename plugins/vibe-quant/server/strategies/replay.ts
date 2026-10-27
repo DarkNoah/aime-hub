@@ -159,8 +159,61 @@ export function replayWindow(
       ? { start: minutes[0].time, end: minutes.at(-1)!.time + 60 }
       : null,
     markerTimes: {
-      entry: anchors.get(trade.entry_time) ?? null,
-      exit: exitTime === null ? null : (anchors.get(exitTime) ?? null),
+      entry: anchors.get(Math.floor(trade.entry_time / 60) * 60) ?? null,
+      exit:
+        exitTime === null
+          ? null
+          : (anchors.get(Math.floor(exitTime / 60) * 60) ?? null),
     },
   };
+}
+
+/** Adapt a frozen TqBacktest dataset to the existing market-chart paging API. */
+export function nativeMarketWindow(
+  dataset: ReplayDataset,
+  trade: TradeRecord,
+  query: {
+    duration: number;
+    limit: number;
+    around?: number;
+    before?: number;
+    after?: number;
+  },
+  sessionAnchors = false,
+) {
+  const window = replayWindow(dataset, trade, {
+    ...query,
+    at: query.around === undefined ? 'latest' : 'entry',
+    intraday: 'false',
+  });
+  if (sessionAnchors && query.duration === 86400) {
+    // The intraday UI uses daily anchors to bound minute queries. Anchor a
+    // futures day at its first observed session, including the prior night.
+    const starts = new Map<number, number>();
+    for (const event of dataset.events) {
+      const bar = event.payload;
+      if (
+        event.type !== 'bar' ||
+        bar.symbol !== trade.symbol ||
+        bar.duration !== 60 ||
+        bar.is_final === false
+      )
+        continue;
+      const key = bucket(bar, 86400);
+      starts.set(key, Math.min(starts.get(key) ?? Infinity, bar.time));
+    }
+    window.bars = window.bars.map((bar) => ({
+      ...bar,
+      time: starts.get(bar.time) ?? bar.time,
+    }));
+    if (window.targetTime !== null)
+      window.targetTime = starts.get(window.targetTime) ?? window.targetTime;
+  }
+  return query.around === undefined
+    ? window.bars
+    : {
+        bars: window.bars,
+        targetTime: window.targetTime,
+        priceTick: window.priceTick,
+      };
 }

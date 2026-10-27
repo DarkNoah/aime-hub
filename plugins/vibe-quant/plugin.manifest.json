@@ -34,24 +34,32 @@
       "key": "tqUser",
       "label": "天勤账号",
       "type": "text",
-      "description": "需开通对应市场的行情权限。",
-      "group": "行情连接",
-      "visibleWhen": {
-        "field": "engine",
-        "equals": "tqsdk"
-      },
-      "required": true
+      "description": "天勤行情、历史回测及实时 TqSim 共用；选择其他行情源时也可配置。",
+      "group": "天勤连接",
+      "required": false
     },
     {
       "key": "tqPassword",
       "label": "天勤密码",
       "type": "password",
-      "group": "行情连接",
-      "visibleWhen": {
-        "field": "engine",
-        "equals": "tqsdk"
-      },
-      "required": true
+      "group": "天勤连接",
+      "required": false,
+      "description": "天勤行情、历史回测及实时 TqSim 共用；选择其他行情源时也可配置。"
+    },
+    {
+      "key": "tqSimCommissionPerLot",
+      "label": "默认每手单边手续费（元）",
+      "type": "number",
+      "min": 0,
+      "description": "TqSim 回测与实时模拟共用。留空使用天勤默认；任务内填写的费用优先。",
+      "group": "TqSim 模拟账户"
+    },
+    {
+      "key": "tqSimMarginPerLot",
+      "label": "默认每手保证金（元）",
+      "type": "number",
+      "description": "必须大于 0；留空使用天勤合约默认。不同合约资金要求不同，可在任务中覆盖。",
+      "group": "TqSim 模拟账户"
     },
     {
       "key": "tushareToken",

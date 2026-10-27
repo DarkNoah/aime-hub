@@ -25,6 +25,13 @@ export interface SignalMonitorInput extends Pick<
   | 'execution_model'
   | 'point_cost'
 > {
+  simulation_engine?: 'builtin' | 'tqsdk';
+  tq_options?: BacktestInput['tq_options'];
+  slippage_ticks?: number;
+  history_start?: number;
+  /** Chart attachment is independent of the instrument used for calculation. */
+  display_symbol?: string;
+  display_engine?: Engine;
   warmup_days: number;
   events: { entry: boolean; exit: boolean };
 }

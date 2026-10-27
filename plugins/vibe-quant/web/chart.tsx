@@ -13,6 +13,7 @@ import {
   createSeriesMarkers,
   type IChartApi,
   type ISeriesApi,
+  type IPriceLine,
   type PriceFormat,
   type LogicalRange,
   type MouseEventParams,
@@ -60,6 +61,8 @@ export function MarketChart({
   strategyHints,
   showDrawingTools = true,
   volumeProfileSource,
+  replay = false,
+  onSelectReplayTime,
 }: {
   bars: Bar[];
   identity: string;
@@ -78,6 +81,8 @@ export function MarketChart({
   strategyHints?: readonly MarketStrategyHint[];
   showDrawingTools?: boolean;
   volumeProfileSource?: VolumeProfileSource;
+  replay?: boolean;
+  onSelectReplayTime?: (time: number) => void;
 }) {
   const hasStrategyHints = strategyHints !== undefined;
   const container = useRef<HTMLDivElement>(null);
@@ -98,7 +103,10 @@ export function MarketChart({
   const userInput = useRef(false);
   const loadMore = useRef(onLoadMore);
   loadMore.current = onLoadMore;
+  const selectReplayTime = useRef(onSelectReplayTime);
+  selectReplayTime.current = onSelectReplayTime;
   const updateFrame = useRef(0);
+  const warningFrame = useRef(0);
   const drawingController = useRef<DrawingController | null>(null);
   const drawingCache = useRef(new Map<string, Drawing[]>());
   const [drawingState, setDrawingState] = useState(EMPTY_DRAWING_STATE);
@@ -171,6 +179,18 @@ export function MarketChart({
       );
     };
     api.subscribeCrosshairMove(onCrosshairMove);
+    const onClick = (event: MouseEventParams) => {
+      if (
+        !selectReplayTime.current ||
+        typeof event.time !== 'number' ||
+        event.paneIndex !== 0
+      )
+        return;
+      const time = barStartTime(event.time, duration);
+      if (previous.current.some((bar) => bar.time === time))
+        selectReplayTime.current(time);
+    };
+    api.subscribeClick(onClick);
     let previousRange: LogicalRange | null = null;
     let edgeTimer: ReturnType<typeof setTimeout>;
     let profileTimer: ReturnType<typeof setTimeout>;
@@ -256,7 +276,14 @@ export function MarketChart({
       priceFormat,
       duration,
       prices.current,
-      setIndicatorWarnings,
+      (warnings) => {
+        // Warm-up warnings change with each revealed candle. Coalesce them to
+        // the next frame instead of nesting state updates inside data effects.
+        cancelAnimationFrame(warningFrame.current);
+        warningFrame.current = requestAnimationFrame(() =>
+          setIndicatorWarnings(warnings),
+        );
+      },
     );
     drawingController.current = showDrawingTools
       ? new DrawingController(
@@ -278,8 +305,10 @@ export function MarketChart({
       clearTimeout(edgeTimer);
       clearTimeout(profileTimer);
       cancelAnimationFrame(updateFrame.current);
+      cancelAnimationFrame(warningFrame.current);
       api.timeScale().unsubscribeVisibleLogicalRangeChange(onRangeChange);
       api.unsubscribeCrosshairMove(onCrosshairMove);
+      api.unsubscribeClick(onClick);
       observer.disconnect();
       drawingController.current?.dispose();
       drawingController.current = null;
@@ -295,6 +324,21 @@ export function MarketChart({
       fitAfterIndicators.current = false;
     };
   }, [
+    identity,
+    priceTick,
+    duration,
+    intraday,
+    drawingScope,
+    drawingSharedScope,
+    showDrawingTools,
+    hasStrategyHints,
+  ]);
+  const pickingReplay = !!onSelectReplayTime;
+  useEffect(() => {
+    drawingController.current?.setEnabled(!pickingReplay);
+    if (pickingReplay) container.current?.focus({ preventScroll: true });
+  }, [
+    pickingReplay,
     identity,
     priceTick,
     duration,
@@ -352,7 +396,16 @@ export function MarketChart({
       lastTime === undefined
         ? 0
         : bars.filter((bar) => bar.time > lastTime).length;
-    if (!old.length || historicalChanged || newSession || appended > 1) {
+    const truncated =
+      bars.length < old.length ||
+      (lastTime !== undefined && bars.at(-1)!.time < lastTime);
+    if (
+      !old.length ||
+      historicalChanged ||
+      newSession ||
+      appended > 1 ||
+      truncated
+    ) {
       prices.current.setData(bars.map(point));
       if (!old.length || newSession) fitAfterIndicators.current = true;
       else if (range) {
@@ -370,6 +423,15 @@ export function MarketChart({
       }
       if (historical && range) rangeAfterIndicators.current = range;
     }
+    if (replay && old.length && range) {
+      // Follow the revealed edge while retaining the user's zoom. A pan into
+      // earlier history stays put until the replay edge leaves the viewport.
+      const delta = bars.length - old.length;
+      rangeAfterIndicators.current =
+        range.to >= old.length - 1 || bars.length - 1 < range.from
+          ? { from: range.from + delta, to: range.to + delta }
+          : range;
+    }
     previous.current = bars;
     drawingController.current?.updateBars(bars);
   }, [
@@ -381,6 +443,7 @@ export function MarketChart({
     duration,
     drawingScope,
     drawingSharedScope,
+    replay,
   ]);
   useEffect(() => {
     indicatorRenderer.current?.update(bars, indicators, profile.context);
@@ -418,21 +481,30 @@ export function MarketChart({
   useEffect(() => {
     const series = prices.current;
     if (!series || !trade) return;
-    const markers = createSeriesMarkers(
-      series,
-      tradeMarkers(trade, bars, duration, priceTick, markerTimes),
+    const visibleMarkers = tradeMarkers(
+      trade,
+      bars,
+      duration,
+      priceTick,
+      markerTimes,
     );
-    const lines = [
-      series.createPriceLine({
-        price: trade.entry_price,
-        color: '#2563eb',
-        lineWidth: 1,
-        lineStyle: 2,
-        axisLabelVisible: true,
-        title: '入场',
-      }),
-    ];
-    if (trade.exit_price !== null)
+    const markers = createSeriesMarkers(series, visibleMarkers);
+    const lines: IPriceLine[] = [];
+    if (!replay || visibleMarkers.some((marker) => marker.color === '#2563eb'))
+      lines.push(
+        series.createPriceLine({
+          price: trade.entry_price,
+          color: '#2563eb',
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: '入场',
+        }),
+      );
+    if (
+      trade.exit_price !== null &&
+      (!replay || visibleMarkers.some((marker) => marker.color === '#d97706'))
+    )
       lines.push(
         series.createPriceLine({
           price: trade.exit_price,
@@ -458,6 +530,7 @@ export function MarketChart({
     drawingScope,
     drawingSharedScope,
     showDrawingTools,
+    replay,
   ]);
   useEffect(() => {
     const series = prices.current;
@@ -506,6 +579,7 @@ export function MarketChart({
           ref={readout}
           bars={bars}
           priceTick={priceTick}
+          replay={replay}
         />
         {profile.enabled && (
           <div
@@ -569,7 +643,7 @@ export function MarketChart({
             onWheelCapture={() => {
               userInput.current = true;
             }}
-            className="h-full min-w-0 focus-visible:outline-2 focus-visible:outline-ring"
+            className={`h-full min-w-0 focus-visible:outline-2 focus-visible:outline-ring ${pickingReplay ? 'cursor-crosshair' : ''}`}
             aria-label={
               intraday
                 ? 'TradingView 分时走势与技术指标图表'
@@ -577,11 +651,20 @@ export function MarketChart({
             }
           />
           <DrawingHint state={drawingState} />
+          {pickingReplay && (
+            <div
+              className="pointer-events-none absolute top-2 left-2 rounded-md border bg-card px-2 py-1 text-xs text-foreground"
+              role="status"
+            >
+              点选 K 线开始回放
+            </div>
+          )}
         </div>
       </div>
       {!!bars.length && showDrawingTools && (
         <DrawingToolbar
           key={drawingScope}
+          disabled={pickingReplay}
           state={drawingState}
           onTool={(tool) => drawingController.current?.setTool(tool)}
           onDelete={() => drawingController.current?.deleteSelected()}

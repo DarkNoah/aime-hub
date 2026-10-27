@@ -1,7 +1,9 @@
 import { maIndicator } from './main/ma';
+import { logisticSrIndicator } from './main/logistic-sr';
 import { smcIndicator } from './main/smc';
 import { volumeProfileIndicator } from './main/volume-profile';
 import { macdIndicator } from './sub/macd';
+import { rsiIndicator } from './sub/rsi';
 import { volumeIndicator } from './sub/volume';
 import type { IndicatorDefinition } from './types';
 
@@ -9,7 +11,9 @@ import type { IndicatorDefinition } from './types';
 export const INDICATORS: readonly IndicatorDefinition[] = [
   maIndicator,
   smcIndicator,
+  logisticSrIndicator,
   volumeProfileIndicator,
   volumeIndicator,
   macdIndicator,
+  rsiIndicator,
 ];

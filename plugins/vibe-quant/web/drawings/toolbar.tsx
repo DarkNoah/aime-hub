@@ -91,6 +91,7 @@ export function DrawingToolbar({
   onClear,
   onCrossPeriod,
   onFibonacciOptions,
+  disabled = false,
 }: {
   state: DrawingState;
   onTool: (tool: DrawingTool) => void;
@@ -98,6 +99,7 @@ export function DrawingToolbar({
   onClear: () => void;
   onCrossPeriod: (value: boolean) => void;
   onFibonacciOptions: (options: Partial<FibonacciOptions>) => void;
+  disabled?: boolean;
 }) {
   const [clearOpen, setClearOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -109,6 +111,8 @@ export function DrawingToolbar({
         role="toolbar"
         aria-label="图表划线工具"
         aria-orientation="vertical"
+        inert={disabled}
+        aria-disabled={disabled}
         className="order-first flex w-11 shrink-0 flex-col items-center gap-1 border-r bg-muted/20 px-1 py-2"
       >
         <Button

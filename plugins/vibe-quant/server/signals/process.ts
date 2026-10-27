@@ -8,6 +8,7 @@ export function runSignalProcess(
   cwd: string,
   signal: AbortSignal,
   handle: (message: Record<string, unknown>) => Promise<unknown>,
+  secrets: string[] = [],
 ) {
   signal.throwIfAborted();
   return new Promise<void>((_resolve, reject) => {
@@ -20,6 +21,7 @@ export function runSignalProcess(
         ...(isAbsolute(python)
           ? { VIRTUAL_ENV: dirname(dirname(python)) }
           : {}),
+        HOME: cwd,
         TMPDIR: cwd,
         PYTHONNOUSERSITE: '1',
         PYTHONIOENCODING: 'utf-8',
@@ -106,6 +108,8 @@ export function runSignalProcess(
     });
     child.on('error', fail);
     child.on('close', () => {
+      for (const secret of secrets)
+        if (secret) stderr = stderr.split(secret).join('[redacted]');
       clearInterval(watchdog);
       clearTimeout(escalation);
       signal.removeEventListener('abort', stop);

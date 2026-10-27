@@ -27,6 +27,7 @@ export default function TradeView({
   trade,
   riskLevels = EMPTY_RISK_LEVELS,
   points = false,
+  native = false,
   onClose,
 }: {
   pluginId: string;
@@ -34,6 +35,7 @@ export default function TradeView({
   trade: TradeRecord;
   riskLevels?: RiskLevelRecord[];
   points?: boolean;
+  native?: boolean;
   onClose: () => void;
 }) {
   const [period, setPeriod] = useState(readChartPeriod);
@@ -52,8 +54,8 @@ export default function TradeView({
     intraday: period === 'intraday',
     identity: `${sharedScope}:${trade.id}:${period}`,
     retry,
-    barsPath: `/strategies/runs/${runId}/trades/${encodeURIComponent(trade.id)}/bars`,
-    initialTime: trade.entry_time,
+    barsPath: `/strategies/runs/${runId}/trades/${encodeURIComponent(trade.id)}/bars${native && period === 'intraday' ? '?snapshot_intraday=true' : ''}`,
+    initialTime: Math.floor(trade.entry_time),
   });
   return (
     <Sheet
@@ -87,7 +89,7 @@ export default function TradeView({
               variant="outline"
               disabled={view.loading}
               title={dateTime(trade.entry_time)}
-              onClick={() => void view.navigate(trade.entry_time)}
+              onClick={() => void view.navigate(Math.floor(trade.entry_time))}
             >
               定位入场 {number(trade.entry_price)}
             </Button>
@@ -97,7 +99,7 @@ export default function TradeView({
                 variant="outline"
                 disabled={view.loading}
                 title={dateTime(trade.exit_time)}
-                onClick={() => void view.navigate(exitTime)}
+                onClick={() => void view.navigate(Math.floor(exitTime))}
               >
                 定位离场 {number(trade.exit_price)}
               </Button>
@@ -124,11 +126,17 @@ export default function TradeView({
               线结束）；图中标记定位成交所属 K 线。
             </p>
           )}
+          {native && (
+            <p className="border-b px-4 py-2 text-xs text-muted-foreground">
+              图表使用本次天勤回测保存的行情快照；成交时间为回放报价时间，数据范围限于本次任务及预热窗口。
+            </p>
+          )}
           {trade.trigger_bar_time != null &&
             trade.trigger_bar_time !== trade.exit_bar_time && (
               <p className="border-b px-4 py-2 text-xs text-muted-foreground">
-                于 {dateTime(trade.trigger_time)} 触发，受成交量或 T+1
-                限制延后成交；平仓沿用触发时的原因和价格依据。
+                于 {dateTime(trade.trigger_time)} 触发，
+                {native ? '模拟委托随后成交' : '受成交量或 T+1 限制延后成交'}
+                ；平仓沿用触发时的原因和价格依据。
               </p>
             )}
           <TradeRiskHistory
@@ -136,7 +144,7 @@ export default function TradeView({
             triggeredId={trade.risk_level_id}
             visible={showRisk}
             onVisibleChange={setShowRisk}
-            onNavigate={(time) => void view.navigate(time)}
+            onNavigate={(time) => void view.navigate(Math.floor(time))}
           />
           <div className="flex h-[calc(100dvh-16rem)] min-h-[640px] flex-col">
             <MarketChartPanel
@@ -146,10 +154,14 @@ export default function TradeView({
               period={period}
               onPeriodChange={setPeriod}
               priceTick={view.priceTick ?? 0.01}
-              volumeProfileSource={{
-                pluginId,
-                path: `/strategies/runs/${runId}/trades/${encodeURIComponent(trade.id)}/volume-profile`,
-              }}
+              volumeProfileSource={
+                native
+                  ? undefined
+                  : {
+                      pluginId,
+                      path: `/strategies/runs/${runId}/trades/${encodeURIComponent(trade.id)}/volume-profile`,
+                    }
+              }
               trade={trade}
               riskLevels={showRisk ? levels : EMPTY_RISK_LEVELS}
               emptyHint="正在读取实际成交合约的行情，拖动至边缘可继续加载。"
@@ -166,8 +178,9 @@ export default function TradeView({
             </Button>
           )}
           <p className="border-t px-4 py-3 text-[11px] leading-5 text-muted-foreground">
-            K
-            线使用行情库当前数据，可继续浏览回测区间以外的行情；成交标记取自本次回测记录。
+            {native
+              ? 'K 线与成交标记均取自本次回测记录，拖动至快照边界后不再加载。'
+              : 'K 线使用行情库当前数据，可继续浏览回测区间以外的行情；成交标记取自本次回测记录。'}
           </p>
         </ScrollArea>
       </SheetContent>

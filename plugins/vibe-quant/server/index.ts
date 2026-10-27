@@ -29,6 +29,10 @@ import { TradeService } from './trades/service.js';
 import { MonitorStore } from './signals/store.js';
 import { SignalWorker } from './signals/worker.js';
 import { signalRoutes } from './signals/routes.js';
+import {
+  StrategyReplaySessions,
+  strategyReplayRoutes,
+} from './signals/replay.js';
 
 const symbolSchema = z
   .string()
@@ -49,7 +53,15 @@ export default function createServer(context: PluginContext): PluginServer {
   let trades: TradeService;
   let monitors: MonitorStore;
   let signals: SignalWorker | undefined;
+  const replays = new StrategyReplaySessions(context, () => ({
+    records,
+    monitors,
+    state,
+    store,
+    config,
+  }));
   const api = new Hono<PluginHttpEnv>();
+  api.route('/strategies', strategyReplayRoutes(replays));
   api.route(
     '/strategies',
     signalRoutes(() => ({
@@ -232,6 +244,7 @@ export default function createServer(context: PluginContext): PluginServer {
     });
   });
   const stop = async () => {
+    await replays.stop();
     await signals?.stop();
     signals = undefined;
     await trades?.stop();
@@ -301,6 +314,8 @@ export default function createServer(context: PluginContext): PluginServer {
           return bridge.request(`http://monitor${path}`, init);
         },
         () => worker!.getStatus(),
+        undefined,
+        () => config,
       );
       signals.start();
       backtests = new BacktestWorker(context, records, {

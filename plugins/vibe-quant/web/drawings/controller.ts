@@ -39,6 +39,7 @@ export class DrawingController {
   private readonly localKey: string;
   private readonly sharedKey: string;
   private defaultCrossPeriod = false;
+  private enabled = true;
 
   constructor(
     private chart: IChartApi,
@@ -93,6 +94,15 @@ export class DrawingController {
   updateBars(bars: Bar[]) {
     this.primitive.bars = bars;
     this.primitive.refresh();
+  }
+
+  setEnabled(enabled: boolean) {
+    this.enabled = enabled;
+    if (!enabled) {
+      this.cancel();
+      this.primitive.selected = null;
+      this.publish();
+    }
   }
 
   setTool(tool: DrawingTool) {
@@ -281,6 +291,7 @@ export class DrawingController {
   }
 
   private down = (event: PointerEvent) => {
+    if (!this.enabled) return;
     if (event.button !== 0 || this.pointer !== null) return;
     const point = this.point(event);
     if (!this.inPane(point) || !this.primitive.bars.length) return;
@@ -349,6 +360,7 @@ export class DrawingController {
   };
 
   private move = (event: PointerEvent) => {
+    if (!this.enabled) return;
     const point = this.point(event);
     if (this.drag && event.pointerId === this.pointer) {
       event.preventDefault();
@@ -501,6 +513,7 @@ export class DrawingController {
   };
 
   private keydown = (event: KeyboardEvent) => {
+    if (!this.enabled) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       this.cancel();

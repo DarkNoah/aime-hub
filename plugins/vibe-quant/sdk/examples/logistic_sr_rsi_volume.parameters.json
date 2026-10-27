@@ -1,0 +1,19 @@
+{
+  "symbol": "KQ.m@CFFEX.IM",
+  "duration": 300,
+  "pivot_length": 14,
+  "target_respects": 3,
+  "probability_threshold": 0.7,
+  "rsi_filter": true,
+  "rsi_length": 14,
+  "long_rsi_max": 50,
+  "short_rsi_min": 50,
+  "volume_filter": true,
+  "volume_length": 20,
+  "volume_ratio": 1.2,
+  "stop_atr_buffer": 0.5,
+  "reward_risk_ratio": 1.5,
+  "quantity": 1,
+  "max_entries_per_day": 2,
+  "deadline": "14:45"
+}

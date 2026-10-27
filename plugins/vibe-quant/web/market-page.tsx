@@ -428,15 +428,16 @@ export function MarketPage({ pluginId }: PluginPageProps) {
           {item ? (
             <>
               <MarketChartPanel
-                toolbarActions={
+                toolbarActions={(replay) => (
                   <StrategyHints
                     key={`${status?.engine}:${selected}`}
                     pluginId={pluginId}
                     instrument={item}
                     hints={hints}
                     onJumpToEntry={marketBars.navigate}
+                    replay={replay}
                   />
-                }
+                )}
                 strategyHints={hints.items}
                 view={marketBars}
                 identity={identity}

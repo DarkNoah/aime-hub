@@ -14,6 +14,13 @@ export const dateTime = (value: number | string | null | undefined) =>
         { timeZone: 'Asia/Shanghai', hour12: false },
       );
 const errors: Record<string, string> = {
+  TQ_ACTUAL_FUTURES_ONLY:
+    '天勤回测仅支持期货实际合约，如 CFFEX.IM2611；暂不支持主连和点数模式',
+  TQ_AUTH_REQUIRED: '请先在插件设置中配置天勤账号和密码',
+  TQ_OPTIMIZATION_UNSUPPORTED: '天勤引擎暂不支持参数调优，请选择内置回测',
+  TQ_CALENDAR_UNSUPPORTED: '天勤回测使用供应商交易日历，请移除自定义日历',
+  TQ_BENCHMARK_UNSUPPORTED:
+    '天勤回测的基准暂仅支持与交易标的相同的合约，或留空',
   STRATEGY_CONFLICT:
     '草稿已在其他窗口更新。当前内容仍保留，请先复制，再重新载入。',
   UNSUPPORTED_INSTRUMENT: '行情目录中未找到该标的，或当前 SDK 尚不支持该类别',

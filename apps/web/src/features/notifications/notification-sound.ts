@@ -8,9 +8,12 @@ type AudioState = {
 };
 let audio: AudioState | undefined;
 const frequencies: Record<NotificationSound, readonly number[]> = {
-  entry: [660, 880],
-  exit: [880, 660],
+  entry: [660, 880, 660, 880, 660, 880],
+  exit: [880, 660, 880, 660, 880, 660],
 };
+const noteSpacing = 0.32;
+const noteDuration = 0.28;
+const peakGain = 0.24;
 const freshFor = 30_000;
 
 function audioConstructor() {
@@ -79,14 +82,15 @@ function playTone(sound: NotificationSound): SoundResult {
   const start = Math.max(context.currentTime + 0.01, state.nextTime);
   try {
     frequencies[sound].forEach((frequency, index) => {
-      const at = start + index * 0.18;
+      const at = start + index * noteSpacing;
       const oscillator = context.createOscillator();
       const gain = context.createGain();
-      oscillator.type = 'sine';
+      oscillator.type = 'triangle';
       oscillator.frequency.setValueAtTime(frequency, at);
       gain.gain.setValueAtTime(0.0001, at);
-      gain.gain.exponentialRampToValueAtTime(0.08, at + 0.012);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.15);
+      gain.gain.exponentialRampToValueAtTime(peakGain, at + 0.02);
+      gain.gain.setValueAtTime(peakGain, at + 0.17);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + noteDuration);
       oscillator.connect(gain);
       gain.connect(context.destination);
       state.nodes.add(oscillator);
@@ -96,9 +100,9 @@ function playTone(sound: NotificationSound): SoundResult {
         state.nodes.delete(oscillator);
       };
       oscillator.start(at);
-      oscillator.stop(at + 0.16);
+      oscillator.stop(at + noteDuration + 0.01);
     });
-    state.nextTime = start + 0.4;
+    state.nextTime = start + frequencies[sound].length * noteSpacing + 0.12;
     return 'played';
   } catch {
     clearNotes(state);
@@ -110,6 +114,11 @@ export async function previewNotificationSound(
   sound: NotificationSound,
 ): Promise<boolean> {
   return (await enableNotificationSound()) && playTone(sound) === 'played';
+}
+
+/** Use an already unlocked audio context for a local, explicitly requested replay. */
+export function playNotificationSound(sound: NotificationSound): SoundResult {
+  return playTone(sound);
 }
 
 /** One authenticated page listener. Web Locks serialize claims across open tabs. */

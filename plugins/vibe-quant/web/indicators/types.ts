@@ -49,9 +49,31 @@ export interface IndicatorPlot {
   lineWidth?: 1 | 2 | 3 | 4;
   data: IndicatorPoint[];
   zeroLine?: boolean;
+  referenceLines?: { value: number; color: string }[];
+  /** Decorations attached to this plot's pane and value scale. */
+  overlay?: IndicatorPlotOverlay;
 }
 
-/** Native price-pane drawings; coordinates are indices in the loaded bar window. */
+export type IndicatorFill = {
+  color: string;
+  gradient?: {
+    top: number;
+    bottom: number;
+    topColor: string;
+    bottomColor: string;
+  };
+} & (
+  | { kind: 'band'; top: number; bottom: number }
+  | { kind: 'area'; data: { index: number; upper?: number; lower?: number }[] }
+);
+
+export interface IndicatorPlotOverlay {
+  drawings: IndicatorDrawing[];
+  fills: IndicatorFill[];
+  valueRange?: { min: number; max: number };
+}
+
+/** Series-pane drawings; coordinates are indices in the loaded bar window. */
 export interface IndicatorDrawing {
   id: string;
   kind: 'line' | 'box' | 'label';
@@ -65,6 +87,8 @@ export interface IndicatorDrawing {
   border?: boolean;
   extendRight?: boolean;
   text?: string;
+  /** Optional filled background for compact event badges. */
+  labelBackground?: string;
   labelIndex?: number;
   /** Keep live strategy labels inside the price pane. */
   clampLabel?: boolean;
@@ -89,6 +113,7 @@ export interface IndicatorDefinition {
   defaultVisible: boolean;
   requiresCandles?: boolean;
   priceFormat?: 'price' | 'volume' | 'oscillator';
+  precision?: number;
   paneWeight?: number;
   validate?: (parameters: IndicatorParameters) => string | undefined;
   render: (

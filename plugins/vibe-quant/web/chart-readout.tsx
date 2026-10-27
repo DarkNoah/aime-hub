@@ -12,10 +12,12 @@ export interface ChartReadoutHandle {
 export function ChartReadout({
   bars,
   priceTick,
+  replay = false,
   ref,
 }: {
   bars: Bar[];
   priceTick: number;
+  replay?: boolean;
   ref: Ref<ChartReadoutHandle>;
 }) {
   const [selection, setSelection] = useState<number | 'latest' | 'empty'>(
@@ -65,7 +67,13 @@ export function ChartReadout({
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
         <div className="flex basis-full items-center gap-2 @min-[780px]/readout:basis-auto">
           <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
-            {bar ? (selection === 'latest' ? '最新' : '指针') : '暂无数据'}
+            {bar
+              ? selection === 'latest'
+                ? replay
+                  ? '回放'
+                  : '最新'
+                : '指针'
+              : '暂无数据'}
           </Badge>
           <time
             dateTime={

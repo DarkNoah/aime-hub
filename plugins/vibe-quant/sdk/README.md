@@ -1,12 +1,36 @@
 # Quant Strategy SDK · 0.1
 
-独立的 Python 包 `quant_sdk`，提供 `data`、`backtest`、`live` 三个接口。策略只依赖 SDK；历史回测和实时计算共用 `Strategy`、`Context`、事件循环及模拟成交器。SDK 数据接口只提供数据；策略管理的后台回测由独立 Python 进程执行管理员提交的固定版本。
+独立的 Python 包 `quant_sdk`，提供 `data`、`backtest`、`live` 三个接口。策略只依赖 SDK；内置历史回测和实时计算共用 `Strategy`、`Context`、事件循环及模拟成交器。策略管理另外支持 TqBacktest + TqSim 历史回测，沿用相同策略回调。后台回测由独立 Python 进程执行管理员提交的固定版本。
+
+## 天勤历史回测
+
+页面选择「天勤回测」，或通过 HTTP/Agent 提交 `backtest_engine="tqsdk"`。不传此字段的历史配置仍使用内置引擎。首版仅支持单个期货实际合约（例如 `CFFEX.IM2611`、`SHFE.rb2701`），可手工输入已到期合约；不支持主连映射、多合约、股票、点数模式或 Optuna 调优。基准只能留空或使用同一合约。需要在插件设置中配置天勤账号，并具备相应历史数据权限。
+
+- 保留 `Strategy` 的 `on_start/on_ready/on_bar/on_quote/on_order/on_fill/on_stop`、`ctx.state`、`history`、目标净持仓、撤单及 `RiskLevels`。策略在同一实际合约上订阅周期；新订阅的历史窗口仅作预热，不补发历史交易信号。硬编码主连的策略仍须改成实际合约或读取 `ctx.params['symbol']`。
+- TqApi + TqBacktest 推进行情，TqSim 决定委托、成交、资金、保证金和结算。订单使用对手价加 `slippage_ticks` 的限价（受涨跌停边界限制）；目标反向持仓先平再开，上期所/能源中心区分平今和平昨。等待撤单回报后再执行替代目标，竞态中已经发生的成交仍记入结果。
+- `tq_options.commission_per_lot` 与 `margin_per_lot` 分别覆盖每手单边手续费、每手保证金（元）。留空优先继承插件 `tqSimCommissionPerLot` / `tqSimMarginPerLot`，插件未设置时使用天勤默认，任务创建时冻结配置、实际取值写入报告；不是历史费率表。`rules`、`participation_rate` 不用于天勤账户，服务端保存其规范占位值；界面只展示天勤实际规则。`instrument.margin_rate` 为初始化时的隐含比例，账户保证金始终取自 TqSim。
+- K 线只在收盘后交给策略；预热窗口最多 2000 根/周期，运行中历史窗口沿用 SDK 上限。分钟收盘事件时间保留天勤微秒精度，成交图标按所属分钟定位。TqSim 不产生部分成交；保护单按收到的报价最新价触发，再由 TqSim 撮合，不能还原 K 线内部触发路径，不能与内置 OHLC 止损口径视为相同。
+- 每笔成交保留原生委托/成交 ID；平仓按 FIFO 关联开仓信号，资金曲线来自原生账户。结果、行情快照、风险线、未平仓展示、交易图表和导出沿用现有格式。快照用于核对数据，不保证脱离天勤服务重新运行 TqSim 得到同样结果；一次性历史回测不支持检查点恢复；行情策略的持续模拟账户支持下述恢复机制。
+- 每次任务有独立 TqSim 账户、15 分钟上限、50 万根 K 线与产物大小限制。凭证只从父进程管道传入，不进入任务参数、命令行、环境变量或回测产物；任务取消会终止整个进程组。
+
+内置回测仍保留原有费用、成交量、主连模拟、点数回测及调优能力。
 
 历史点数回测使用 `RunConfig(pnl_mode="points", point_cost=0)`。每个标的目标仓位归一为 `-1 / 0 / 1`，按价格点差累计盈亏，`point_cost` 为开仓、平仓各扣一次的点数成本；资金、乘数、保证金、成交量、T+1 及股票裸空限制不参与模拟，滑点与保护性止盈止损仍生效。此模式不能用于 `paper` 或 `monitor`。页面选择 `execution_model="points"` 会准备对应的历史快照，支持指数和不做换月映射的主连。结果 `pnl_unit="points"`，`equity_curve.equity` 从 0 开始表示累计点数，`benchmark_equity` 表示基准价格涨跌点数；资金收益率、年化和夏普等返回 `null`。
 
 策略 `ctx.state` 支持 JSON 类型以及嵌套的 Python `date` / `datetime`；检查点使用带版本的类型编码，恢复后保留日期类型。其他自定义对象仍需由策略转换为可保存的数据。
 
-插件页面已提供脚本、版本、回测记录及交易行情回放。Optuna、通知 UI 和真实委托适配器尚未接入。
+插件页面已提供脚本、版本、回测记录、交易行情回放与内置引擎的 Optuna 调优。天勤回测只构造 TqSim 模拟账户。
+
+## 行情策略的 TqSim 模拟引擎
+
+行情「添加策略」可选 `simulation_engine="tqsdk"`。`symbol` 自动填入当前图表，可改为其他标的；`display_symbol` / `display_engine` 记录显示位置。例如在 `KQ.m@CFFEX.IM` 分别绑定 `CFFEX.IM2611`、`CFFEX.IM2612`，或在 `SZSE.000852` 绑定内置引擎的 `KQ.m@CFFEX.IM`。跨标的信号按时间显示并标明来源，不把其他标的的风险价格画在当前价格轴。天勤引擎仍仅支持单个期货实际合约。
+
+- 初次启动使用 `TqApi + TqBacktest + TqSim` 回放历史，默认从最近十年前开始读取合约可用历史，可指定 `history_start`。随后切换到 `TqApi + TqSim`，沿用账户、持仓、委托与策略 `ctx.state`。信号来自确认的原生成交，历史计算期间不发送过期通知。
+- 原生委托、成交、交易记录、账户摘要写入 ClickHouse `quant_signal_history`（摘要使用 `kind=summary`）；账户和策略检查点写入 `quant_signal_checkpoints`。先保存含待投递记录的检查点，再发布记录，以稳定 ID 去重。存储失败会重试同一批记录。
+- 重启恢复已有账户和挂单；未发到 TqSim 的委托意图使用原 ID 重发，未确认撤单会再次撤销。停机期间行情只用于预热，不补造离线成交。历史转实时和重启不会人为执行一次日结；真实换日仍由 TqSim 处理。
+- TqSdk 没有公开的完整状态保存接口，因此 `tq_persistence.py` 隔离适配内部状态并严格限定 `tqsdk==3.10.2`，不修改依赖包。升级 SDK 或策略运行时前需验证/迁移检查点；不兼容状态会明确报错，不能自动重置账户。
+- 绩效直接读取 `TqSim.tqsdk_stat`；持续运行中通过天勤自身 `TqReport` 生成同口径指标，保留 `native_metrics` 和 `metrics_source`。年化/回撤/胜率采用天勤定义，胜率按平仓手数、毛盈亏统计，持平计为盈利。`profit_loss_ratio` 是天勤盈亏额比例，不伪装成内置 `profit_factor`；不支持的指标显示为空。
+- 历史记录、账户曲线与交易图表沿用现有展示。交互式逐根重新计算目前仅支持内置引擎，天勤任务会明确提示不支持，避免用不同撮合器生成结果。此模式仅构造 TqSim，不连接实盘交易账户。
 
 ## 安装与离线验证
 

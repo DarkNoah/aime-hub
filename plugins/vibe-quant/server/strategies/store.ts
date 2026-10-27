@@ -30,7 +30,7 @@ export type StoredStrategy = Omit<StrategySummary, 'status'> & {
   user_id: string;
   draft_hash: string;
   draft_parameters: Record<string, unknown>;
-  versions: Omit<StrategyVersion, 'source'>[];
+  versions: StoredVersion[];
 };
 export type StoredRun = BacktestRun & {
   /** Submitter attribution and per-user queue limit, not an access boundary. */
@@ -39,6 +39,17 @@ export type StoredRun = BacktestRun & {
   heartbeat_at: string | null;
 };
 type RecordRow = { payload: string; revision: string | number };
+type StoredVersion = Omit<StrategyVersion, 'source'> & { deleted_at?: string };
+const runMetrics = (
+  metrics?: Record<string, unknown>,
+): NonNullable<BacktestRun['metrics']> => {
+  const finite = (value: unknown) =>
+    typeof value === 'number' && Number.isFinite(value) ? value : null;
+  return {
+    profit_factor: finite(metrics?.profit_factor),
+    sharpe: finite(metrics?.sharpe),
+  };
+};
 const active = (run: BacktestRun) =>
   ['queued', 'preparing', 'running'].includes(run.status);
 const iso = () => new Date().toISOString();
@@ -247,10 +258,11 @@ export class StrategyStore extends ClickHouseClient {
 
   async versions(_actor: string, id: string): Promise<StrategyVersion[]> {
     const row = await this.storedStrategy(id);
+    const versions = row.versions.filter((v) => !v.deleted_at);
     const sources = await this.sources.readMany(
-      row.versions.map((v) => v.source_hash),
+      versions.map((v) => v.source_hash),
     );
-    return [...row.versions]
+    return versions
       .sort((a, b) => b.number - a.number)
       .map((version) => {
         const source = sources.get(version.source_hash);
@@ -260,7 +272,11 @@ export class StrategyStore extends ClickHouseClient {
       });
   }
 
-  async version(_actor: string, id: string): Promise<StrategyVersion> {
+  async version(
+    _actor: string,
+    id: string,
+    includeDeleted = false,
+  ): Promise<StrategyVersion> {
     const [row] = await this.rows<{ payload: string }>(
       `SELECT payload FROM ${this.table('quant_strategies')} FINAL
        WHERE arrayExists(v -> JSONExtractString(v, 'id') = {id:String},
@@ -272,8 +288,39 @@ export class StrategyStore extends ClickHouseClient {
       (JSON.parse(row.payload) as StoredStrategy).versions.find(
         (v) => v.id === id,
       );
-    if (!version) throw new StrategyError('VERSION_NOT_FOUND', 404);
+    if (!version || (version.deleted_at && !includeDeleted))
+      throw new StrategyError('VERSION_NOT_FOUND', 404);
     return versionDetail(version, await this.sources.read(version.source_hash));
+  }
+
+  async deleteVersion(
+    _actor: string,
+    id: string,
+    versionId: string,
+    revision: number,
+  ): Promise<StrategySummary> {
+    const row = await this.storedStrategy(id);
+    assertEditable(row);
+    if (row.revision !== revision)
+      throw new StrategyError('STRATEGY_CONFLICT', 409);
+    const version = row.versions.find(
+      (v) => v.id === versionId && !v.deleted_at,
+    );
+    if (!version) throw new StrategyError('VERSION_NOT_FOUND', 404);
+    const now = iso();
+    const versions = row.versions.map((v) =>
+      v.id === versionId ? { ...v, deleted_at: now } : v,
+    );
+    const next: StoredStrategy = {
+      ...row,
+      versions,
+      version_count: versions.filter((v) => !v.deleted_at).length,
+      revision: revision + 1,
+      updated_at: now,
+    };
+    if (!(await this.replace('quant_strategies', next, revision)))
+      throw new StrategyError('STRATEGY_CONFLICT', 409);
+    return summary(next);
   }
 
   async publish(owner: string, id: string, revision: number, note: string) {
@@ -285,7 +332,7 @@ export class StrategyStore extends ClickHouseClient {
     const version: Omit<StrategyVersion, 'source'> = {
       id: randomUUID(),
       strategy_id: id,
-      number: row.version_count + 1,
+      number: row.versions.reduce((max, v) => Math.max(max, v.number), 0) + 1,
       source_hash: row.draft_hash,
       parameters: row.draft_parameters,
       note,
@@ -295,7 +342,7 @@ export class StrategyStore extends ClickHouseClient {
     const next = {
       ...row,
       revision: revision + 1,
-      version_count: version.number,
+      version_count: row.version_count + 1,
       updated_at: iso(),
       versions: [...row.versions, version],
     };
@@ -316,7 +363,9 @@ export class StrategyStore extends ClickHouseClient {
     const strategy = await this.storedStrategy(id);
     assertEditable(strategy);
     if (!strategy.enabled) throw new StrategyError('STRATEGY_DISABLED', 409);
-    const version = strategy.versions.find((v) => v.id === config.version_id);
+    const version = strategy.versions.find(
+      (v) => v.id === config.version_id && !v.deleted_at,
+    );
     if (!version) throw new StrategyError('VERSION_NOT_FOUND', 404);
     const row: StoredRun = {
       id: randomUUID(),
@@ -401,7 +450,30 @@ export class StrategyStore extends ClickHouseClient {
         beforeId: before ?? '',
       },
     );
-    return rows.map((row) => JSON.parse(row.payload));
+    const runs: BacktestRun[] = rows.map((row) => JSON.parse(row.payload));
+    // Old results can be large: read one at a time, then persist the small summary
+    // so subsequent polls do not repeatedly download and decompress artifacts.
+    for (const run of runs) {
+      if (run.status !== 'completed' || run.metrics !== undefined) continue;
+      try {
+        const result = await this.artifact(run.id, 'result');
+        if (!result) continue;
+        run.metrics = runMetrics(JSON.parse(result.text)?.metrics);
+        await this.updateRun(run.id, (current) =>
+          current.status === 'completed' && current.metrics === undefined
+            ? { ...current, metrics: run.metrics }
+            : undefined,
+        );
+      } catch (error) {
+        // A missing/corrupt legacy result must not hide the entire run history.
+        console.warn(
+          '[vibe-quant] 回测列表指标暂不可用',
+          run.id,
+          error instanceof Error ? error.name : 'UnknownError',
+        );
+      }
+    }
+    return runs;
   }
 
   async run(_actor: string, id: string): Promise<BacktestRun> {
@@ -436,7 +508,7 @@ export class StrategyStore extends ClickHouseClient {
       )
     )
       throw new StrategyError('OPTIMIZATION_RESULT_MISSING', 409);
-    const version = await this.version(owner, run.version_id);
+    const version = await this.version(owner, run.version_id, true);
     if (version.source_hash !== run.source_hash)
       throw new Error('策略版本哈希不匹配');
     const original = await this.storedStrategy(run.strategy_id);
@@ -581,6 +653,7 @@ export class StrategyStore extends ClickHouseClient {
     worker: string,
     status: BacktestRun['status'],
     message = '',
+    metrics?: Record<string, unknown>,
   ) {
     await this.updateRun(id, (run) => {
       if (
@@ -593,6 +666,9 @@ export class StrategyStore extends ClickHouseClient {
       return {
         ...run,
         status: cancelled ? 'cancelled' : status,
+        ...(status === 'completed' && !cancelled && metrics
+          ? { metrics: runMetrics(metrics) }
+          : {}),
         message: cancelled ? '用户中止了操作' : message.slice(0, 2000),
         finished_at: ['completed', 'failed', 'cancelled'].includes(status)
           ? iso()

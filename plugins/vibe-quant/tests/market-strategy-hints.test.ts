@@ -478,3 +478,19 @@ test('main-price simulation requests only stored main prices in larger bounded p
     400,
   );
 });
+
+test('cross-symbol markers bind to display chart, retain source prices and omit foreign risk lines', () => {
+  const chartSymbol = 'SZSE.000852';
+  const cross = {
+    ...hint,
+    config: { ...hint.config, display_symbol: chartSymbol },
+    signals: [{ ...hint.signals[0], price: 7001.25 }],
+  };
+  const chart = bars.map((bar) => ({ ...bar, symbol: chartSymbol }));
+  const markers = strategyHintMarkers([cross], chart, 60, 1);
+  assert.equal(markers.length, 1);
+  assert.match(markers[0].text ?? '', /CFFEX.IM2611/);
+  assert.match(markers[0].text ?? '', /7001.25/);
+  assert.equal(strategyHintLines([cross], chartSymbol).length, 0);
+  assert.equal(strategyHintMarkers([cross], bars, 60, 1).length, 0);
+});

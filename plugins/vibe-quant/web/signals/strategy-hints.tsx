@@ -33,6 +33,7 @@ import { StrategyPicker } from './strategy-picker';
 import { strategyNotifications } from '../../strategy-notifications';
 import { StrategyNotificationSettings } from './notification-settings';
 import type { useStrategyHints } from './use-strategy-hints';
+import type { StrategyReplayView } from '../replay/use-strategy-replay';
 
 const HintPerformance = lazy(() =>
   import('./hint-performance').then((module) => ({
@@ -50,11 +51,13 @@ export function StrategyHints({
   instrument,
   hints,
   onJumpToEntry,
+  replay,
 }: {
   pluginId: string;
   instrument: Instrument;
   hints: ReturnType<typeof useStrategyHints>;
   onJumpToEntry: (time: number) => Promise<boolean>;
+  replay?: StrategyReplayView;
 }) {
   const [adding, setAdding] = useState(false);
   const [settings, setSettings] = useState<string>();
@@ -115,15 +118,31 @@ export function StrategyHints({
                     className="min-w-0 flex-1 truncate pr-2 text-xs font-medium"
                     title={`${item.strategy_name} · v${item.version_number} · ${durationLabel(item.config.duration)}${monitorExecutionModel(item.config) === 'points' ? ' · 点数模拟' : monitorExecutionModel(item.config) === 'continuous_price' ? ' · 主连价格模拟' : ''}`}
                   >
-                    {item.strategy_name} · v{item.version_number}
+                    {item.strategy_name} · v{item.version_number} ·{' '}
+                    {item.config.symbol}
+                    {item.config.simulation_engine === 'tqsdk' && (
+                      <Badge variant="secondary" className="ml-1">
+                        TqSim
+                      </Badge>
+                    )}
                   </span>
                   <Badge
                     variant={
-                      item.status === 'error' ? 'destructive' : 'outline'
+                      (replay ? !!replay.error : item.status === 'error')
+                        ? 'destructive'
+                        : 'outline'
                     }
                     className="mr-1 shrink-0"
                   >
-                    {labels[item.status]}
+                    {replay
+                      ? !item.enabled
+                        ? '已暂停'
+                        : replay.pages[item.id]
+                          ? '回放'
+                          : replay.error
+                            ? '计算失败'
+                            : '计算中'
+                      : labels[item.status]}
                   </Badge>
                   <DropdownMenuItem
                     asChild
@@ -134,6 +153,7 @@ export function StrategyHints({
                       size="icon-sm"
                       className="shrink-0"
                       aria-label={`${item.strategy_name} 历史记录`}
+                      disabled={!!replay && !replay.pages[item.id]}
                       title="历史记录"
                     >
                       <ChartNoAxesCombined className="size-3.5" />
@@ -214,7 +234,10 @@ export function StrategyHints({
             pluginId={pluginId}
             item={historical}
             onClose={() => setPerformance(undefined)}
-            onJumpToEntry={onJumpToEntry}
+            onJumpToEntry={replay?.navigate ?? onJumpToEntry}
+            replayPage={
+              replay ? (replay.pages[historical.id] ?? null) : undefined
+            }
           />
         </Suspense>
       )}

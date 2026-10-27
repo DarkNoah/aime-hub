@@ -14,11 +14,6 @@ import {
   Input,
   Label,
   ScrollArea,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Skeleton,
   Switch,
   Table,
@@ -44,6 +39,7 @@ import {
   Settings2,
   SlidersHorizontal,
   Square,
+  Trash2,
   Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -56,11 +52,12 @@ import {
   type StrategySummary,
   type StrategyVersion,
 } from '../../strategy-types';
-import { dateTime, errorText, parseObject } from './format';
+import { dateTime, errorText, number, parseObject } from './format';
 import { RunForm } from './run-form';
 import { ResultView } from './result-view';
 import { OptimizationPanel } from './optimization-panel';
 import { LifecycleActions } from './lifecycle-actions';
+import { VersionSelect } from './version-select';
 
 type EditState = {
   name: string;
@@ -140,6 +137,8 @@ export function StrategyEditor({
   const [moreBusy, setMoreBusy] = useState(false);
   const [retry, setRetry] = useState(0);
   const [publish, setPublish] = useState(false);
+  const [deletingVersion, setDeletingVersion] =
+    useState<StrategyVersion | null>(null);
   const [note, setNote] = useState('');
   const [settings, setSettings] = useState(false);
   const [optimizationOpen, setOptimizationOpen] = useState(false);
@@ -416,20 +415,28 @@ export function StrategyEditor({
           className="data-[state=inactive]:hidden flex min-h-0 flex-1 flex-col"
         >
           <div className="flex flex-wrap items-center gap-2 border-b p-3">
-            <Select value={selectedVersion} onValueChange={setSelectedVersion}>
-              <SelectTrigger className="w-[185px]" aria-label="选择草稿或版本">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="draft">工作草稿</SelectItem>
-                {versions.map((v) => (
-                  <SelectItem key={v.id} value={v.id}>
-                    v{v.number} · {v.note || v.source_hash.slice(0, 8)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="w-full min-w-0 sm:w-80">
+              <VersionSelect
+                versions={versions}
+                value={selectedVersion}
+                onValueChange={setSelectedVersion}
+                includeDraft
+                disabled={busy}
+              />
+            </div>
             <div className="ml-auto flex flex-wrap gap-2">
+              {viewed && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-destructive hover:text-destructive"
+                  disabled={readOnly || busy}
+                  onClick={() => setDeletingVersion(viewed)}
+                >
+                  <Trash2 className="size-3.5" />
+                  删除版本
+                </Button>
+              )}
               {viewed ? (
                 <Button
                   size="sm"
@@ -598,9 +605,35 @@ export function StrategyEditor({
                     >
                       <TableCell className="pl-5">
                         <span className="text-xs">v{item.version_number}</span>
+                        {item.config.backtest_engine === 'tqsdk' && (
+                          <Badge variant="secondary" className="ml-2">
+                            天勤回测
+                          </Badge>
+                        )}
                         <p className="mt-1 font-mono text-xs text-muted-foreground">
                           {item.config.symbol}
                         </p>
+                        {item.status === 'completed' && (
+                          <div
+                            className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums"
+                            aria-label="回测指标"
+                          >
+                            <span>
+                              <span className="text-muted-foreground">PF </span>
+                              <span className="font-medium">
+                                {number(item.metrics?.profit_factor)}
+                              </span>
+                            </span>
+                            <span>
+                              <span className="text-muted-foreground">
+                                夏普{' '}
+                              </span>
+                              <span className="font-medium">
+                                {number(item.metrics?.sharpe)}
+                              </span>
+                            </span>
+                          </div>
+                        )}
                         <p className="mt-1 whitespace-nowrap text-[10px] text-muted-foreground sm:hidden">
                           {dateTime(item.created_at)}
                         </p>
@@ -738,6 +771,66 @@ export function StrategyEditor({
           </ScrollArea>
         </TabsContent>
       </Tabs>
+      {deletingVersion && (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !busy) setDeletingVersion(null);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>删除 v{deletingVersion.number}</DialogTitle>
+              <DialogDescription>
+                删除后该版本将从选择列表移除，不能用于新建回测、调优或策略提示。历史记录和已提交的任务会保留。
+              </DialogDescription>
+            </DialogHeader>
+            {deletingVersion.note && (
+              <p className="line-clamp-3 whitespace-pre-wrap text-sm text-muted-foreground [overflow-wrap:anywhere]">
+                {deletingVersion.note}
+              </p>
+            )}
+            <DialogFooter>
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() => setDeletingVersion(null)}
+              >
+                取消
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={busy}
+                onClick={() =>
+                  void action(async () => {
+                    const next = await pluginRequest<StrategySummary>(
+                      pluginId,
+                      `/strategies/${record.id}/versions/${deletingVersion.id}`,
+                      {
+                        method: 'DELETE',
+                        body: JSON.stringify({ revision: baseRevision }),
+                      },
+                    );
+                    setRecord((old) => ({ ...old, ...next }));
+                    setBaseRevision(next.revision);
+                    onUpdate(next);
+                    setVersions((old) =>
+                      old.filter((v) => v.id !== deletingVersion.id),
+                    );
+                    setSelectedVersion((old) =>
+                      old === deletingVersion.id ? 'draft' : old,
+                    );
+                    setDeletingVersion(null);
+                    toast.success(`v${deletingVersion.number} 已删除`);
+                  })
+                }
+              >
+                {busy ? '删除中…' : '删除版本'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
       {reloadDraft && (
         <Dialog open onOpenChange={setReloadDraft}>
           <DialogContent>
@@ -847,7 +940,7 @@ export function StrategyEditor({
         >
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>发布 v{record.version_count + 1}</DialogTitle>
+              <DialogTitle>发布新版本</DialogTitle>
               <DialogDescription>
                 保存当前草稿并创建固定版本。后续编辑不影响这个版本和它的回测记录。
               </DialogDescription>

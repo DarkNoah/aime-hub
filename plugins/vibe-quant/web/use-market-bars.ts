@@ -286,6 +286,12 @@ export function useMarketBars({
 
   return {
     ...(view.identity === identity ? view : emptyView(identity)),
+    replaySource: {
+      pluginId,
+      symbol,
+      duration,
+      path: barsPath ?? `/bars?symbol=${encodeURIComponent(symbol)}`,
+    },
     navigate,
     loadMore,
   };

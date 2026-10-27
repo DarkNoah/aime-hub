@@ -1,5 +1,5 @@
 import type { MarketStrategyHint } from '../../signal-types';
-import type { ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import {
   Button,
   ScrollArea,
@@ -34,11 +34,46 @@ import { IndicatorControls } from '../indicators/indicator-controls';
 import { useIndicators } from '../indicators/use-indicators';
 import type { useMarketBars } from '../use-market-bars';
 import type { VolumeProfileSource } from '../indicators/main/volume-profile/use-volume-profile';
+import { useCandleReplay } from '../replay/use-candle-replay';
+import { ReplayControls } from '../replay/controls';
+import { replayStrategyKey } from '../replay/strategy-state';
+import {
+  useStrategyReplay,
+  type StrategyReplayView,
+} from '../replay/use-strategy-replay';
+import { ReplayStrategies } from '../replay/strategy-status';
+import { useReplayNotifications } from '../replay/use-replay-notifications';
 
 export type ChartBarsView = ReturnType<typeof useMarketBars>;
 
 /** The complete center chart workspace, shared by market quotes and frozen trade replay. */
-export function MarketChartPanel({
+export function MarketChartPanel(props: MarketChartPanelProps) {
+  return (
+    <ChartWorkspace
+      key={`${props.view.identity}:${props.view.windowRevision}`}
+      {...props}
+    />
+  );
+}
+
+interface MarketChartPanelProps {
+  view: ChartBarsView;
+  identity: string;
+  drawingSharedScope: string;
+  period: ChartPeriod;
+  onPeriodChange: (period: ChartPeriod) => void;
+  priceTick: number;
+  trade?: TradeRecord;
+  markerTimes?: TradeReplay['markerTimes'];
+  riskLevels?: readonly RiskLevelRecord[];
+  strategyHints?: readonly MarketStrategyHint[];
+  toolbarActions?: ReactNode | ((replay?: StrategyReplayView) => ReactNode);
+  volumeProfileSource?: VolumeProfileSource;
+  latestLabel?: string;
+  emptyHint?: string;
+}
+
+function ChartWorkspace({
   view,
   identity,
   drawingSharedScope,
@@ -53,26 +88,51 @@ export function MarketChartPanel({
   volumeProfileSource,
   latestLabel = '最新行情',
   emptyHint = '首次订阅需要加载历史数据。请确认当前引擎具备此标的行情权限。',
-}: {
-  view: ChartBarsView;
-  identity: string;
-  drawingSharedScope: string;
-  period: ChartPeriod;
-  onPeriodChange: (period: ChartPeriod) => void;
-  priceTick: number;
-  trade?: TradeRecord;
-  markerTimes?: TradeReplay['markerTimes'];
-  riskLevels?: readonly RiskLevelRecord[];
-  strategyHints?: readonly MarketStrategyHint[];
-  toolbarActions?: ReactNode;
-  volumeProfileSource?: VolumeProfileSource;
-  latestLabel?: string;
-  emptyHint?: string;
-}) {
+}: MarketChartPanelProps) {
   const indicators = useIndicators();
+  const scope = useRef<HTMLDivElement>(null);
+  const [picking, setPicking] = useState(false);
+  const [replayNotifications, setReplayNotifications] = useState(true);
   const intraday = period === 'intraday';
   const duration = intraday ? 60 : period;
-  const { bars, loading } = view;
+  const { loading } = view;
+  const selectedStrategies = strategyHints ?? EMPTY_STRATEGIES;
+  const strategyKey = replayStrategyKey(selectedStrategies);
+  const replay = useCandleReplay(
+    view.replaySource,
+    view.bars,
+    view.hasAfter,
+    strategyKey,
+  );
+  const strategies = useStrategyReplay({
+    pluginId: view.replaySource.pluginId,
+    session: replay.session,
+    duration,
+    hints: selectedStrategies,
+    strategyKey,
+    markReady: replay.markReady,
+    pause: replay.pause,
+  });
+  const { bars } = replay;
+  const replaying = !!replay.session;
+  const strategyView: StrategyReplayView | undefined = replaying
+    ? {
+        ...strategies,
+        navigate: async (time) => {
+          const success = replay.seekTime(time);
+          if (!success)
+            toast.error('该入场时间早于本次回放已加载范围，请重新定位回放起点');
+          return success;
+        },
+      }
+    : undefined;
+  useReplayNotifications(
+    replay.session,
+    duration,
+    strategies.pages,
+    selectedStrategies,
+    replayNotifications && !picking,
+  );
   function changePeriod(value: string) {
     const next = parseChartPeriod(value);
     onPeriodChange(next);
@@ -82,7 +142,17 @@ export function MarketChartPanel({
       });
   }
   return (
-    <>
+    <div
+      ref={scope}
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
+      onKeyDownCapture={(event) => {
+        if (event.key === 'Escape' && picking) {
+          event.preventDefault();
+          event.stopPropagation();
+          setPicking(false);
+        }
+      }}
+    >
       <div className="@container/chart-toolbar min-w-0 border-b px-3 py-2">
         <ScrollArea viewportProps={{ className: '[&>div]:block!' }}>
           <div className="flex w-max min-w-full items-center gap-2">
@@ -109,7 +179,9 @@ export function MarketChartPanel({
               onVisibleChange={indicators.setVisible}
               onParametersChange={indicators.setParameters}
             />
-            {toolbarActions}
+            {typeof toolbarActions === 'function'
+              ? toolbarActions(strategyView)
+              : toolbarActions}
           </div>
           <ScrollBar orientation="horizontal" />
         </ScrollArea>
@@ -122,12 +194,21 @@ export function MarketChartPanel({
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
         <MarketChart
           bars={bars}
-          identity={`${identity}:${view.windowRevision}`}
+          identity={`${identity}:${view.windowRevision}:${replay.session?.id ?? 'market'}`}
           drawingScope={identity}
           drawingSharedScope={drawingSharedScope}
-          targetTime={view.targetTime}
-          historical={view.historical}
-          onLoadMore={view.loadMore}
+          targetTime={replaying ? null : view.targetTime}
+          historical={replaying || view.historical}
+          onLoadMore={replaying || replay.loading ? undefined : view.loadMore}
+          replay={replaying}
+          onSelectReplayTime={
+            picking
+              ? (time) => {
+                  replay.selectTime(time);
+                  setPicking(false);
+                }
+              : undefined
+          }
           duration={duration}
           intraday={intraday}
           priceTick={priceTick}
@@ -135,7 +216,7 @@ export function MarketChartPanel({
           trade={trade}
           markerTimes={markerTimes}
           riskLevels={riskLevels}
-          strategyHints={strategyHints}
+          strategyHints={replaying ? strategies.items : strategyHints}
           volumeProfileSource={volumeProfileSource}
         />
         {!bars.length && (
@@ -157,59 +238,86 @@ export function MarketChartPanel({
         )}
       </div>
       {!intraday && (
-        <div
-          className="flex flex-wrap items-center gap-2 border-t px-3 py-2"
-          aria-label="K 线导航"
-        >
-          <DateJump
-            key={identity}
-            defaultTime={view.targetTime ?? bars.at(-1)?.time}
-            duration={duration}
-            loading={loading}
-            onJump={view.navigate}
-          />
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={loading}
-            onClick={() => void view.navigate(null)}
-          >
-            <LocateFixed className="size-4" />
-            {latestLabel}
-          </Button>
-          <div className="ml-auto flex items-center gap-1">
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label="加载更早行情"
-              disabled={
-                loading || !bars.length || !view.hasBefore || view.beforeLoading
-              }
-              onClick={() => void view.loadMore('before')}
-            >
-              <ArrowLeft className="size-4" />
-            </Button>
-            <span role="status" className="text-xs text-muted-foreground">
-              {view.beforeLoading
-                ? '正在加载更早行情…'
-                : view.afterLoading
-                  ? '正在加载后续行情…'
-                  : '拖动到边缘自动加载'}
-            </span>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label="加载后续行情"
-              disabled={
-                loading || !bars.length || !view.hasAfter || view.afterLoading
-              }
-              onClick={() => void view.loadMore('after')}
-            >
-              <ArrowRight className="size-4" />
-            </Button>
-          </div>
-        </div>
+        <ReplayControls
+          replay={replay}
+          duration={duration}
+          picking={picking}
+          onPickingChange={setPicking}
+          scope={scope}
+          disabled={loading || !bars.length}
+          defaultTime={
+            view.targetTime ?? bars[Math.max(0, bars.length - 100)]?.time
+          }
+          historical={!!trade}
+          linkedStrategies={!!strategyKey}
+          navigation={
+            <>
+              <DateJump
+                key={identity}
+                defaultTime={view.targetTime ?? bars.at(-1)?.time}
+                duration={duration}
+                loading={loading}
+                onJump={view.navigate}
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={loading}
+                onClick={() => void view.navigate(null)}
+              >
+                <LocateFixed className="size-4" />
+                {latestLabel}
+              </Button>
+              <div className="ml-auto flex items-center gap-1">
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="加载更早行情"
+                  disabled={
+                    loading ||
+                    !bars.length ||
+                    !view.hasBefore ||
+                    view.beforeLoading
+                  }
+                  onClick={() => void view.loadMore('before')}
+                >
+                  <ArrowLeft className="size-4" />
+                </Button>
+                <span role="status" className="text-xs text-muted-foreground">
+                  {view.beforeLoading
+                    ? '正在加载更早行情…'
+                    : view.afterLoading
+                      ? '正在加载后续行情…'
+                      : '拖动到边缘自动加载'}
+                </span>
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="加载后续行情"
+                  disabled={
+                    loading ||
+                    !bars.length ||
+                    !view.hasAfter ||
+                    view.afterLoading
+                  }
+                  onClick={() => void view.loadMore('after')}
+                >
+                  <ArrowRight className="size-4" />
+                </Button>
+              </div>
+            </>
+          }
+        />
       )}
-    </>
+      {strategyView && !!strategyKey && (
+        <ReplayStrategies
+          view={strategyView}
+          notifications={replayNotifications}
+          onNotificationsChange={setReplayNotifications}
+        />
+      )}
+    </div>
   );
 }
+
+const EMPTY_STRATEGIES: MarketStrategyHint[] = [];

@@ -28,6 +28,8 @@ const schema = z
     newsFailureThreshold: z.number().int().min(1).max(20).default(3),
     tqUser: z.string().default(''),
     tqPassword: z.string().default(''),
+    tqSimCommissionPerLot: z.number().finite().nonnegative().optional(),
+    tqSimMarginPerLot: z.number().finite().positive().optional(),
     tushareToken: z.string().default(''),
     tdxServers: z.string().default(''),
     tdxTradeStockHost: z.ipv4().default('124.71.187.122'),

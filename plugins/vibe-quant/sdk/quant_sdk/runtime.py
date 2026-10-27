@@ -289,6 +289,9 @@ class Runner:
                                  'trading_day': self.broker.trading_day}})
         return path
 
+    def performance(self):
+        return summarize(self.curve, self.broker.trades, self.config)
+
     def finish(self, status: str = 'succeeded', message: str = '') -> dict:
         if self.finished:
             return self.result
@@ -306,7 +309,7 @@ class Runner:
             self.status, self.message = 'failed', f'Output delivery failed: {type(error).__name__}'
         self.result = {'schema_version': 1, 'run_id': self.run_id, 'status': self.status, 'message': self.message,
                        'pnl_unit': 'points' if self.broker.points else 'currency',
-                       **summarize(self.curve, self.broker.trades, self.config),
+                       **self.performance(),
                        'equity_curve': self.curve, 'trades': self.broker.trades,
                        'orders': [asdict(o) for o in self.broker.orders], 'fills': self.broker.fills,
                        'signals': self.signals, 'risk_levels': self.risk_levels,

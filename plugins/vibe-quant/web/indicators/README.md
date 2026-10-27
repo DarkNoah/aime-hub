@@ -8,6 +8,24 @@ SMC 智能资金参照 stock-rl 的 `src/lib/smc` 移植，默认显示，入口
 
 计算、默认参数和绘图改编自 stock-rl 对 Smart Money Concepts [LuxAlgo] 的移植，© LuxAlgo，依据 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) 发布该改编。这里调整了时间桶、参数表单和渲染器接入，保留来源署名。
 
+## RSI
+
+入口为「副图指标 → RSI」，默认关闭。按用户提供的 Pine Script v6 移植，原稿保存在 `sub/rsi/source.pine`。默认 RSI(14)、收盘价来源及 SMA(14) 平滑线；提供无平滑、SMA、SMA + 布林带、EMA、SMMA / RMA、WMA、VWMA 七种选择。周期、来源、背离开关、布林带倍数、填充、线宽和颜色均可配置并本地保存。副图显示 70 / 50 / 30 参考线、紫色背景及超买 / 超卖渐变，数值保留两位小数，基础范围 0–100，布林带超出范围时自动扩展。
+
+RSI 使用 Wilder RMA，等待完整周期的价格变化后输出，不用零填补预热值。保留原稿先判断下跌均值为零的顺序，因此连续持平时 RSI 为 100。SMA / RMA / WMA / VWMA 平滑等待完整有效窗口；EMA 从首个有效 RSI 初始化。VWMA 使用 K 线成交量，窗口成交量为零时留空。布林带使用总体标准差及默认 2 倍宽度。
+
+常规背离默认关闭。开启后显示 RSI 更高低点 + 价格更低低点的 Bull，或 RSI 更低高点 + 价格更高高点的 Bear。左右各 5 根确认，严格保留原稿 `_inRange(plFound[1])` / `_inRange(phFound[1])` 的位移，所以相邻同类拐点间隔为 6–61 根；标记回画到确认前 5 根的拐点。历史补齐或末根行情修订会重算和撤回不再成立的信号。仅绘制标记，不发送策略通知；尚未进行 TradingView 同源逐根对照。
+
+## 逻辑回归支撑阻力
+
+入口为「主图指标 → 逻辑回归支撑阻力」，默认关闭，设置与显示状态沿用本地保存。根据用户提供的 **Support and Resistance Logistic Regression | Flux Charts** 移植，© fluxchart，改编文件遵循 [MPL-2.0](https://mozilla.org/MPL/2.0/)，原稿保存在 `main/logistic-sr/source.pine`。支持预测概率、有效触碰 R、突破 B、远线过滤、线型、线宽及独立线条 / 触碰文字配色；分时图暂不显示。R/B 仅作图表标记，不发送策略通知。
+
+默认左右各 14 根确认拐点、目标有效触碰 3 次、概率阈值 0.7。RSI 与 ATR 使用 Wilder 平滑；实体大小取拐点 K 线，比较对象取确认 K 线的 ATR。保留原稿的 ±1 训练标签、固定偏置 1、学习率 0.008、`p + loss` 更新，以及将新拐点加入训练后再预测的顺序；损失用代数等价的稳定表达式避免 `log(0)`。这不是标准逻辑回归梯度，显示值也不是经验证的交易胜率。周期最小为 1，因为原稿允许的 0 无法用于 RSI / ATR。
+
+影线严格穿过价位且收盘收回才计有效触碰；冷却只约束 R 标记（距离前次标记需大于 3 根），不影响训练计数。穿过后收盘等于或越过价位则终止该线；未突破线延伸到最新 K 线，距最新收盘超过 7 ATR 时可隐藏。显示最多 500 条线及 500 个标签，计算仍保留所有已加载拐点。拐点确认后回画至起点，概率在确认时固定；加载更早历史会重新训练。
+
+行情接口没有 Pine 的收盘确认标志。本移植沿用现有指标的全量重算方式，末根 K 线的触碰、突破及拐点在盘中可能出现或撤回；与原稿仅在 `barstate.isconfirmed` 更新触碰 / 突破的实时行为有区别（[Pine bar states](https://www.tradingview.com/pine-script-docs/concepts/bar-states/)）。尚未进行 TradingView 同源逐根对照。
+
 ## 成交量分布
 
 成交量分布入口为「主图指标 → 成交量分布」，默认关闭。保留 stock-rl 的 30 个价格档、70% 价值区间、固定范围（5/15/30 分钟、1–5 小时、1/2/3/5 天）和默认隐藏当前未完成区间。横向分布占区间宽度的 42%，显示 POC、VAH、VAL、VWAP；POC 并列取较低价格档，价值区间从 POC 向成交量较大的邻档扩展，并列向上。设置沿用统一弹窗及本地保存。
@@ -34,6 +52,7 @@ SMC 智能资金参照 stock-rl 的 `src/lib/smc` 移植，默认显示，入口
 - `requiresCandles`：只在 K 线视图显示，分时菜单禁用但保留已保存设置。
 - `priceFormat` / `paneWeight`：价格精度类型、初始副图高度权重。
 - `render(bars, parameters)`：计算与显示逻辑，返回具有稳定 ID 的折线/柱状图配置及数据。数据按时间升序，预热不足时省略 `value`，不要填入零值。
+- `precision`：可选的指标数值精度。每个 plot 支持 `referenceLines` 及 `overlay`，用于自己的副图坐标系中的参考线、绘图、填充和基础数值范围。
 - `renderOverlay(bars, parameters, duration, context)`：可选，返回线段、矩形、标签、蜡烛颜色和提示。绘图横坐标使用当前历史窗口内的逻辑索引，不增加虚拟时间点。`context.volumeProfile` 提供异步加载的成交量分布。
 
 `renderer.ts` 统一维护序列、零轴、独立面板和销毁逻辑。脚本不访问 React、DOM 或存储。每次行情更新、历史补齐或参数修改，基于当前已加载数据重新计算，当前未收盘 K 线也参与计算。
@@ -58,6 +77,8 @@ SMC 保留参考实现的收盘价突破、单次 pivot 突破、内部 5 根 / 
 
 ```sh
 node --import tsx --test plugins/vibe-quant/tests/indicators.test.ts plugins/vibe-quant/tests/smc.test.ts plugins/vibe-quant/tests/indicator-renderer.test.ts plugins/vibe-quant/tests/volume-profile.test.ts
+node --import tsx --test plugins/vibe-quant/tests/logistic-sr.test.ts
+node --import tsx --test plugins/vibe-quant/tests/rsi.test.ts
 ```
 
 成交量分布的 ClickHouse 集成测试使用本机隔离测试实例 `127.0.0.1:18128`，以 `QUANT_PROFILE_INTEGRATION=1` 启用；每次创建随机测试库并在结束时清理。

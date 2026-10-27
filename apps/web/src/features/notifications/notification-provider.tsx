@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useEffectEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { ParseKeys } from 'i18next';
 import { notificationEventSchema } from '@aime/shared/notifications';
 import { useAuthSession } from '@/features/auth/session-context';
 import { Toaster } from '@/components/ui/toast';
@@ -11,12 +12,21 @@ import {
 import { refreshDesktopPush } from './desktop-push';
 import { SharedEventSource } from '@/components/realtime/event-source';
 import { toast as signalToast } from 'sonner';
+import { showMarketSignalToast } from './market-signal-toast';
 
 export function NotificationProvider() {
   const { data } = useAuthSession();
   const { t, i18n } = useTranslation();
   const userId = data?.user.id;
   const sessionId = data?.session.id;
+  // Language changes update labels without clearing unconfirmed signals.
+  const translate = useEffectEvent((key: ParseKeys) => t(key));
+  useEffect(() => {
+    if (!userId || !sessionId) return;
+    void refreshDesktopPush(i18n.language).catch(() => {
+      /* The editor offers explicit permission/setup feedback. */
+    });
+  }, [userId, sessionId, i18n.language]);
   useEffect(() => {
     if (!userId || !sessionId) return;
     const key = `notification-cursor:${userId}`;
@@ -71,27 +81,37 @@ export function NotificationProvider() {
               document.visibilityState !== 'visible'
             )
               return;
-            signalToast(t('notifications.soundBlocked'), {
+            signalToast(translate('notifications.soundBlocked'), {
               id: 'notification-sound-unlock',
               duration: 10000,
               action: {
-                label: t('notifications.enableSound'),
+                label: translate('notifications.enableSound'),
                 onClick: async () => {
                   if (await enableNotificationSound())
                     signalToast.dismiss('notification-sound-unlock');
-                  else signalToast.error(t('notifications.soundUnavailable'));
+                  else
+                    signalToast.error(
+                      translate('notifications.soundUnavailable'),
+                    );
                 },
               },
             });
           });
           if (!notification.toast) return;
           signalToasts.add(notification.id);
+          if (notification.pluginId === 'vibe-quant') {
+            showMarketSignalToast({
+              ...notification,
+              onConfirm: () => signalToasts.delete(notification.id),
+            });
+            return;
+          }
           signalToast(notification.title, {
             id: notification.id,
             description: notification.body,
             duration: 10000,
             action: {
-              label: t('notifications.view'),
+              label: translate('notifications.view'),
               onClick: () => window.location.assign(notification.url),
             },
             onDismiss: () => signalToasts.delete(notification.id),
@@ -101,7 +121,7 @@ export function NotificationProvider() {
         }
         const id = toast.add({
           id: notification.id,
-          title: t(
+          title: translate(
             notification.status === 'succeeded'
               ? 'notifications.completed'
               : 'notifications.failed',
@@ -109,7 +129,7 @@ export function NotificationProvider() {
           description: notification.taskName,
           type: notification.status === 'succeeded' ? 'success' : 'error',
           actionProps: {
-            children: t('notifications.view'),
+            children: translate('notifications.view'),
             onClick: () => {
               window.location.assign(notification.url);
               toast.close(notification.id);
@@ -130,9 +150,6 @@ export function NotificationProvider() {
       };
     };
     connect();
-    void refreshDesktopPush(i18n.language).catch(() => {
-      /* The editor offers explicit permission/setup feedback. */
-    });
     return () => {
       stopped = true;
       sounds.dispose();
@@ -142,6 +159,6 @@ export function NotificationProvider() {
       for (const id of openToasts) toast.close(id);
       for (const id of signalToasts) signalToast.dismiss(id);
     };
-  }, [userId, sessionId, t, i18n.language]);
+  }, [userId, sessionId]);
   return <Toaster />;
 }

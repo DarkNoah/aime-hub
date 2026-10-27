@@ -18,8 +18,16 @@ import {
 } from '../../signal-types.js';
 import { POINT_BACKTEST_RULES } from '../../strategy-types.js';
 
+import { actualFuture, resolveTqOptions } from '../tq-options.js';
+
 const shape = backtestSchema.shape;
 export const monitorSchema = z.object({
+  simulation_engine: z.enum(['builtin', 'tqsdk']).optional(),
+  display_symbol: shape.symbol.optional(),
+  display_engine: z.enum(['tqsdk', 'tushare', 'tdx']).optional(),
+  tq_options: shape.tq_options,
+  slippage_ticks: shape.slippage_ticks.optional(),
+  history_start: shape.start.optional(),
   version_id: shape.version_id,
   symbol: shape.symbol,
   duration: shape.duration,
@@ -69,6 +77,9 @@ export function signalRoutes(
     if (!row.enabled) throw new StrategyError('STRATEGY_DISABLED', 409);
     return row;
   };
+  api.get('/simulation-defaults', (c) =>
+    c.json(resolveTqOptions(get().config)),
+  );
   api.get('/monitors/:id/history', async (c) => {
     const { monitors } = get();
     const monitor = await monitors.get(c.req.param('id'), c.get('userId'));
@@ -104,7 +115,9 @@ export function signalRoutes(
     )
       throw new StrategyError('INVALID_MONITOR_CONFIG');
     const rows = (await monitors.list(owner)).filter(
-      (row) => row.config.symbol === symbol && row.engine === config.engine,
+      (row) =>
+        (row.config.display_symbol ?? row.config.symbol) === symbol &&
+        (row.config.display_engine ?? row.engine) === config.engine,
     );
     return c.json(
       await Promise.all(
@@ -156,20 +169,44 @@ export function signalRoutes(
     const version = await records.version(owner, parsed.data.version_id);
     if (version.strategy_id !== strategyId)
       throw new StrategyError('VERSION_NOT_FOUND', 404);
-    const item = await state.instrument(config.engine, parsed.data.symbol);
-    const executionModel = monitorExecutionModel(parsed.data);
+    const native = parsed.data.simulation_engine === 'tqsdk';
+    if (native && !actualFuture.test(parsed.data.symbol))
+      throw new StrategyError('TQ_ACTUAL_FUTURES_ONLY');
+    if (native && (!config.tqUser || !config.tqPassword))
+      throw new StrategyError('TQ_AUTH_REQUIRED');
+    if (native && parsed.data.calendar)
+      throw new StrategyError('TQ_CALENDAR_UNSUPPORTED');
     if (
-      !item ||
-      item.expired ||
-      item.kind === 'option' ||
-      (isIndexSymbol(item.symbol) && executionModel !== 'points') ||
-      (executionModel === 'continuous_price' &&
-        (item.kind !== 'continuous' || !item.symbol.startsWith('KQ.m@'))) ||
-      !supports(config.engine, item) ||
-      (item.kind === 'continuous' && !item.symbol.startsWith('KQ.m@'))
+      native &&
+      parsed.data.execution_model &&
+      parsed.data.execution_model !== 'actual_contract'
+    )
+      throw new StrategyError('TQ_ACTUAL_FUTURES_ONLY');
+    if (
+      native &&
+      parsed.data.history_start &&
+      parsed.data.history_start >= Date.now() / 1000
+    )
+      throw new StrategyError('INVALID_MONITOR_CONFIG');
+    const item = native
+      ? null
+      : await state.instrument(config.engine, parsed.data.symbol);
+    const executionModel = native
+      ? 'actual_contract'
+      : monitorExecutionModel(parsed.data);
+    if (
+      !native &&
+      (!item ||
+        item.expired ||
+        item.kind === 'option' ||
+        (isIndexSymbol(item.symbol) && executionModel !== 'points') ||
+        (executionModel === 'continuous_price' &&
+          (item.kind !== 'continuous' || !item.symbol.startsWith('KQ.m@'))) ||
+        !supports(config.engine, item) ||
+        (item.kind === 'continuous' && !item.symbol.startsWith('KQ.m@')))
     )
       throw new StrategyError('UNSUPPORTED_INSTRUMENT');
-    const stock = item.kind === 'stock';
+    const stock = item?.kind === 'stock';
     const points = executionModel === 'points';
     const rules = parsed.data.rules ?? {
       multiplier: stock ? 1 : 200,
@@ -189,6 +226,22 @@ export function signalRoutes(
     const { notifications, notifications_enabled, ...monitorConfig } =
       monitorSchema.parse({
         ...parsed.data,
+        ...(parsed.data.display_symbol || native
+          ? {
+              display_symbol: parsed.data.display_symbol ?? parsed.data.symbol,
+              display_engine: config.engine,
+            }
+          : {}),
+        ...(native
+          ? {
+              execution_model: 'actual_contract',
+              tq_options: resolveTqOptions(config, parsed.data.tq_options),
+              history_start:
+                parsed.data.history_start ??
+                Math.floor(Date.now() / 1000) - 3650 * 86400,
+              slippage_ticks: parsed.data.slippage_ticks ?? 0,
+            }
+          : {}),
         // The simple market picker reuses the published version. Full legacy
         // callers supply explicit parameters and retain their requested period.
         duration:
@@ -200,17 +253,18 @@ export function signalRoutes(
         ...(points ? { execution_model: 'points' } : {}),
         parameters: parsed.data.parameters ?? version.parameters,
         initial_cash: points ? 1 : (parsed.data.initial_cash ?? 1_000_000),
-        rules: points
-          ? structuredClone(POINT_BACKTEST_RULES)
-          : stock
-            ? { ...rules, multiplier: 1, margin_rate: 1 }
-            : rules,
+        rules:
+          points || native
+            ? structuredClone(POINT_BACKTEST_RULES)
+            : stock
+              ? { ...rules, multiplier: 1, margin_rate: 1 }
+              : rules,
       });
     const monitor = await monitors.create(
       owner,
       strategyId,
       version.number,
-      config.engine,
+      native ? 'tqsdk' : config.engine,
       monitorConfig,
       {
         notifications: strategyNotifications(

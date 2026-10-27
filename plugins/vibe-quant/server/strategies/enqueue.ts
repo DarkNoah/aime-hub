@@ -1,3 +1,4 @@
+import { resolveTqOptions } from '../tq-options.js';
 import type { BacktestInput } from '../../strategy-types.js';
 import type { QuantConfig } from '../config.js';
 import type { StateStore } from '../state-store.js';
@@ -21,19 +22,28 @@ export async function enqueueBacktest(
   if (!actor.isAdmin)
     throw new StrategyError('SCRIPT_EXECUTION_ADMIN_REQUIRED', 403);
   const config = parseBacktestConfig(input);
-  const item = await market.state.instrument(
-    market.config.engine,
-    config.symbol,
-  );
+  const native = config.backtest_engine === 'tqsdk';
+  if (native) {
+    const resolved = resolveTqOptions(market.config, config.tq_options);
+    if (Object.keys(resolved).length) config.tq_options = resolved;
+  }
+  if (native && (!market.config.tqUser || !market.config.tqPassword))
+    throw new StrategyError('TQ_AUTH_REQUIRED');
+  // Expired futures need not exist in the current market catalog. TqApi validates
+  // the concrete contract against historical metadata when the job starts.
+  const item = native
+    ? null
+    : await market.state.instrument(market.config.engine, config.symbol);
   signal?.throwIfAborted();
   if (
-    !item ||
-    item.kind === 'option' ||
-    (config.execution_model === 'continuous_price' &&
-      item.kind !== 'continuous')
+    !native &&
+    (!item ||
+      item.kind === 'option' ||
+      (config.execution_model === 'continuous_price' &&
+        item.kind !== 'continuous'))
   )
     throw new StrategyError('UNSUPPORTED_INSTRUMENT', 400);
-  if (item.kind === 'stock') {
+  if (item?.kind === 'stock') {
     config.rules.multiplier = 1;
     config.rules.margin_rate = 1;
   }
@@ -41,7 +51,7 @@ export async function enqueueBacktest(
     actor.userId,
     strategyId,
     config,
-    market.config.engine,
+    native ? 'tqsdk' : market.config.engine,
   );
   // A database insert may finish after the tool stopped waiting. Cancel that queued job too.
   if (signal?.aborted) {

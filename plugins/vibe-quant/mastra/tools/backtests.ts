@@ -39,6 +39,15 @@ function runView(run: BacktestRun): BacktestRun {
 }
 
 export const agentBacktestSchema = z.object({
+  backtest_engine: z
+    .enum(['builtin', 'tqsdk'])
+    .optional()
+    .describe(
+      '默认 builtin；tqsdk 使用 TqBacktest + TqSim，仅支持单个期货实际合约，不支持主连、点数和调优。',
+    ),
+  tq_options: backtestSchema.shape.tq_options.describe(
+    '天勤引擎的每手手续费、每手保证金（元）；省略使用 TqSim 默认。rules 与 participation_rate 仅用于内置引擎。',
+  ),
   version_id: z
     .string()
     .describe('strategy_publish 或 strategy_versions 返回的版本 ID'),
@@ -77,7 +86,7 @@ export const agentBacktestSchema = z.object({
     })
     .optional()
     .describe(
-      '资金回测须提供用户给定或核实的交易规则，费率用小数；点数回测可省略',
+      '内置资金回测须提供用户给定或核实的交易规则，费率用小数；点数或天勤回测可省略',
     ),
   execution_model: z
     .enum(['actual_contract', 'continuous_price', 'points'])
@@ -111,7 +120,7 @@ export class BacktestStartTool extends PluginTool {
       title: optimize ? '调优参数并创建新草稿' : '提交策略回测',
       description: optimize
         ? '管理员提交独立的 Optuna 参数调优任务，成功后以最佳参数自动新建一个未发布的策略草稿，不覆盖原策略。提供 version_id、symbol、start、end、rules 和 optimization.search_space。默认 30 次、600 秒、TPE 种子 42；可设置 validation_start 留出验证。调优不列入普通回测历史。返回 run_id 后用 backtest_status/result/cancel 查询或取消，完成后 optimization_draft_id 指向新草稿。'
-        : '管理员提交历史回测，只需 version_id、symbol、start、end、rules。其余参数可省略：资金 100 万、1 分钟 K 线、滑点 1 tick、参与率 10%。立即返回队列记录，随后查询 status/result。',
+        : '管理员提交历史回测。默认内置引擎需要 version_id、symbol、start、end、rules。backtest_engine=tqsdk 使用天勤历史行情和 TqSim，仅支持单个期货实际合约；rules 可省略，tq_options 可覆盖每手手续费和保证金。默认资金 100 万、1 分钟 K 线、滑点 1 tick；内置引擎参与率 10%。立即返回队列记录，随后查询 status/result。',
       inputSchema: optimize
         ? agentBacktestSchema.extend({ optimization: optimizationSchema })
         : agentBacktestSchema,
