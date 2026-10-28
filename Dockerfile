@@ -38,7 +38,10 @@ RUN node -e "const fs = require('node:fs'); const path = '/etc/ssl/certs/ca-cert
 RUN --mount=type=cache,id=hub-apt-bookworm-${TARGETARCH},target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=hub-apt-lists-bookworm-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
     apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates python3 build-essential
+    && apt-get install -y --no-install-recommends ca-certificates python3 build-essential ffmpeg
+# ffmpeg-static honors this path during both installation and runtime. Keep it
+# available before pnpm fetch so its install script never downloads from GitHub.
+ENV FFMPEG_BIN=/usr/bin/ffmpeg
 
 FROM system-deps AS build
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -65,7 +68,7 @@ RUN --mount=type=cache,id=hub-apt-bookworm-${TARGETARCH},target=/var/cache/apt,s
     --mount=type=cache,id=hub-apt-lists-bookworm-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
     apt-get update \
     && apt-get install -y --no-install-recommends \
-        curl xz-utils fuse3 git ripgrep ffmpeg \
+        curl xz-utils fuse3 git ripgrep \
         python3-pip python3-venv python-is-python3 \
         jq unzip zip procps openssh-client \
     && python3 -m venv /opt/python \
