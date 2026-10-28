@@ -32,40 +32,43 @@
 - 绩效直接读取 `TqSim.tqsdk_stat`；持续运行中通过天勤自身 `TqReport` 生成同口径指标，保留 `native_metrics` 和 `metrics_source`。年化/回撤/胜率采用天勤定义，胜率按平仓手数、毛盈亏统计，持平计为盈利。`profit_loss_ratio` 是天勤盈亏额比例，不伪装成内置 `profit_factor`；不支持的指标显示为空。
 - 历史记录、账户曲线与交易图表沿用现有展示。交互式逐根重新计算目前仅支持内置引擎，天勤任务会明确提示不支持，避免用不同撮合器生成结果。此模式仅构造 TqSim，不连接实盘交易账户。
 
-## 安装与离线验证
+## 策略文件与版本控制
+
+公开仓库只维护 SDK、回测/模拟执行引擎、接口、空白模板和行情指标的计算与展示。具体交易策略的源码、参数、描述、研究报告、专属测试及运行产物仅存放于本地忽略目录或策略数据库，不提交到 GitHub。
+
+- `sdk/examples/` 整个目录为本地私有内容，包含已有策略文件及配套资料；新克隆不含这些文件。
+- 新增私人研究文件优先放在仓库根目录的 `.local/quant-strategies/`；运行产物使用 `.quant-runs/` 或插件工作空间。
+- `tests/test_*_strategy.py` 为具体策略的本地专属测试。公开的引擎测试只使用合成数据和测试桩。
+- `sdk/templates/strategy.py` 是不含下单规则的公共模板。策略页面及 Agent 指南均读取此模板，不依赖私有文件。
+- 行情指标代码 `web/indicators/` 保留版本管理。公共接口文档不内嵌具体交易规则。
+
+这些私有路径同时由 `.gitignore` 和 `.dockerignore` 排除。忽略规则不会删除已经提交的历史副本；发现历史已包含私人策略时，应单独处理远端和 Git 历史。
+
+## 安装与验证
 
 需要 Python 3.10+，SDK 无第三方运行依赖。在仓库根目录执行：
 
 ```bash
 workspaces/plugins/vibe-quant/.venv/bin/python -m pip install -e plugins/vibe-quant/sdk
-workspaces/plugins/vibe-quant/.venv/bin/python plugins/vibe-quant/sdk/examples/offline.py --output /tmp/quant-runs
+workspaces/plugins/vibe-quant/.venv/bin/python -B -m unittest discover -s plugins/vibe-quant/tests -p test_strategy_sdk.py
 ```
 
-示例用一份均线策略分别运行 IM 主连、商品期货主连和股票，检查回测与实时事件回放的信号、成交、交易记录、净值和指标完全相同。示例价格、保证金及费率均为测试输入，不代表当前交易所或券商标准。
+引擎测试用合成行情和测试桩检查回测与实时事件回放的信号、成交、交易记录、净值和指标一致性。测试价格、保证金及费率不代表当前交易所或券商标准。
 
-## 同一份策略
+## 策略接口模板
 
 ```python
 from quant_sdk import Strategy
 
-class Trend(Strategy):
+class CustomStrategy(Strategy):
     def on_start(self, ctx):
-        ctx.data.subscribe(ctx.params["symbol"], 60)
+        ctx.data.subscribe(ctx.params["symbol"], ctx.params.get("duration", 60))
 
     def on_bar(self, ctx, bar):
         if not bar.is_final:
             return
-        bars = ctx.data.history(bar.symbol, 60, count=20)
-        if len(bars) < 20:
-            return
-        actual = ctx.data.resolve_contract(bar.symbol)
-        size = ctx.data.instrument(actual).lot_size
-        target = size if bars[-1].close > sum(b.close for b in bars) / 20 else 0
-        ctx.orders.target_position(actual, target, reason="above_ma20")
-
-    def on_roll(self, ctx, event, previous_contract):
-        if previous_contract:
-            ctx.orders.target_position(previous_contract, 0, reason="roll")
+        # 在私有脚本或策略编辑器内编写自己的信号与风控逻辑。
+        pass
 ```
 
 策略必须放在可读取的 `.py` 文件中，以便保存源码及校验指纹。恢复所需状态放入 `ctx.state`；普通实例属性不包含在检查点中。恢复时先调用新实例的 `on_start`，重新初始化参数、订阅和临时缓存，再加载检查点中的状态、持仓与待处理委托；初始化不会覆盖已保存的 `ctx.state`，已完成的 `on_ready` 不会重复执行。影响后续交易的累计状态必须放入 `ctx.state`，临时缓存应能从已恢复的数据窗口重建。
@@ -86,19 +89,19 @@ class Trend(Strategy):
 ```python
 from quant_sdk import Dataset, RunConfig, backtest, live
 
-data = Dataset.load("snapshot.json")
+data = Dataset.load(".local/quant-strategies/snapshot.json")
 result = backtest.run(
-    Trend(), data, params={"symbol": "KQ.m@CFFEX.IM"},
+    CustomStrategy(), data, params={"symbol": "KQ.m@CFFEX.IM"},
     config=RunConfig(initial_cash=1_000_000, slippage_ticks=1),
-    output_dir="runs", on_event=lambda event: print(event),
+    output_dir=".quant-runs", on_event=lambda event: print(event),
 )
 
 # 使用完全相同的事件流验证计算及模拟成交一致性。
 replayed = live.run(
-    Trend(), iter(data.events), instruments=data.instruments,
+    CustomStrategy(), iter(data.events), instruments=data.instruments,
     params={"symbol": "KQ.m@CFFEX.IM"},
     config=RunConfig(initial_cash=1_000_000, slippage_ticks=1),
-    mode="paper", output_dir="runs",
+    mode="paper", output_dir=".quant-runs",
 )
 ```
 
@@ -112,9 +115,9 @@ replayed = live.run(
 from quant_sdk import RiskLevels
 
 # 下单时绑定本次入场信号；价格使用真实交易合约的坐标。
-entry_id = ctx.orders.target_position(actual, 1, reason="trend_entry")
-return RiskLevels(actual, stop_loss=price * 0.98,
-                  take_profit=price * 1.04, entry_id=entry_id)
+entry_id = ctx.orders.target_position(actual, target_quantity, reason=entry_reason)
+return RiskLevels(actual, stop_loss=stop_price,
+                  take_profit=target_price, entry_id=entry_id)
 
 # 持仓期间每次计算都可更新。省略 entry_id 会更新该标的全部在持入场批次。
 ctx.set_risk_levels(actual, stop_loss=trailing_stop, take_profit=target)
@@ -134,7 +137,7 @@ ctx.set_risk_levels(actual, stop_loss=None, take_profit=None)
 
 交易和离场成交保存 `exit_reason`（`stop_loss`／`take_profit`，或策略订单传入的 `reason`）、`risk_level_id`、`trigger_price`、`trigger_time`、`trigger_bar_time` 和 `trigger_time_precision`。触发后若因成交量或 T+1 延迟，触发信息保持不变，实际离场时间另行记录。行情回放标明离场原因、触发价格及对应的计算记录；等待平仓期间绘图保持触发时使用的范围，后续计算仍完整保存在结果中。
 
-示例均线策略支持 `stop_loss_pct`、`take_profit_pct`、`trailing_stop`。风险平仓后等待下一次均线方向变化再开仓；策略可以自行设计重新入场条件。
+上面的目标仓位、价格和原因均由调用者的私有策略提供，SDK 不内置交易决策规则。
 
 ## 连接已有 Vibe Quant 行情
 
@@ -165,13 +168,13 @@ def rules(symbol, metadata):
 with client.stream(["KQ.m@CFFEX.IM"], calendar=calendar, rules=rules) as source:
     warmup = client.snapshot(["KQ.m@CFFEX.IM"], start=history_start,
                              end=source.cutoff, calendar=calendar, rules=rules)
-    result = live.run(Trend(), source, warmup=warmup, mode="monitor",
+    result = live.run(CustomStrategy(), source, warmup=warmup, mode="monitor",
                       params={"symbol": "KQ.m@CFFEX.IM"})
 ```
 
 上面的规则仅示范参数位置。正式使用须填入对应品种、合约及研究时段的交易规则。`TradingCalendar` 输入为覆盖所需日期的 `{"2026-10-16": true, "2026-10-17": false, ...}`；必须包含周末、节假日以及夜盘所属交易日。未知日期报错。日线默认以所属交易日 15:00 收盘，可显式配置 `daily_close`。SDK 不把自然日直接当作交易日。
 
-完整命令示例见 `examples/hub.py`，规则文件样式见 `examples/rules.example.json`。账号信息通过环境传入，不写入运行清单。CLI 可选择 `backtest`、`monitor`、`paper`；Ctrl+C 会保存取消记录。`LiveRunner.cancel()` 或共享 `threading.Event` 可以中止持续轮询，网络阻塞最多等待客户端 timeout。
+本地连接脚本及规则文件请放在 `.local/quant-strategies/` 等忽略目录。账号信息通过环境传入，不写入运行清单。`LiveRunner.cancel()` 或共享 `threading.Event` 可以中止持续轮询，网络阻塞最多等待客户端 timeout。
 
 数据契约：
 

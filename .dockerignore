@@ -11,3 +11,8 @@ coverage
 .vscode
 .DS_Store
 **/*.log
+
+# Local trading strategies and their artifacts must not enter build images.
+plugins/vibe-quant/sdk/examples/
+plugins/vibe-quant/tests/test_*_strategy.py
+**/.quant-runs/

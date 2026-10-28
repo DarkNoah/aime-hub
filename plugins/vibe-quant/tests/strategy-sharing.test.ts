@@ -1,8 +1,40 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
+import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import type { PluginContext } from '@app/plugin-sdk/server';
 import { strategyFixture, input } from './strategy-fixture.js';
 import { optimizationSchema } from '../server/strategies/optimization.js';
+import { strategyRoutes } from '../server/strategies/routes.js';
+
+test('public template works in a deployment without private examples', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'quant-public-template-'));
+  try {
+    await mkdir(join(root, 'sdk/templates'), { recursive: true });
+    await copyFile(
+      resolve('plugins/vibe-quant/sdk/templates/strategy.py'),
+      join(root, 'sdk/templates/strategy.py'),
+    );
+    const unavailable = (): never => {
+      throw new Error('Template must not depend on strategy storage');
+    };
+    const api = strategyRoutes(
+      { runtime: { paths: { pluginRoot: root } } } as unknown as PluginContext,
+      unavailable,
+      unavailable,
+    );
+    const response = await api.request('/template');
+    assert.equal(response.status, 200);
+    const template = await response.json();
+    assert.match(template.source, /class CustomStrategy/);
+    assert.doesNotMatch(template.source, /ctx\.orders|RiskLevels/);
+    assert.deepEqual(template.parameters, {});
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test(
   'shared strategies support cross-account editing, versions, runs and optimization drafts without changing attribution',

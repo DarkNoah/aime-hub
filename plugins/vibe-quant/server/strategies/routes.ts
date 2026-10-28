@@ -58,16 +58,10 @@ export function strategyRoutes(
       canRun: c.get('isAdmin'),
       runtime: 'plugin-venv',
       source: await readFile(
-        join(context.runtime.paths.pluginRoot, 'sdk/examples/strategy.py'),
+        join(context.runtime.paths.pluginRoot, 'sdk/templates/strategy.py'),
         'utf8',
       ),
-      parameters: {
-        fast: 5,
-        slow: 20,
-        stop_loss_pct: 0.01,
-        take_profit_pct: 0.02,
-        trailing_stop: false,
-      },
+      parameters: {},
     }),
   );
   api.get('/', async (c) => {

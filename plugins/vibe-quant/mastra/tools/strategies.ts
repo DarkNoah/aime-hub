@@ -19,14 +19,14 @@ export class StrategyGuideTool extends PluginTool {
       id: 'plugin_vibe_quant_strategy_guide',
       title: '策略编写指南',
       description:
-        '读取当前 quant_sdk 文档、Python 示例和回测权限。编写或修改策略前先调用。',
+        '读取当前 quant_sdk 文档、空白 Python 模板和回测权限。编写或修改策略前先调用。',
       inputSchema: z.object({}),
       execute: (_input, execution) =>
         run(execution, async (_deps, actor, signal) => {
           const root = context.runtime.paths.pluginRoot;
           const [reference, source] = await Promise.all([
             readFile(join(root, 'sdk/README.md'), { encoding: 'utf8', signal }),
-            readFile(join(root, 'sdk/examples/strategy.py'), {
+            readFile(join(root, 'sdk/templates/strategy.py'), {
               encoding: 'utf8',
               signal,
             }),
@@ -37,13 +37,7 @@ export class StrategyGuideTool extends PluginTool {
             reference,
             template: {
               source,
-              parameters: {
-                fast: 5,
-                slow: 20,
-                stop_loss_pct: 0.01,
-                take_profit_pct: 0.02,
-                trailing_stop: false,
-              },
+              parameters: {},
             },
             workflow:
               'create/update → publish → backtest_start → backtest_status → backtest_result。策略及回测在同一数据库内共享，已发布版本不可变。',

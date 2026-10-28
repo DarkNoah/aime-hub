@@ -73,6 +73,26 @@ class EntrypointTest(unittest.TestCase):
                 manifest = json.loads((directory / 'artifacts' / result['run_id'] / 'manifest.json').read_text())
                 self.assertEqual(manifest['strategy_class'], 'WorkerStrategy')
 
+    def test_public_scaffold_runs_without_orders_or_private_strategy_files(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            (directory / 'strategy.py').write_text((ROOT / 'sdk/templates/strategy.py').read_text())
+            (directory / 'config.json').write_text(json.dumps({'parameters': {'symbol': 'TEST', 'duration': 60}}))
+            events = []
+            for index in range(40):
+                price = 100 + (index if index < 20 else 40 - index)
+                bar = Bar('TEST', index * 60, (index + 1) * 60, '1970-01-01', 60,
+                          price, price + 1, price - 1, price, 1000)
+                events.append(Event(str(index), bar.end_time, bar))
+            Dataset([Instrument('TEST', 'future', 1, multiplier=1, margin_rate=1)], events).save(directory / 'dataset.json')
+            completed = subprocess.run([sys.executable, '-B', str(ROOT / 'worker/strategy_run.py'), str(ROOT / 'sdk'), temp], capture_output=True, text=True, timeout=20)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            result = json.loads((directory / 'result.json').read_text())
+            self.assertEqual(result['status'], 'succeeded', result['message'])
+            for key in ('orders', 'fills', 'trades', 'signals', 'risk_levels'):
+                self.assertEqual(result[key], [])
+            self.assertEqual(result['metrics']['total_pnl'], 0)
+
 
 if __name__ == '__main__':
     unittest.main()

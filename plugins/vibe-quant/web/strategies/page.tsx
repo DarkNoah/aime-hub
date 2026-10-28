@@ -256,7 +256,7 @@ export default function StrategiesPage({ pluginId }: PluginPageProps) {
                   </h2>
                   <p className="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
                     {status === 'active'
-                      ? '保存草稿，发布版本，再配置回测。内置均线模板可用于 IM 主连、商品主连和股票。'
+                      ? '从空白模板编写或导入策略，保存草稿并发布版本后配置回测。'
                       : '策略的脚本、版本和回测记录会保留，可随时恢复到当前策略。'}
                   </p>
                   {status === 'active' && !query && (
@@ -373,7 +373,7 @@ function CreateDialog({
                   autoFocus
                   disabled={busy}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="例如 IM 均线方向策略"
+                  placeholder="例如 我的 IM 策略"
                 />
               </Label>
               <Label className="grid gap-2">
@@ -387,7 +387,7 @@ function CreateDialog({
                 />
               </Label>
               <p className="text-xs text-muted-foreground">
-                以均线交叉模板创建；交易规则和资金在每次回测时配置。
+                从空白模板创建，编写或导入策略后再发布和回测。
               </p>
 
               {error && (

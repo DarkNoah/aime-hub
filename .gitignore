@@ -26,6 +26,12 @@ apps/server/src/modules/plugins/bundled-skills/
 !scripts/chat-image-edit-browser.test.mjs
 plugins/vibe-quant/**/__pycache__/
 
+# Private trading strategies: scripts, parameters, notes and dedicated tests.
+# Public SDK/runtime and web/indicators remain versioned.
+/plugins/vibe-quant/sdk/examples/
+/plugins/vibe-quant/tests/test_*_strategy.py
+.quant-runs/
+
 !scripts/intelligent-ui-browser.test.mjs
 
 !scripts/group-chats-browser.test.mjs
