@@ -26,6 +26,7 @@ services:
         BUN_IMAGE: ${BUN_IMAGE:-oven/bun:1}
         BROWSER_CACHE_IMAGE: ${BROWSER_CACHE_IMAGE:-base}
         AGENTFS_DOWNLOAD_BASE_URL: ${AGENTFS_DOWNLOAD_BASE_URL:-https://github.com/tursodatabase/agentfs/releases/download}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple}
     restart: unless-stopped
     init: true
     stop_grace_period: 60s
@@ -34,6 +35,7 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
+      PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple}
       ALLOW_INSECURE_HTTP: ${ALLOW_INSECURE_HTTP:-false}
       ALLOW_ALL_NETWORKS: ${ALLOW_ALL_NETWORKS:-false}
       DATABASE_URL: postgresql://hub:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@app-postgres:5432/hub

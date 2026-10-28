@@ -92,11 +92,19 @@ RUN --mount=type=cache,id=hub-apt-bookworm-${TARGETARCH},target=/var/cache/apt,s
     node /opt/playwright-core/cli.js install-deps chromium
 COPY --from=browser-cache /opt/playwright /opt/playwright
 RUN node /opt/playwright-core/cli.js install chromium
+# Keep index selection close to Python dependencies so changing it preserves
+# the Node, system-package and browser layers. Runtime pip inherits it as well.
+ARG PIP_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_DEFAULT_TIMEOUT=30 \
+    PIP_RETRIES=3 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 # Isolate build dependencies for legacy source packages such as pytdx.
 COPY plugins/vibe-quant/plugin.manifest.json ./plugins/vibe-quant/plugin.manifest.json
 COPY plugins/vibe-quant/worker/requirements.txt ./plugins/vibe-quant/worker/requirements.txt
-RUN if node -e "process.exit(require('./plugins/vibe-quant/plugin.manifest.json').enabled === false ? 1 : 0)"; then \
-      /opt/python/bin/pip wheel --use-pep517 --no-cache-dir --wheel-dir /opt/plugin-wheels/vibe-quant -r plugins/vibe-quant/worker/requirements.txt; \
+RUN --mount=type=cache,id=hub-pip-bookworm-${TARGETARCH},target=/root/.cache/pip,sharing=locked \
+    if node -e "process.exit(require('./plugins/vibe-quant/plugin.manifest.json').enabled === false ? 1 : 0)"; then \
+      /opt/python/bin/pip wheel --use-pep517 --wheel-dir /opt/plugin-wheels/vibe-quant -r plugins/vibe-quant/worker/requirements.txt; \
     fi
 COPY --from=build /app /app
 ENV PATH="/opt/python/bin:${PATH}"
