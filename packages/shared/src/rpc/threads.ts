@@ -191,7 +191,12 @@ export const threadsContract = {
       inputStructure: 'detailed',
       successStatus: 202,
     })
-    .input(z.object({ params: z.object({ threadId }) }))
+    .input(
+      z.object({
+        params: z.object({ threadId }),
+        body: chatSettingsSchema.optional(),
+      }),
+    )
     .output(type<ThreadSummary>()),
   continue: procedure
     .route({

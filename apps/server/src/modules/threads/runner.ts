@@ -70,8 +70,16 @@ import {
 } from './context-compaction.js';
 import type { ObservationalMemoryConfig } from '@mastra/memory/processors';
 
-function latestInputMetadata(messageList: MessageList) {
-  const latest = [...messageList.get.all.db()]
+function latestInputMetadata(
+  messageList: MessageList,
+  requestContext?: RequestContext,
+) {
+  // A retry adopts the current selection until a new user signal arrives.
+  // Stored signals retain the model originally used to submit that message.
+  const source = requestContext?.get('chatRetry')
+    ? messageList.get.input
+    : messageList.get.all;
+  const latest = [...source.db()]
     .reverse()
     .find(
       (message) =>
@@ -234,7 +242,7 @@ export function createChatRunner(
         budget,
         async ({ messageList, requestContext }) => {
           const metadata =
-            latestInputMetadata(messageList) ??
+            latestInputMetadata(messageList, requestContext) ??
             (requestContext?.get('chatInputMetadata') as ReturnType<
               typeof latestInputMetadata
             >);
@@ -502,10 +510,12 @@ export function createChatRunner(
         const optionsFor = async (
           next: ChatSettings,
           createdBy?: string,
+          retry = false,
         ): Promise<AgentExecutionOptions> => {
           const selection = await sessionModel(next);
           const abortSignal = runAbort.signal;
           const requestContext = new RequestContext();
+          requestContext.set('chatRetry', retry);
           requestContext.set('speechPlayback', speechPlayback);
           requestContext.set('userId', createdBy ?? userId);
           // Resolve against the current message author, including queued project messages.
@@ -542,16 +552,18 @@ export function createChatRunner(
               // Read their settings; do not drain or inject application-owned input.
               // OM may have just compacted the signal that carried these settings.
               const metadata =
-                latestInputMetadata(messageList) ??
+                latestInputMetadata(messageList, requestContext) ??
                 (requestContext.get('chatInputMetadata') as ReturnType<
                   typeof latestInputMetadata
                 >);
               const fromMessage = metadata?.chatSettings;
               // Queued project messages can have different authors in one stream.
-              requestContext.set(
-                'userId',
-                metadata?.createdBy ?? createdBy ?? userId,
-              );
+              const author =
+                latestInputMetadata(messageList)?.createdBy ??
+                metadata?.createdBy;
+              const authorId =
+                typeof author === 'string' ? author : (createdBy ?? userId);
+              requestContext.set('userId', authorId);
               currentSettings =
                 chatSettingsSchema.safeParse(fromMessage).data ?? next;
               resolved = await sessionModel(currentSettings);
@@ -567,10 +579,7 @@ export function createChatRunner(
                 id: randomUUID(),
                 createdAt: new Date(),
                 startedAt: performance.now(),
-                userId:
-                  typeof metadata?.createdBy === 'string'
-                    ? metadata.createdBy
-                    : (createdBy ?? userId),
+                userId: authorId,
                 model: resolved,
                 number: stepNumber,
               };
@@ -843,7 +852,12 @@ export function createChatRunner(
             consume(output);
           },
           async retry(next) {
-            consume(await agent.streamUntilIdle([], await optionsFor(next)));
+            consume(
+              await agent.streamUntilIdle(
+                [],
+                await optionsFor(next, undefined, true),
+              ),
+            );
           },
           abort() {
             speechPlayback.stop();

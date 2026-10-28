@@ -62,6 +62,8 @@ const errors: Record<string, string> = {
   STRATEGY_ARCHIVED: '策略已归档，请恢复后再编辑、发布或新建任务',
   STRATEGY_DELETED: '策略已移入回收站，请恢复后再编辑、发布或新建任务',
   RUN_QUEUE_FULL: '已有 3 个回测或调优任务等待或执行，请完成或取消后重试',
+  RUN_NOT_FOUND: '回测记录不存在或已删除',
+  RUN_ACTIVE: '回测尚未结束，请先取消并等待任务停止后再删除',
   USE_OPTIMIZATION_ENDPOINT: '请通过「调优参数」入口创建调优任务',
   OPTIMIZATION_NOT_COMPLETED: '调优尚未成功完成，暂时无法生成草稿',
   OPTIMIZATION_RESULT_MISSING: '最佳参数结果尚未保存完整，请稍后重试',

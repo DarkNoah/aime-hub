@@ -3,9 +3,23 @@ import {
   INTELLIGENT_UI_MAX_RESPONSE,
 } from '@aime/shared/intelligent-ui';
 
-// No host privileges: the frame has an opaque origin and only an explicit JSON bridge.
+// The opaque frame uses an explicit bridge; only user-activated links open in the host.
 export const INTELLIGENT_UI_CSP =
-  "default-src 'none'; base-uri 'none'; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; worker-src 'none'";
+  "default-src 'none'; base-uri 'none'; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: http: data: blob:; font-src data:; media-src data: blob:; worker-src 'none'";
+
+export function getIntelligentUiLinkUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'https:' || url.protocol === 'http:') &&
+      !url.username &&
+      !url.password
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 const bootstrap = `(() => {
   const config = document.currentScript.dataset;
@@ -68,10 +82,17 @@ const bootstrap = `(() => {
     if (!object(value)) throw new Error('data-ui-resume must contain a JSON object.');
     return value;
   };
-  document.addEventListener('click', (event) => {
+  const click = (event) => {
     const target = event.target instanceof Element ? event.target : null;
-    if (target?.closest('a, area')) event.preventDefault();
+    const link = target?.closest('a, area');
+    if (link) event.preventDefault();
     const trigger = target?.closest('[data-ui-resume]');
+    if (!trigger && link) {
+      if (event.isTrusted && !document.body.inert && (event.button === 0 || event.button === 1))
+        send('open-link', { url: link.getAttribute('href') });
+      return;
+    }
+    if (event.type !== 'click') return;
     if (!trigger || trigger instanceof HTMLFormElement || trigger.matches(':disabled')) return;
     event.preventDefault();
     try {
@@ -80,7 +101,9 @@ const bootstrap = `(() => {
       const submitter = (trigger instanceof HTMLButtonElement || trigger instanceof HTMLInputElement) && trigger.type === 'submit' ? trigger : undefined;
       resume({ ...valuesFor(form, submitter), ...declared(trigger) });
     } catch (error) { reportError(error); }
-  });
+  };
+  document.addEventListener('click', click);
+  document.addEventListener('auxclick', click);
   document.addEventListener('submit', (event) => {
     event.preventDefault();
     const form = event.target;
@@ -110,23 +133,27 @@ const bootstrap = `(() => {
 })();`;
 
 export function buildIntelligentUiDocument(html: string, token: string) {
-  // Strip declarative navigation before parsing in the live frame. Inline scripts
-  // stay inside the opaque sandbox; CSP blocks external subresources and APIs.
+  // Keep only web links for the host bridge. Inline scripts stay sandboxed;
+  // CSP permits image resources while blocking external code and network APIs.
   const template = document.createElement('template');
   template.innerHTML = html;
   template.content
     .querySelectorAll('meta, base, iframe, frame, object, embed, link')
     .forEach((node) => node.remove());
   template.content.querySelectorAll('a, area').forEach((node) => {
-    node.removeAttribute('href');
+    const url = getIntelligentUiLinkUrl(node.getAttribute('href'));
+    if (url) node.setAttribute('href', url);
+    else node.removeAttribute('href');
     node.removeAttribute('ping');
-    node.removeAttribute('target');
+    node.setAttribute('target', '_blank');
+    node.setAttribute('rel', 'noopener noreferrer');
     node.removeAttribute('download');
   });
   const safeToken = token.replace(/[^a-zA-Z0-9_-]/g, '');
   return (
     '<!doctype html><html><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<meta name="referrer" content="no-referrer">' +
     '<meta http-equiv="Content-Security-Policy" content="' +
     INTELLIGENT_UI_CSP +
     '">' +

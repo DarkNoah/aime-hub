@@ -14,7 +14,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useTheme } from '@/components/theme/context';
 import type { ToolInteractionProps } from '../chat-tool-interaction';
 import { useToolResponse } from './use-tool-response';
-import { buildIntelligentUiDocument } from './intelligent-ui-document';
+import {
+  buildIntelligentUiDocument,
+  getIntelligentUiLinkUrl,
+} from './intelligent-ui-document';
 
 export function IntelligentUI(props: ToolInteractionProps) {
   const { t } = useTranslation();
@@ -83,6 +86,18 @@ export function IntelligentUI(props: ToolInteractionProps) {
     )
       return;
     if (data.type === 'ready') return syncState();
+    if (data.type === 'open-link') {
+      const url = getIntelligentUiLinkUrl(data.url);
+      if (
+        url &&
+        !locked &&
+        !streaming &&
+        document.activeElement === frame.current &&
+        navigator.userActivation?.isActive
+      )
+        window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
     if (
       data.type === 'resize' &&
       typeof data.height === 'number' &&

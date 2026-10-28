@@ -1643,8 +1643,8 @@ export class ThreadService {
     });
   }
 
-  retry(userId: string, id: string) {
-    return this.continueFromHistory(userId, id, 'retry');
+  retry(userId: string, id: string, settings?: ChatSettings) {
+    return this.continueFromHistory(userId, id, 'retry', settings);
   }
 
   continueRun(userId: string, id: string) {
@@ -1655,6 +1655,7 @@ export class ThreadService {
     userId: string,
     id: string,
     action: 'retry' | 'continue',
+    selectedSettings?: ChatSettings,
   ) {
     return this.scopeLocked(userId, id, async () => {
       if (this.closing) throw new ThreadError('SERVER_STOPPING', 503);
@@ -1676,7 +1677,7 @@ export class ThreadService {
           !runtime.messages.some((message) => message.role === 'user'))
       )
         throw new ThreadError('RETRY_UNAVAILABLE', 409);
-      const settings: ChatSettings = {
+      const settings: ChatSettings = selectedSettings ?? {
         agentId:
           typeof runtime.thread.metadata?.agentId === 'string'
             ? runtime.thread.metadata.agentId
@@ -1687,9 +1688,21 @@ export class ThreadService {
             : null,
         reasoningEffort: runtime.data.reasoningEffort,
       };
+      if (selectedSettings)
+        await this.runner.validate(
+          userId,
+          settings,
+          threadScope(runtime.thread.resourceId).projectId,
+        );
       const session = await this.session(runtime, settings);
       // The native retry starts a stream with no new input, preserving tool results.
       await session.retry(settings);
+      runtime.thread.metadata = {
+        ...runtime.thread.metadata,
+        model: settings.model,
+        agentId: settings.agentId ?? null,
+      };
+      runtime.data.reasoningEffort = settings.reasoningEffort;
       runtime.data.error = null;
       runtime.data.status = 'pending';
       await this.save(runtime);

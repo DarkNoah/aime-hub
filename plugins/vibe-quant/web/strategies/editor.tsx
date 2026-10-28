@@ -135,11 +135,14 @@ export function StrategyEditor({
   const [listError, setListError] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  const [runsCursor, setRunsCursor] = useState('');
   const [moreBusy, setMoreBusy] = useState(false);
   const [retry, setRetry] = useState(0);
   const [publish, setPublish] = useState(false);
   const [deletingVersion, setDeletingVersion] =
     useState<StrategyVersion | null>(null);
+  const [deletingRun, setDeletingRun] = useState<BacktestRun | null>(null);
+  const deletedRuns = useRef(new Set<string>());
   const [note, setNote] = useState('');
   const [settings, setSettings] = useState(false);
   const [optimizationOpen, setOptimizationOpen] = useState(false);
@@ -194,14 +197,20 @@ export function StrategyEditor({
         if (abort.signal.aborted) return;
         setRuns((old) => {
           const map = new Map(old.map((r) => [r.id, r]));
-          rows.forEach((r) => map.set(r.id, r));
+          rows.forEach((r) => {
+            if (!deletedRuns.current.has(r.id)) map.set(r.id, r);
+          });
           return [...map.values()].sort((a, b) =>
             b.created_at.localeCompare(a.created_at),
           );
         });
         if (first) {
           setHasMore(rows.length === 30);
-          setSelectedRun((old) => old || rows[0]?.id || '');
+          setRunsCursor(rows.at(-1)?.id ?? '');
+          setSelectedRun(
+            (old) =>
+              old || rows.find((r) => !deletedRuns.current.has(r.id))?.id || '',
+          );
         }
         if (saved) setVersions(saved);
         setLoaded(true);
@@ -746,6 +755,23 @@ export function StrategyEditor({
                               <Square className="size-3.5" />
                             </Button>
                           )}
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="size-8 text-muted-foreground hover:text-destructive"
+                            disabled={
+                              readOnly || busy || activeRun(item.status)
+                            }
+                            aria-label="删除回测记录"
+                            title={
+                              activeRun(item.status)
+                                ? '请先取消并等待回测结束后再删除'
+                                : '删除回测记录'
+                            }
+                            onClick={() => setDeletingRun(item)}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -782,15 +808,18 @@ export function StrategyEditor({
                       try {
                         const rows = await pluginRequest<BacktestRun[]>(
                           pluginId,
-                          `/strategies/${record.id}/runs?before=${runs.at(-1)!.id}`,
+                          `/strategies/${record.id}/runs?before=${runsCursor}`,
                         );
                         setRuns((old) => [
                           ...old,
                           ...rows.filter(
-                            (r) => !old.some((v) => v.id === r.id),
+                            (r) =>
+                              !deletedRuns.current.has(r.id) &&
+                              !old.some((v) => v.id === r.id),
                           ),
                         ]);
                         setHasMore(rows.length === 30);
+                        if (rows.length) setRunsCursor(rows.at(-1)!.id);
                       } catch (e) {
                         toast.error(errorText(e));
                       } finally {
@@ -807,6 +836,55 @@ export function StrategyEditor({
           </ScrollArea>
         </TabsContent>
       </Tabs>
+      {deletingRun && (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !busy) setDeletingRun(null);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>删除回测记录</DialogTitle>
+              <DialogDescription>
+                删除后无法再查看或导出这条回测记录，且无法恢复。策略脚本和已发布版本不受影响。
+              </DialogDescription>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              v{deletingRun.version_number} · {deletingRun.config.symbol} ·{' '}
+              {dateTime(deletingRun.created_at)}
+            </p>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() => setDeletingRun(null)}
+              >
+                取消
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={busy || readOnly}
+                onClick={() =>
+                  void action(async () => {
+                    const id = deletingRun.id;
+                    await pluginRequest(pluginId, `/strategies/runs/${id}`, {
+                      method: 'DELETE',
+                    });
+                    deletedRuns.current.add(id);
+                    setRuns((old) => old.filter((r) => r.id !== id));
+                    setSelectedRun((old) => (old === id ? '' : old));
+                    setDeletingRun(null);
+                    toast.success('回测记录已删除');
+                  })
+                }
+              >
+                {busy ? '删除中…' : '删除记录'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
       {deletingVersion && (
         <Dialog
           open

@@ -60,9 +60,28 @@ const panels = [
   {
     id: 'display',
     title: '天气展示',
+    tips: null,
     html:
       style +
       '<h2>晴 · 24°C</h2><p>静态示例数据，图表交互不会阻塞对话。</p><button id="toggle" onclick="document.querySelector(\'#forecast\').textContent=\'明天 26°C\'">查看明天</button><p id="forecast">今天 24°C</p>',
+  },
+  {
+    id: 'null-optionals',
+    title: null,
+    tips: null,
+    waitForResponse: null,
+    html: '<h2>可选字段为空的展示卡片</h2><button onclick="this.textContent=\'已点击\'">本地交互</button>',
+  },
+  {
+    id: 'links',
+    title: '带图片和链接的结果卡片',
+    html: `<style>.result{display:flex;gap:16px;align-items:center}.result img{width:96px;height:64px;object-fit:cover;border-radius:8px}.result svg{width:18px;height:18px;vertical-align:middle}a{color:var(--primary)}</style>
+      <article class="result"><img src="https://example.test/thumbnail.svg" alt="结果缩略图"><div><h2>示例结果</h2><a id="details" href="https://example.test/details" target="_top" ping="https://example.test/ping" download><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12m-5-5 5 5-5 5" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>查看详情</span></a></div></article>
+      <a id="http-link" href="http://example.test/source">查看来源</a>
+      <a id="script-link" href="javascript:alert('unexpected')">无效脚本链接</a>
+      <a id="data-link" href="data:text/html,unexpected">无效数据链接</a>
+      <a id="relative-link" href="/private">无效相对链接</a>
+      <script>document.querySelector('#details').click();parent.postMessage({channel: 'intelligent-ui', token: document.querySelector('script[data-token]').dataset.token, type: 'open-link', url: 'https://example.test/automatic'}, '*');</script>`,
   },
   {
     id: 'slider',
@@ -75,10 +94,11 @@ const panels = [
 ];
 
 test(
-  'HTML panels: forms, retry, events, auto height, sandbox, theme and turn order',
+  'HTML panels: forms, retry, events, links, images, auto height, sandbox, theme and turn order',
   { timeout: 120000 },
   async (t) => {
     const fixture = await mkdtemp(path.join(webRoot, '.intelligent-ui-test-'));
+    const imageRequests = [];
     let vite;
     let browser;
     t.after(async () => {
@@ -94,8 +114,9 @@ import {useTheme} from '/src/components/theme/context';
 import {initializeI18n} from '/src/i18n';
 import '/src/index.css';
 const panels=${JSON.stringify(panels)};
+panels.find(panel=>panel.id==='links').html=panels.find(panel=>panel.id==='links').html.replace('https://example.test/thumbnail.svg',location.origin+'/thumbnail.svg');
 const ChatTurns=React.lazy(()=>import('/src/components/chat/chat-turns').then(module=>({default:module.ChatTurns})));
-const orderedPanel={type:'tool-IntelligentUI',toolCallId:'ordered',state:'output-available',input:{title:'顺序检查',html:'<p>这是图表内容</p>'},output:{rendered:true}};
+const orderedPanel={type:'tool-IntelligentUI',toolCallId:'ordered',state:'output-available',input:{title:'顺序检查',tips:null,waitForResponse:false,html:'<p>这是图表内容</p>'},output:{rendered:true}};
 const finalText={type:'text',text:'这是图表后的最终说明',state:'done'};
 const orderedUser={id:'order-turn',role:'user',parts:[{type:'text',text:'展示图表并说明'}]};
 const orderedSummary={id:'order-turn',user:orderedUser,assistant:{id:'order-assistant',role:'assistant',parts:[orderedPanel,finalText]},hasDetails:true,toolCount:1,revision:'order-revision',assetRevision:''};
@@ -120,6 +141,14 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
           name: 'ui-test',
           configureServer(server) {
             server.middlewares.use(async (req, res, next) => {
+              if (req.url === '/thumbnail.svg') {
+                imageRequests.push(req.headers);
+                res.setHeader('Content-Type', 'image/svg+xml');
+                res.end(
+                  '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="64"><rect width="96" height="64" fill="#16805c"/><circle cx="48" cy="32" r="18" fill="white"/></svg>',
+                );
+                return;
+              }
               if (req.url?.split('?')[0] !== '/') return next();
               res.setHeader('Content-Type', 'text/html');
               res.end(
@@ -149,12 +178,28 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       locale: 'zh-CN',
       reducedMotion: 'reduce',
     });
+    await page.context().route(/^https?:\/\/example\.test\//, async (route) => {
+      return route.fulfill({
+        contentType: 'text/html',
+        body: '<!doctype html><title>Destination</title><p>Link destination</p>',
+      });
+    });
     const errors = [];
+    const browserMessages = [];
     page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => browserMessages.push(message.text()));
+    page.on('requestfailed', (request) =>
+      browserMessages.push(request.url() + ': ' + request.failure()?.errorText),
+    );
     await page.goto('http://127.0.0.1:' + port);
     await page.locator('[data-panel=form] iframe').waitFor();
     const frames = {};
     for (const id of panels.map((p) => p.id)) {
+      assert.equal(
+        await page.locator('[data-panel=' + id + '] iframe').count(),
+        1,
+        id + ' renders HTML even when optional fields are null',
+      );
       frames[id] = await (
         await page.locator('[data-panel=' + id + '] iframe').elementHandle()
       ).contentFrame();
@@ -162,6 +207,105 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
         () => document.body && !document.body.inert,
       );
     }
+    await t.test(
+      'images render and web links open only on user activation',
+      async () => {
+        const links = frames.links;
+        await links.waitForFunction(() => {
+          const image = document.querySelector('img');
+          return image.complete;
+        });
+        assert.equal(
+          await links.locator('img').evaluate((image) => image.naturalWidth),
+          96,
+          browserMessages.join('\n'),
+        );
+        assert.equal(imageRequests.length, 1);
+        assert.equal(imageRequests[0].referer, undefined);
+        assert.equal(await links.locator('svg path').count(), 1);
+        assert.equal(page.context().pages().length, 1, 'no automatic tabs');
+        for (const id of ['script-link', 'data-link', 'relative-link'])
+          assert.equal(
+            await links.locator('#' + id).getAttribute('href'),
+            null,
+          );
+        assert.equal(
+          await links.locator('#details').getAttribute('ping'),
+          null,
+        );
+        assert.equal(
+          await links.locator('#details').getAttribute('download'),
+          null,
+        );
+
+        const open = async (activate, expectedUrl) => {
+          const popupReady = page.waitForEvent('popup');
+          await activate();
+          const popup = await popupReady;
+          await popup.waitForLoadState();
+          assert.equal(popup.url(), expectedUrl);
+          assert.deepEqual(
+            await popup.evaluate(() => ({
+              opener: window.opener,
+              referrer: document.referrer,
+            })),
+            { opener: null, referrer: '' },
+          );
+          await popup.close();
+        };
+        await open(
+          () => links.locator('#details span').click(),
+          'https://example.test/details',
+        );
+        await open(
+          () => links.locator('#http-link').press('Enter'),
+          'http://example.test/source',
+        );
+        await open(
+          () => links.locator('#details').click({ button: 'middle' }),
+          'https://example.test/details',
+        );
+        await links.locator('#details').dispatchEvent('click');
+        await links.evaluate(() => {
+          const link = document.createElement('a');
+          link.id = 'dynamic-link';
+          link.href = 'javascript:alert("unexpected")';
+          link.textContent = 'Invalid dynamic link';
+          document.body.append(link);
+        });
+        await links.locator('#dynamic-link').click();
+        await page.evaluate(
+          () => new Promise((resolve) => setTimeout(resolve, 100)),
+        );
+        assert.equal(
+          page.context().pages().length,
+          1,
+          'reject synthetic clicks and invalid dynamic URLs',
+        );
+        assert.equal(
+          await page.evaluate(() => window.records.length),
+          0,
+          'links do not submit the panel',
+        );
+        assert.equal(page.url(), 'http://127.0.0.1:' + port + '/');
+        assert.equal(links.url(), 'about:srcdoc');
+        await page
+          .locator('[data-panel=links]')
+          .screenshot({ path: '/tmp/intelligent-ui-links.png' });
+      },
+    );
+    const nullOptionals = frames['null-optionals'];
+    assert.equal(
+      await page
+        .locator('[data-panel=null-optionals] iframe')
+        .getAttribute('title'),
+      'IntelligentUI',
+    );
+    await nullOptionals
+      .getByRole('button', { name: '本地交互' })
+      .press('Enter');
+    await nullOptionals.getByRole('button', { name: '已点击' }).waitFor();
+    assert.equal(await nullOptionals.getByRole('button').innerText(), '已点击');
     const form = frames.form;
     const token = (
       await page.locator('[data-panel=form] iframe').getAttribute('srcdoc')

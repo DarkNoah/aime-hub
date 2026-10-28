@@ -99,7 +99,7 @@ export function threadRouter(
       threads().abort(context.userId, input.params.threadId),
     ),
     retry: p.retry.handler(({ context, input }) =>
-      threads().retry(context.userId, input.params.threadId),
+      threads().retry(context.userId, input.params.threadId, input.body),
     ),
     continue: p.continue.handler(({ context, input }) =>
       threads().continueRun(context.userId, input.params.threadId),

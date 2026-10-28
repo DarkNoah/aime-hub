@@ -99,7 +99,8 @@ export const chatApi = {
       params: { threadId, interactionId },
       body: response,
     }),
-  retry: (threadId: string) => api.threads.retry({ params: { threadId } }),
+  retry: (threadId: string, settings: ChatSettings) =>
+    api.threads.retry({ params: { threadId }, body: settings }),
   continue: (threadId: string) =>
     api.threads.continue({ params: { threadId } }),
   queued: (threadId: string, messageId: string, signal?: AbortSignal) =>

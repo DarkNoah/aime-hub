@@ -44,6 +44,8 @@ export type StoredRun = BacktestRun & {
   user_id: string;
   worker_id: string | null;
   heartbeat_at: string | null;
+  /** Tombstones preserve pagination cursors and prevent stale writes reviving a run. */
+  deleted_at?: string;
 };
 type RecordRow = { payload: string; revision: string | number };
 type StoredVersion = Omit<StrategyVersion, 'source'> & { deleted_at?: string };
@@ -489,6 +491,7 @@ export class StrategyStore extends ClickHouseClient {
     const rows = await this.rows<{ payload: string }>(
       `SELECT payload FROM ${this.table('quant_strategy_runs')} FINAL
        WHERE JSONExtractString(payload, 'strategy_id') = {strategy:String}
+       AND JSONExtractString(payload, 'deleted_at') = ''
        ${
          monitor
            ? `AND JSONExtractString(payload, 'version_id') = {version:String}
@@ -542,8 +545,19 @@ export class StrategyStore extends ClickHouseClient {
 
   async run(_actor: string, id: string): Promise<BacktestRun> {
     const row = await this.record<StoredRun>('quant_strategy_runs', id);
-    if (!row) throw new StrategyError('RUN_NOT_FOUND', 404);
+    if (!row || row.value.deleted_at)
+      throw new StrategyError('RUN_NOT_FOUND', 404);
     return row.value;
+  }
+
+  async deleteRun(owner: string, id: string): Promise<void> {
+    const run = await this.run(owner, id);
+    assertEditable(await this.storedStrategy(run.strategy_id));
+    const deleted = await this.updateRun(id, (current) => {
+      if (active(current)) throw new StrategyError('RUN_ACTIVE', 409);
+      return { ...current, deleted_at: iso() };
+    });
+    if (!deleted) throw new StrategyError('RUN_NOT_FOUND', 404);
   }
 
   /** Reserve a target ID before insertion so retries/concurrent requests cannot clone twice. */
@@ -617,7 +631,7 @@ export class StrategyStore extends ClickHouseClient {
     for (let attempt = 0; attempt < 30; attempt++) {
       try {
         const row = await this.record<StoredRun>('quant_strategy_runs', id);
-        if (!row) return;
+        if (!row || row.value.deleted_at) return;
         const next = update(row.value);
         if (!next) return;
         if (await this.replace('quant_strategy_runs', next, row.revision))

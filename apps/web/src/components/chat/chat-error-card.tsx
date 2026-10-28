@@ -5,20 +5,28 @@ import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { chatErrorKey } from './api';
+import { chatApi, chatErrorKey } from './api';
+import { usePersonalChatSettings } from './use-personal-chat-settings';
 
 export function ChatErrorCard({
   error,
-  onRetry,
+  threadId,
   disabled,
 }: {
   error: string;
-  onRetry: () => Promise<void>;
+  threadId: string;
   disabled?: boolean;
 }) {
   const { t } = useTranslation();
+  const {
+    settings,
+    loading,
+    saving,
+    error: settingsError,
+  } = usePersonalChatSettings();
   const pending = useRef(false);
   const [retrying, setRetrying] = useState(false);
+  const retryDisabled = disabled || loading || saving || !!settingsError;
   const errorKey = chatErrorKey(error);
   const message =
     errorKey === 'chat.errors.failed' && error !== 'CHAT_FAILED'
@@ -26,11 +34,11 @@ export function ChatErrorCard({
       : t(errorKey);
 
   async function retry() {
-    if (pending.current || disabled) return;
+    if (pending.current || retryDisabled) return;
     pending.current = true;
     setRetrying(true);
     try {
-      await onRetry();
+      await chatApi.retry(threadId, settings);
     } catch (cause) {
       toast.error(t(chatErrorKey(cause)));
     } finally {
@@ -55,7 +63,7 @@ export function ChatErrorCard({
         <Button
           variant="outline"
           size="sm"
-          disabled={disabled || retrying}
+          disabled={retryDisabled || retrying}
           onClick={() => void retry()}
         >
           {retrying ? (

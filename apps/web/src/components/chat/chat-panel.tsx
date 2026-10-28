@@ -386,14 +386,14 @@ function ExistingChat({
           )}
         </div>
       )}
-      <ChatConversation
-        contentClassName={chatContentClassName}
-        composer={
-          chat.thread && (
-            <PersonalChatSettingsProvider
-              threadId={chat.thread.plugin ? threadId : undefined}
-              initialSettings={chat.thread}
-            >
+      <PersonalChatSettingsProvider
+        threadId={chat.thread?.plugin ? threadId : undefined}
+        initialSettings={chat.thread ?? undefined}
+      >
+        <ChatConversation
+          contentClassName={chatContentClassName}
+          composer={
+            chat.thread && (
               <ChatComposer
                 className={chatContentClassName}
                 threadId={threadId}
@@ -434,64 +434,62 @@ function ExistingChat({
                   }
                 }}
               />
-            </PersonalChatSettingsProvider>
-          )
-        }
-      >
-        <ChatHistoryLoader
-          hasEarlier={chat.hasEarlier}
-          loading={chat.loadingHistory}
-          loadEarlier={chat.loadEarlier}
-          firstTurnId={chat.turns[0]?.id}
-        />
-        {!chat.thread && !chat.error && (
-          <div
-            role="status"
-            aria-label={t('chat.loading')}
-            className="space-y-5 motion-safe:animate-pulse"
-          >
-            <div className="h-4 w-1/3 rounded bg-muted" />
-            <div className="h-20 w-4/5 rounded-lg bg-muted" />
-            <div className="ml-auto h-14 w-3/5 rounded-lg bg-muted" />
-          </div>
-        )}
-        <ChatTurns
-          turns={chat.turns}
-          details={chat.details}
-          loadDetails={chat.loadDetails}
-          activeTurnId={chat.activeTurnId}
-          threadId={threadId}
-          running={running}
-          activeMessageId={chat.activeMessageId}
-          toolInteractions={chat.toolInteractions}
-          onToolResponse={chat.respondToTool}
-          disabled={!chat.connected || running || stopping}
-        />
-        {chat.thread && !chat.turns.length && <ChatWelcome />}
-        {running && !chat.activeMessageId && (
-          <p
-            role="status"
-            className="text-sm text-muted-foreground motion-safe:animate-pulse"
-          >
-            {t('chat.thinking')}
-          </p>
-        )}
-        {canContinue && (
-          <ChatContinueButton
-            disabled={!chat.connected || stopping || chat.sending}
-            onContinue={chat.continueRun}
+            )
+          }
+        >
+          <ChatHistoryLoader
+            hasEarlier={chat.hasEarlier}
+            loading={chat.loadingHistory}
+            loadEarlier={chat.loadEarlier}
+            firstTurnId={chat.turns[0]?.id}
           />
-        )}
-        {chat.thread?.error && (
-          <ChatErrorCard
-            error={chat.thread.error}
-            disabled={!chat.connected || running || stopping || chat.sending}
-            onRetry={async () => {
-              await chatApi.retry(threadId);
-            }}
+          {!chat.thread && !chat.error && (
+            <div
+              role="status"
+              aria-label={t('chat.loading')}
+              className="space-y-5 motion-safe:animate-pulse"
+            >
+              <div className="h-4 w-1/3 rounded bg-muted" />
+              <div className="h-20 w-4/5 rounded-lg bg-muted" />
+              <div className="ml-auto h-14 w-3/5 rounded-lg bg-muted" />
+            </div>
+          )}
+          <ChatTurns
+            turns={chat.turns}
+            details={chat.details}
+            loadDetails={chat.loadDetails}
+            activeTurnId={chat.activeTurnId}
+            threadId={threadId}
+            running={running}
+            activeMessageId={chat.activeMessageId}
+            toolInteractions={chat.toolInteractions}
+            onToolResponse={chat.respondToTool}
+            disabled={!chat.connected || running || stopping}
           />
-        )}
-      </ChatConversation>
+          {chat.thread && !chat.turns.length && <ChatWelcome />}
+          {running && !chat.activeMessageId && (
+            <p
+              role="status"
+              className="text-sm text-muted-foreground motion-safe:animate-pulse"
+            >
+              {t('chat.thinking')}
+            </p>
+          )}
+          {canContinue && (
+            <ChatContinueButton
+              disabled={!chat.connected || stopping || chat.sending}
+              onContinue={chat.continueRun}
+            />
+          )}
+          {chat.thread?.error && (
+            <ChatErrorCard
+              threadId={threadId}
+              error={chat.thread.error}
+              disabled={!chat.connected || running || stopping || chat.sending}
+            />
+          )}
+        </ChatConversation>
+      </PersonalChatSettingsProvider>
     </>
   );
 }

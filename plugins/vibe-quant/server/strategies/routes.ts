@@ -272,6 +272,10 @@ export function strategyRoutes(
       await getRecords().run(c.get('userId'), readId(c.req.param('runId'))),
     ),
   );
+  api.delete('/runs/:runId', async (c) => {
+    await getRecords().deleteRun(c.get('userId'), readId(c.req.param('runId')));
+    return c.json({ success: true });
+  });
   api.post('/runs/:runId/cancel', async (c) =>
     c.json(
       await getRecords().cancel(c.get('userId'), readId(c.req.param('runId'))),
