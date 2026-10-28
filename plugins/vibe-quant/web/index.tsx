@@ -7,6 +7,7 @@ const LazyMarketPage = lazy(() =>
 
 const LazyStrategiesPage = lazy(() => import('./strategies/page'));
 const LazyNewsPage = lazy(() => import('./news/page'));
+const LazyFactorsPage = lazy(() => import('./factors/page'));
 
 // The host lazily loads page entries, so expose a component rather than another lazy object.
 function MarketPage(props: PluginPageProps) {
@@ -18,7 +19,15 @@ function StrategiesPage(props: PluginPageProps) {
 function NewsPage(props: PluginPageProps) {
   return <LazyNewsPage {...props} />;
 }
+function FactorsPage(props: PluginPageProps) {
+  return <LazyFactorsPage {...props} />;
+}
 
 export default {
-  pages: { '': MarketPage, strategies: StrategiesPage, news: NewsPage },
+  pages: {
+    '': MarketPage,
+    strategies: StrategiesPage,
+    factors: FactorsPage,
+    news: NewsPage,
+  },
 } satisfies PluginWeb;

@@ -209,6 +209,7 @@ export class StrategyReplaySessions {
       await writeFile(join(directory, 'strategy.py'), version.source, {
         mode: 0o600,
       });
+      await records.prepareFactors(version.source, directory);
       this.sweep();
     }
     if (session.task) throw new StrategyError('REPLAY_BUSY', 409);

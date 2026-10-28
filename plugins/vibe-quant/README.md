@@ -305,11 +305,16 @@ QUANT_STRATEGY_INTEGRATION=1 node --import dotenv/config --import tsx --test plu
 | `strategy_versions`、`strategy_publish` | 查看版本摘要、固定当前草稿版本                                     |
 | `backtest_start`、`backtest_list`       | 提交回测、分页读取历史记录                                         |
 | `backtest_status`、`backtest_result`    | 等待进度、指标与说明、分页读取交易/委托/成交/信号/日志/权益/风险线 |
+| `backtest_compare`                      | 同一策略不同版本的整体指标、逐年/逐月收益及中文描述对比            |
 | `backtest_optimize`                     | 提交独立的 Optuna 调优任务，成功后创建新的策略草稿                 |
 | `backtest_cancel`                       | 取消排队或运行中的回测                                             |
 | `news_search`、`news_read`              | 搜索已采集资讯、读取正文及来源；采集关闭后仍可读取已有数据         |
 
 典型流程是 `guide → list/read → create/update → publish → backtest_start → status → result`。创建策略只需 `name`、`source`，`parameters` 默认空对象；更新传 `strategy_id`、`revision` 和要改的字段，`source`、`parameters` 直接放在顶层，无需 `draft`。省略字段保留原值，`parameters` 如提供则整体替换。读取结果仍保留 `strategy.draft` 结构。
+
+版本效果对比：先用 `backtest_list` 找到同一策略各版本已完成的普通回测，调用 `backtest_compare({"run_ids":["版本1回测ID","版本2回测ID"]})`，每个版本选一条，第一条作为差值基准，支持多个版本。返回 `metrics`（总收益、年化、回撤、夏普、胜率、PF 等）、`yearly`、`monthly` 及可直接阅读的中文 `description`；每项含原值、相对基准的差值和描述。结构化收益率及其差值使用小数比例，描述用百分比/百分点；点数回测使用点，不转换成资金收益率。年度/月度直接采用原回测报告，按交易日所属期间对齐，不把月收益率相加作为年收益率；缺失期间为 null，首尾部分年/月不折算成完整期间。
+
+对比同时返回版本、源码/结果哈希、实际回测配置、指标口径说明和观测范围。标的、区间、周期、引擎、交易规则或成本等条件不同，或权益观测覆盖不同/缺失，会提示并停止相关排名；参数差异单独说明。`comparable` 仅表示已记录的设置和权益观测覆盖一致，不证明底层行情快照完全相同。资金和点数结果不能混比，不同策略、同版本多条记录、未完成/失败任务和调优训练结果不用于版本对比；调优后可按选定参数单独运行普通回测。工具只读已有产物，无需新增后台配置或专属渲染器，沿用通用工具结果展示；中止读取立即返回“用户中止了操作”。
 
 内置回测只需 `version_id`、`symbol`、`start`、`end`、`rules`，策略归属由版本自动确定；仍兼容可选 `strategy_id` 并校验归属。`backtest_start.parameters` 覆盖固定版本的同名参数。默认使用 1 分钟 K 线、初始资金 100 万、滑点 1 tick、参与率 10%、年化交易日 252，均为可覆盖的研究假设；乘数、保证金、手数、T+1 和手续费规则必须明确提供。`rules.fees.mode` 可选 `fixed`（按手／股固定金额）、`rate`（按成交额比例）、`combined`（两者叠加，省略时沿用历史口径）；页面新建回测默认选择固定模式，最低手续费与卖出税费在所有模式下生效。日期使用 UTC epoch 秒。工具参数保持简单，实际保存和回测仍执行后端校验；参数错误会返回具体字段或错误码。结果明细每页固定 50 条，用 `next_offset` 继续。数据缺失、执行错误和无成交保留为实际结果，不会被当作验证成功。
 

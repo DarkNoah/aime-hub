@@ -15,6 +15,8 @@ import { ClickHouseClient, ClickHouseError } from '../clickhouse-client.js';
 import { StrategyError } from './schema.js';
 import { sha256, StrategySources } from './sources.js';
 import { decodeArtifact, encodeArtifact } from './artifacts.js';
+import { FactorStore } from '../factors/store.js';
+import { writeFactorBundle } from '../factors/bundle.js';
 import type { OptimizationReport } from '../../optimization-types.js';
 import {
   strategyNotifications,
@@ -88,6 +90,10 @@ const versionDetail = (
 
 /** Shared strategy library in ClickHouse. Caller IDs attribute writes, not access. */
 export class StrategyStore extends ClickHouseClient {
+  async prepareFactors(source: string, directory: string) {
+    await writeFactorBundle(new FactorStore(this.config), source, directory);
+  }
+
   get sources() {
     return new StrategySources(this.config);
   }

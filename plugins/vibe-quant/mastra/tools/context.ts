@@ -7,8 +7,13 @@ import type { StateStore } from '../../server/state-store.js';
 import type { StrategyStore } from '../../server/strategies/store.js';
 import type { NewsStore } from '../../server/news/store.js';
 import { StrategyError } from '../../server/strategies/schema.js';
+import { FactorError } from '../../server/factors/schema.js';
+import type { FactorStore } from '../../server/factors/store.js';
+import type { FactorService } from '../../server/factors/service.js';
 
 export interface QuantDependencies {
+  factors?: FactorStore;
+  factorService?: FactorService;
   records: Pick<
     StrategyStore,
     | 'list'
@@ -34,7 +39,8 @@ export function quantToolContext(
   get: () => QuantDependencies,
 ) {
   return async function execute<T>(
-    execution: ToolExecutionContext | undefined,
+    execution:
+      Pick<ToolExecutionContext, 'abortSignal' | 'requestContext'> | undefined,
     run: (
       deps: QuantDependencies,
       actor: { userId: string; isAdmin: boolean },
@@ -72,6 +78,8 @@ export function quantToolContext(
       if (signal?.aborted)
         return { cancelled: true as const, message: '用户中止了操作' };
       if (error instanceof StrategyError) return { error: error.code };
+      if (error instanceof FactorError)
+        return { error: 'FACTOR_ERROR', message: error.message };
       if (error instanceof ZodError)
         return {
           error: 'INVALID_ARGUMENTS',

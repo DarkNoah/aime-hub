@@ -253,3 +253,7 @@ QUANT_INTEGRATION=1 pnpm --filter @plugins/vibe-quant test
 ### 策略管理中的入口识别
 
 策略管理不提供入口类配置，`draft` 仅包含 `source` 和 `parameters`。回测工作进程在管理员授权执行脚本时，自动选择本文件中唯一可实例化的 `Strategy` 子类，同一继承链选择最末级。导入的类不参与自动选择；多个独立策略类会明确报错，需拆分为单独脚本。旧记录中的入口字段不再影响新回测，历史版本及已完成的回测产物保持原样。保存草稿和切换脚本预览不会执行 Python。
+
+## 因子复用
+
+期货因子通过 `from quant_sdk import Factor, load_factor` 使用。完整协议、策略示例和分析口径见 [FACTORS.md](FACTORS.md)。策略脚本用 `load_factor("已发布版本UUID")` 固定引用因子，并在回调中调用 `factor.value(ctx, bar.symbol, bar.duration)`，只读取当前时钟已收盘的历史。

@@ -13,6 +13,33 @@ export const dateTime = (value: number | string | null | undefined) =>
         'zh-CN',
         { timeZone: 'Asia/Shanghai', hour12: false },
       );
+export function holdingDuration(
+  entryTime: number | null | undefined,
+  endTime: number | null | undefined,
+) {
+  if (
+    entryTime == null ||
+    endTime == null ||
+    !Number.isFinite(entryTime) ||
+    !Number.isFinite(endTime) ||
+    endTime < entryTime
+  )
+    return '—';
+  const seconds = endTime - entryTime;
+  if (seconds === 0) return '0m';
+  if (seconds < 60) return '<1m';
+  const minutes = Math.floor(seconds / 60);
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const remainingMinutes = minutes % 60;
+  return [
+    days ? `${days}d` : '',
+    hours ? `${hours}h` : '',
+    remainingMinutes ? `${remainingMinutes}m` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
 const errors: Record<string, string> = {
   TQ_ACTUAL_FUTURES_ONLY:
     '天勤回测仅支持期货实际合约，如 CFFEX.IM2611；暂不支持主连和点数模式',

@@ -311,6 +311,7 @@ export class BacktestWorker {
       await writeFile(join(directory, 'strategy.py'), version.source, {
         mode: 0o600,
       });
+      await this.records.prepareFactors(version.source, directory);
       signal.throwIfAborted();
       stage = '执行策略';
       await this.records.status(job.id, this.id, 'running');

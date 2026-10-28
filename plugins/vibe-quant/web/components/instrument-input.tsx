@@ -8,19 +8,28 @@ export function InstrumentInput({
   pluginId,
   value,
   futuresOnly = false,
+  includeContinuous = false,
+  label = '信号标的',
   onChange,
   onSelect,
 }: {
   pluginId: string;
   value: string;
   futuresOnly?: boolean;
+  includeContinuous?: boolean;
+  label?: string;
   onChange: (value: string) => void;
   onSelect: (instrument: Instrument) => void;
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
   const query = value.trim();
-  const searchKey = JSON.stringify([pluginId, query, futuresOnly]);
+  const searchKey = JSON.stringify([
+    pluginId,
+    query,
+    futuresOnly,
+    includeContinuous,
+  ]);
   const [result, setResult] = useState<{
     key: string;
     items: Instrument[];
@@ -37,7 +46,7 @@ export function InstrumentInput({
       try {
         const rows = await pluginRequest<Instrument[]>(
           pluginId,
-          `/instruments?q=${encodeURIComponent(query)}${futuresOnly ? '&kind=future' : ''}`,
+          `/instruments?q=${encodeURIComponent(query)}${futuresOnly && !includeContinuous ? '&kind=future' : ''}`,
           { signal: abort.signal },
         );
         if (abort.signal.aborted) return;
@@ -45,7 +54,12 @@ export function InstrumentInput({
           key: searchKey,
           items: rows
             .filter((item) =>
-              futuresOnly ? item.kind === 'future' : item.kind !== 'option',
+              futuresOnly
+                ? item.kind === 'future' ||
+                  (includeContinuous &&
+                    item.kind === 'continuous' &&
+                    item.symbol.startsWith('KQ.m@'))
+                : item.kind !== 'option',
             )
             .slice(0, 12),
         });
@@ -59,7 +73,7 @@ export function InstrumentInput({
       clearTimeout(timer);
       abort.abort();
     };
-  }, [pluginId, query, futuresOnly, searchKey, open]);
+  }, [pluginId, query, futuresOnly, includeContinuous, searchKey, open]);
 
   const status = !query
     ? '输入标的代码或名称，自动搜索匹配标的'
@@ -76,7 +90,7 @@ export function InstrumentInput({
   return (
     <div className="grid min-w-0 gap-2">
       <Label htmlFor={id} className="text-xs">
-        信号标的
+        {label}
       </Label>
       <AutocompleteInput
         id={id}
@@ -94,9 +108,11 @@ export function InstrumentInput({
           if (item) onSelect(item);
         }}
         placeholder={
-          futuresOnly
+          futuresOnly && !includeContinuous
             ? '输入实际合约代码或名称，如 IM2611、螺纹钢'
-            : '输入代码或名称，如 IM、螺纹钢、600000'
+            : futuresOnly
+              ? '输入期货或主连代码、名称，如 IM、螺纹钢'
+              : '输入代码或名称，如 IM、螺纹钢、600000'
         }
         status={status}
       />

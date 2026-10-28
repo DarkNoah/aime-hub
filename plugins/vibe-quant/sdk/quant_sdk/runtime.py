@@ -16,6 +16,7 @@ from .metrics import summarize
 from .models import Bar, Event, Fees, Instrument, Quote, Roll, RunConfig
 from .risk import RiskLevels, accept, publish
 from .state_codec import encode_state, decode_state
+from .factors import snapshot_factors
 
 
 class Strategy:
@@ -149,6 +150,9 @@ class Runner:
                          },
                          'settlement_model': 'previous_trading_day_last_observed_close',
                          'end_policy': 'mark_open_positions; cancel_pending_orders'}
+        factors = snapshot_factors(self.directory)
+        if factors:
+            self.manifest['factor_versions'] = factors
         if self.broker.points:
             self.manifest.update(pnl_unit='points', position_model='fixed_one_unit_per_direction',
                                  fill_model='next_bar_open_with_slippage; no_cash_margin_volume_or_T_plus_one_constraints')

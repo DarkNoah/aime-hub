@@ -71,7 +71,7 @@ export function AutocompleteInput({
         }}
       />
       <Autocomplete.Status className="sr-only">{status}</Autocomplete.Status>
-      <Autocomplete.Portal container={container}>
+      <Autocomplete.Portal container={container ?? undefined}>
         <Autocomplete.Positioner
           sideOffset={4}
           align="start"

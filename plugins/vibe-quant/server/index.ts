@@ -28,6 +28,9 @@ import { readVolumeProfile, volumeProfileQuery } from './volume-profile.js';
 import { TradeService } from './trades/service.js';
 import { MonitorStore } from './signals/store.js';
 import { SignalWorker } from './signals/worker.js';
+import { FactorStore } from './factors/store.js';
+import { FactorService } from './factors/service.js';
+import { factorRoutes } from './factors/routes.js';
 import { signalRoutes } from './signals/routes.js';
 import {
   StrategyReplaySessions,
@@ -53,6 +56,8 @@ export default function createServer(context: PluginContext): PluginServer {
   let trades: TradeService;
   let monitors: MonitorStore;
   let signals: SignalWorker | undefined;
+  let factors: FactorStore;
+  let factorService: FactorService;
   const replays = new StrategyReplaySessions(context, () => ({
     records,
     monitors,
@@ -61,6 +66,10 @@ export default function createServer(context: PluginContext): PluginServer {
     config,
   }));
   const api = new Hono<PluginHttpEnv>();
+  api.route(
+    '/factors',
+    factorRoutes(context, () => ({ records: factors, service: factorService })),
+  );
   api.route('/strategies', strategyReplayRoutes(replays));
   api.route(
     '/strategies',
@@ -244,6 +253,7 @@ export default function createServer(context: PluginContext): PluginServer {
     });
   });
   const stop = async () => {
+    await factorService?.stop();
     await replays.stop();
     await signals?.stop();
     signals = undefined;
@@ -258,6 +268,8 @@ export default function createServer(context: PluginContext): PluginServer {
   return {
     api,
     ...createQuantMastra(context, () => ({
+      factors,
+      factorService,
       records,
       state,
       news,
@@ -280,6 +292,13 @@ export default function createServer(context: PluginContext): PluginServer {
       await trades.initialize();
       records = new StrategyStore(config);
       await records.initialize();
+      factors = new FactorStore(config);
+      await factors.initialize();
+      factorService = new FactorService(context, factors, {
+        store,
+        state,
+        config,
+      });
       await migrateStrategies(context.database, records);
       monitors = new MonitorStore(config);
       await monitors.initialize();

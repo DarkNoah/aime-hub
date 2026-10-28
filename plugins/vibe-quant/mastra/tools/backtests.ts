@@ -16,6 +16,7 @@ import { enqueueBacktest } from '../../server/strategies/enqueue.js';
 import { optimizationSchema } from '../../server/strategies/optimization.js';
 import type { OptimizationReport } from '../../optimization-types.js';
 import { quantToolContext, type QuantDependencies } from './context.js';
+import { BacktestCompareTool } from './backtest-compare.js';
 
 function runView(run: BacktestRun): BacktestRun {
   return {
@@ -347,6 +348,7 @@ export function createBacktestTools(
     new BacktestListTool(context, get),
     new BacktestStatusTool(context, get),
     new BacktestResultTool(context, get),
+    new BacktestCompareTool(context, get),
     new BacktestCancelTool(context, get),
   ];
 }

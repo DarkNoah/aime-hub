@@ -285,6 +285,12 @@
       "navigation": true
     },
     {
+      "path": "factors",
+      "title": "因子库",
+      "access": "session",
+      "navigation": true
+    },
+    {
       "path": "news",
       "title": "资讯",
       "access": "session",

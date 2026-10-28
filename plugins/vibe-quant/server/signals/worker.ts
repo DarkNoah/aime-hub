@@ -229,6 +229,7 @@ export class SignalWorker {
       await writeFile(join(directory, 'strategy.py'), version.source, {
         mode: 0o600,
       });
+      await this.records.prepareFactors(version.source, directory);
       await writeFile(
         join(directory, 'config.json'),
         JSON.stringify({

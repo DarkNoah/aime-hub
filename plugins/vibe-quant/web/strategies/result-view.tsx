@@ -28,8 +28,15 @@ import type {
   BacktestRun,
   TradeRecord,
 } from '../../strategy-types';
+import { tradeHoldingEnd } from '../../strategy-types';
 import { resultTradeRecords, closedTradeWinRate } from '../../strategy-trades';
-import { dateTime, errorText, number, percent } from './format';
+import {
+  dateTime,
+  errorText,
+  holdingDuration,
+  number,
+  percent,
+} from './format';
 import { exitReasonLabel } from '../trade-exit';
 import { PeriodReturns } from './period-returns';
 const EquityChart = lazy(() => import('./equity-chart'));
@@ -354,6 +361,12 @@ export function ResultView({
                         <TableHead>状态</TableHead>
                         <TableHead>入场</TableHead>
                         <TableHead>离场</TableHead>
+                        <TableHead
+                          className="whitespace-nowrap text-right"
+                          title="按自然时间计算；未平仓记录截至回测最后观测时间"
+                        >
+                          持仓时间
+                        </TableHead>
                         <TableHead>离场原因</TableHead>
                         <TableHead className="text-right">数量</TableHead>
                         <TableHead className="text-right">
@@ -411,6 +424,19 @@ export function ResultView({
                                 </div>
                               )}
                             </TableCell>
+                            <TableCell
+                              className="whitespace-nowrap text-right tabular-nums"
+                              title={
+                                item.status === 'open'
+                                  ? `截至 ${dateTime(item.observed_until)}（回测最后观测时间）`
+                                  : undefined
+                              }
+                            >
+                              {holdingDuration(
+                                item.entry_time,
+                                tradeHoldingEnd(item),
+                              )}
+                            </TableCell>
                             <TableCell>
                               {item.status === 'open' ? (
                                 '—'
@@ -455,7 +481,7 @@ export function ResultView({
                       {!sortedTrades.length && (
                         <TableRow>
                           <TableCell
-                            colSpan={9}
+                            colSpan={10}
                             className="py-10 text-center text-muted-foreground"
                           >
                             暂无交易记录，可在订单与日志中检查信号和拒单原因。
