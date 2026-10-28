@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { pluginRequest } from '@app/plugin-sdk/web';
 import {
+  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -57,17 +58,12 @@ export function StrategyPicker({
   }>({});
   const native = simulationEngine === 'tqsdk';
   const [selected, setSelected] = useState('');
-  const [versions, setVersions] = useState<{
-    strategyId: string;
-    items: StrategyVersion[];
-  }>();
-  const [versionId, setVersionId] = useState('');
+  const [primaryVersion, setPrimaryVersion] = useState<StrategyVersion>();
   const [canRun, setCanRun] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const availableVersions =
-    versions?.strategyId === selected ? versions.items : undefined;
-  const version = availableVersions?.find((item) => item.id === versionId);
+  const version =
+    primaryVersion?.strategy_id === selected ? primaryVersion : undefined;
   const versionDuration = strategyHintDuration(version?.parameters);
   const calculationDuration = versionDuration ?? 60;
 
@@ -106,16 +102,14 @@ export function StrategyPicker({
   useEffect(() => {
     if (!selected) return;
     const abort = new AbortController();
-    void pluginRequest<StrategyVersion[]>(
+    void pluginRequest<StrategyVersion>(
       pluginId,
-      `/strategies/${selected}/versions`,
+      `/strategies/${selected}/primary-version`,
       { signal: abort.signal },
     )
-      .then((rows) => {
+      .then((version) => {
         if (abort.signal.aborted) return;
-        const sorted = [...rows].sort((a, b) => b.number - a.number);
-        setVersions({ strategyId: selected, items: sorted });
-        setVersionId(sorted[0]?.id ?? '');
+        setPrimaryVersion(version);
       })
       .catch((error) => {
         if (!abort.signal.aborted) setError(errorText(error));
@@ -135,7 +129,6 @@ export function StrategyPicker({
         {
           method: 'POST',
           body: JSON.stringify({
-            version_id: version.id,
             symbol: sourceSymbol.trim(),
             display_symbol: symbol,
             simulation_engine: simulationEngine,
@@ -176,14 +169,14 @@ export function StrategyPicker({
         <DialogHeader>
           <DialogTitle>添加策略提示 · {symbolName}</DialogTitle>
           <DialogDescription>
-            使用所选版本的默认参数
+            自动使用主要版本的默认参数
             {version ? `，按 ${durationLabel(calculationDuration)} 周期` : ''}
             {native
               ? '由天勤回放合约历史，随后持续模拟交易，成交与账户记录入库。'
               : '计算全部已存行情，完成后持续实时更新。'}
             {version &&
               (versionDuration !== undefined
-                ? '计算周期取自所选版本参数，不受图表周期影响。'
+                ? '计算周期取自主要版本参数，不受图表周期影响。'
                 : '版本未配置周期，使用默认 1 分钟，不受图表周期影响。')}
             {!native &&
               monitorExecutionModel({ symbol: sourceSymbol }) === 'points' &&
@@ -291,7 +284,7 @@ export function StrategyPicker({
                     disabled={busy}
                     onValueChange={(value) => {
                       setSelected(value);
-                      setVersionId('');
+                      setPrimaryVersion(undefined);
                       setError('');
                     }}
                   >
@@ -307,32 +300,20 @@ export function StrategyPicker({
                     </SelectContent>
                   </Select>
                 </Label>
-                <Label className="grid min-w-0 grid-cols-1 gap-2">
-                  版本
-                  <Select
-                    value={versionId}
-                    disabled={busy || !availableVersions?.length}
-                    onValueChange={setVersionId}
-                  >
-                    <SelectTrigger className="w-full" aria-label="选择策略版本">
-                      <SelectValue
-                        placeholder={
-                          !availableVersions
-                            ? '正在加载版本…'
-                            : '暂无已发布版本'
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableVersions?.map((item) => (
-                        <SelectItem key={item.id} value={item.id}>
-                          v{item.number}
-                          {item.note ? ` · ${item.note}` : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Label>
+                <div className="space-y-2 rounded-md border p-3">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Badge variant="secondary">主要版本</Badge>
+                    {version ? `v${version.number}` : '正在加载…'}
+                  </div>
+                  {version?.note && (
+                    <p className="line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                      {version.note}
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    可在策略页面切换主要版本，添加时使用当前主要版本。
+                  </p>
+                </div>
               </>
             ) : (
               <p className="text-sm text-muted-foreground">

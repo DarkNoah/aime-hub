@@ -45,6 +45,7 @@ export function RunForm({
   pluginId,
   strategyId,
   versions,
+  primaryVersionId,
   mode = 'backtest',
   initial,
   onClose,
@@ -53,16 +54,19 @@ export function RunForm({
   pluginId: string;
   strategyId: string;
   versions: StrategyVersion[];
+  primaryVersionId?: string | null;
   mode?: 'backtest' | 'optimization';
   initial?: BacktestInput;
   onClose: () => void;
   onCreated: (run: BacktestRun) => void;
 }) {
+  const defaultVersion =
+    versions.find((version) => version.id === primaryVersionId) ?? versions[0];
   const [config, setConfig] = useState<BacktestInput>(() =>
     initial
       ? { ...initial }
       : {
-          version_id: versions[0].id,
+          version_id: defaultVersion.id,
           symbol: 'KQ.m@CFFEX.IM',
           duration: 60,
           start: Math.floor(Date.now() / 1000) - 7 * 86400,
@@ -73,7 +77,7 @@ export function RunForm({
           annualization: 252,
           risk_free_rate: 0,
           benchmark_symbol: 'KQ.m@CFFEX.IM',
-          parameters: versions[0].parameters,
+          parameters: defaultVersion.parameters,
           rules: {
             multiplier: 200,
             margin_rate: 0.12,
@@ -272,6 +276,7 @@ export function RunForm({
                   脚本版本
                   <VersionSelect
                     versions={versions}
+                    primaryVersionId={primaryVersionId}
                     disabled={busy}
                     value={config.version_id}
                     onValueChange={(id) => {

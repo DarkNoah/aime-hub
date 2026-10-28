@@ -39,6 +39,7 @@ import {
   Settings2,
   SlidersHorizontal,
   Square,
+  Star,
   Trash2,
   Upload,
 } from 'lucide-react';
@@ -418,6 +419,7 @@ export function StrategyEditor({
             <div className="w-full min-w-0 sm:w-80">
               <VersionSelect
                 versions={versions}
+                primaryVersionId={record.primary_version_id}
                 value={selectedVersion}
                 onValueChange={setSelectedVersion}
                 includeDraft
@@ -425,6 +427,35 @@ export function StrategyEditor({
               />
             </div>
             <div className="ml-auto flex flex-wrap gap-2">
+              {viewed && viewed.id !== record.primary_version_id && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={readOnly || busy}
+                  onClick={() =>
+                    void action(async () => {
+                      const next = await pluginRequest<StrategySummary>(
+                        pluginId,
+                        `/strategies/${record.id}/primary-version`,
+                        {
+                          method: 'PUT',
+                          body: JSON.stringify({
+                            revision: baseRevision,
+                            version_id: viewed.id,
+                          }),
+                        },
+                      );
+                      setRecord((old) => ({ ...old, ...next }));
+                      setBaseRevision(next.revision);
+                      onUpdate(next);
+                      toast.success(`v${viewed.number} 已设为主要版本`);
+                    })
+                  }
+                >
+                  <Star className="size-3.5" />
+                  设为主要版本
+                </Button>
+              )}
               {viewed && (
                 <Button
                   size="sm"
@@ -529,6 +560,11 @@ export function StrategyEditor({
                 v{viewed.number} · {dateTime(viewed.created_at)} ·{' '}
                 {viewed.note || '无版本说明'}
               </p>
+              {viewed.id === record.primary_version_id && (
+                <p className="mt-1">
+                  主要版本是策略的默认版本，行情添加策略时自动使用。
+                </p>
+              )}
               <p className="mt-1 break-all font-mono text-[10px]">
                 SHA-256 {viewed.source_hash}
               </p>
@@ -783,6 +819,10 @@ export function StrategyEditor({
               <DialogTitle>删除 v{deletingVersion.number}</DialogTitle>
               <DialogDescription>
                 删除后该版本将从选择列表移除，不能用于新建回测、调优或策略提示。历史记录和已提交的任务会保留。
+                {deletingVersion.id === record.primary_version_id &&
+                  (versions.length > 1
+                    ? '删除主要版本后，将自动使用剩余的最新版本作为主要版本。'
+                    : '这是最后一个版本，删除后需重新发布才能添加策略。')}
               </DialogDescription>
             </DialogHeader>
             {deletingVersion.note && (
@@ -942,7 +982,7 @@ export function StrategyEditor({
             <DialogHeader>
               <DialogTitle>发布新版本</DialogTitle>
               <DialogDescription>
-                保存当前草稿并创建固定版本。后续编辑不影响这个版本和它的回测记录。
+                保存当前草稿并创建固定版本，新版本将自动设为主要版本，供行情添加策略时使用。后续编辑不影响这个版本和它的回测记录。
               </DialogDescription>
             </DialogHeader>
             <Label className="grid gap-2">
@@ -980,7 +1020,9 @@ export function StrategyEditor({
                     setVersions((old) => [result.version, ...old]);
                     setPublish(false);
                     setNote('');
-                    toast.success(`v${result.version.number} 已发布`);
+                    toast.success(
+                      `v${result.version.number} 已发布并设为主要版本`,
+                    );
                   })
                 }
               >
@@ -995,6 +1037,7 @@ export function StrategyEditor({
           pluginId={pluginId}
           strategyId={record.id}
           versions={versions}
+          primaryVersionId={record.primary_version_id}
           initial={runForm.initial}
           onClose={() => setRunForm(null)}
           onCreated={(next) => {

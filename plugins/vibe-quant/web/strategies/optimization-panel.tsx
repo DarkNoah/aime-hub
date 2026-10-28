@@ -374,6 +374,7 @@ export function OptimizationPanel({
           pluginId={pluginId}
           strategyId={strategy.id}
           versions={versions}
+          primaryVersionId={strategy.primary_version_id}
           initial={job?.config ?? initial}
           onClose={() => setForm(false)}
           onCreated={(next) => {

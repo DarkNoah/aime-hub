@@ -47,6 +47,8 @@ export const monitorSchema = z.object({
 // Market hints use the published version's timeframe, independently of the chart.
 // Keep full input support for existing callers and immutable stored monitors.
 const createMonitorSchema = monitorSchema.extend({
+  // Market additions resolve the primary version at submission time.
+  version_id: shape.version_id.optional(),
   duration: shape.duration.optional(),
   parameters: shape.parameters.optional(),
   rules: shape.rules.optional(),
@@ -166,7 +168,9 @@ export function signalRoutes(
     const owner = c.get('userId'),
       strategyId = c.req.param('strategyId');
     await editable(strategyId);
-    const version = await records.version(owner, parsed.data.version_id);
+    const version = parsed.data.version_id
+      ? await records.version(owner, parsed.data.version_id)
+      : await records.primaryVersion(owner, strategyId);
     if (version.strategy_id !== strategyId)
       throw new StrategyError('VERSION_NOT_FOUND', 404);
     const native = parsed.data.simulation_engine === 'tqsdk';
@@ -226,6 +230,7 @@ export function signalRoutes(
     const { notifications, notifications_enabled, ...monitorConfig } =
       monitorSchema.parse({
         ...parsed.data,
+        version_id: parsed.data.version_id ?? version.id,
         ...(parsed.data.display_symbol || native
           ? {
               display_symbol: parsed.data.display_symbol ?? parsed.data.symbol,

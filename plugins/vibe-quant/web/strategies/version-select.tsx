@@ -1,4 +1,5 @@
 import {
+  Badge,
   Select,
   SelectContent,
   SelectItem,
@@ -10,13 +11,18 @@ import type { StrategyVersion } from '../../strategy-types';
 function VersionLabel({
   version,
   compact = false,
+  primary = false,
 }: {
   version: StrategyVersion;
   compact?: boolean;
+  primary?: boolean;
 }) {
   return (
     <span className="flex min-w-0 flex-1 flex-col gap-1 text-left">
-      <span className="text-sm font-medium">v{version.number}</span>
+      <span className="flex items-center gap-2 text-sm font-medium">
+        v{version.number}
+        {primary && <Badge variant="secondary">主要版本</Badge>}
+      </span>
       <span
         className={`whitespace-pre-wrap text-xs font-normal leading-5 text-muted-foreground [overflow-wrap:anywhere] ${compact ? 'line-clamp-2' : ''}`}
       >
@@ -33,12 +39,14 @@ export function VersionSelect({
   onValueChange,
   includeDraft = false,
   disabled = false,
+  primaryVersionId,
 }: {
   versions: StrategyVersion[];
   value: string;
   onValueChange: (value: string) => void;
   includeDraft?: boolean;
   disabled?: boolean;
+  primaryVersionId?: string | null;
 }) {
   const selected = versions.find((version) => version.id === value);
   return (
@@ -57,7 +65,11 @@ export function VersionSelect({
           placeholder="选择版本"
         >
           {selected ? (
-            <VersionLabel version={selected} compact />
+            <VersionLabel
+              version={selected}
+              primary={selected.id === primaryVersionId}
+              compact
+            />
           ) : value === 'draft' ? (
             '工作草稿'
           ) : undefined}
@@ -76,7 +88,10 @@ export function VersionSelect({
             textValue={`v${version.number} ${version.note}`}
             className="py-2 [&>span:last-child]:min-w-0 [&>span:last-child]:flex-1"
           >
-            <VersionLabel version={version} />
+            <VersionLabel
+              version={version}
+              primary={version.id === primaryVersionId}
+            />
           </SelectItem>
         ))}
       </SelectContent>

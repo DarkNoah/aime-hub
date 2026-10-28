@@ -112,6 +112,28 @@ export function strategyRoutes(
       ),
     );
   });
+  api.get('/:id/primary-version', async (c) =>
+    c.json(
+      await getRecords().primaryVersion(
+        c.get('userId'),
+        readId(c.req.param('id')),
+      ),
+    ),
+  );
+  api.put('/:id/primary-version', async (c) => {
+    const body = z
+      .object({ revision: z.number().int().positive(), version_id: z.uuid() })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ code: 'VALIDATION_ERROR' }, 400);
+    return c.json(
+      await getRecords().setPrimaryVersion(
+        c.get('userId'),
+        readId(c.req.param('id')),
+        body.data.version_id,
+        body.data.revision,
+      ),
+    );
+  });
   api.get('/:id/versions', async (c) =>
     c.json(
       await getRecords().versions(c.get('userId'), readId(c.req.param('id'))),

@@ -23,9 +23,14 @@ import {
   type StrategyNotifications,
 } from '../../strategy-notifications.js';
 
-export type StoredStrategy = Omit<StrategySummary, 'status'> & {
+export type StoredStrategy = Omit<
+  StrategySummary,
+  'status' | 'primary_version_id'
+> & {
   /** Records saved before lifecycle support are active. */
   status?: StrategyStatus;
+  /** Legacy strategies default to their newest non-deleted version. */
+  primary_version_id?: string | null;
   /** Legacy records have no notification preferences; channels default to off. */
   notifications?: StrategyNotifications;
   /** Creator attribution only; strategies are shared across authenticated users. */
@@ -57,6 +62,19 @@ const active = (run: BacktestRun) =>
 const iso = () => new Date().toISOString();
 const activeSql =
   "JSONExtractString(payload, 'status') IN ('queued','preparing','running')";
+function primaryVersion(
+  row: Pick<StoredStrategy, 'versions' | 'primary_version_id'>,
+) {
+  const versions = row.versions.filter((version) => !version.deleted_at);
+  return (
+    versions.find((version) => version.id === row.primary_version_id) ??
+    versions.reduce<StoredVersion | undefined>(
+      (latest, version) =>
+        !latest || version.number > latest.number ? version : latest,
+      undefined,
+    )
+  );
+}
 const summary = (row: StoredStrategy): StrategySummary => ({
   id: row.id,
   name: row.name,
@@ -65,6 +83,7 @@ const summary = (row: StoredStrategy): StrategySummary => ({
   status: row.status ?? 'active',
   revision: row.revision,
   version_count: row.version_count,
+  primary_version_id: primaryVersion(row)?.id ?? null,
   updated_at: row.updated_at,
 });
 function assertEditable(row: StoredStrategy) {
@@ -252,6 +271,9 @@ export class StrategyStore extends ClickHouseClient {
       status: 'active',
       revision: (existing?.revision ?? 0) + 1,
       version_count: existing?.version_count ?? 0,
+      primary_version_id: existing
+        ? (primaryVersion(existing)?.id ?? null)
+        : null,
       updated_at: iso(),
       draft_hash: hash,
       draft_parameters: value.draft.parameters,
@@ -276,6 +298,40 @@ export class StrategyStore extends ClickHouseClient {
           throw new Error('策略脚本不存在于 ClickHouse');
         return versionDetail(version, source);
       });
+  }
+
+  async primaryVersion(_actor: string, id: string): Promise<StrategyVersion> {
+    const row = await this.storedStrategy(id);
+    const version = primaryVersion(row);
+    if (!version) throw new StrategyError('VERSION_NOT_FOUND', 404);
+    return versionDetail(version, await this.sources.read(version.source_hash));
+  }
+
+  async setPrimaryVersion(
+    _actor: string,
+    id: string,
+    versionId: string,
+    revision: number,
+  ): Promise<StrategySummary> {
+    const row = await this.storedStrategy(id);
+    assertEditable(row);
+    if (row.revision !== revision)
+      throw new StrategyError('STRATEGY_CONFLICT', 409);
+    if (
+      !row.versions.some(
+        (version) => version.id === versionId && !version.deleted_at,
+      )
+    )
+      throw new StrategyError('VERSION_NOT_FOUND', 404);
+    const next: StoredStrategy = {
+      ...row,
+      primary_version_id: versionId,
+      revision: revision + 1,
+      updated_at: iso(),
+    };
+    if (!(await this.replace('quant_strategies', next, revision)))
+      throw new StrategyError('STRATEGY_CONFLICT', 409);
+    return summary(next);
   }
 
   async version(
@@ -320,6 +376,7 @@ export class StrategyStore extends ClickHouseClient {
     const next: StoredStrategy = {
       ...row,
       versions,
+      primary_version_id: primaryVersion({ ...row, versions })?.id ?? null,
       version_count: versions.filter((v) => !v.deleted_at).length,
       revision: revision + 1,
       updated_at: now,
@@ -349,6 +406,7 @@ export class StrategyStore extends ClickHouseClient {
       ...row,
       revision: revision + 1,
       version_count: row.version_count + 1,
+      primary_version_id: version.id,
       updated_at: iso(),
       versions: [...row.versions, version],
     };

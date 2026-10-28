@@ -14,10 +14,33 @@ RUN npm install --global pnpm@10.12.1
 FROM ${BROWSER_CACHE_IMAGE} AS browser-cache
 RUN mkdir -p /opt/playwright
 
-FROM base AS build
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 build-essential \
-    && rm -rf /var/lib/apt/lists/*
+# Shared by the build and runtime images, including Playwright's apt subprocesses.
+FROM base AS system-deps
+ARG DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
+ARG DEBIAN_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
+ARG TARGETARCH
+# slim has no CA bundle yet. Bootstrap HTTPS with Node's bundled trusted roots;
+# the ca-certificates package below replaces it with Debian's managed bundle.
+RUN node -e "const fs = require('node:fs'); const path = '/etc/ssl/certs/ca-certificates.crt'; if (!fs.existsSync(path)) { fs.mkdirSync('/etc/ssl/certs', { recursive: true }); fs.writeFileSync(path, require('node:tls').rootCertificates.join('\n') + '\n'); }" \
+    && sed -i \
+        -e "s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR%/}|g" \
+        -e "s|http://deb.debian.org/debian|${DEBIAN_MIRROR%/}|g" \
+        /etc/apt/sources.list.d/debian.sources \
+    && printf '%s\n' \
+        'Acquire::Retries "3";' \
+        'Acquire::http::Timeout "30";' \
+        'Acquire::https::Timeout "30";' \
+        'Acquire::http::Pipeline-Depth "0";' \
+        'APT::Update::Error-Mode "any";' \
+        'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
+        > /etc/apt/apt.conf.d/99build-network \
+    && rm -f /etc/apt/apt.conf.d/docker-clean
+RUN --mount=type=cache,id=hub-apt-bookworm-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=hub-apt-lists-bookworm-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates python3 build-essential
+
+FROM system-deps AS build
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=hub-pnpm-store,target=/pnpm/store \
     NODE_OPTIONS=--max-old-space-size=1536 nice -n 10 pnpm --store-dir=/pnpm/store --network-concurrency=4 --child-concurrency=1 fetch --frozen-lockfile
@@ -26,20 +49,27 @@ RUN --mount=type=cache,id=hub-pnpm-store,target=/pnpm/store \
     NODE_OPTIONS=--max-old-space-size=1536 nice -n 10 pnpm --store-dir=/pnpm/store --child-concurrency=1 install --offline --frozen-lockfile
 RUN NODE_OPTIONS=--max-old-space-size=2048 nice -n 10 pnpm build
 
-FROM base AS server
+# Export only the installed, lockfile-resolved CLI. Application source changes
+# must not invalidate Chromium's system dependencies and browser download layers.
+FROM build AS playwright-package
+RUN mkdir -p /opt/playwright-core \
+    && cp -aL apps/server/node_modules/playwright-core/. /opt/playwright-core/
+
+FROM system-deps AS server
 ARG AGENTFS_VERSION=0.6.4
 ENV NODE_ENV=production \
     PLAYWRIGHT_BROWSERS_PATH=/opt/playwright \
     WORKSPACE_ROOT=/data/workspaces
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
-RUN apt-get update \
+RUN --mount=type=cache,id=hub-apt-bookworm-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=hub-apt-lists-bookworm-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
+    apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates curl xz-utils fuse3 git ripgrep ffmpeg \
-        python3 python3-pip python3-venv python-is-python3 \
-        build-essential jq unzip zip procps openssh-client \
+        curl xz-utils fuse3 git ripgrep ffmpeg \
+        python3-pip python3-venv python-is-python3 \
+        jq unzip zip procps openssh-client \
     && python3 -m venv /opt/python \
-    && ln -s /usr/local/bin/bun /usr/local/bin/bunx \
-    && rm -rf /var/lib/apt/lists/*
+    && ln -s /usr/local/bin/bun /usr/local/bin/bunx
 ARG AGENTFS_DOWNLOAD_BASE_URL=https://github.com/tursodatabase/agentfs/releases/download
 RUN set -eu; \
     case "$(uname -m)" in x86_64) arch=x86_64 ;; aarch64) arch=aarch64 ;; *) exit 1 ;; esac; \
@@ -53,17 +83,19 @@ RUN set -eu; \
     install "agentfs-${arch}-unknown-linux-gnu/agentfs" /usr/local/bin/agentfs; \
     rm -rf /tmp/agentfs-*
 RUN mkdir -p /data/workspaces
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/apps/server/node_modules ./apps/server/node_modules
-RUN node apps/server/node_modules/playwright-core/cli.js install-deps chromium \
-    && rm -rf /var/lib/apt/lists/*
+COPY --from=playwright-package /opt/playwright-core /opt/playwright-core
+RUN --mount=type=cache,id=hub-apt-bookworm-${TARGETARCH},target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=hub-apt-lists-bookworm-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
+    node /opt/playwright-core/cli.js install-deps chromium
 COPY --from=browser-cache /opt/playwright /opt/playwright
-RUN node apps/server/node_modules/playwright-core/cli.js install chromium
-COPY --from=build /app /app
+RUN node /opt/playwright-core/cli.js install chromium
 # Isolate build dependencies for legacy source packages such as pytdx.
+COPY plugins/vibe-quant/plugin.manifest.json ./plugins/vibe-quant/plugin.manifest.json
+COPY plugins/vibe-quant/worker/requirements.txt ./plugins/vibe-quant/worker/requirements.txt
 RUN if node -e "process.exit(require('./plugins/vibe-quant/plugin.manifest.json').enabled === false ? 1 : 0)"; then \
       /opt/python/bin/pip wheel --use-pep517 --no-cache-dir --wheel-dir /opt/plugin-wheels/vibe-quant -r plugins/vibe-quant/worker/requirements.txt; \
     fi
+COPY --from=build /app /app
 ENV PATH="/opt/python/bin:${PATH}"
 EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \

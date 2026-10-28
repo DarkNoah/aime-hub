@@ -20,6 +20,8 @@ export interface StrategySummary {
   status: StrategyStatus;
   revision: number;
   version_count: number;
+  /** The default published version; null until a version is published. */
+  primary_version_id: string | null;
   updated_at: string;
 }
 export interface StrategyDetail extends StrategySummary {

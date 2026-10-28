@@ -21,6 +21,8 @@ services:
       target: server
       args:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
+        DEBIAN_MIRROR: ${DEBIAN_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
+        DEBIAN_SECURITY_MIRROR: ${DEBIAN_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}
         BUN_IMAGE: ${BUN_IMAGE:-oven/bun:1}
         BROWSER_CACHE_IMAGE: ${BROWSER_CACHE_IMAGE:-base}
         AGENTFS_DOWNLOAD_BASE_URL: ${AGENTFS_DOWNLOAD_BASE_URL:-https://github.com/tursodatabase/agentfs/releases/download}
@@ -64,6 +66,8 @@ services:
       target: web
       args:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
+        DEBIAN_MIRROR: ${DEBIAN_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
+        DEBIAN_SECURITY_MIRROR: ${DEBIAN_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}
         NGINX_IMAGE: ${NGINX_IMAGE:-nginx:stable-alpine}
     restart: unless-stopped
     depends_on:
