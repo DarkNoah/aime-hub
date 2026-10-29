@@ -19,7 +19,7 @@ export class StrategyGuideTool extends PluginTool {
       id: 'plugin_vibe_quant_strategy_guide',
       title: '策略编写指南',
       description:
-        '读取当前 quant_sdk 文档、空白 Python 模板和回测权限。编写或修改策略前先调用。',
+        '读取当前 quant_sdk 文档、完整回调签名、空白 Python 模板和回测权限。编写或修改策略前先调用；on_stop 必须接收 self、ctx、reason。',
       inputSchema: z.object({}),
       execute: (_input, execution) =>
         run(execution, async (_deps, actor, signal) => {
@@ -34,6 +34,22 @@ export class StrategyGuideTool extends PluginTool {
           return {
             can_run: actor.isAdmin,
             runtime: 'plugin-venv',
+            callbacks: {
+              signatures: [
+                'on_start(self, ctx)',
+                'on_ready(self, ctx)',
+                'on_bar(self, ctx, bar)',
+                'on_quote(self, ctx, quote)',
+                'on_roll(self, ctx, event, previous_contract)',
+                'on_order(self, ctx, order)',
+                'on_fill(self, ctx, fill)',
+                'on_stop(self, ctx, reason)',
+              ],
+              rules:
+                '所有回调均为同步实例方法，可只实现需要的回调，其余继承 Strategy 的空实现。重写时按上述签名接收 runtime 传入的全部位置参数；即使参数未使用也不能省略。',
+              on_stop:
+                'runtime 调用 strategy.on_stop(ctx, reason)，self 由 Python 自动传入。必须写 def on_stop(self, ctx, reason):，不能写 def on_stop(self, ctx):。reason 为结束原因字符串：正常结束通常为 succeeded，取消时为用户中止了操作，失败时为错误信息；无需清理逻辑时可省略整个 on_stop 方法。',
+            },
             reference,
             template: {
               source,

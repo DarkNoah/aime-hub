@@ -11,3 +11,8 @@ class CustomStrategy(Strategy):
             return
         # Add your own signal and risk rules here. The blank template places no orders.
         pass
+
+    def on_stop(self, ctx, reason):
+        # Optional cleanup. The runtime passes ctx and reason; keep both parameters.
+        # reason is a string: 'succeeded', a cancellation message, or an error message.
+        pass

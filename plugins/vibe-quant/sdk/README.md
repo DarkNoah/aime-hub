@@ -69,6 +69,10 @@ class CustomStrategy(Strategy):
             return
         # 在私有脚本或策略编辑器内编写自己的信号与风控逻辑。
         pass
+
+    def on_stop(self, ctx, reason):
+        # 可选清理逻辑；即使不使用 reason，重写时也必须接收这个参数。
+        pass
 ```
 
 策略必须放在可读取的 `.py` 文件中，以便保存源码及校验指纹。恢复所需状态放入 `ctx.state`；普通实例属性不包含在检查点中。恢复时先调用新实例的 `on_start`，重新初始化参数、订阅和临时缓存，再加载检查点中的状态、持仓与待处理委托；初始化不会覆盖已保存的 `ctx.state`，已完成的 `on_ready` 不会重复执行。影响后续交易的累计状态必须放入 `ctx.state`，临时缓存应能从已恢复的数据窗口重建。
@@ -84,7 +88,24 @@ class CustomStrategy(Strategy):
 | `ctx.account` / `ctx.position(symbol)`         | 本次模拟账户与仓位；monitor 不连接券商账户。                                                              |
 | `ctx.params` / `ctx.state` / `ctx.now`         | 参数、可恢复状态、当前事件可用时间。时间统一为 UTC epoch 秒。                                             |
 
-回调包括 `on_start`、`on_ready`、`on_bar`、`on_quote`、`on_roll`、`on_order`、`on_fill`、`on_stop`。预热只更新数据窗口；`on_ready` 在第一个有效计算事件前调用。首版 live 使用收盘 Bar 和 Quote，没有逐笔 Tick 策略接口。
+### 回调签名
+
+所有回调均为同步实例方法，只需重写策略用到的方法，其余继承 `Strategy` 的空实现。重写时必须接收 runtime 传入的全部位置参数，即使某个参数没有使用也不能省略。
+
+| 方法签名 | 调用时机与参数 |
+| --- | --- |
+| `on_start(self, ctx)` | 初始化参数、订阅和临时缓存。 |
+| `on_ready(self, ctx)` | 预热结束后的第一个有效计算事件前调用。 |
+| `on_bar(self, ctx, bar)` | 订阅的 K 线更新，`bar` 为 `Bar` 对象。 |
+| `on_quote(self, ctx, quote)` | 订阅的报价更新，`quote` 为 `Quote` 对象。 |
+| `on_roll(self, ctx, event, previous_contract)` | 主连映射变化；`event` 为 `Roll` 对象，`previous_contract` 为旧实际合约代码，首次映射时可为 `None`。 |
+| `on_order(self, ctx, order)` | 委托更新，`order` 为字典。 |
+| `on_fill(self, ctx, fill)` | 成交更新，`fill` 为字典。 |
+| `on_stop(self, ctx, reason)` | 结束清理；`reason` 为结束原因字符串，正常结束通常是 `succeeded`，取消时是 `用户中止了操作`，失败时是错误信息。 |
+
+**`on_stop` 不能写成 `def on_stop(self, ctx):`。** runtime 调用 `strategy.on_stop(ctx, reason)`，Python 还会自动传入 `self`，所以方法须接收三个参数。漏掉 `reason` 会报 `on_stop() takes 2 positional arguments but 3 were given`；无需清理逻辑时可省略整个方法。结束回调中不能下单或发出交易信号。
+
+预热只更新数据窗口；`on_ready` 在第一个有效计算事件前调用。首版 live 使用收盘 Bar 和 Quote，没有逐笔 Tick 策略接口。
 
 ```python
 from quant_sdk import Dataset, RunConfig, backtest, live
