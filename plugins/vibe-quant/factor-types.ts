@@ -4,6 +4,32 @@ export interface FactorDraft {
   enabled: boolean;
   source: string;
   parameters: Record<string, unknown>;
+  group_id?: string;
+}
+
+export interface FactorGroup {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  builtin: boolean;
+}
+
+export interface FactorGroups {
+  revision: number;
+  groups: FactorGroup[];
+}
+
+export interface BuiltinFactorInfo {
+  family: string;
+  key: string;
+  formula: string;
+  expression: string;
+  fields: string[];
+  lookback: number;
+  cross_sectional: boolean;
+  recursive: boolean;
+  notes: string[];
+  reference: string;
 }
 
 export interface FactorVersion {
@@ -25,12 +51,18 @@ export interface FactorSummary {
   revision: number;
   version_count: number;
   updated_at: string;
+  group_id?: string;
+  builtin?: Pick<
+    BuiltinFactorInfo,
+    'family' | 'key' | 'fields' | 'cross_sectional'
+  >;
 }
 
 export interface FactorDetail extends FactorSummary {
   source: string;
   parameters: Record<string, unknown>;
   versions: FactorVersion[];
+  builtin?: BuiltinFactorInfo;
 }
 
 export interface FactorAnalysisInput {

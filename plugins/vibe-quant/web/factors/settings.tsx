@@ -9,10 +9,16 @@ import {
   DialogTitle,
   Input,
   Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Switch,
   Textarea,
 } from '@app/plugin-ui';
-import type { FactorDraft } from '../../factor-types';
+import type { FactorDraft, FactorGroup } from '../../factor-types';
+import { groupOptions, UNGROUPED } from '../../factor-groups';
 
 export function FactorSettings({
   initial,
@@ -20,12 +26,16 @@ export function FactorSettings({
   onSave,
   onClose,
   creating = false,
+  groups,
+  copying = false,
 }: {
   initial: FactorDraft;
   busy: boolean;
   creating?: boolean;
+  copying?: boolean;
+  groups: FactorGroup[];
   onSave: (
-    value: Pick<FactorDraft, 'name' | 'description' | 'enabled'>,
+    value: Pick<FactorDraft, 'name' | 'description' | 'enabled' | 'group_id'>,
   ) => void;
   onClose: () => void;
 }) {
@@ -39,11 +49,19 @@ export function FactorSettings({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{creating ? '新建期货因子' : '因子设置'}</DialogTitle>
+          <DialogTitle>
+            {copying
+              ? '复制为自定义因子'
+              : creating
+                ? '新建期货因子'
+                : '因子设置'}
+          </DialogTitle>
           <DialogDescription>
-            {creating
-              ? '从均线乖离模板开始，使用 Python 编写因子。'
-              : '修改名称、描述和启用状态。停用后已有固定版本仍可被策略引用。'}
+            {copying
+              ? '复制公式与参数后，可独立修改和发布版本。'
+              : creating
+                ? '从均线乖离模板开始，使用 Python 编写因子。'
+                : '修改名称、描述和启用状态。停用后已有固定版本仍可被策略引用。'}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -64,6 +82,25 @@ export function FactorSettings({
               onChange={(e) => setValue({ ...value, name: e.target.value })}
               placeholder="例如：20 日均线乖离"
             />
+          </Label>
+          <Label className="grid gap-2">
+            所属分组
+            <Select
+              value={value.group_id ?? UNGROUPED}
+              onValueChange={(group_id) => setValue({ ...value, group_id })}
+              disabled={busy}
+            >
+              <SelectTrigger aria-label="所属分组">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {groupOptions(groups).map((group) => (
+                  <SelectItem key={group.id} value={group.id}>
+                    {group.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Label>
           <Label className="grid gap-2">
             描述

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { pluginRequest, type PluginPageProps } from '@app/plugin-sdk/web';
 import {
-  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -19,10 +18,14 @@ import type {
   FactorDetail,
   FactorDraft,
   FactorSummary,
+  FactorGroups,
 } from '../../factor-types';
 import { FactorEditor } from './editor';
 import { FactorSettings } from './settings';
 import { factorError } from './format';
+import { FactorGroupTree } from './group-tree';
+import { GroupDialog, type GroupAction } from './group-dialog';
+import { UNGROUPED } from '../../factor-groups';
 
 type Template = Pick<FactorDraft, 'source' | 'parameters'> & {
   canRun: boolean;
@@ -35,6 +38,9 @@ export default function FactorsPage({ pluginId }: PluginPageProps) {
   );
   const [query, setQuery] = useState('');
   const [creating, setCreating] = useState(false);
+  const [tree, setTree] = useState<FactorGroups>({ groups: [], revision: 0 });
+  const [activeGroup, setActiveGroup] = useState(UNGROUPED);
+  const [groupAction, setGroupAction] = useState<GroupAction | null>(null);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState('');
@@ -43,6 +49,9 @@ export default function FactorsPage({ pluginId }: PluginPageProps) {
   useEffect(() => {
     const abort = new AbortController();
     Promise.all([
+      pluginRequest<FactorGroups>(pluginId, '/factors/groups', {
+        signal: abort.signal,
+      }),
       pluginRequest<FactorSummary[]>(pluginId, '/factors', {
         signal: abort.signal,
       }),
@@ -50,7 +59,8 @@ export default function FactorsPage({ pluginId }: PluginPageProps) {
         signal: abort.signal,
       }),
     ])
-      .then(([rows, example]) => {
+      .then(([groups, rows, example]) => {
+        setTree(groups);
         setItems(rows);
         setTemplate(example);
         setSelected((old) =>
@@ -77,11 +87,54 @@ export default function FactorsPage({ pluginId }: PluginPageProps) {
     if (dirty) setPending(id);
     else setSelected(id);
   };
-  const filtered = items?.filter((item) =>
-    `${item.name} ${item.description}`
-      .toLowerCase()
-      .includes(query.toLowerCase()),
-  );
+  const applyTree = (next: FactorGroups) => {
+    setTree(next);
+    const valid = new Set(next.groups.map((g) => g.id));
+    setItems(
+      (old) =>
+        old?.map((item) =>
+          valid.has(item.group_id ?? UNGROUPED)
+            ? item
+            : { ...item, group_id: UNGROUPED },
+        ) ?? null,
+    );
+    setActiveGroup((old) => (valid.has(old) ? old : UNGROUPED));
+  };
+  const saveGroup = async (name: string, parent_id: string | null) => {
+    if (!groupAction) return;
+    setBusy(true);
+    const { type } = groupAction;
+    try {
+      const next = await pluginRequest<FactorGroups>(
+        pluginId,
+        type === 'create'
+          ? '/factors/groups'
+          : `/factors/groups/${groupAction.group.id}`,
+        {
+          method:
+            type === 'create' ? 'POST' : type === 'edit' ? 'PUT' : 'DELETE',
+          body: JSON.stringify({ name, parent_id, revision: tree.revision }),
+        },
+      );
+      applyTree(next);
+      setGroupAction(null);
+      toast.success(
+        type === 'delete' ? '分组已删除，因子已移到未分类' : '分组已保存',
+      );
+    } catch (error) {
+      toast.error(factorError(error));
+      // A stale tree revision is recoverable without replacing the factor editor.
+      try {
+        applyTree(
+          await pluginRequest<FactorGroups>(pluginId, '/factors/groups'),
+        );
+      } catch {
+        /* retain existing tree */
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <ScrollArea
       data-page-width="full"
@@ -116,7 +169,7 @@ export default function FactorsPage({ pluginId }: PluginPageProps) {
             </Button>
           </div>
         ) : (
-          <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-[220px_minmax(0,1fr)] lg:grid-rows-1">
+          <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-[270px_minmax(0,1fr)] lg:grid-rows-1">
             <aside className="flex min-h-0 flex-col border-b bg-muted/15 lg:border-b-0 lg:border-r">
               <div className="relative m-3">
                 <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
@@ -132,50 +185,24 @@ export default function FactorsPage({ pluginId }: PluginPageProps) {
                 className="max-h-48 min-h-0 flex-1 lg:max-h-none"
                 viewportProps={{ className: '[&>div]:block!' }}
               >
-                <div className="space-y-1 px-2 pb-3">
-                  {items === null ? (
-                    <div className="space-y-3 p-2">
-                      <Skeleton className="h-20" />
-                      <Skeleton className="h-20" />
-                    </div>
-                  ) : filtered?.length ? (
-                    filtered.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        aria-current={selected === item.id ? 'page' : undefined}
-                        onClick={() => select(item.id)}
-                        className={`w-full rounded-md border p-3 text-left transition-colors ${selected === item.id ? 'border-border bg-background' : 'border-transparent hover:bg-accent'}`}
-                      >
-                        <p
-                          className="truncate text-sm font-medium"
-                          title={item.name}
-                        >
-                          {item.name}
-                        </p>
-                        <p className="mt-1 line-clamp-2 break-words text-xs leading-5 text-muted-foreground">
-                          {item.description || 'Python 期货因子'}
-                        </p>
-                        <div className="mt-2 flex items-center gap-2">
-                          <Badge variant="outline" className="text-[10px]">
-                            {item.enabled ? '启用' : '停用'}
-                          </Badge>
-                          <span className="text-xs text-muted-foreground">
-                            {item.version_count
-                              ? `${item.version_count} 个版本`
-                              : '草稿'}
-                          </span>
-                        </div>
-                      </button>
-                    ))
-                  ) : (
-                    <p className="px-3 py-8 text-center text-xs text-muted-foreground">
-                      {query
-                        ? '没有匹配的因子'
-                        : '新建一个 Python 因子开始研究'}
-                    </p>
-                  )}
-                </div>
+                {items === null ? (
+                  <div className="space-y-3 p-3">
+                    <Skeleton className="h-32" />
+                    <Skeleton className="h-32" />
+                  </div>
+                ) : (
+                  <FactorGroupTree
+                    groups={tree.groups}
+                    items={items}
+                    query={query}
+                    selected={selected}
+                    activeGroup={activeGroup}
+                    canEdit={!!template?.canRun && !busy && !dirty}
+                    onGroup={setActiveGroup}
+                    onSelect={select}
+                    onAction={setGroupAction}
+                  />
+                )}
               </ScrollArea>
             </aside>
             {selected ? (
@@ -186,6 +213,12 @@ export default function FactorsPage({ pluginId }: PluginPageProps) {
                 canRun={template?.canRun ?? false}
                 onUpdate={update}
                 onDirty={setDirty}
+                groups={tree.groups}
+                onCreated={(row) => {
+                  update(row);
+                  setSelected(row.id);
+                  setActiveGroup(row.group_id ?? UNGROUPED);
+                }}
               />
             ) : (
               <div className="flex min-h-80 items-center justify-center p-8 text-center text-sm text-muted-foreground">
@@ -200,7 +233,14 @@ export default function FactorsPage({ pluginId }: PluginPageProps) {
       {creating && template && (
         <FactorSettings
           creating
-          initial={{ ...template, name: '', description: '', enabled: true }}
+          initial={{
+            ...template,
+            name: '',
+            description: '',
+            enabled: true,
+            group_id: activeGroup || UNGROUPED,
+          }}
+          groups={tree.groups}
           busy={busy}
           onClose={() => setCreating(false)}
           onSave={(values) => {
@@ -218,6 +258,15 @@ export default function FactorsPage({ pluginId }: PluginPageProps) {
               .catch((e) => toast.error(factorError(e)))
               .finally(() => setBusy(false));
           }}
+        />
+      )}
+      {groupAction && (
+        <GroupDialog
+          action={groupAction}
+          groups={tree.groups}
+          busy={busy}
+          onClose={() => setGroupAction(null)}
+          onSave={(name, parent) => void saveGroup(name, parent)}
         />
       )}
       {pending && (

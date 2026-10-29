@@ -28,6 +28,7 @@ import type {
   FactorAnalysisInput,
   FactorAnalysisSummary,
   FactorDetail,
+  FactorGroup,
   FactorSummary,
   FactorVersion,
 } from '../../factor-types';
@@ -37,6 +38,8 @@ import { FactorReportView } from './report';
 import { dateTime, factorError } from './format';
 import { factorStrategySource } from '../../factor-strategy';
 import type { StrategyDetail } from '../../strategy-types';
+import { UNGROUPED } from '../../factor-groups';
+import { BuiltinInfo } from './builtin-info';
 
 export function FactorEditor({
   pluginId,
@@ -44,10 +47,14 @@ export function FactorEditor({
   canRun,
   onUpdate,
   onDirty,
+  groups,
+  onCreated,
 }: {
   pluginId: string;
   id: string;
   canRun: boolean;
+  groups: FactorGroup[];
+  onCreated: (row: FactorSummary) => void;
   onUpdate: (row: FactorSummary) => void;
   onDirty: (value: boolean) => void;
 }) {
@@ -64,6 +71,7 @@ export function FactorEditor({
   const [resultError, setResultError] = useState('');
   const [retry, setRetry] = useState(0);
   const [settings, setSettings] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [publish, setPublish] = useState(false);
   const [note, setNote] = useState('');
   const [guide, setGuide] = useState(false);
@@ -167,6 +175,11 @@ export function FactorEditor({
         source,
         parameters: params,
         ...overrides,
+        group_id: groups.some(
+          (g) => g.id === (overrides.group_id ?? record.group_id),
+        )
+          ? (overrides.group_id ?? record.group_id)
+          : UNGROUPED,
       }),
     });
     setRecord(next);
@@ -227,6 +240,7 @@ export function FactorEditor({
         <Skeleton className="h-64" />
       </div>
     );
+  const canEdit = canRun && !record.builtin;
   const pinnedVersion = viewed ?? record.versions[0];
   const invocation = factorStrategySource(
     pinnedVersion?.id ?? '发布后获得版本ID',
@@ -255,6 +269,15 @@ export function FactorEditor({
         </div>
         <div className="flex items-center gap-1">
           <Button
+            size="sm"
+            variant="outline"
+            disabled={!canRun || busy || dirty}
+            onClick={() => setCopying(true)}
+          >
+            <Copy className="size-3.5" />
+            复制因子
+          </Button>
+          <Button
             size="icon"
             variant="ghost"
             aria-label="因子 SDK 用法"
@@ -266,7 +289,7 @@ export function FactorEditor({
             size="icon"
             variant="ghost"
             aria-label="因子设置"
-            disabled={!canRun || busy}
+            disabled={!canEdit || busy}
             onClick={() => setSettings(true)}
           >
             <Settings2 className="size-4" />
@@ -279,6 +302,7 @@ export function FactorEditor({
           viewportProps={{ className: '[&>div]:block!' }}
         >
           <div className="space-y-5 p-4 sm:p-5">
+            {record.builtin && <BuiltinInfo info={record.builtin} />}
             <div className="flex flex-wrap items-center gap-2">
               <Select
                 disabled={busy}
@@ -289,7 +313,9 @@ export function FactorEditor({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="draft">当前草稿</SelectItem>
+                  <SelectItem value="draft">
+                    {record.builtin ? '内置公式' : '当前草稿'}
+                  </SelectItem>
                   {record.versions.map((v) => (
                     <SelectItem key={v.id} value={v.id}>
                       v{v.number} · {dateTime(v.created_at)}
@@ -300,7 +326,7 @@ export function FactorEditor({
               <Button
                 size="sm"
                 variant="outline"
-                disabled={!canRun || busy || !!viewed || !dirty}
+                disabled={!canEdit || busy || !!viewed || !dirty}
                 onClick={() =>
                   void action(async () => {
                     await save();
@@ -314,7 +340,7 @@ export function FactorEditor({
               <Button
                 size="sm"
                 variant="outline"
-                disabled={!canRun || busy || !!viewed || !record.enabled}
+                disabled={!canEdit || busy || !!viewed || !record.enabled}
                 onClick={() => setPublish(true)}
               >
                 发布版本
@@ -329,7 +355,7 @@ export function FactorEditor({
                   <Button
                     size="sm"
                     variant="ghost"
-                    disabled={!canRun || busy}
+                    disabled={!canEdit || busy}
                     onClick={() => setRestore(viewed)}
                   >
                     <Copy className="size-3.5" />
@@ -392,7 +418,7 @@ export function FactorEditor({
                 viewed ? JSON.stringify(viewed.parameters, null, 2) : parameters
               }
               onChange={setParameters}
-              readOnly={busy || !canRun || !!viewed}
+              readOnly={busy || !canEdit || !!viewed}
               label="因子参数"
             />
             <CodeEditor
@@ -400,9 +426,9 @@ export function FactorEditor({
               label="Python 因子脚本"
               value={viewed?.source ?? source}
               onChange={setSource}
-              readOnly={busy || !canRun || !!viewed}
+              readOnly={busy || !canEdit || !!viewed}
               onSave={() => {
-                if (dirty && !busy && canRun && !viewed)
+                if (dirty && !busy && canEdit && !viewed)
                   void action(async () => {
                     await save();
                     toast.success('因子已保存');
@@ -470,7 +496,13 @@ export function FactorEditor({
       </div>
       {settings && (
         <FactorSettings
-          initial={record}
+          initial={{
+            ...record,
+            group_id: groups.some((g) => g.id === record.group_id)
+              ? record.group_id
+              : UNGROUPED,
+          }}
+          groups={groups}
           busy={busy}
           onClose={() => setSettings(false)}
           onSave={(values) =>
@@ -478,6 +510,40 @@ export function FactorEditor({
               await save(values);
               setSettings(false);
               toast.success('因子设置已更新');
+            })
+          }
+        />
+      )}
+      {copying && (
+        <FactorSettings
+          creating
+          copying
+          initial={{
+            ...record,
+            name: `${record.name.slice(0, 90)} 副本`,
+            description: record.description.slice(0, 2000),
+            group_id: UNGROUPED,
+          }}
+          groups={groups}
+          busy={busy}
+          onClose={() => setCopying(false)}
+          onSave={(values) =>
+            void action(async () => {
+              const next = await pluginRequest<FactorDetail>(
+                pluginId,
+                '/factors',
+                {
+                  method: 'POST',
+                  body: JSON.stringify({
+                    ...values,
+                    source: viewed?.source ?? record.source,
+                    parameters: viewed?.parameters ?? record.parameters,
+                  }),
+                },
+              );
+              setCopying(false);
+              onCreated(next);
+              toast.success('已复制为自定义因子');
             })
           }
         />
@@ -594,7 +660,12 @@ export function FactorEditor({
             />
             <DialogFooter>
               <Button
-                disabled={!canRun || !pinnedVersion || busy}
+                disabled={
+                  !canRun ||
+                  !pinnedVersion ||
+                  busy ||
+                  !!record.builtin?.cross_sectional
+                }
                 onClick={() =>
                   void action(async () => {
                     const strategy = await pluginRequest<StrategyDetail>(

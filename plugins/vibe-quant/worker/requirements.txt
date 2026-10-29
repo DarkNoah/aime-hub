@@ -2,3 +2,5 @@ tqsdk==3.10.2
 pytdx==1.72
 chinese-calendar==1.11.0
 optuna==4.5.0
+pandas==2.3.3
+numpy==2.2.6

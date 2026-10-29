@@ -15,6 +15,13 @@ export const factorSchema = z.object({
   enabled: z.boolean().default(true),
   source: z.string().min(1).max(60_000),
   parameters: z.record(z.string(), z.unknown()).default({}),
+  group_id: z.uuid().optional(),
+});
+
+export const factorGroupSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  parent_id: z.uuid().nullable().default(null),
+  revision: z.number().int().nonnegative(),
 });
 
 export const analysisSchema = z

@@ -87,6 +87,12 @@ class PublishedFactor(Factor):
     def compute(self, bars, params):
         return self.factor.compute(bars, {**self.parameters, **params})
 
+    def evaluate_panel(self, histories, params=None):
+        method = getattr(self.factor, 'evaluate_panel', None)
+        if method is None:
+            raise ValueError('该因子未实现横截面计算')
+        return method(histories, {**self.parameters, **(params or {})})
+
 
 def load_factor(version_id):
     """Use a literal published UUID: load_factor('...'). Host bundles it per run.

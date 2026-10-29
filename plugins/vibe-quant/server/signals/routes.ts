@@ -19,6 +19,8 @@ import {
 import { POINT_BACKTEST_RULES } from '../../strategy-types.js';
 
 import { actualFuture, resolveTqOptions } from '../tq-options.js';
+import { readMarketPositions } from './positions.js';
+import type { MarketPositionsPage } from '../../market-positions.js';
 
 const shape = backtestSchema.shape;
 export const monitorSchema = z.object({
@@ -82,6 +84,42 @@ export function signalRoutes(
   api.get('/simulation-defaults', (c) =>
     c.json(resolveTqOptions(get().config)),
   );
+  api.get('/monitors/positions', async (c) => {
+    const { monitors, records, config } = get();
+    const rows = (await monitors.list(c.get('userId'))).filter(
+      (row) =>
+        !row.deleted &&
+        (row.config.display_engine ?? row.engine) === config.engine,
+    );
+    const [positions, views, strategyNames] = await Promise.all([
+      readMarketPositions(
+        monitors.history,
+        rows.map((row) => row.id),
+        c.req.query('before'),
+      ),
+      Promise.all(rows.map((row) => monitors.view(row))),
+      Promise.all(
+        [...new Set(rows.map((row) => row.strategy_id))].map(
+          async (id) => [id, (await records.storedStrategy(id)).name] as const,
+        ),
+      ),
+    ]);
+    const names = new Map(strategyNames);
+    const progress = new Map(
+      positions.progress.map((row) => [row.monitor_id, row]),
+    );
+    return c.json({
+      open: positions.open,
+      history: positions.history,
+      next: positions.next,
+      monitors: views.map((view) => ({
+        ...view,
+        strategy_name: names.get(view.strategy_id)!,
+        through: progress.get(view.id)?.through ?? null,
+        replaying: progress.get(view.id)?.replaying ?? false,
+      })),
+    } satisfies MarketPositionsPage);
+  });
   api.get('/monitors/:id/history', async (c) => {
     const { monitors } = get();
     const monitor = await monitors.get(c.req.param('id'), c.get('userId'));
@@ -274,10 +312,14 @@ export function signalRoutes(
       {
         notifications: strategyNotifications(
           notifications ?? {
-            channels: { toast: { enabled: true }, desktop: { enabled: false } },
+            channels: {
+              toast: { enabled: true },
+              desktop: { enabled: false },
+              sound: { enabled: true },
+            },
           },
         ),
-        notifications_enabled: notifications_enabled ?? false,
+        notifications_enabled: notifications_enabled ?? true,
       },
     );
     wake();

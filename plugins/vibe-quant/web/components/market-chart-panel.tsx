@@ -71,6 +71,7 @@ interface MarketChartPanelProps {
   volumeProfileSource?: VolumeProfileSource;
   latestLabel?: string;
   emptyHint?: string;
+  chartClassName?: string;
 }
 
 function ChartWorkspace({
@@ -88,6 +89,7 @@ function ChartWorkspace({
   volumeProfileSource,
   latestLabel = '最新行情',
   emptyHint = '首次订阅需要加载历史数据。请确认当前引擎具备此标的行情权限。',
+  chartClassName,
 }: MarketChartPanelProps) {
   const indicators = useIndicators();
   const scope = useRef<HTMLDivElement>(null);
@@ -193,6 +195,7 @@ function ChartWorkspace({
       )}
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
         <MarketChart
+          className={chartClassName}
           bars={bars}
           identity={`${identity}:${view.windowRevision}:${replay.session?.id ?? 'market'}`}
           drawingScope={identity}

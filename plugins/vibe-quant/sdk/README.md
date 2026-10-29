@@ -257,3 +257,5 @@ QUANT_INTEGRATION=1 pnpm --filter @plugins/vibe-quant test
 ## 因子复用
 
 期货因子通过 `from quant_sdk import Factor, load_factor` 使用。完整协议、策略示例和分析口径见 [FACTORS.md](FACTORS.md)。策略脚本用 `load_factor("已发布版本UUID")` 固定引用因子，并在回调中调用 `factor.value(ctx, bar.symbol, bar.duration)`，只读取当前时钟已收盘的历史。
+
+可选的 `KronosFactor` / `kronos_forecast` 可将本地 Kronos 模型的独立预测路径转换为方向概率，安装、时间口径和验证方法见 [KRONOS.md](KRONOS.md)。

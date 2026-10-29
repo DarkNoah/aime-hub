@@ -69,6 +69,8 @@ export function createFactorTools(
             factor_id: z.string().optional(),
             version_id: z.string().optional(),
             analysis_id: z.string().optional(),
+            group_id: z.string().optional(),
+            query: z.string().optional(),
           }),
           execute: (input, execution) =>
             run(execution, async (deps) => {
@@ -91,7 +93,26 @@ export function createFactorTools(
                 };
               }
               if (input.version_id) return records.version(input.version_id);
-              if (!input.factor_id) return { factors: await records.list() };
+              if (!input.factor_id) {
+                const [all, tree] = await Promise.all([
+                  records.list(),
+                  records.groups(),
+                ]);
+                const factors = all.filter(
+                  (f) =>
+                    (!input.group_id || f.group_id === input.group_id) &&
+                    (!input.query ||
+                      `${f.name} ${f.description}`
+                        .toLowerCase()
+                        .includes(input.query.toLowerCase())),
+                );
+                return {
+                  groups: tree.groups,
+                  total: factors.length,
+                  factors: factors.slice(0, 100),
+                  truncated: factors.length > 100,
+                };
+              }
               const row = await records.detail(input.factor_id);
               return {
                 ...row,

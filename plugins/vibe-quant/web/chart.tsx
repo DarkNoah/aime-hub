@@ -63,6 +63,7 @@ export function MarketChart({
   volumeProfileSource,
   replay = false,
   onSelectReplayTime,
+  className = 'min-h-[440px] lg:min-h-[560px]',
 }: {
   bars: Bar[];
   identity: string;
@@ -83,6 +84,7 @@ export function MarketChart({
   volumeProfileSource?: VolumeProfileSource;
   replay?: boolean;
   onSelectReplayTime?: (time: number) => void;
+  className?: string;
 }) {
   const hasStrategyHints = strategyHints !== undefined;
   const container = useRef<HTMLDivElement>(null);
@@ -572,7 +574,7 @@ export function MarketChart({
     showDrawingTools,
   ]);
   return (
-    <div className="relative flex min-h-[440px] min-w-0 flex-1 lg:min-h-[560px]">
+    <div className={`relative flex min-w-0 flex-1 ${className}`}>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <ChartReadout
           key={identity}

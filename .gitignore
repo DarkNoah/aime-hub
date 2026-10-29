@@ -42,3 +42,7 @@ plugins/vibe-quant/**/__pycache__/
 !plugins/vibe-quant/tests/strategy-sharing.test.ts
 
 !scripts/notification-sound-browser.test.mjs
+!plugins/vibe-quant/tests/market-positions.test.ts
+!scripts/quant-market-positions-browser.test.mjs
+
+!plugins/vibe-quant/tests/factor-groups.test.ts

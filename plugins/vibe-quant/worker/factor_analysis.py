@@ -10,8 +10,9 @@ from zoneinfo import ZoneInfo
 
 if __name__ == '__main__':
     sys.path.insert(0, sys.argv[1])
-from quant_sdk import Bar, TradingCalendar
+from quant_sdk import Bar, Factor, TradingCalendar
 from quant_sdk.factors import factor_from_source
+from quant_sdk.alpha import ExpressionFactor
 
 
 def ranks(values):
@@ -84,7 +85,8 @@ def daily_bars(raw, now):
         if end > now:
             continue
         result.append(Bar(symbol=row['symbol'], time=row['time'], end_time=end, trading_day=day,
-                          duration=86400, **{k: row[k] for k in ('open', 'high', 'low', 'close', 'volume')}))
+                          duration=86400, amount=row.get('amount'),
+                          **{k: row[k] for k in ('open', 'high', 'low', 'close', 'volume')}))
     return result
 
 
@@ -100,13 +102,28 @@ def analyze(factor, bars, config, parameters):
     lookback = factor.lookback(parameters)
     if type(lookback) is not int or not 1 <= lookback <= 500:
         raise ValueError('因子 lookback 必须是 1 至 500 的整数')
+    # Batch only the known causal expression engine. Ordinary Python factors keep
+    # receiving a bounded past window; a method named evaluate_panel is not enough.
+    panel_method = factor.evaluate_panel if (isinstance(factor, ExpressionFactor)
+        and type(factor).evaluate_panel is ExpressionFactor.evaluate_panel
+        and type(factor).compute is ExpressionFactor.compute
+        and type(factor).lookback is ExpressionFactor.lookback
+        and type(factor).metadata is ExpressionFactor.metadata
+        and type(factor).evaluate is Factor.evaluate) else None
+    panel = panel_method({s: sorted(by_symbol[s].values(), key=lambda b: b.end_time)
+                          for s in symbols}, parameters) if panel_method else None
     for symbol in symbols:
         history = sorted(by_symbol[symbol].values(), key=lambda bar: bar.end_time)
         computed = {}
         for i, bar in enumerate(history):
             if config['start'] <= bar.trading_day <= config['end']:
                 # Never give the factor future rows, even when the entire snapshot is present.
-                value = factor.evaluate(history[max(0, i-lookback+1):i+1], parameters)
+                if panel is None:
+                    value = factor.evaluate(history[max(0, i-lookback+1):i+1], parameters)
+                else:
+                    value = float(panel.loc[bar.trading_day, symbol])
+                    if not isfinite(value):
+                        value = None
                 if value is not None:
                     computed[bar.trading_day] = value
         values[symbol] = computed

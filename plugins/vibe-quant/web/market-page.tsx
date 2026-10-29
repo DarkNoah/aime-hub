@@ -36,6 +36,7 @@ import { readChartPeriod } from './chart-period';
 import { OrderBookPanel } from './order-book';
 import { useStrategyHints } from './signals/use-strategy-hints';
 import { StrategyHints } from './signals/strategy-hints';
+import { MarketPositionsPanel } from './signals/market-positions-panel';
 
 const ENGINE_NAMES = { tqsdk: 'TqSdk', tushare: 'Tushare', tdx: '通达信' };
 const STATE_LABELS = {
@@ -251,8 +252,11 @@ export function MarketPage({ pluginId }: PluginPageProps) {
   const item = list.find((entry) => entry.symbol === selected);
   const currentQuote = quotes.find((entry) => entry.symbol === selected);
   return (
-    <div className="space-y-4" data-page-width="full">
-      <header className="flex flex-wrap items-center justify-between gap-3">
+    <div
+      className="flex flex-col gap-4 xl:h-[calc(100dvh-8.5rem)] xl:min-h-[32rem]"
+      data-page-width="full"
+    >
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="rounded-lg bg-primary/10 p-2 text-primary">
             <ChartCandlestick className="size-5" />
@@ -289,7 +293,7 @@ export function MarketPage({ pluginId }: PluginPageProps) {
       {listError && (
         <div
           role="alert"
-          className="flex items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm"
+          className="flex shrink-0 items-center justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm"
         >
           <span>{listError}</span>
           <Button
@@ -301,11 +305,9 @@ export function MarketPage({ pluginId }: PluginPageProps) {
           </Button>
         </div>
       )}
-      <div
-        className={`grid min-w-0 overflow-hidden rounded-xl border bg-card lg:grid-cols-[280px_minmax(0,1fr)] ${item ? 'xl:grid-cols-[280px_minmax(0,1fr)_240px]' : ''}`}
-      >
-        <aside className="min-w-0 border-b lg:border-r lg:border-b-0">
-          <div className="border-b p-4">
+      <div className="grid min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border bg-card lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_340px] xl:grid-rows-[minmax(0,1fr)] 2xl:grid-cols-[260px_minmax(0,1fr)_360px]">
+        <aside className="flex min-h-0 min-w-0 flex-col border-b lg:border-r lg:border-b-0">
+          <div className="shrink-0 border-b p-4">
             <Button
               variant="outline"
               className="w-full justify-start text-muted-foreground"
@@ -316,14 +318,14 @@ export function MarketPage({ pluginId }: PluginPageProps) {
               <Plus className="ml-auto size-4" />
             </Button>
           </div>
-          <div className="flex items-center justify-between px-4 pt-4 pb-2">
+          <div className="flex shrink-0 items-center justify-between px-4 pt-4 pb-2">
             <h2 className="flex items-center gap-2 text-sm font-medium">
               <Star className="size-4 text-primary" />
               我的自选
             </h2>
             <Badge variant="secondary">{list.length}</Badge>
           </div>
-          <ScrollArea className="h-[220px] lg:h-[586px]">
+          <ScrollArea className="h-[220px] lg:h-[586px] xl:h-0 xl:min-h-0 xl:flex-1">
             {loading ? (
               <p className="p-4 text-sm text-muted-foreground" role="status">
                 正在读取自选…
@@ -424,10 +426,11 @@ export function MarketPage({ pluginId }: PluginPageProps) {
             )}
           </ScrollArea>
         </aside>
-        <section className="flex min-w-0 flex-col">
+        <section className="flex min-h-0 min-w-0 flex-col">
           {item ? (
             <>
               <MarketChartPanel
+                chartClassName="min-h-[440px] lg:min-h-[560px] xl:min-h-0"
                 toolbarActions={(replay) => (
                   <StrategyHints
                     key={`${status?.engine}:${selected}`}
@@ -452,7 +455,7 @@ export function MarketPage({ pluginId }: PluginPageProps) {
               />
             </>
           ) : (
-            <div className="flex min-h-[500px] flex-1 items-center justify-center p-8 text-center">
+            <div className="flex min-h-[500px] flex-1 items-center justify-center p-8 text-center xl:min-h-0">
               <div className="max-w-md">
                 <ChartCandlestick className="mx-auto mb-5 size-10 text-primary/70" />
                 <h2 className="text-lg font-medium">从关注的标的开始</h2>
@@ -470,40 +473,44 @@ export function MarketPage({ pluginId }: PluginPageProps) {
             </div>
           )}
         </section>
-        {item && (
-          <aside
-            aria-label="行情概览与盘口"
-            className="min-w-0 border-t lg:col-span-2 xl:col-span-1 xl:border-t-0 xl:border-l"
-          >
-            <dl
-              aria-label="行情概览"
-              className="grid grid-cols-2 gap-x-4 gap-y-4 border-b p-4 text-xs sm:grid-cols-3 xl:grid-cols-2"
-            >
-              {[
-                ['今开', price(currentQuote?.open)],
-                ['最高', price(currentQuote?.high)],
-                ['最低', price(currentQuote?.low)],
-                ['昨收', price(currentQuote?.preClose)],
-                ['成交量', quantity(currentQuote?.volume)],
-                ['持仓量', quantity(currentQuote?.openInterest)],
-              ].map(([label, value]) => (
-                <div key={label} className="min-w-0">
-                  <dt className="text-muted-foreground">{label}</dt>
-                  <dd className="mt-1 break-all font-medium tabular-nums">
-                    {value}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-            <OrderBookPanel
-              book={orderBooks.find((book) => book.symbol === selected)}
-              symbol={selected}
-              priceTick={item.priceTick}
-            />
-          </aside>
-        )}
+        <MarketPositionsPanel
+          key={`${pluginId}:${status?.engine}`}
+          pluginId={pluginId}
+          engine={status?.engine}
+          marketOverview={
+            item ? (
+              <div aria-label="行情概览与盘口">
+                <dl
+                  aria-label="行情概览"
+                  className="grid grid-cols-2 gap-x-4 gap-y-4 border-b p-4 text-xs sm:grid-cols-3 xl:grid-cols-2"
+                >
+                  {[
+                    ['今开', price(currentQuote?.open)],
+                    ['最高', price(currentQuote?.high)],
+                    ['最低', price(currentQuote?.low)],
+                    ['昨收', price(currentQuote?.preClose)],
+                    ['成交量', quantity(currentQuote?.volume)],
+                    ['持仓量', quantity(currentQuote?.openInterest)],
+                  ].map(([label, value]) => (
+                    <div key={label} className="min-w-0">
+                      <dt className="text-muted-foreground">{label}</dt>
+                      <dd className="mt-1 break-all font-medium tabular-nums">
+                        {value}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                <OrderBookPanel
+                  book={orderBooks.find((book) => book.symbol === selected)}
+                  symbol={selected}
+                  priceTick={item.priceTick}
+                />
+              </div>
+            ) : undefined
+          }
+        />
       </div>
-      <footer className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+      <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <span>
           {reconnecting || status?.state === 'error'
             ? '正在连接同步服务'

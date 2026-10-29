@@ -25,6 +25,9 @@ export function runSignalProcess(
         TMPDIR: cwd,
         PYTHONNOUSERSITE: '1',
         PYTHONIOENCODING: 'utf-8',
+        ...(process.env.QUANT_KRONOS_ROOT
+          ? { QUANT_KRONOS_ROOT: process.env.QUANT_KRONOS_ROOT }
+          : {}),
         ...(process.platform === 'win32'
           ? { SystemRoot: process.env.SystemRoot }
           : {}),

@@ -75,10 +75,25 @@ class Bar:
     close: float
     volume: float
     is_final: bool = True
+    # Optional research inputs. Never synthesize these from OHLC prices.
+    amount: float | None = None
+    vwap: float | None = None
+    cap: float | None = None
+    sector: str | None = None
+    industry: str | None = None
+    subindustry: str | None = None
+    benchmark_open: float | None = None
+    benchmark_close: float | None = None
+    mkt: float | None = None
+    smb: float | None = None
+    hml: float | None = None
 
     def __post_init__(self):
         for name in ('time', 'end_time', 'open', 'high', 'low', 'close', 'volume'):
             finite(getattr(self, name), name)
+        for name in ('amount', 'vwap', 'cap', 'benchmark_open', 'benchmark_close', 'mkt', 'smb', 'hml'):
+            if getattr(self, name) is not None:
+                finite(getattr(self, name), name)
         if (self.end_time <= self.time or self.duration <= 0 or self.volume < 0
                 or self.low > min(self.open, self.close) or self.high < max(self.open, self.close)):
             raise ValueError('Invalid bar')

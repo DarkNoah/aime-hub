@@ -8,6 +8,7 @@ import {
   factorId,
   FactorError,
   factorSchema,
+  factorGroupSchema,
 } from './schema.js';
 import type { FactorStore } from './store.js';
 import type { FactorService } from './service.js';
@@ -52,6 +53,42 @@ export function factorRoutes(
     }),
   );
   api.get('/', async (c) => c.json(await get().records.list()));
+  api.get('/groups', async (c) => c.json(await get().records.groups()));
+  api.post('/groups', async (c) => {
+    const input = factorGroupSchema.safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!input.success) throw new FactorError('请检查分组名称和上级分组');
+    return c.json(
+      await get().records.saveGroup(c.get('userId'), input.data),
+      201,
+    );
+  });
+  api.put('/groups/:id', async (c) => {
+    const input = factorGroupSchema.safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!input.success) throw new FactorError('分组参数无效');
+    const id = factorId(c.req.param('id'));
+    if (!(await get().records.groups()).groups.some((g) => g.id === id))
+      throw new FactorError('分组不存在', 404);
+    return c.json(
+      await get().records.saveGroup(c.get('userId'), input.data, id),
+    );
+  });
+  api.delete('/groups/:id', async (c) => {
+    const input = z
+      .object({ revision: z.number().int().nonnegative() })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!input.success) throw new FactorError('分组版本无效');
+    return c.json(
+      await get().records.deleteGroup(
+        c.get('userId'),
+        factorId(c.req.param('id')),
+        input.data.revision,
+      ),
+    );
+  });
   api.post('/', async (c) => {
     const input = factorSchema.safeParse(await c.req.json().catch(() => null));
     if (!input.success) throw new FactorError('请检查名称、Python 源码和参数');

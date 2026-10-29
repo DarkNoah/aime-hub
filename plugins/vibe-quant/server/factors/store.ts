@@ -6,10 +6,23 @@ import type {
   FactorDraft,
   FactorSummary,
   FactorVersion,
+  FactorGroups,
+  FactorGroup,
 } from '../../factor-types.js';
+import {
+  FACTOR_GROUPS,
+  UNGROUPED,
+  groupDescendants,
+} from '../../factor-groups.js';
 import { ClickHouseClient, ClickHouseError } from '../clickhouse-client.js';
 import { sha256 } from '../strategies/sources.js';
 import { FactorError } from './schema.js';
+import {
+  builtinDetail,
+  builtinSummaries,
+  builtinVersion,
+  builtinVersions,
+} from './builtins.js';
 
 type RecordRow<T> = { payload: T; revision: number };
 
@@ -20,6 +33,7 @@ export class FactorStore extends ClickHouseClient {
       'quant_factors',
       'quant_factor_versions',
       'quant_factor_analyses',
+      'quant_factor_groups',
     ]) {
       try {
         await this.request(`SELECT id FROM ${this.table(name)} LIMIT 0`);
@@ -31,6 +45,21 @@ export class FactorStore extends ClickHouseClient {
         ) ENGINE = ReplacingMergeTree(revision) ORDER BY id`);
       }
     }
+    // Retain every shipped version even if a future catalog revises a formula.
+    // One idempotent statement, serialized across app instances on this database.
+    await this.execute(
+      `INSERT INTO ${this.table('quant_factor_versions')}
+       SELECT id, 'builtin', payload, toUInt64(1) FROM input('id String, payload String')
+       WHERE id NOT IN (SELECT id FROM ${this.table('quant_factor_versions')} FINAL)
+       FORMAT JSONEachRow`,
+      {},
+      builtinVersions()
+        .map((version) =>
+          JSON.stringify({ id: version.id, payload: JSON.stringify(version) }),
+        )
+        .join('\n'),
+      'factor-builtin-version-catalog',
+    );
   }
 
   private async read<T>(table: string, id: string): Promise<RecordRow<T>> {
@@ -42,10 +71,10 @@ export class FactorStore extends ClickHouseClient {
     return { payload: JSON.parse(row.payload), revision: Number(row.revision) };
   }
 
-  private async put(
+  private async put<T extends { id: string }>(
     table: string,
     actor: string,
-    value: { id: string },
+    value: T,
     previous: number,
   ) {
     const exists = `SELECT 1 FROM ${this.table(table)} FINAL WHERE id={id:String}`;
@@ -76,17 +105,123 @@ export class FactorStore extends ClickHouseClient {
        JSONExtractBool(payload, 'enabled') AS enabled, revision,
        JSONExtractUInt(payload, 'version_count') AS version_count,
        JSONExtractString(payload, 'updated_at') AS updated_at
+       ,JSONExtractString(payload, 'group_id') AS group_id
        FROM ${this.table('quant_factors')} FINAL ORDER BY updated_at DESC, id`,
     );
-    return rows.map((row) => ({
-      ...row,
-      enabled: !!row.enabled,
-      revision: Number(row.revision),
-    }));
+    const { groups } = await this.groups();
+    return [
+      ...rows.map((row) => ({
+        ...row,
+        enabled: !!row.enabled,
+        revision: Number(row.revision),
+        group_id: groups.some((g) => g.id === row.group_id)
+          ? row.group_id
+          : UNGROUPED,
+      })),
+      ...builtinSummaries(),
+    ];
   }
 
   async detail(id: string) {
-    return (await this.read<FactorDetail>('quant_factors', id)).payload;
+    const builtin = builtinDetail(id);
+    if (builtin) return structuredClone(builtin);
+    const row = (await this.read<FactorDetail>('quant_factors', id)).payload;
+    const { groups } = await this.groups();
+    return {
+      ...row,
+      group_id: groups.some((g) => g.id === row.group_id)
+        ? row.group_id
+        : UNGROUPED,
+    };
+  }
+
+  async groups(): Promise<FactorGroups> {
+    try {
+      const row = await this.read<{ groups: FactorGroup[] }>(
+        'quant_factor_groups',
+        'tree',
+      );
+      return {
+        revision: row.revision,
+        groups: [...FACTOR_GROUPS, ...row.payload.groups],
+      };
+    } catch (error) {
+      if (error instanceof FactorError && error.status === 404)
+        return { revision: 0, groups: [...FACTOR_GROUPS] };
+      throw error;
+    }
+  }
+
+  async saveGroup(
+    actor: string,
+    input: { name: string; parent_id: string | null; revision: number },
+    id: string = randomUUID(),
+  ) {
+    const tree = await this.groups();
+    if (tree.revision !== input.revision)
+      throw new FactorError('分组已被修改，请重新加载', 409);
+    const existing = tree.groups.find((g) => g.id === id);
+    if (existing?.builtin)
+      throw new FactorError('固定分组不能重命名或移动', 403);
+    const name = input.name.trim();
+    if (!name || name.length > 100)
+      throw new FactorError('分组名称须为 1 至 100 个字符');
+    if (input.parent_id && !tree.groups.some((g) => g.id === input.parent_id))
+      throw new FactorError('上级分组不存在');
+    if (
+      input.parent_id &&
+      groupDescendants(tree.groups, id).has(input.parent_id)
+    )
+      throw new FactorError('不能将分组移动到自身或子组中');
+    if (
+      tree.groups.some(
+        (g) =>
+          g.id !== id &&
+          g.parent_id === input.parent_id &&
+          g.name.toLocaleLowerCase() === name.toLocaleLowerCase(),
+      )
+    )
+      throw new FactorError('同级分组名称已存在', 409);
+    const group: FactorGroup = {
+      id,
+      name,
+      parent_id: input.parent_id,
+      builtin: false,
+    };
+    const groups = tree.groups
+      .filter((g) => !g.builtin)
+      .map((g) => (g.id === id ? group : g));
+    if (!existing) groups.push(group);
+    await this.put(
+      'quant_factor_groups',
+      actor,
+      { id: 'tree', groups },
+      tree.revision,
+    );
+    return {
+      revision: tree.revision + 1,
+      groups: [...FACTOR_GROUPS, ...groups],
+    };
+  }
+
+  async deleteGroup(actor: string, id: string, revision: number) {
+    const tree = await this.groups();
+    if (tree.revision !== revision)
+      throw new FactorError('分组已被修改，请重新加载', 409);
+    const group = tree.groups.find((g) => g.id === id);
+    if (!group) throw new FactorError('分组不存在', 404);
+    if (group.builtin) throw new FactorError('固定分组不能删除', 403);
+    const removed = groupDescendants(tree.groups, id);
+    const groups = tree.groups.filter((g) => !g.builtin && !removed.has(g.id));
+    // Canonical reads resolve removed group IDs to 未分类. This single CAS makes
+    // subtree deletion atomic without partial multi-table updates or data loss.
+    await this.put(
+      'quant_factor_groups',
+      actor,
+      { id: 'tree', groups },
+      revision,
+    );
+    return { revision: revision + 1, groups: [...FACTOR_GROUPS, ...groups] };
   }
 
   async save(
@@ -95,11 +230,17 @@ export class FactorStore extends ClickHouseClient {
     id: string = randomUUID(),
     revision = 0,
   ): Promise<FactorDetail> {
+    if (builtinDetail(id))
+      throw new FactorError('内置因子为只读，请复制为自定义因子后修改', 403);
     const previous = revision ? await this.detail(id) : null;
     if (previous && previous.revision !== revision)
       throw new FactorError('记录已被修改，请重新加载后保存', 409);
+    const groupId = draft.group_id ?? previous?.group_id ?? UNGROUPED;
+    if (!(await this.groups()).groups.some((g) => g.id === groupId))
+      throw new FactorError('分组不存在，请重新选择');
     const next: FactorDetail = {
       ...draft,
+      group_id: groupId,
       id,
       revision: revision + 1,
       versions: previous?.versions ?? [],
@@ -111,6 +252,11 @@ export class FactorStore extends ClickHouseClient {
   }
 
   async publish(actor: string, id: string, revision: number, note: string) {
+    if (builtinDetail(id))
+      throw new FactorError(
+        '内置因子已有固定版本，请复制后发布自定义版本',
+        403,
+      );
     const row = await this.detail(id);
     if (row.revision !== revision)
       throw new FactorError('记录已被修改，请重新加载后发布', 409);
@@ -138,6 +284,8 @@ export class FactorStore extends ClickHouseClient {
   }
 
   async version(id: string) {
+    const builtin = builtinVersion(id);
+    if (builtin) return structuredClone(builtin);
     const row = (await this.read<FactorVersion>('quant_factor_versions', id))
       .payload;
     if (sha256(row.source) !== row.source_hash)

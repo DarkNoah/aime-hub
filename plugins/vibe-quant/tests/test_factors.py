@@ -117,6 +117,9 @@ class FactorsTest(unittest.TestCase):
         bars, config = fixture()
         seen = []
         class Observed(Momentum):
+            def evaluate_panel(self, *_):
+                raise AssertionError('ordinary factors must not receive future snapshots')
+
             def compute(self, history, params):
                 self.assertion = all(a.end_time < b.end_time for a, b in zip(history, history[1:]))
                 seen.append((history[-1].symbol, history[-1].trading_day, tuple(b.close for b in history)))
