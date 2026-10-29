@@ -116,6 +116,16 @@ export function IndicatorSettingsDialog({
                           change(parameter.key, value)
                         }
                       />
+                    ) : parameter.type === 'time' ? (
+                      <Input
+                        id={id}
+                        type="time"
+                        step={60}
+                        value={String(draft[parameter.key])}
+                        onChange={(event) =>
+                          change(parameter.key, event.target.value)
+                        }
+                      />
                     ) : parameter.type === 'color' ? (
                       <div className="flex items-center gap-2">
                         <Input

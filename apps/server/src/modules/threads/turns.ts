@@ -3,6 +3,7 @@ import { isToolUIPart, type UIMessage } from 'ai';
 import { isCompletedIntelligentUiPart } from '@aime/shared/intelligent-ui';
 import {
   hasChatTurnDetails,
+  isCompletedAskUserPart,
   type ChatTurnSummary,
 } from '@aime/shared/chat-turns';
 
@@ -63,7 +64,7 @@ export function summarizeTurn(
       continue;
     }
     for (const part of message.parts) {
-      if (isCompletedIntelligentUiPart(part)) {
+      if (isCompletedIntelligentUiPart(part) || isCompletedAskUserPart(part)) {
         assistantMessage ??= message;
         overview.push(part);
       }

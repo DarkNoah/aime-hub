@@ -50,6 +50,7 @@ import { PgNotificationStore } from './modules/notifications/store.js';
 import { createPushTransport } from './modules/notifications/push.js';
 import { AssetService } from './modules/assets/service.js';
 import { SystemSettingsService } from './modules/system-settings/service.js';
+import { LocalApiAccess } from './modules/auth/local-api.js';
 
 const env = loadEnv();
 const workspaceRoot = resolve(
@@ -152,6 +153,16 @@ const projects = new ProjectService(database, { workspaceRoot });
 const groupChats = new GroupChatService(database);
 const users = new UserService(database, groupChats);
 const environmentVariables = new EnvironmentVariableService(database);
+const localApi = new LocalApiAccess(
+  `http://127.0.0.1:${env.SERVER_PORT}/api`,
+  async (userId) => {
+    const { rows } = await pool.query(
+      'SELECT banned FROM users WHERE id = $1',
+      [userId],
+    );
+    return !!rows[0] && !rows[0].banned;
+  },
+);
 const scheduleHooks: ScheduleHooks<Mastra> = {};
 const memoryVectors = new PgVector({
   id: 'chat-memory',
@@ -221,6 +232,8 @@ const threads = new ThreadService(
     usage,
     environmentVariables,
     getMemoryConfig,
+    localApi,
+    plugins,
   ),
   projects,
   mastra.backgroundTaskManager,
@@ -257,6 +270,7 @@ const app = createApp(
     models,
     projects,
     assets,
+    localApi,
     groupChats,
     users,
     webOrigin: env.WEB_ORIGINS,

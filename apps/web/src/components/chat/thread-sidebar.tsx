@@ -20,6 +20,7 @@ export type ThreadSidebarProps = {
   plugin?: string;
   /** Default agent for chats created within a plugin. */
   agentId?: string;
+  usePluginWorkspace?: boolean;
   title?: string;
   label?: string;
   newLabel?: string;
@@ -29,6 +30,7 @@ export type ThreadSidebarProps = {
 export function ThreadSidebar({
   plugin,
   agentId,
+  usePluginWorkspace,
   title,
   label,
   newLabel,
@@ -66,6 +68,7 @@ export function ThreadSidebar({
       const thread = await chatApi.create({
         plugin,
         agentId,
+        usePluginWorkspace,
         model: null,
         reasoningEffort: 'auto',
       });

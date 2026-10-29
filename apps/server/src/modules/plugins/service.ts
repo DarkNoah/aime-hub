@@ -56,6 +56,7 @@ type PluginState = PluginStatus & {
 /** Code is immutable for the lifetime of a process; activation is read from PostgreSQL. */
 export class PluginService {
   private servers = new Map<string, PluginServer>();
+  private runtimes = new Map<string, ReturnType<typeof createPluginRuntime>>();
   private lifecycle = new PluginLifecycle(this.servers);
   private queue: Promise<unknown> = Promise.resolve();
   private starting?: Promise<void>;
@@ -79,12 +80,14 @@ export class PluginService {
       const { id } = definition.manifest;
       if (ids.has(id)) throw new Error(`Duplicate plugin ID: ${id}`);
       ids.add(id);
+      const runtime = createPluginRuntime(definition.manifest, runtimeOptions);
+      this.runtimes.set(id, runtime);
       const server = definition.createServer({
         id,
         database,
         web,
         notifications: notifications?.(id),
-        runtime: createPluginRuntime(definition.manifest, runtimeOptions),
+        runtime,
         assertEnabled: () => this.assertEnabled(id),
       });
       const agents = new Set<string>();
@@ -222,6 +225,14 @@ export class PluginService {
 
   async list(): Promise<PluginStatus[]> {
     return this.runtimeStates(await this.readStates());
+  }
+
+  async workspaceDirectory(id: string): Promise<string | undefined> {
+    const runtime = this.runtimes.get(id);
+    if (!runtime?.paths.pluginWorkspace) return;
+    if (!(await this.list()).some((state) => state.id === id && state.enabled))
+      return;
+    return runtime.ensureWorkspace();
   }
 
   private serialize<T>(work: () => Promise<T>): Promise<T> {

@@ -31,6 +31,7 @@ export type IndicatorParameter =
       options: readonly { value: string; label: string }[];
     })
   | (ParameterBase & { type: 'color'; default: string; alpha?: boolean })
+  | (ParameterBase & { type: 'time'; default: string })
   | (ParameterBase & { type: 'boolean'; default: boolean });
 
 /** A missing value is a warm-up/whitespace point, never a fabricated zero. */
@@ -89,6 +90,8 @@ export interface IndicatorDrawing {
   text?: string;
   /** Optional filled background for compact event badges. */
   labelBackground?: string;
+  /** A pentagonal badge with its full-width pointed edge facing the price anchor. */
+  labelPointer?: boolean;
   labelIndex?: number;
   /** Keep live strategy labels inside the price pane. */
   clampLabel?: boolean;
@@ -101,6 +104,15 @@ export interface IndicatorOverlay {
   drawings: IndicatorDrawing[];
   candleColors?: (string | undefined)[];
   warnings?: string[];
+  dashboards?: IndicatorDashboard[];
+}
+
+export interface IndicatorDashboard {
+  id: string;
+  title: string;
+  position: 'top-right' | 'right-center' | 'top-center';
+  rows: { label: string; value: string; status?: boolean }[];
+  note?: string;
 }
 
 export interface IndicatorDefinition {

@@ -33,6 +33,8 @@ export const createThreadSchema = chatSettingsSchema.extend({
   title: z.string().trim().min(1).max(120).optional(),
   /** ID of the plugin that created this thread. */
   plugin: z.string().trim().min(1).optional(),
+  /** Use the plugin's persistent workspace when the enabled plugin declares one. */
+  usePluginWorkspace: z.boolean().optional(),
   projectId: z
     .string()
     .regex(/^[a-zA-Z0-9_-]{16}$/)

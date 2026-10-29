@@ -59,7 +59,7 @@ export interface BarWindow {
   targetTime: number | null;
   priceTick?: number;
 }
-export const BAR_PAGE_SIZE = 200;
+export const BAR_PAGE_SIZE = 1000;
 export const BAR_JUMP_RADIUS = 100;
 /** SDK market snapshot, not an individual execution. UInt64 values use decimal strings. */
 export interface Tick {

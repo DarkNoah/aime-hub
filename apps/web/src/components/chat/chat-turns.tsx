@@ -1,4 +1,5 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { isToolUIPart } from 'ai';
 import { ChevronDown, ChevronUp, LoaderCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -40,6 +41,15 @@ export function ChatTurns({
   activeMessageId,
   ...props
 }: Props) {
+  const pendingToolCallIds = useMemo(
+    () =>
+      new Set(
+        props.toolInteractions
+          .filter((interaction) => !interaction.response)
+          .map((interaction) => interaction.toolCallId),
+      ),
+    [props.toolInteractions],
+  );
   return (
     <>
       {turns.map((turn) => (
@@ -52,6 +62,7 @@ export function ChatTurns({
           activeMessageId={activeMessageId}
           turn={turn}
           detail={details.get(turn.id)}
+          pendingToolCallIds={pendingToolCallIds}
         />
       ))}
       {/* Pending interactions remain actionable even with every detail collapsed. */}
@@ -75,12 +86,14 @@ const ChatTurnRow = memo(function ChatTurnRow({
   running,
   activeTurnId,
   activeMessageId,
+  pendingToolCallIds,
 }: Pick<
   Props,
   'loadDetails' | 'threadId' | 'running' | 'activeTurnId' | 'activeMessageId'
 > & {
   turn: ChatTurnSummary;
   detail?: ChatTurnDetail;
+  pendingToolCallIds: ReadonlySet<string>;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -182,10 +195,15 @@ const ChatTurnRow = memo(function ChatTurnRow({
               .map((message) => ({
                 ...message,
                 parts: message.parts.filter(
-                  // Pending panels remain in the actionable interaction area.
+                  // Pending interactions render once in the actionable area,
+                  // including ask_user, plans, and generic tool approvals.
                   (part) =>
-                    !isIntelligentUiPart(part) ||
-                    isCompletedIntelligentUiPart(part),
+                    !(
+                      isToolUIPart(part) &&
+                      pendingToolCallIds.has(part.toolCallId)
+                    ) &&
+                    (!isIntelligentUiPart(part) ||
+                      isCompletedIntelligentUiPart(part)),
                 ),
               }))
               .filter((message) => message.parts.length)}

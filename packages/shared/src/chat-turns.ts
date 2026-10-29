@@ -3,6 +3,16 @@ import { getMessageCompression } from './message-compression.js';
 import type { ThreadSnapshot } from './threads.js';
 import { isIntelligentUiPart } from './intelligent-ui.js';
 
+/** Answered questions remain visible when the rest of a turn is collapsed. */
+export function isCompletedAskUserPart(part: UIMessage['parts'][number]) {
+  return (
+    isToolUIPart(part) &&
+    (part.type === 'dynamic-tool' ? part.toolName : part.type.slice(5)) ===
+      'ask_user' &&
+    (part.state === 'output-available' || part.state === 'output-denied')
+  );
+}
+
 /** Details must add visible content beyond the final text already in the overview. */
 export function hasChatTurnDetails(messages: readonly UIMessage[]) {
   let textCount = 0;
@@ -12,7 +22,8 @@ export function hasChatTurnDetails(messages: readonly UIMessage[]) {
       message.parts.some((part) => {
         if (part.type === 'text') return !!part.text.trim() && ++textCount > 1;
         if (part.type === 'reasoning') return !!part.text.trim();
-        if (isToolUIPart(part)) return !isIntelligentUiPart(part);
+        if (isToolUIPart(part))
+          return !isIntelligentUiPart(part) && !isCompletedAskUserPart(part);
         if (part.type === 'file') return part.mediaType.startsWith('image/');
         if (part.type === 'data-background-task-completed') {
           const data = part.data;
@@ -33,7 +44,7 @@ export function hasChatTurnDetails(messages: readonly UIMessage[]) {
 export type ChatTurnSummary = {
   id: string;
   user: UIMessage | null;
-  /** Final text and completed HTML panels in their original part order. */
+  /** Final text, completed HTML panels, and answered questions in part order. */
   assistant: UIMessage | null;
   /** Whether details add visible content beyond the final assistant text. */
   hasDetails?: boolean;

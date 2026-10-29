@@ -17,7 +17,13 @@ import type { ChatSettings } from '../threads.js';
 
 export const projectsContract = {
   list: procedure
-    .route({ method: 'GET', path: '/projects', inputStructure: 'detailed' })
+    .meta({ localApi: true })
+    .route({
+      method: 'GET',
+      path: '/projects',
+      inputStructure: 'detailed',
+      summary: '分页列出当前用户有权访问的项目',
+    })
     .input(
       z.object({
         query: z.object({
@@ -29,18 +35,22 @@ export const projectsContract = {
     )
     .output(type<ProjectList>()),
   create: procedure
+    .meta({ localApi: true })
     .route({
       method: 'POST',
       path: '/projects',
       inputStructure: 'detailed',
       successStatus: 201,
+      summary: '创建项目，当前用户成为所有者',
     })
     .input(z.object({ body: projectCreateSchema }))
     .output(type<ProjectDetail>()),
   get: procedure
+    .meta({ localApi: true })
     .route({
       method: 'GET',
       path: '/projects/{projectId}',
+      summary: '读取项目详情、工作区和默认设置',
       inputStructure: 'detailed',
     })
     .input(z.object({ params: z.object({ projectId: threadId }) }))

@@ -324,12 +324,32 @@ export default { pages: { '': Page } } satisfies PluginWeb;
 
 区域按 `thread.plugin === plugin.id` 精确筛选当前用户的未归档个人线程，支持分页、实时状态、切换、重命名和归档。新建会保存插件 ID 并打开聊天，但不会自动发送消息。普通个人聊天和项目聊天列表默认排除带 `plugin` 的线程，项目运行数量也只统计普通线程。列表 API 未传 `plugin` 时排除插件线程，传入时按插件 ID 精确筛选；与 `projectId` 同时使用时只筛选该授权项目，筛选发生在分页之前。
 
+创建线程的 `POST /api/threads` 接受可选布尔参数 `usePluginWorkspace`（RPC 调用放在 `body` 中）。只有传入 `true`、指定 `plugin`，且该插件已启用并在清单中声明 `"workspace": true` 时，线程才使用 `<WORKSPACE_ROOT>/plugins/<pluginId>`；目录尚未创建时由宿主创建。未传、传 `false`、插件不存在/未启用/未声明空间时，沿用原有个人或项目工作区。
+
+```json
+{
+  "plugin": "vibe-quant",
+  "agentId": "plugin:vibe-quant:quant-agent",
+  "usePluginWorkspace": true,
+  "model": null,
+  "reasoningEffort": "auto"
+}
+```
+
+插件空间优先于 `projectId` 对应的工作区，但项目成员权限仍照常校验。文件面板、文件工具和命令工作目录均使用插件空间；该空间由插件及选择它的聊天共享，包括不同用户的聊天。选择结果在创建时保存，已有线程不会自动迁移；归档、恢复及彻底删除线程均保留插件空间中的文件。
+
+在清单的 `chatThreads` 中设置 `"usePluginWorkspace": true`，内置侧栏新建聊天时就会传入该参数；省略时保持原有工作区行为。Vibe Quant 已启用此配置。
+
 插件页面也可以从 `@app/plugin-ui` 导入共用组件：
 
 ```tsx
 import { ThreadSidebar } from '@app/plugin-ui';
 
-<ThreadSidebar plugin={pluginId} agentId="plugin:vibe-quant:quant-agent" />;
+<ThreadSidebar
+  plugin={pluginId}
+  agentId="plugin:vibe-quant:quant-agent"
+  usePluginWorkspace
+/>;
 ```
 
 `ThreadSidebar` 包含折叠、新建、路由切换和编辑弹窗。只需要列表时可使用 `ThreadList`，传入 `plugin`、`selectedId`、`onSelect` 和 `onAction`；需要自定义数据源时可传入 `resource`。两者复用宿主会话内的实时导航与分页缓存；默认跟随外层 `ScrollArea` 滚动，独立选择器可给 `ThreadList` 传入 `maxHeight`。

@@ -1,4 +1,5 @@
 import { enabledPluginSkills } from '../plugins/skill-access.js';
+import { pluginWorkspaceDirectory } from '../plugins/runtime.js';
 import { lstat, mkdir, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -105,10 +106,14 @@ export function getWorkspace(
   skillPaths: Parameters<typeof directorySkillConfig>[0] = [],
   filesystem?: WorkspaceFilesystem,
   environmentVariables?: Pick<EnvironmentVariableService, 'getEnv'>,
+  commandEnvironment?: (userId?: string) => Record<string, string>,
+  workspacePlugin?: string,
 ) {
-  const valid = projectId
-    ? path === projectDirectory(root, projectId)
-    : dirname(path) === userDirectory(root, userId);
+  const valid = workspacePlugin
+    ? path === pluginWorkspaceDirectory(root, workspacePlugin)
+    : projectId
+      ? path === projectDirectory(root, projectId)
+      : dirname(path) === userDirectory(root, userId);
   if (!valid) throw new ThreadError('WORKSPACE_UNAVAILABLE', 500);
   const userPath = userDirectory(root, userId);
   const sharedPath = resolve(userPath, 'shared');
@@ -127,7 +132,7 @@ export function getWorkspace(
       instructions: projectId
         ? undefined
         : ({ defaultInstructions }) =>
-            `${defaultInstructions}\nThe shared folder at "${sharedPath}" is shared by all personal chat threads belonging to the current user. Use "../shared/" relative to this thread's workspace, or its absolute path, to read and write files that should be available across the user's personal conversations.`,
+            `${defaultInstructions}\nThe shared folder at "${sharedPath}" is shared by all personal chat threads belonging to the current user. Use ${workspacePlugin ? 'its absolute path' : '"../shared/" relative to this thread\'s workspace, or its absolute path,'} to read and write files that should be available across the user's personal conversations.`,
     });
   const workingDirectory =
     workspaceFilesystem instanceof LocalFilesystem
@@ -138,14 +143,34 @@ export function getWorkspace(
     '.agents',
     'skills',
   );
+  const skillsRoot = resolve(root, '.agents', 'skills');
+  const appApiScript = resolve(
+    skillsRoot,
+    'builtin',
+    'docs',
+    'scripts',
+    'app-api.mjs',
+  );
   const sandbox = new CommandSandbox(
     {
       workingDirectory,
-      env: { SKILL_HOME: skillHome },
+      env: {
+        SKILL_HOME: skillHome,
+        SKILLS_ROOT: skillsRoot,
+        APP_API_SCRIPT: appApiScript,
+      },
     },
-    async () => ({
+    async (authorId) => ({
       ...(await environmentVariables?.getEnv()),
       SKILL_HOME: skillHome,
+      SKILLS_ROOT: skillsRoot,
+      APP_API_SCRIPT: appApiScript,
+      // Reserved, request-scoped values cannot come from shared admin settings.
+      APP_API_URL: '',
+      APP_API_TOKEN: '',
+      APP_THREAD_ID: '',
+      APP_PROJECT_ID: '',
+      ...commandEnvironment?.(authorId),
     }),
   );
   const lspHooks = workspaceLspHooks(workingDirectory, workspaceFilesystem);

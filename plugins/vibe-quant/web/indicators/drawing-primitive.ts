@@ -131,9 +131,18 @@ export class IndicatorDrawingPrimitive implements ISeriesPrimitive {
           : x;
         if (drawing.clampLabel) ctx.textAlign = 'center';
         const textX = labelX + (drawing.align === 'left' ? 3 : 0);
+        const pointer =
+          drawing.labelPointer &&
+          drawing.labelBackground &&
+          drawing.align !== 'left';
+        const labelGap = pointer ? 12 : 3;
         const textY =
           y +
-          (drawing.align === 'below' ? 3 : drawing.align === 'left' ? 0 : -3);
+          (drawing.align === 'below'
+            ? labelGap
+            : drawing.align === 'left'
+              ? 0
+              : -labelGap);
         if (drawing.labelBackground) {
           const textWidth = ctx.measureText(drawing.text).width;
           const left = ctx.textAlign === 'left' ? textX : textX - textWidth / 2;
@@ -145,7 +154,30 @@ export class IndicatorDrawingPrimitive implements ISeriesPrimitive {
                 : textY - size;
           const textColor = ctx.fillStyle;
           ctx.fillStyle = drawing.labelBackground;
-          ctx.fillRect(left - 3, top - 2, textWidth + 6, size + 4);
+          if (pointer) {
+            const badgeLeft = left - 4;
+            const badgeRight = left + textWidth + 4;
+            const badgeTop = top - 2;
+            const badgeBottom = top + size + 2;
+            // A single pentagonal badge: the entire edge forms the arrowhead.
+            // Keep the tip at the candle and the text inside the rectangle.
+            ctx.beginPath();
+            if (drawing.align === 'below') {
+              ctx.moveTo(textX, y + 2);
+              ctx.lineTo(badgeRight, badgeTop);
+              ctx.lineTo(badgeRight, badgeBottom);
+              ctx.lineTo(badgeLeft, badgeBottom);
+              ctx.lineTo(badgeLeft, badgeTop);
+            } else {
+              ctx.moveTo(badgeLeft, badgeTop);
+              ctx.lineTo(badgeRight, badgeTop);
+              ctx.lineTo(badgeRight, badgeBottom);
+              ctx.lineTo(textX, y - 2);
+              ctx.lineTo(badgeLeft, badgeBottom);
+            }
+            ctx.closePath();
+            ctx.fill();
+          } else ctx.fillRect(left - 3, top - 2, textWidth + 6, size + 4);
           ctx.fillStyle = textColor;
         }
         if (drawing.clampLabel)

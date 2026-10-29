@@ -1,7 +1,8 @@
 import { oc } from '@orpc/contract';
 import { z } from 'zod';
 
-export const procedure = oc;
+// Opt in at the owning contract; discovery and delegated authorization share this flag.
+export const procedure = oc.$meta<{ localApi?: boolean }>({});
 export const id = z.string().min(1).max(128);
 export const threadId = z.string().regex(/^(?:schedule:)?[a-zA-Z0-9_-]{16}$/);
 export const page = z.coerce.number().int().min(0).max(10000).default(0);

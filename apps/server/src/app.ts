@@ -20,6 +20,8 @@ import { normalizeWebOrigins, type WebOrigins } from '@aime/shared';
 import type { HttpEnv } from './http.js';
 import { authRoutes } from './modules/auth/routes.js';
 import { requireAdmin } from './modules/auth/require-admin.js';
+import type { LocalApiAccess } from './modules/auth/local-api.js';
+import { localApiRoutes } from './modules/local-api/routes.js';
 import { healthRoutes } from './modules/health/routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { threadRoutes } from './modules/threads/routes.js';
@@ -68,6 +70,7 @@ export function createApp(
     groupChats?: GroupChatService;
     users?: UserService;
     assets?: AssetService;
+    localApi?: LocalApiAccess;
   },
   skills?: { service: SkillService; webOrigin: WebOrigins },
   environmentVariables?: {
@@ -111,6 +114,8 @@ export function createApp(
     c.header('Cache-Control', 'no-store');
     await next();
   });
+  if (chat?.localApi)
+    app.route('/api/local-api', localApiRoutes(chat.localApi));
   if (plugins)
     app.route('/api/plugins', pluginRoutes(auth, plugins, webOrigins));
   if (audio) app.route('/api/audio', audioRoutes(auth, audio, webOrigins));
@@ -195,6 +200,7 @@ export function createApp(
         headers: c.req.raw.headers,
         method: c.req.method,
         webOrigins,
+        localApi: chat?.localApi,
       },
     });
     if (result.matched)

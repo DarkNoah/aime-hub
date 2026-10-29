@@ -26,6 +26,8 @@ export const pluginManifestSchema = z.strictObject({
     .strictObject({
       /** Default agent for new plugin chats; omitted uses the host default. */
       agentId: z.string().trim().min(1).optional(),
+      /** Request the plugin's persistent workspace for new chats. */
+      usePluginWorkspace: z.boolean().optional(),
     })
     .optional(),
   pages: z

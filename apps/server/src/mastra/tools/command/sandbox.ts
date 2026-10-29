@@ -69,7 +69,7 @@ export class CommandSandbox extends LocalSandbox {
 
   constructor(
     options: LocalSandboxOptions,
-    private refreshEnv?: () => Promise<Record<string, string>>,
+    private refreshEnv?: (userId?: string) => Promise<Record<string, string>>,
   ) {
     super(options);
   }
@@ -127,7 +127,7 @@ export class CommandSandbox extends LocalSandbox {
     }
   }
 
-  async exec(input: CommandInput, signal?: AbortSignal) {
+  async exec(input: CommandInput, signal?: AbortSignal, userId?: string) {
     const startedAt = performance.now();
     signal?.throwIfAborted();
     if (this.closing) throw new Error('Command sandbox is closing');
@@ -145,7 +145,7 @@ export class CommandSandbox extends LocalSandbox {
     );
     session.busy = true;
     this.sessions.set(id, session);
-    const startup = this.spawn(input, session, signal);
+    const startup = this.spawn(input, session, signal, userId);
     session.ready = startup;
     this.starting.add(startup);
     this.changed();
@@ -210,13 +210,12 @@ export class CommandSandbox extends LocalSandbox {
     input: CommandInput,
     session: CommandSession,
     signal?: AbortSignal,
+    userId?: string,
   ): Promise<CommandHandle> {
     await this.ensureRunning();
     // A fresh overlay also removes deleted settings, without inheriting host secrets.
-    if (this.refreshEnv) {
-      const env = await this.refreshEnv();
-      this.setEnv(() => env);
-    }
+    // Keep credentials local to this invocation, including concurrent commands.
+    const env = this.refreshEnv ? await this.refreshEnv(userId) : this.getEnv();
     signal?.throwIfAborted();
     if (this.closing) throw new Error('Command sandbox is closing');
     const shell =
@@ -224,7 +223,6 @@ export class CommandSandbox extends LocalSandbox {
     const args = [input.login ? '-lc' : '-c', input.cmd];
     const command = `exec ${[shell, ...args].map(quote).join(' ')}`;
     const cwd = resolve(this.workingDirectory, input.workdir ?? '.');
-    const env = this.getEnv();
     if (input.tty)
       return spawnPty(this, shell, args, command, cwd, env, session.append);
     const handle = await this.processes.spawn(command, {

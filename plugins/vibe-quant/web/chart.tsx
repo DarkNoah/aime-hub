@@ -21,7 +21,11 @@ import {
 } from 'lightweight-charts';
 import { MONTH_DURATION, type Bar } from '../shared';
 import { IndicatorRenderer } from './indicators/renderer';
-import type { IndicatorPreferences } from './indicators/types';
+import type {
+  IndicatorDashboard,
+  IndicatorPreferences,
+} from './indicators/types';
+import { IndicatorDashboards } from './indicators/indicator-dashboards';
 import { centeredRange, type PageDirection } from './chart-navigation';
 import { DrawingController } from './drawings/controller';
 import { DrawingHint, DrawingToolbar } from './drawings/toolbar';
@@ -109,10 +113,14 @@ export function MarketChart({
   selectReplayTime.current = onSelectReplayTime;
   const updateFrame = useRef(0);
   const warningFrame = useRef(0);
+  const dashboardFrame = useRef(0);
   const drawingController = useRef<DrawingController | null>(null);
   const drawingCache = useRef(new Map<string, Drawing[]>());
   const [drawingState, setDrawingState] = useState(EMPTY_DRAWING_STATE);
   const [indicatorWarnings, setIndicatorWarnings] = useState<string[]>([]);
+  const [indicatorDashboards, setIndicatorDashboards] = useState<
+    IndicatorDashboard[]
+  >([]);
   const [profileViewport, setProfileViewport] = useState({
     identity: '',
     from: 0,
@@ -286,6 +294,12 @@ export function MarketChart({
           setIndicatorWarnings(warnings),
         );
       },
+      (dashboards) => {
+        cancelAnimationFrame(dashboardFrame.current);
+        dashboardFrame.current = requestAnimationFrame(() =>
+          setIndicatorDashboards(dashboards),
+        );
+      },
     );
     drawingController.current = showDrawingTools
       ? new DrawingController(
@@ -308,6 +322,7 @@ export function MarketChart({
       clearTimeout(profileTimer);
       cancelAnimationFrame(updateFrame.current);
       cancelAnimationFrame(warningFrame.current);
+      cancelAnimationFrame(dashboardFrame.current);
       api.timeScale().unsubscribeVisibleLogicalRangeChange(onRangeChange);
       api.unsubscribeCrosshairMove(onCrosshairMove);
       api.unsubscribeClick(onClick);
@@ -652,6 +667,7 @@ export function MarketChart({
                 : 'TradingView K 线与技术指标图表'
             }
           />
+          <IndicatorDashboards dashboards={indicatorDashboards} />
           <DrawingHint state={drawingState} />
           {pickingReplay && (
             <div

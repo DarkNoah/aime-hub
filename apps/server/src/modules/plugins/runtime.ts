@@ -8,6 +8,12 @@ export interface PluginRuntimeOptions {
   workspaceRoot: string;
 }
 
+export function pluginWorkspaceDirectory(root: string, pluginId: string) {
+  if (!/^[a-z][a-z0-9-]{0,39}$/.test(pluginId))
+    throw new Error('Invalid plugin ID');
+  return resolve(root, 'plugins', pluginId);
+}
+
 export function createPluginRuntime(
   manifest: Pick<PluginManifest, 'id' | 'workspace'>,
   options: PluginRuntimeOptions,
@@ -17,7 +23,7 @@ export function createPluginRuntime(
   const applicationRoot = resolve(options.applicationRoot);
   const workspaceRoot = resolve(options.workspaceRoot);
   const pluginWorkspace = manifest.workspace
-    ? resolve(workspaceRoot, 'plugins', manifest.id)
+    ? pluginWorkspaceDirectory(workspaceRoot, manifest.id)
     : null;
   return Object.freeze({
     platform: process.platform,

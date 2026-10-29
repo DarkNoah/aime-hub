@@ -305,7 +305,10 @@ export const pluginDatabases: {
         },
       ],
       workspace: true,
-      chatThreads: { agentId: 'plugin:vibe-quant:quant-agent' },
+      chatThreads: {
+        agentId: 'plugin:vibe-quant:quant-agent',
+        usePluginWorkspace: true,
+      },
       pages: [
         { path: '', title: '行情', access: 'session', navigation: true },
         {

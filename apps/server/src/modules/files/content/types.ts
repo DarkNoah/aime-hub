@@ -33,6 +33,8 @@ export type FileContentOptions = {
   signal?: AbortSignal;
   model?: FileContentModel | null;
   parameters?: FileContentParameters;
+  /** Let read_file return available content when optional OCR is unavailable or fails. */
+  skipOcrErrors?: boolean;
 };
 
 type FileContentMetadata = {

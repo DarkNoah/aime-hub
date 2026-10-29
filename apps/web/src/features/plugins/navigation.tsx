@@ -69,6 +69,7 @@ export function PluginNavigation({
                 <ThreadSidebar
                   plugin={plugin.id}
                   agentId={chats.agentId}
+                  usePluginWorkspace={chats.usePluginWorkspace}
                   label={t('plugins.threadList', { name: plugin.name })}
                   newLabel={t('plugins.newThread', { name: plugin.name })}
                   onNavigate={onNavigate}

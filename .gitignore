@@ -33,6 +33,8 @@ plugins/vibe-quant/**/__pycache__/
 .quant-runs/
 
 !scripts/intelligent-ui-browser.test.mjs
+!scripts/chat-tool-interactions-browser.test.mjs
+!scripts/chat-ask-user.test.ts
 
 !scripts/group-chats-browser.test.mjs
 !plugins/vibe-quant/tests/strategy-notifications.test.ts
@@ -46,3 +48,9 @@ plugins/vibe-quant/**/__pycache__/
 !scripts/quant-market-positions-browser.test.mjs
 
 !plugins/vibe-quant/tests/factor-groups.test.ts
+
+!plugins/vibe-quant/tests/orb.test.ts
+!plugins/vibe-quant/tests/indicator-renderer.test.ts
+
+!scripts/local-api.test.ts
+!apps/server/src/modules/threads/workspace-env.test.ts

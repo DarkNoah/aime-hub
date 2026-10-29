@@ -41,7 +41,7 @@ from quant_sdk import KronosFactor
 # 在原策略的入场条件通过后执行；不要将模型对象放入 ctx.state。
 forecast = KronosFactor().forecast(
     ctx, bar.symbol, bar.duration,
-    lookback=128, horizon=6, samples=32, seed=0,
+    lookback=128, horizon=1, samples=32, seed=0,
 )
 if forecast is None:
     return  # 预热不足或当天剩余交易时间不足
@@ -51,6 +51,12 @@ if probability < 0.6:
     return
 # 继续原策略的订单与保护线逻辑。
 ```
+
+`horizon` 的单位是 K 线根数。短周期入场过滤可显式使用 `horizon=1`：
+1 分钟策略预测下一分钟，5 分钟策略预测接下来的 5 个交易分钟；午休会按交易时段跳过。
+`lookback=128` 是输入历史长度，与预测长度分别设置。省略 `horizon` 仍使用 SDK 默认值 6，
+因此短周期策略应在参数中明确保存 1。比较不同年份时先固定预测长度、阈值和采样数，
+保留指标所需的历史预热，再分别报告年度结果。
 
 直接调用 `kronos_forecast(bars, ...)` 时，调用方负责只传入当前已知历史。
 `KronosFactor.forecast()` 从 `ctx.data.history` 读取当前策略时钟的数据，并传递取消信号。

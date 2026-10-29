@@ -3,6 +3,8 @@ import { SpeechPlayback } from '../audio/playback.js';
 import { runtimeTokenCounts } from '../usage/runtime.js';
 import type { UsageService } from '../usage/service.js';
 import type { EnvironmentVariableService } from '../environment-variables/service.js';
+import type { LocalApiAccess } from '../auth/local-api.js';
+import type { PluginService } from '../plugins/service.js';
 import { mastraDBMessageToSignal } from '@mastra/core/agent';
 import {
   buildAgent,
@@ -100,6 +102,8 @@ export function createChatRunner(
     Partial<Pick<UsageService, 'latestThreadUsage' | 'threadConsumedTokens'>>,
   environmentVariables?: Pick<EnvironmentVariableService, 'getEnv'>,
   getMemoryConfig?: ResolveMemoryConfig,
+  localApi?: LocalApiAccess,
+  plugins?: Pick<PluginService, 'workspaceDirectory'>,
 ): ChatRunner {
   const getConfig = async (id?: string | null) => {
     if (agents) return agents.getConfig(id);
@@ -174,12 +178,19 @@ export function createChatRunner(
       if (!projectId) return createPersonalWorkspace(workspaceRoot, userId);
       return createProjectWorkspace(workspaceRoot, projectId);
     },
+    async pluginWorkspace(pluginId) {
+      return plugins?.workspaceDirectory(pluginId);
+    },
     removePersonalWorkspace: (userId, directory) =>
       removePersonalWorkspace(workspaceRoot, userId, directory),
     async open({ thread, settings, onEvent }) {
       const scope = threadScope(thread.resourceId);
       const userId = scope.userId ?? String(thread.metadata?.createdBy ?? '');
       const projectId = scope.projectId;
+      const workspacePlugin =
+        typeof thread.metadata?.workspacePlugin === 'string'
+          ? thread.metadata.workspacePlugin
+          : undefined;
       const target = { threadId: thread.id, resourceId: thread.resourceId! };
       const config = await getConfig(settings.agentId);
       settings = { ...settings, agentId: config.id };
@@ -256,9 +267,10 @@ export function createChatRunner(
         },
         (error) => onEvent({ type: 'error', error }),
       );
-      const filesystem = projectId
-        ? await projectFilesystem(userId, projectId)
-        : undefined;
+      const filesystem =
+        projectId && !workspacePlugin
+          ? await projectFilesystem(userId, projectId)
+          : undefined;
       let workspace: ReturnType<typeof getWorkspace> | undefined;
       let unsubscribeCommands: (() => void) | undefined;
       try {
@@ -266,7 +278,7 @@ export function createChatRunner(
         workspace = getWorkspace(
           workspaceRoot,
           userId,
-          projectId
+          projectId && !workspacePlugin
             ? projectDirectory(workspaceRoot, projectId)
             : String(thread.metadata?.workspace),
           projectId,
@@ -276,6 +288,12 @@ export function createChatRunner(
             resolveAgentSkillPaths(workspaceRoot, userId, config, projectId),
           filesystem,
           environmentVariables,
+          (authorId) => ({
+            ...localApi?.environment(authorId),
+            APP_THREAD_ID: thread.id,
+            APP_PROJECT_ID: projectId ?? '',
+          }),
+          workspacePlugin,
         );
         const commands = workspace.sandbox;
         if (!(commands instanceof CommandSandbox))
@@ -283,9 +301,11 @@ export function createChatRunner(
         unsubscribeCommands = commands.onCommandSessionsChanged(() =>
           onEvent({ type: 'commands' }),
         );
-        const projectInstructions = projectId
-          ? ' This is a shared project conversation. Its workspace is shared by project members and other project conversations. File tools and the command sandbox share the same mounted storage. In composite mode, a file tool path such as /data/file.txt is data/file.txt relative to the command working directory. Do not unmount or replace mount directories.'
-          : '';
+        const workspaceInstructions = workspacePlugin
+          ? ` This conversation uses the persistent workspace of plugin "${workspacePlugin}". Files are shared with the plugin and other conversations using this plugin workspace, including conversations owned by other users. File tools and the command sandbox use the same directory.`
+          : projectId
+            ? ' This is a shared project conversation. Its workspace is shared by project members and other project conversations. File tools and the command sandbox share the same mounted storage. In composite mode, a file tool path such as /data/file.txt is data/file.txt relative to the command working directory. Do not unmount or replace mount directories.'
+            : '';
         const attachmentMedia = new AttachmentMediaReader(
           workspace.filesystem!,
           projectId
@@ -317,7 +337,7 @@ export function createChatRunner(
           versionId:
             config.source === 'database' ? config.versionId : undefined,
           mastra,
-          instructions: config.instructions + projectInstructions,
+          instructions: config.instructions + workspaceInstructions,
           model: resolved.model,
           // Matching native processor IDs suppress Memory's default OM processors.
           // Keep the same processor for input and output so native turn cleanup,
@@ -347,7 +367,7 @@ export function createChatRunner(
               outputProcessors: [compatibility],
               instructions: async () =>
                 child.instructions +
-                projectInstructions +
+                workspaceInstructions +
                 '\n\n' +
                 agentEnvironment(
                   commands.workingDirectory,

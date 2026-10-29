@@ -17,6 +17,7 @@ import { IndicatorDrawingPrimitive } from './drawing-primitive';
 import { IndicatorPlotPrimitive } from './plot-primitive';
 import type {
   IndicatorContext,
+  IndicatorDashboard,
   IndicatorOverlay,
   IndicatorPlot,
   IndicatorPreference,
@@ -46,6 +47,7 @@ export class IndicatorRenderer {
   private previousBars: readonly Bar[] | undefined;
   private coloredCandles = false;
   private warningKey = '';
+  private dashboardKey = '';
 
   constructor(
     private chart: IChartApi,
@@ -53,6 +55,7 @@ export class IndicatorRenderer {
     private duration: number,
     private prices: ISeriesApi<'Candlestick'> | ISeriesApi<'Line'>,
     private onWarnings?: (warnings: string[]) => void,
+    private onDashboards?: (dashboards: IndicatorDashboard[]) => void,
   ) {}
 
   update(
@@ -165,6 +168,14 @@ export class IndicatorRenderer {
     if (this.warningKey !== warningKey) {
       this.warningKey = warningKey;
       this.onWarnings?.(warnings);
+    }
+    const dashboards = instances.flatMap(
+      (instance) => instance.overlay?.dashboards ?? [],
+    );
+    const dashboardKey = JSON.stringify(dashboards);
+    if (this.dashboardKey !== dashboardKey) {
+      this.dashboardKey = dashboardKey;
+      this.onDashboards?.(dashboards);
     }
     const colors = instances.map((instance) => instance.overlay?.candleColors);
     const hasColors = colors.some((values) =>

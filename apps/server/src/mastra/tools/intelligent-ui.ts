@@ -10,7 +10,7 @@ import {
 
 export const intelligentUI = createTool({
   id: INTELLIGENT_UI_TOOL,
-  description: `Render a rich IntelligentUI HTML panel directly in the conversation: weather, reports, charts, heatmaps, forms, visual selectors, sliders, diagrams, or multi-step interactions.
+  description: `Render a rich IntelligentUI HTML panel directly in the conversation: weather, reports, charts, heatmaps, flowcharts, forms, visual selectors, sliders, diagrams, or multi-step interactions.
 
 Provide html, optionally title and tips. Omit waitForResponse (or set false) for weather, reports, and other displays: the tool returns immediately and local interactions still work. Set waitForResponse: true only when the runtime needs the user's result to continue.
 
@@ -19,6 +19,8 @@ For a response, call window.IntelligentUI.resume({ action: 'submit', ...values }
 Declarative forms also work: <form data-ui-resume='{"action":"save"}'>...</form>. Named controls are collected on submit; repeated names become arrays. A button with data-ui-resume merges its JSON object with its associated form values and validates the form. File uploads are not supported; return JSON values only, up to 60,000 characters.
 
 Use simple cards for multiple results, with optional image thumbnails, inline SVG icons, and descriptive links such as <a href="https://example.com/details">View details</a>. Use actual URLs from the user or tool results. HTTP/HTTPS links open in a new tab on user activation without submitting the panel or requiring waitForResponse. Use ordinary anchors, not window.open or automatic redirects. Images may use HTTP/HTTPS URLs, data URLs, or blob URLs; provide useful alt text and responsive sizing. Icons can use inline SVG without external libraries. Keep content readable if an image fails to load.
+
+Render flowcharts for workflows, decision branches, and connected steps with inline SVG or self-contained HTML/CSS. Use clearly labeled nodes, directional arrows, and branch conditions; keep connectors clear of text and labels readable. Mermaid and external diagram libraries are not preloaded. Omit waitForResponse or set it to false for display-only flowcharts.
 
 The HTML runs in a sandbox with inline CSS/JavaScript, SVG and canvas. Host DOM, cookies, storage, network APIs, external scripts/styles/fonts, frames, downloads, script-created popups and form navigation are unavailable. External images and user-activated HTTP/HTTPS links are supported without sending a referrer. Keep code and styles inline; fetch real data with other tools first and embed it. Write finite, event-driven scripts. Use this tool directly, not inside exec.
 

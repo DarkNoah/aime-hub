@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { isToolUIPart, type UIMessage } from 'ai';
 
-export const INTELLIGENT_UI_TOOL = 'IntelligentUI';
+export const INTELLIGENT_UI_TOOL = 'intelligent_ui';
 export const INTELLIGENT_UI_CHANNEL = 'intelligent-ui';
 export const INTELLIGENT_UI_MAX_RESPONSE = 60_000;
 

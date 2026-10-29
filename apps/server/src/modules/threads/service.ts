@@ -139,6 +139,7 @@ export interface ChatRunner {
     projectId?: string,
   ): Promise<void>;
   createWorkspace(userId: string, projectId?: string): Promise<string>;
+  pluginWorkspace?(pluginId: string): Promise<string | undefined>;
   removePersonalWorkspace?(userId: string, directory: string): Promise<void>;
   open(context: ChatSessionContext): Promise<ChatSession>;
 }
@@ -929,10 +930,13 @@ export class ThreadService {
     if (input.projectId) await this.projectAccess(userId, input.projectId);
     input = { ...input, ...(await this.runner.resolveSettings?.(input)) };
     if (input.model) await this.runner.validate(userId, input, input.projectId);
-    const workspace = await this.runner.createWorkspace(
-      userId,
-      input.projectId,
-    );
+    const pluginWorkspace =
+      input.usePluginWorkspace && input.plugin
+        ? await this.runner.pluginWorkspace?.(input.plugin)
+        : undefined;
+    const workspace =
+      pluginWorkspace ??
+      (await this.runner.createWorkspace(userId, input.projectId));
     const thread = await this.memory.createThread({
       threadId: nanoid(16),
       resourceId: input.projectId
@@ -944,6 +948,8 @@ export class ThreadService {
         agentId: input.agentId ?? null,
         createdBy: userId,
         ...(input.plugin !== undefined ? { plugin: input.plugin } : {}),
+        // Record the selected workspace, not merely the requested preference.
+        ...(pluginWorkspace ? { workspacePlugin: input.plugin } : {}),
         workspace,
         ...initialData(),
         reasoningEffort: input.reasoningEffort,
@@ -1134,18 +1140,18 @@ export class ThreadService {
       const thread = await this.archivedPersonalThread(userId, id);
       await this.assertNoBackgroundTasks(thread);
       const directory = thread.metadata?.workspace;
-      if (
-        typeof directory !== 'string' ||
-        !directory ||
-        !this.runner.removePersonalWorkspace
-      )
+      if (typeof directory !== 'string' || !directory)
         throw new ThreadError('WORKSPACE_UNAVAILABLE', 409);
-      // Keep the archive available for retry if filesystem cleanup fails. Missing
-      // directories are harmless when retrying after a failed database deletion.
-      await this.runner.removePersonalWorkspace(
-        thread.resourceId === 'system:automations' ? 'system' : userId,
-        directory,
-      );
+      // Plugin storage is shared and outlives individual conversations.
+      if (!thread.metadata?.workspacePlugin) {
+        if (!this.runner.removePersonalWorkspace)
+          throw new ThreadError('WORKSPACE_UNAVAILABLE', 409);
+        // Keep the archive available for retry if filesystem cleanup fails.
+        await this.runner.removePersonalWorkspace(
+          thread.resourceId === 'system:automations' ? 'system' : userId,
+          directory,
+        );
+      }
       await this.memory.deleteThread(id);
       this.navigation.publish(thread.resourceId!, {
         type: 'remove',
@@ -1217,7 +1223,7 @@ export class ThreadService {
         return action(await this.runner.personalSharedDirectory(userId));
       });
     }
-    if (!projectId)
+    if (!projectId || thread.metadata?.workspacePlugin)
       return this.locked(id, async () =>
         action(await this.workspaceDirectory(userId, id)),
       );

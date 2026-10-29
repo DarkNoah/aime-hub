@@ -8,6 +8,20 @@ SMC 智能资金参照 stock-rl 的 `src/lib/smc` 移植，默认显示，入口
 
 计算、默认参数和绘图改编自 stock-rl 对 Smart Money Concepts [LuxAlgo] 的移植，© LuxAlgo，依据 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) 发布该改编。这里调整了时间桶、参数表单和渲染器接入，保留来源署名。
 
+## ORB Algo
+
+入口为「主图指标 → ORB Algo」，默认关闭。根据用户提供的 **ORB Algo | Flux Charts**（© fluxchart，MPL-2.0）移植，原稿保存在 `main/orb/source.pine`。默认 30 分钟区间、Medium（1 次回踩）、Close 突破、Dynamic 止盈、HL2 EMA(9)、Balanced 止损和自适应止损；可切换 High / Low / Lowest（0 / 2 / 3 次回踩）、EMA 突破、ATR 止盈、EMA 4/9/13/20/34、Safer / Risky 止损。图中显示上下沿、Buy / Sell、TP 1–3、SL 和跨时段 Exit，可选 EMA。事件使用一体式五边形尖角标签，整边尖角指向对应 K 线高低点，Buy / Sell 也贴近信号 K 线，不再沿用原稿的 3 ATR 标签偏移；文字与尖端间距随图表缩放保持固定。状态面板和原稿模拟统计可分别关闭、调整位置；参数与显示状态本地保存。
+
+ATR 使用 Wilder ATR(12)，种子为最初 12 根真实波幅均值。ATR 目标为入场价 ± 入场 ATR 的 0.75 / 1.5 / 2.25 倍；Dynamic 需 EMA 相对入场有利变化至少 0.20%，收盘反向穿过 EMA，后续目标还需相比上一目标有利移动至少 0.075%。保持原稿执行顺序：同根允许入场并触发 TP，每根最多一档 TP，触发 TP 时跳过 SL；TP 1 可将 SL 移至入场价，TP 3 终结。止损影线必须严格越过，触及相等不触发。新时段开始时，未结束信号以前一根收盘记录 Exit。High + EMA 保留原稿“突破失败后仍满足零次回踩而入场”的独立条件。
+
+常规开盘时间以可配置的北京时间替代 Pine 的 `session.isfirstbar_regular`，默认 09:30，商品日盘可改为 09:00。须加载开盘前一根及开盘首根；保留原稿不处理已加载数据第 0 根的条件，EMA / ATR 仍包含该根。自定义时段默认关闭、10:00–11:00；支持跨午夜，时段仅用于识别新 ORB 的起点，不是信号截止时间。ORB 上下沿与信号持续到下一次起点。没有交易所会话元数据，节假日及常规/扩展交易时段以实际加载数据和设置为准。区间按 K 线起始时间取整根，非整除周期可能覆盖区间结束时刻之后的价格，与原稿相同；不大于 15 分钟的分钟 K 线可用，15 分钟本身也可用，其他周期显示提示。
+
+“ORB 原稿模拟”完整保留原稿简化统计：分批比例默认 90% / 5% / 5%；触及过 TP 就记胜，未止盈且出现 SL / Exit 记负。收益使用绝对价差，残余仓位的 SL / Exit 一律扣减，因此有利的跨时段退出也会被扣成负收益；零权重目标也仍算触及 TP。这不是平台策略回测，不计费用、滑点、保证金、真实成交或换月成本，不能将其理解为可执行策略收益。无已判定胜负时显示“—”，不伪造胜率。
+
+计算和统计使用全部已加载历史；绘图只显示最近 5,000 根内的区间起点与事件，并限制 500 条线、500 个标签。关闭历史只显示最新时段，统计不变。回放使用已揭示的 K 线，历史补齐或末根修订会重算并撤回失效事件。与原稿 `barstate.isconfirmed` 不同，行情接口没有确认标志，末根也参与计算，盘中信号可能变化；仅绘图，不发送策略通知。尚未完成 TradingView 同源逐根对照。
+
+回归测试：`node --import tsx --test plugins/vibe-quant/tests/orb.test.ts plugins/vibe-quant/tests/indicator-renderer.test.ts`。
+
 ## RSI
 
 入口为「副图指标 → RSI」，默认关闭。按用户提供的 Pine Script v6 移植，原稿保存在 `sub/rsi/source.pine`。默认 RSI(14)、收盘价来源及 SMA(14) 平滑线；提供无平滑、SMA、SMA + 布林带、EMA、SMMA / RMA、WMA、VWMA 七种选择。周期、来源、背离开关、布林带倍数、填充、线宽和颜色均可配置并本地保存。副图显示 70 / 50 / 30 参考线、紫色背景及超买 / 超卖渐变，数值保留两位小数，基础范围 0–100，布林带超出范围时自动扩展。
@@ -46,14 +60,14 @@ RSI 使用 Wilder RMA，等待完整周期的价格变化后输出，不用零�
 - `type`：`main` 主图或 `sub` 副图。
 - `name` / `description`：菜单名称与设置说明。
 - `source`：可选的来源名称、链接，与计算用的“价格来源”参数分开。
-- `parameters`：数字、选择、颜色、布尔参数及默认值；支持 `group` 分组与颜色 `alpha` 不透明度，共用设置弹窗自动渲染。
+- `parameters`：数字、选择、颜色、布尔、HH:MM 时间参数及默认值；支持 `group` 分组与颜色 `alpha` 不透明度，共用设置弹窗自动渲染。
 - `validate`：可选的跨参数校验。
 - `defaultVisible`：首次使用时是否显示。
 - `requiresCandles`：只在 K 线视图显示，分时菜单禁用但保留已保存设置。
 - `priceFormat` / `paneWeight`：价格精度类型、初始副图高度权重。
 - `render(bars, parameters)`：计算与显示逻辑，返回具有稳定 ID 的折线/柱状图配置及数据。数据按时间升序，预热不足时省略 `value`，不要填入零值。
 - `precision`：可选的指标数值精度。每个 plot 支持 `referenceLines` 及 `overlay`，用于自己的副图坐标系中的参考线、绘图、填充和基础数值范围。
-- `renderOverlay(bars, parameters, duration, context)`：可选，返回线段、矩形、标签、蜡烛颜色和提示。绘图横坐标使用当前历史窗口内的逻辑索引，不增加虚拟时间点。`context.volumeProfile` 提供异步加载的成交量分布。
+- `renderOverlay(bars, parameters, duration, context)`：可选，返回线段、矩形、标签、蜡烛颜色、提示及可选固定位置状态面板（`dashboards`）。绘图横坐标使用当前历史窗口内的逻辑索引，不增加虚拟时间点。`context.volumeProfile` 提供异步加载的成交量分布。
 
 `renderer.ts` 统一维护序列、零轴、独立面板和销毁逻辑。脚本不访问 React、DOM 或存储。每次行情更新、历史补齐或参数修改，基于当前已加载数据重新计算，当前未收盘 K 线也参与计算。
 

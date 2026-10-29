@@ -48,7 +48,13 @@ export const threadsContract = {
     .input(z.object({ params: z.object({ threadId }) }))
     .output(type<void>()),
   list: procedure
-    .route({ method: 'GET', path: '/threads', inputStructure: 'detailed' })
+    .meta({ localApi: true })
+    .route({
+      method: 'GET',
+      path: '/threads',
+      inputStructure: 'detailed',
+      summary: '列出当前用户的个人或指定项目线程',
+    })
     .input(
       z.object({
         query: z.object({
@@ -61,18 +67,22 @@ export const threadsContract = {
     )
     .output(type<ThreadList>()),
   create: procedure
+    .meta({ localApi: true })
     .route({
       method: 'POST',
       path: '/threads',
       inputStructure: 'detailed',
       successStatus: 201,
+      summary: '创建线程，不自动发送消息',
     })
     .input(z.object({ body: createThreadSchema }))
     .output(type<ThreadSummary>()),
   get: procedure
+    .meta({ localApi: true })
     .route({
       method: 'GET',
       path: '/threads/{threadId}',
+      summary: '读取线程状态和当前消息快照',
       inputStructure: 'detailed',
     })
     .input(z.object({ params: z.object({ threadId }) }))
@@ -129,9 +139,11 @@ export const threadsContract = {
     .input(z.object({ body: chatSettingsSchema }))
     .output(type<ChatSettings>()),
   history: procedure
+    .meta({ localApi: true })
     .route({
       method: 'GET',
       path: '/threads/{threadId}/history',
+      summary: '分页读取消息历史或轮次摘要',
       inputStructure: 'detailed',
     })
     .input(
@@ -147,9 +159,11 @@ export const threadsContract = {
     )
     .output(type<MessagePage<UIMessage> | ChatTurnPage>()),
   turn: procedure
+    .meta({ localApi: true })
     .route({
       method: 'GET',
       path: '/threads/{threadId}/turns/{turnId}',
+      summary: '读取指定轮次的详情',
       inputStructure: 'detailed',
     })
     .input(
@@ -160,11 +174,15 @@ export const threadsContract = {
     )
     .output(type<ChatTurnDetail>()),
   run: procedure
+    .meta({ localApi: true })
     .route({
       method: 'POST',
       path: '/threads/{threadId}/messages',
       inputStructure: 'detailed',
       successStatus: 202,
+      summary: '发送消息并启动或排队执行',
+      description:
+        '先读取目标线程，沿用其 model、agentId、reasoningEffort，除非用户要求修改。每条新消息提供唯一 id 与 parts；202 表示已接收，不代表回复完成。',
     })
     .input(z.object({ params: z.object({ threadId }), body: runInputSchema }))
     .output(type<ThreadSummary>()),

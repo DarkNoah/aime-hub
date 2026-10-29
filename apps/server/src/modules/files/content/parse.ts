@@ -2,6 +2,7 @@ import { extname } from 'node:path';
 import type { OfficeContentNode, OfficeIssue } from 'officeparser';
 import { includesPage, pageSelection } from './selection.js';
 import { spreadsheetContent } from './spreadsheet.js';
+import { zoomImage } from './image-zoom.js';
 import { withAbortSignal } from '../../../lib/abort.js';
 import { inspectImageFile, maxBinaryFileBytes } from '../binary-file.js';
 import {
@@ -72,13 +73,14 @@ export async function parseFileContent(
   const signal = options.signal ?? new AbortController().signal;
   return withAbortSignal(signal, async () => {
     validateFileContentSize(input.data.byteLength, true);
-    const data = Buffer.from(input.data);
+    let data: Buffer = Buffer.from(input.data);
     const fileName = fileNameForMimeType(input.fileName, input.mimeType);
     const extension = extname(fileName).toLowerCase();
     const format = fileContentFormat(fileName);
     if (format && format.kind !== 'text') validateFileContentSize(data.length);
     const parameters = options.parameters ?? {};
     const pageRanges = pageSelection(parameters.pdf_pages, 'pdf_pages');
+    const warnings: string[] = [];
     let metadata = {
       fileName,
       mimeType:
@@ -97,6 +99,7 @@ export async function parseFileContent(
       type: 'text',
       format: outputFormat,
       text,
+      ...(warnings.length ? { warnings: [...warnings] } : {}),
     });
 
     if (pageRanges !== undefined && metadata.kind !== 'pdf')
@@ -106,6 +109,21 @@ export async function parseFileContent(
       );
     if (metadata.kind === 'image')
       metadata = { ...metadata, ...inspectImageFile(data, fileName) };
+    if (parameters.image_zoom !== undefined) {
+      if (metadata.kind !== 'image')
+        throw new FileContentError(
+          'INVALID_FILE_PARAMETERS',
+          'image_zoom 仅适用于图片。',
+        );
+      const { data: zoomed, ...zoomMetadata } = await zoomImage(
+        data,
+        metadata.fileName,
+        parameters.image_zoom,
+        signal,
+      );
+      data = zoomed;
+      metadata = { ...metadata, ...zoomMetadata };
+    }
     if (
       metadata.kind === 'pdf' &&
       !data.subarray(0, 1024).includes(Buffer.from('%PDF-'))
@@ -144,26 +162,29 @@ export async function parseFileContent(
       try {
         resolved = await dependencies.resolveOcr?.();
       } catch (error) {
-        // A missing default can fall back to a text PDF. A broken configured provider cannot.
-        if (!(
-          error &&
-          typeof error === 'object' &&
-          'code' in error &&
-          error.code === 'OCR_NOT_CONFIGURED'
-        ))
+        signal.throwIfAborted();
+        if (
+          !options.skipOcrErrors &&
+          !(
+            error &&
+            typeof error === 'object' &&
+            'code' in error &&
+            error.code === 'OCR_NOT_CONFIGURED'
+          )
+        )
           throw error;
       }
       signal.throwIfAborted();
       if (resolved) {
-        if (
-          pageRanges !== undefined &&
-          resolved.model.supportsPageRanges === false
-        )
-          throw new FileContentError(
-            'PAGE_RANGES_UNSUPPORTED',
-            '当前 OCR 接口不支持 PDF 页码选择，请省略 pdf_pages 后读取完整 PDF。',
-          );
         try {
+          if (
+            pageRanges !== undefined &&
+            resolved.model.supportsPageRanges === false
+          )
+            throw new FileContentError(
+              'PAGE_RANGES_UNSUPPORTED',
+              '当前 OCR 接口不支持 PDF 页码选择，请省略 pdf_pages 后读取完整 PDF。',
+            );
           const result = await resolved.model.doOCR({
             input: { data, fileName: metadata.fileName },
             pageRanges: pageRanges,
@@ -180,19 +201,39 @@ export async function parseFileContent(
           };
         } catch (error) {
           signal.throwIfAborted();
-          if (error instanceof FileContentError) throw error;
-          throw new FileContentError(
-            'OCR_FAILED',
-            '文档识别失败，请检查文件及 OCR 模型配置。',
-          );
+          if (!options.skipOcrErrors) {
+            if (error instanceof FileContentError) throw error;
+            throw new FileContentError(
+              'OCR_FAILED',
+              '文档识别失败，请检查文件及 OCR 模型配置。',
+            );
+          }
+          // Never include provider error bodies or credentials in fallback warnings.
+          warnings.push('OCR 识别失败或不支持当前选项，已跳过 OCR。');
         }
+      } else if (options.skipOcrErrors) {
+        warnings.push('OCR 未配置或不可用，已跳过 OCR。');
       }
       if (metadata.kind === 'image') {
+        if (options.skipOcrErrors) {
+          warnings.push(
+            images
+              ? parameters.image_zoom !== undefined
+                ? '已提供选定区域放大后的图片供当前模型读取。'
+                : '已提供原始图片供当前模型读取。'
+              : '未提取图片文字，当前读取结果不包含图片内容。',
+          );
+          return { ...textResult(''), images };
+        }
         if (images)
           return {
             ...textResult(''),
             images,
-            warnings: ['未配置 OCR 模型，已提供原始图片供当前模型读取。'],
+            warnings: [
+              parameters.image_zoom !== undefined
+                ? '未配置 OCR 模型，已提供选定区域放大后的图片供当前模型读取。'
+                : '未配置 OCR 模型，已提供原始图片供当前模型读取。',
+            ],
           };
         throw new FileContentError(
           'OCR_NOT_CONFIGURED',
@@ -249,11 +290,16 @@ export async function parseFileContent(
               issue.code === 'PDF_NO_TEXT_EXTRACTED' ||
               issue.code === 'PDF_TEXT_ENCODING_SUSPECT',
           )
-        )
+        ) {
+          if (options.skipOcrErrors) {
+            warnings.push('PDF 中没有可靠的可读文本，已跳过需要 OCR 的内容。');
+            return textResult('');
+          }
           throw new FileContentError(
             'OCR_NOT_CONFIGURED',
             'PDF 中没有可靠的可读文本；扫描文档需要配置 OCR 模型。',
           );
+        }
         if (document.type === 'xlsx' || document.type === 'ods')
           return {
             ...textResult(''),
@@ -308,11 +354,16 @@ export async function parseFileContent(
         });
         signal.throwIfAborted();
         assertCompleteDocument(messages);
-        if (metadata.kind === 'pdf' && !value.trim())
+        if (metadata.kind === 'pdf' && !value.trim()) {
+          if (options.skipOcrErrors) {
+            warnings.push('PDF 中没有可读取的文本，已跳过需要 OCR 的内容。');
+            return textResult('');
+          }
           throw new FileContentError(
             'OCR_NOT_CONFIGURED',
             'PDF 中没有可读取的文本；扫描文档需要配置 OCR 模型。',
           );
+        }
         return textResult(value);
       } catch (error) {
         signal.throwIfAborted();
