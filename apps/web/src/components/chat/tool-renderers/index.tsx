@@ -1,4 +1,5 @@
 import type { ComponentType } from 'react';
+import { INTELLIGENT_UI_TOOL } from '@aime/shared/intelligent-ui';
 import {
   ChatToolInteraction,
   type ToolInteractionProps,
@@ -13,7 +14,7 @@ const renderers: Record<
 > = {
   ask_user: ChatToolInteraction,
   submit_plan: SubmitPlan,
-  IntelligentUI,
+  [INTELLIGENT_UI_TOOL]: IntelligentUI,
 };
 
 export function ChatToolRenderer(props: ToolInteractionProps) {

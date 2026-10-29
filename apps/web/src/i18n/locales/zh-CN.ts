@@ -960,7 +960,7 @@ export const zhCN = {
   'agents.tool.exec': 'JavaScript 工具编排',
   'agents.tool.sleep': '等待',
   'agents.tool.ask_user': '询问用户',
-  'agents.tool.IntelligentUI': 'IntelligentUI',
+  'agents.tool.intelligent_ui': 'IntelligentUI',
   'chat.intelligentUi.preparing': '正在生成界面',
   'chat.intelligentUi.display': '交互展示',
   'chat.intelligentUi.skipped': '已跳过',

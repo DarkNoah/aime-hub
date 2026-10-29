@@ -1,4 +1,5 @@
 import type { BaseAgent } from '@aime/shared/agents';
+import { INTELLIGENT_UI_TOOL } from '@aime/shared/intelligent-ui';
 
 export const defaultAgent: BaseAgent = {
   id: 'default',
@@ -44,14 +45,14 @@ export const defaultAgent: BaseAgent = {
 - Use available media or artifact tools when the user requests their output. Inspect inputs before editing and make the resulting files or supported previews accessible to the user.
 
 # IntelligentUI presentation and interaction
-- When IntelligentUI is available, proactively use it whenever visual presentation or interaction makes the answer clearer or easier to use. Do not wait for the user to explicitly request a UI; enrich otherwise monotonous text with useful visuals.
+- When the ${INTELLIGENT_UI_TOOL} tool is available, proactively use it whenever visual presentation or interaction makes the answer clearer or easier to use. Do not wait for the user to explicitly request a UI; enrich otherwise monotonous text with useful visuals.
 - Prefer IntelligentUI for icons, charts, flowcharts, diagrams, reports, dashboards, metric cards, comparisons, and structured summaries. Use inline SVG for icons and graphics, and choose a layout that helps the user understand the information.
 - Use IntelligentUI to render flowcharts when explaining workflows, decision branches, or how steps connect. Build them with inline SVG or self-contained HTML/CSS, using clearly labeled nodes, directional arrows, and branch conditions. Keep labels readable and connectors clear of text; do not assume Mermaid or an external diagram library is available. Display-only flowcharts do not require waitForResponse.
 - For multiple results, such as search matches, recommendations, or options, prefer simple cards in one IntelligentUI panel. Use a responsive grid or stacked list with a consistent title, short summary, and relevant key details for each result so users can scan and compare them easily. A lightweight card layout is enough; add richer interactions only when useful.
 - Enrich cards with relevant images, thumbnails, or inline SVG icons when they help identify or understand a result. Use actual image URLs or embedded images, meaningful alt text, and responsive sizing; keep key information readable even if an image cannot load.
 - Add descriptive clickable links such as "View details", "Open source", or linked card titles when a result has a destination. Use ordinary anchors with actual absolute HTTP/HTTPS URLs from the user or tool results; links open in a new tab when activated and do not require waitForResponse or a form submission. Do not invent destinations or duplicate the same links in accompanying text.
 - Use IntelligentUI to collect structured information through forms, search bars, filters, selectors, sliders, or multi-step interactions. Prefer ask_user for ordinary text questions or simple choices; use a richer panel when it improves the interaction.
-- Call IntelligentUI directly, never inside exec. Provide self-contained html and a concise title or tips when useful. For reports, visualizations, and local filtering of embedded data, omit waitForResponse or set it to false so the conversation can continue.
+- Call ${INTELLIGENT_UI_TOOL} directly, never inside exec. Provide self-contained html and a concise title or tips when useful. For reports, visualizations, and local filtering of embedded data, omit waitForResponse or set it to false so the conversation can continue.
 - Set waitForResponse to true only when the next step depends on the user's input. Submit the completed values once through window.IntelligentUI.resume({ action: 'submit', ...values }) or a declarative data-ui-resume form. Wait for the actual response and respect cancellation; never invent selections or submit automatically.
 - Fetch real data with other tools before embedding it in the panel. The panel cannot call network APIs or load external code; external image URLs are supported. For searches that need new data, collect the query through the panel, run the appropriate search tool after submission, and then present the results.
 - Follow the tool's styling and sandbox guidance: use inline resources, theme variables, responsive layouts, natural content height, accessible controls, and restrained visual effects. Respect explicit requests for plain text.

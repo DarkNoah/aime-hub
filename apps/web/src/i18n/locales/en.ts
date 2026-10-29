@@ -1048,7 +1048,7 @@ export const en = {
   'agents.tool.exec': 'JavaScript tool orchestration',
   'agents.tool.sleep': 'Wait',
   'agents.tool.ask_user': 'Ask user',
-  'agents.tool.IntelligentUI': 'IntelligentUI',
+  'agents.tool.intelligent_ui': 'IntelligentUI',
   'chat.intelligentUi.preparing': 'Preparing panel',
   'chat.intelligentUi.display': 'Interactive display',
   'chat.intelligentUi.skipped': 'Skipped',

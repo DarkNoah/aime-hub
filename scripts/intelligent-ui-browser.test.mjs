@@ -109,6 +109,7 @@ test(
     const entry = `import React from 'react';
 import {createRoot} from 'react-dom/client';
 import {IntelligentUI} from '/src/components/chat/tool-renderers/intelligent-ui';
+import {INTELLIGENT_UI_TOOL} from '@aime/shared/intelligent-ui';
 import {ThemeProvider} from '/src/components/theme/theme-provider';
 import {useTheme} from '/src/components/theme/context';
 import {initializeI18n} from '/src/i18n';
@@ -116,14 +117,14 @@ import '/src/index.css';
 const panels=${JSON.stringify(panels)};
 panels.find(panel=>panel.id==='links').html=panels.find(panel=>panel.id==='links').html.replace('https://example.test/thumbnail.svg',location.origin+'/thumbnail.svg');
 const ChatTurns=React.lazy(()=>import('/src/components/chat/chat-turns').then(module=>({default:module.ChatTurns})));
-const orderedPanel={type:'tool-IntelligentUI',toolCallId:'ordered',state:'output-available',input:{title:'顺序检查',tips:null,waitForResponse:false,html:'<p>这是图表内容</p>'},output:{rendered:true}};
+const orderedPanel={type:'tool-'+INTELLIGENT_UI_TOOL,toolCallId:'ordered',state:'output-available',input:{title:'顺序检查',tips:null,waitForResponse:false,html:'<p>这是图表内容</p>'},output:{rendered:true}};
 const finalText={type:'text',text:'这是图表后的最终说明',state:'done'};
 const orderedUser={id:'order-turn',role:'user',parts:[{type:'text',text:'展示图表并说明'}]};
 const orderedSummary={id:'order-turn',user:orderedUser,assistant:{id:'order-assistant',role:'assistant',parts:[orderedPanel,finalText]},hasDetails:true,toolCount:1,revision:'order-revision',assetRevision:''};
 const orderedDetail={id:'order-turn',revision:'order-revision',messages:[orderedUser,{id:'order-assistant',role:'assistant',parts:[{type:'text',text:'正在准备图表'},orderedPanel,finalText]}]};
 function TurnOrder(){const [details,setDetails]=React.useState(new Map());return <ChatTurns turns={[orderedSummary]} details={details} loadDetails={async()=>{setDetails(new Map([['order-turn',orderedDetail]]));return orderedDetail;}} threadId="test-thread" running={false} activeTurnId={null} activeMessageId={null} toolInteractions={[]} onToolResponse={async()=>{}} disabled={false}/>;}
 window.records=[]; window.failFirst=true;
-function App(){const {setTheme}=useTheme(); return <main style={{maxWidth:760,margin:'24px auto',padding:16}}><button id="theme" onClick={()=>setTheme('dark')}>深色主题</button>{panels.map(({id,...input})=><div key={id} data-panel={id}><IntelligentUI tool={{type:'tool-IntelligentUI',toolCallId:id,input,state:input.waitForResponse?'input-available':'output-available',...(input.waitForResponse?{}:{output:{rendered:true}})}} interaction={input.waitForResponse?{id,toolCallId:id,toolName:'IntelligentUI',kind:'suspended',runId:'run',input}:undefined} onRespond={async (interactionId,response)=>{window.records.push({interactionId,...response}); await new Promise(r=>setTimeout(r,80)); if(interactionId==='form'&&window.failFirst){window.failFirst=false;throw new Error('Connection lost');}}}/></div>)}</main>}
+function App(){const {setTheme}=useTheme(); return <main style={{maxWidth:760,margin:'24px auto',padding:16}}><button id="theme" onClick={()=>setTheme('dark')}>深色主题</button>{panels.map(({id,...input})=><div key={id} data-panel={id}><IntelligentUI tool={{type:'tool-'+INTELLIGENT_UI_TOOL,toolCallId:id,input,state:input.waitForResponse?'input-available':'output-available',...(input.waitForResponse?{}:{output:{rendered:true}})}} interaction={input.waitForResponse?{id,toolCallId:id,toolName:INTELLIGENT_UI_TOOL,kind:'suspended',runId:'run',input}:undefined} onRespond={async (interactionId,response)=>{window.records.push({interactionId,...response}); await new Promise(r=>setTimeout(r,80)); if(interactionId==='form'&&window.failFirst){window.failFirst=false;throw new Error('Connection lost');}}}/></div>)}</main>}
 await initializeI18n();createRoot(document.getElementById('root')).render(<ThemeProvider>{location.search==='?turn'?<main style={{maxWidth:760,margin:'24px auto',padding:16}}><React.Suspense fallback="加载中"><TurnOrder/></React.Suspense></main>:<App/>}</ThemeProvider>);`;
     await writeFile(path.join(fixture, 'entry.tsx'), entry);
     const entryUrl =
