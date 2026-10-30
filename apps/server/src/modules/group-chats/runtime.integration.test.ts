@@ -287,7 +287,7 @@ test('native room agent publishes only tools, refreshes MEMORY.md and continues 
     threads.runGroupChat('alice', member.threadId, {
       ...settings,
       id: `room-event-0000${event}`,
-      isImmediate: false,
+      isImmediate: true,
       parts: [
         { type: 'text', text: `Room event ${event}. Read recent messages.` },
       ],

@@ -134,6 +134,11 @@ export const en = {
   'groupChat.a2a.hint':
     'Each API key represents a separate member that can read and send messages in this room.',
   'groupChat.a2a.namePlaceholder': 'For example: External research assistant',
+  'groupChat.a2a.description': 'Agent Card description',
+  'groupChat.a2a.descriptionPlaceholder':
+    'Describe the room’s purpose and how to collaborate',
+  'groupChat.a2a.descriptionHint':
+    'Shown when reading the Agent Card with this member’s API key. Leave blank to use the default description.',
   'groupChat.a2a.createKey': 'Create member and API key',
   'groupChat.a2a.created': 'A2A member created',
   'groupChat.a2a.saved': 'A2A member saved',
@@ -205,6 +210,7 @@ export const en = {
   'groupChat.worker': 'Worker',
   'groupChat.configureAgent': 'Configure {{name}}',
   'groupChat.viewAgentThread': 'View {{name}}’s thread messages',
+  'groupChat.backToMembers': 'Back to members',
   'groupChat.agentThreadTitle': '{{name}}’s thread',
   'groupChat.agentThreadReadOnly': 'Read only',
   'groupChat.agentThreadHint':

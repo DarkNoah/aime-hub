@@ -33,10 +33,7 @@ const errorResponse = (
   error: { code, message },
 });
 
-export function groupChatA2aRoutes(
-  service: RoomService,
-  webOrigins: readonly string[] = [],
-) {
+export function groupChatA2aRoutes(service: RoomService) {
   const router = new Hono<A2aEnv>();
   router.use('*', async (c, next) => {
     c.header('Cache-Control', 'no-store');
@@ -63,15 +60,20 @@ export function groupChatA2aRoutes(
     c.set('apiKey', key);
     await next();
   };
-  const card = (requestUrl: string, room: { id: string; title: string }) => {
-    const origin = new URL(requestUrl).origin;
+  const card = (
+    requestUrl: string,
+    { room, member }: A2aEnv['Variables']['identity'],
+  ) => {
+    // The browser's origin survives reverse proxies that rewrite the host.
+    // Older keys use the incoming URL, never an unrelated WEB_ORIGINS entry.
     return roomAgentCard(
       room,
-      webOrigins.includes(origin) ? origin : (webOrigins[0] ?? origin),
+      member.publicOrigin ?? new URL(requestUrl).origin,
+      member.description,
     );
   };
   router.get('/:roomId/.well-known/agent-card.json', authenticate, (c) =>
-    c.json(card(c.req.url, c.get('identity').room)),
+    c.json(card(c.req.url, c.get('identity'))),
   );
   router.get('/:roomId/messages', authenticate, async (c) => {
     const parsed = groupChatMessagesQuery.safeParse(c.req.query());
@@ -123,7 +125,11 @@ export function groupChatA2aRoutes(
         throw new RoomA2aError(-32009, 'Only A2A version 0.3 is supported');
       const { member, room } = c.get('identity');
       if (request.method === 'agent/getAuthenticatedExtendedCard')
-        return c.json({ jsonrpc: '2.0', id, result: card(c.req.url, room) });
+        return c.json({
+          jsonrpc: '2.0',
+          id,
+          result: card(c.req.url, c.get('identity')),
+        });
       if (request.method.startsWith('tasks/pushNotificationConfig/'))
         throw new RoomA2aError(-32003, 'Push notifications are not supported');
       if (

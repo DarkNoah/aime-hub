@@ -13,6 +13,8 @@ import type {
   GroupChatAgent,
   GroupChatAgentInput,
   GroupChatAgentUpdate,
+  GroupChatA2AMemberInput,
+  GroupChatA2AMemberUpdate,
   GroupChatFile,
   GroupChatUi,
   GroupChatEvent,
@@ -521,7 +523,11 @@ export class GroupChatService {
     return { messages, hasMore, revision };
   }
 
-  createA2aMember(userId: string, roomId: string, input: { name: string }) {
+  createA2aMember(
+    userId: string,
+    roomId: string,
+    input: GroupChatA2AMemberInput,
+  ) {
     return this.a2aKeys.create(userId, roomId, input);
   }
 
@@ -529,7 +535,7 @@ export class GroupChatService {
     userId: string,
     roomId: string,
     memberId: string,
-    input: { name?: string; enabled?: boolean },
+    input: GroupChatA2AMemberUpdate,
   ) {
     return this.a2aKeys.update(userId, roomId, memberId, input);
   }

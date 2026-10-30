@@ -113,12 +113,14 @@ export function roomMessageReceipt(message: GroupChatMessage): Message {
 export function roomAgentCard(
   room: { id: string; title: string },
   origin: string,
+  description?: string,
 ): AgentCard {
   const url = `${origin}/api/a2a/rooms/${encodeURIComponent(room.id)}`;
   return {
     protocolVersion: '0.3.0',
     name: room.title,
     description:
+      description?.trim() ||
       'Participate in this chat room as the member associated with your API key. Sending publishes a message and returns a delivery receipt. Replies are available in the room message feed.',
     url,
     preferredTransport: 'JSONRPC',

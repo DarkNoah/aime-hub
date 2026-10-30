@@ -3,12 +3,14 @@ import test from 'node:test';
 import { createHash, randomBytes } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { GroupChatService } from '../apps/server/src/modules/group-chats/service.js';
+import { groupChatA2aRoutes } from '../apps/server/src/modules/group-chats/a2a-routes.js';
 import { CreateGroupChats1780000024000 } from '../packages/db/src/migrations/1780000024000-create-group-chats.js';
 import { GroupChatAgents1780000026000 } from '../packages/db/src/migrations/1780000026000-group-chat-agents.js';
 import { GroupChatMembers1780000027000 } from '../packages/db/src/migrations/1780000027000-group-chat-members.js';
 import { GroupChatIdleWake1780000029000 } from '../packages/db/src/migrations/1780000029000-group-chat-idle-wake.js';
 import { GroupChatA2aMembers1780000030000 } from '../packages/db/src/migrations/1780000030000-group-chat-a2a-members.js';
 import { GroupChatA2aMemberDeletion1780000031000 } from '../packages/db/src/migrations/1780000031000-group-chat-a2a-member-deletion.js';
+import { GroupChatA2aCard1780000033000 } from '../packages/db/src/migrations/1780000033000-group-chat-a2a-card.js';
 
 const code = (expected: string) => (error: unknown) =>
   !!error &&
@@ -51,6 +53,7 @@ test(
       new GroupChatIdleWake1780000029000(),
       new GroupChatA2aMembers1780000030000(),
       new GroupChatA2aMemberDeletion1780000031000(),
+      new GroupChatA2aCard1780000033000(),
     ])
       await migration.up(runner);
     await runner.release();
@@ -59,6 +62,8 @@ test(
     const other = await rooms.create('alice', { title: 'Another room' });
     const first = await rooms.createA2aMember('alice', room.id, {
       name: 'Research',
+      publicOrigin: 'https://public.example/',
+      description: '调研与核验协作室',
     });
     const second = await rooms.createA2aMember('alice', room.id, {
       name: 'Research',
@@ -101,6 +106,8 @@ test(
             'id',
             'roomId',
             'name',
+            'publicOrigin',
+            'description',
             'enabled',
             'keyPrefix',
             'createdAt',
@@ -120,6 +127,76 @@ test(
           rooms.createA2aMember('outsider', room.id, { name: 'No' }),
           code('NOT_FOUND'),
         );
+      },
+    );
+
+    await t.test(
+      'card settings persist and updates preserve omitted values',
+      async () => {
+        const app = groupChatA2aRoutes(rooms);
+        const readCard = async (apiKey: string) => {
+          const response = await app.request(
+            `http://internal:8088/${room.id}/.well-known/agent-card.json`,
+            { headers: { Authorization: `Bearer ${apiKey}` } },
+          );
+          assert.equal(response.status, 200);
+          return response.json();
+        };
+        assert.equal(first.member.publicOrigin, 'https://public.example');
+        assert.equal(first.member.description, '调研与核验协作室');
+        assert.equal(second.member.publicOrigin, null);
+        assert.equal(second.member.description, '');
+        const card = await readCard(first.apiKey);
+        assert.equal(
+          card.url,
+          `https://public.example/api/a2a/rooms/${room.id}`,
+        );
+        assert.equal(card.description, first.member.description);
+        const saved = await rooms.updateA2aMember(
+          'alice',
+          room.id,
+          first.member.id,
+          {
+            publicOrigin: 'https://new.example',
+            description: '新的协作说明',
+          },
+        );
+        assert.equal(saved.publicOrigin, 'https://new.example');
+        assert.equal(saved.description, '新的协作说明');
+        const enabled = await rooms.updateA2aMember(
+          'alice',
+          room.id,
+          first.member.id,
+          {
+            enabled: true,
+          },
+        );
+        assert.equal(enabled.publicOrigin, saved.publicOrigin);
+        assert.equal(enabled.description, saved.description);
+        const updatedCard = await readCard(first.apiKey);
+        assert.equal(
+          updatedCard.url,
+          `https://new.example/api/a2a/rooms/${room.id}`,
+        );
+        assert.equal(updatedCard.description, saved.description);
+        await rooms.updateA2aMember('alice', room.id, first.member.id, {
+          description: '',
+        });
+        const defaultCard = await readCard(second.apiKey);
+        assert.equal(
+          (await readCard(first.apiKey)).description,
+          defaultCard.description,
+        );
+        assert.equal(
+          defaultCard.url,
+          `http://internal:8088/api/a2a/rooms/${room.id}`,
+        );
+        const refreshed = await rooms.get('alice', room.id);
+        const member = refreshed.a2aMembers?.find(
+          (item) => item.id === first.member.id,
+        );
+        assert.equal(member?.publicOrigin, 'https://new.example');
+        assert.equal(member?.description, '');
       },
     );
 

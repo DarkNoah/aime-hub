@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Dialog,
@@ -33,6 +34,7 @@ export function RoomA2aEditor({
   const { t } = useTranslation();
   const id = useId();
   const [name, setName] = useState(member?.name ?? '');
+  const [description, setDescription] = useState(member?.description ?? '');
   const [pending, setPending] = useState(false);
   // This secret is held only by this mounted dialog and is never persisted.
   const [created, setCreated] = useState<{
@@ -41,7 +43,7 @@ export function RoomA2aEditor({
   } | null>(null);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
   const current = created?.member ?? member;
-  const endpoint = `${window.location.origin}/api/a2a/rooms/${roomId}`;
+  const endpoint = `${current?.publicOrigin ?? window.location.origin}/api/a2a/rooms/${roomId}`;
   const connections = [
     ['Agent Card', `${endpoint}/.well-known/agent-card.json`],
     ['A2A JSON-RPC', endpoint],
@@ -62,14 +64,13 @@ export function RoomA2aEditor({
     if (pending || !name.trim() || created || member?.revokedAt) return;
     setPending(true);
     try {
+      const body = { name, description, publicOrigin: window.location.origin };
       if (member) {
-        onSaved(
-          await groupChatApi.updateA2aMember(roomId, member.id, { name }),
-        );
+        onSaved(await groupChatApi.updateA2aMember(roomId, member.id, body));
         toast.success(t('groupChat.a2a.saved'));
         onClose();
       } else {
-        const result = await groupChatApi.createA2aMember(roomId, name);
+        const result = await groupChatApi.createA2aMember(roomId, body);
         setCreated(result);
         onSaved(result.member);
         toast.success(t('groupChat.a2a.created'));
@@ -121,6 +122,27 @@ export function RoomA2aEditor({
                   disabled={pending || !!created || !!current?.revokedAt}
                   required
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor={`${id}-description`}>
+                  {t('groupChat.a2a.description')}
+                </Label>
+                <Textarea
+                  id={`${id}-description`}
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  maxLength={4000}
+                  rows={3}
+                  placeholder={t('groupChat.a2a.descriptionPlaceholder')}
+                  aria-describedby={`${id}-description-hint`}
+                  disabled={pending || !!created || !!current?.revokedAt}
+                />
+                <p
+                  id={`${id}-description-hint`}
+                  className="text-xs text-muted-foreground"
+                >
+                  {t('groupChat.a2a.descriptionHint')}
+                </p>
               </div>
               {created && (
                 <div className="space-y-3 rounded-lg border border-primary/25 bg-primary/5 p-4">

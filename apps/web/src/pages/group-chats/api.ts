@@ -3,6 +3,8 @@ import type {
   MemberProfile,
   GroupChatAgentInput,
   GroupChatAgentUpdate,
+  GroupChatA2AMemberInput,
+  GroupChatA2AMemberUpdate,
   GroupChatFile,
 } from '@aime/shared/group-chats';
 import { api, apiErrorCode } from '@/lib/rpc';
@@ -27,12 +29,12 @@ export const groupChatApi = {
     ),
   addMember: (roomId: string, userId: string) =>
     api.groupChats.addMember({ params: { roomId }, body: { userId } }),
-  createA2aMember: (roomId: string, name: string) =>
-    api.groupChats.createA2aMember({ params: { roomId }, body: { name } }),
+  createA2aMember: (roomId: string, body: GroupChatA2AMemberInput) =>
+    api.groupChats.createA2aMember({ params: { roomId }, body }),
   updateA2aMember: (
     roomId: string,
     memberId: string,
-    body: { name?: string; enabled?: boolean },
+    body: GroupChatA2AMemberUpdate,
   ) => api.groupChats.updateA2aMember({ params: { roomId, memberId }, body }),
   revokeA2aMember: (roomId: string, memberId: string) =>
     api.groupChats.revokeA2aMember({ params: { roomId, memberId } }),

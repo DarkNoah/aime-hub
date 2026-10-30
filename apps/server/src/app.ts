@@ -143,10 +143,7 @@ export function createApp(
   if (avatars)
     app.route('/api/profile', profileRoutes(auth, avatars.service, webOrigins));
   if (chat?.groupChats)
-    app.route(
-      '/api/a2a/rooms',
-      groupChatA2aRoutes(chat.groupChats, webOrigins),
-    );
+    app.route('/api/a2a/rooms', groupChatA2aRoutes(chat.groupChats));
   const router = rpc.router({
     groupChats: groupChatRouter(chat?.groupChats),
     users: userRouter(chat?.users),

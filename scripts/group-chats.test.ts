@@ -13,6 +13,7 @@ import {
 import { groupChatMessagesQuery } from '../packages/shared/src/rpc/group-chats.js';
 import { GroupChatA2aMembers1780000030000 } from '../packages/db/src/migrations/1780000030000-group-chat-a2a-members.js';
 import { GroupChatA2aMemberDeletion1780000031000 } from '../packages/db/src/migrations/1780000031000-group-chat-a2a-member-deletion.js';
+import { GroupChatA2aCard1780000033000 } from '../packages/db/src/migrations/1780000033000-group-chat-a2a-card.js';
 import { GroupChatIdleWake1780000029000 } from '../packages/db/src/migrations/1780000029000-group-chat-idle-wake.js';
 import { GroupChatAgents1780000026000 } from '../packages/db/src/migrations/1780000026000-group-chat-agents.js';
 import { GroupChatMembers1780000027000 } from '../packages/db/src/migrations/1780000027000-group-chat-members.js';
@@ -128,6 +129,7 @@ test(
     await new GroupChatIdleWake1780000029000().up(runner);
     await new GroupChatA2aMembers1780000030000().up(runner);
     await new GroupChatA2aMemberDeletion1780000031000().up(runner);
+    await new GroupChatA2aCard1780000033000().up(runner);
     await new GroupChatReads1780000032000().up(runner);
     assert.equal(
       (

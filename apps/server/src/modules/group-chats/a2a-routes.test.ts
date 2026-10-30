@@ -8,6 +8,10 @@ import type {
   GroupChatMessage,
   GroupChatMessages,
 } from '@aime/shared/group-chats';
+import {
+  groupChatA2aMemberCreateSchema,
+  groupChatA2aMemberUpdateSchema,
+} from '@aime/shared/group-chats';
 import { groupChatA2aRoutes } from './a2a-routes.js';
 import { roomMessagesStream } from './a2a-events.js';
 import type { GroupChatService } from './service.js';
@@ -26,6 +30,8 @@ function fixture() {
         id: `externalmember0${index}`,
         roomId,
         name: `External ${index}`,
+        publicOrigin: null,
+        description: '',
         enabled: true,
         keyPrefix: 'test-key',
         createdAt: '2026-10-30T00:00:00.000Z',
@@ -146,6 +152,103 @@ function sendRequest(message: Record<string, unknown> = {}) {
     },
   };
 }
+
+test('A2A card settings accept HTTP(S) origins and reject credentials or URL paths', () => {
+  assert.deepEqual(
+    groupChatA2aMemberCreateSchema.parse({
+      name: 'External',
+      publicOrigin: 'https://room.example:8443/',
+      description: '  项目协作室  ',
+    }),
+    {
+      name: 'External',
+      publicOrigin: 'https://room.example:8443',
+      description: '项目协作室',
+    },
+  );
+  assert.equal(
+    groupChatA2aMemberCreateSchema.parse({ name: 'Legacy' }).publicOrigin,
+    undefined,
+  );
+  assert.equal(
+    groupChatA2aMemberUpdateSchema.parse({ description: '  ' }).description,
+    '',
+  );
+  for (const publicOrigin of [
+    '',
+    'not-a-url',
+    'https://',
+    'javascript:alert(1)',
+    'file:///tmp/card',
+    'https://user:password@room.example',
+    'https://room.example/path',
+    'https://room.example?redirect=elsewhere',
+    'https://room.example#card',
+  ]) {
+    assert.equal(
+      groupChatA2aMemberCreateSchema.safeParse({
+        name: 'External',
+        publicOrigin,
+      }).success,
+      false,
+      publicOrigin,
+    );
+  }
+});
+
+test('card discovery and extended cards use saved browser origin and per-key description behind a proxy', async () => {
+  const state = fixture();
+  const publicOrigin = 'https://room.example:8443';
+  const description = '协作处理项目调研和结果核验。';
+  Object.assign(state.members.get(keyA)!, { publicOrigin, description });
+  const response = await state.request(cardPath);
+  assert.equal(response.status, 200);
+  const card = await response.json();
+  assert.equal(card.url, `${publicOrigin}${endpoint}`);
+  assert.equal(card.description, description);
+  const extension = card.capabilities.extensions[0];
+  assert.equal(extension.uri, `${publicOrigin}${endpoint}/messages`);
+  assert.deepEqual(extension.params, {
+    messagesUrl: `${publicOrigin}${endpoint}/messages`,
+    eventsUrl: `${publicOrigin}${endpoint}/events`,
+    cursor: 'afterRevision',
+    contextId: roomId,
+  });
+  assert.ok(!JSON.stringify(card).includes('http://room.test'));
+  const extended = await state.rpc({
+    jsonrpc: '2.0',
+    id: 'card',
+    method: 'agent/getAuthenticatedExtendedCard',
+  });
+  assert.deepEqual((await extended.json()).result, card);
+  const otherCard = await (await state.request(cardPath, {}, keyB)).json();
+  assert.notEqual(otherCard.description, description);
+  assert.equal(otherCard.url, `http://room.test${endpoint}`);
+  state.members.get(keyA)!.description = '';
+  assert.equal(
+    (await (await state.request(cardPath)).json()).description,
+    otherCard.description,
+  );
+});
+
+test('legacy cards use the incoming request origin, not Origin or forwarded headers', async () => {
+  const state = fixture();
+  const response = await state.app.request(
+    `https://public.example${cardPath}`,
+    {
+      headers: {
+        Authorization: `Bearer ${keyA}`,
+        Origin: 'https://unrelated.example',
+        'X-Forwarded-Host': '192.168.10.7:8088',
+      },
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.equal(
+    (await response.json()).url,
+    `https://public.example${endpoint}`,
+  );
+});
 
 test('A2A card, message history, and feeds require their own room-scoped Bearer identity', async () => {
   const state = fixture();

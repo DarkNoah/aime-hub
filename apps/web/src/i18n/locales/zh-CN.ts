@@ -123,6 +123,10 @@ export const zhCN = {
   'groupChat.a2a.hint':
     '每个 API Key 对应一个独立成员，可读取和发送当前聊天室的消息。',
   'groupChat.a2a.namePlaceholder': '例如：外部研究助手',
+  'groupChat.a2a.description': 'Agent Card 描述',
+  'groupChat.a2a.descriptionPlaceholder': '介绍聊天室的用途和协作方式',
+  'groupChat.a2a.descriptionHint':
+    '通过此成员的 API Key 读取 Agent Card 时展示。留空使用默认描述。',
   'groupChat.a2a.createKey': '创建成员与 API Key',
   'groupChat.a2a.created': 'A2A 成员已创建',
   'groupChat.a2a.saved': 'A2A 成员已保存',
@@ -190,6 +194,7 @@ export const zhCN = {
   'groupChat.worker': '协作',
   'groupChat.configureAgent': '配置 {{name}}',
   'groupChat.viewAgentThread': '查看 {{name}} 的线程消息',
+  'groupChat.backToMembers': '返回成员',
   'groupChat.agentThreadTitle': '{{name}} 的线程',
   'groupChat.agentThreadReadOnly': '只读',
   'groupChat.agentThreadHint': '执行记录实时更新；请在聊天室中与 Agent 沟通。',

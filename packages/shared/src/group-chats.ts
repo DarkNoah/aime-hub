@@ -53,14 +53,38 @@ export type GroupChatAgentInput = z.infer<typeof groupChatAgentCreateSchema>;
 export type GroupChatAgentUpdate = z.infer<typeof groupChatAgentUpdateSchema>;
 export const groupChatA2aMemberCreateSchema = z.object({
   name: z.string().trim().min(1).max(80),
+  publicOrigin: z
+    .url({ protocol: /^https?$/ })
+    .refine((value) => {
+      if (!URL.canParse(value)) return false;
+      const url = new URL(value);
+      return (
+        !url.username &&
+        !url.password &&
+        url.pathname === '/' &&
+        !url.search &&
+        !url.hash
+      );
+    }, 'Expected an HTTP(S) origin')
+    .transform((value) => new URL(value).origin)
+    .optional(),
+  description: z.string().trim().max(4000).optional(),
 });
 export const groupChatA2aMemberUpdateSchema = groupChatA2aMemberCreateSchema
   .partial()
   .extend({ enabled: z.boolean().optional() });
+export type GroupChatA2AMemberInput = z.infer<
+  typeof groupChatA2aMemberCreateSchema
+>;
+export type GroupChatA2AMemberUpdate = z.infer<
+  typeof groupChatA2aMemberUpdateSchema
+>;
 export type GroupChatA2AMember = {
   id: string;
   roomId: string;
   name: string;
+  publicOrigin: string | null;
+  description: string;
   enabled: boolean;
   keyPrefix: string;
   createdAt: string;

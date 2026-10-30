@@ -1,3 +1,4 @@
+import { GroupChatA2aCard1780000033000 } from './migrations/1780000033000-group-chat-a2a-card.js';
 import { GroupChatReads1780000032000 } from './migrations/1780000032000-group-chat-reads.js';
 import { GroupChatMembers1780000027000 } from './migrations/1780000027000-group-chat-members.js';
 import { GroupChatA2aMembers1780000030000 } from './migrations/1780000030000-group-chat-a2a-members.js';
@@ -88,6 +89,7 @@ export function createDataSource(
       GeneratedAsset,
     ],
     migrations: [
+      GroupChatA2aCard1780000033000,
       GroupChatReads1780000032000,
       GroupChatA2aMemberDeletion1780000031000,
       GroupChatA2aMembers1780000030000,

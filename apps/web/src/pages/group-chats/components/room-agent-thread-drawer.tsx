@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ArrowLeft, ExternalLink, X } from 'lucide-react';
-import { Dialog as DialogPrimitive } from 'radix-ui';
+import { ArrowLeft, ExternalLink } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { GroupChatAgent } from '@aime/shared/group-chats';
 import { ChatThreadView } from '@/components/chat/chat-thread-view';
@@ -14,96 +13,27 @@ import { ThreadFilePreview } from '@/components/chat/message-preview/thread-file
 import { useMessagePreviewController } from '@/components/chat/message-preview/use-message-preview';
 import { WorkspaceFileContext } from '@/components/file-manager/context';
 import { AssetAttachmentContext } from '@/components/generated-assets/context';
-import { FloatingWindow } from '@/components/floating-window';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogPortal,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
+  SheetContent,
+  SheetTitle,
+  SheetDescription,
+} from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
 
-export default function RoomAgentThreadWindow({
+export function RoomAgentThreadDrawer({
   agent,
   projectId,
-  onClose,
+  container,
+  opener,
+  onBack,
 }: {
   agent: GroupChatAgent;
   projectId?: string;
-  onClose: () => void;
-}) {
-  const { t } = useTranslation();
-  // The viewport exists before the window's layout effect measures its bounds.
-  const boundary = useRef<HTMLElement>(document.documentElement);
-  const [compact, setCompact] = useState(
-    () => window.matchMedia('(max-width: 759px)').matches,
-  );
-  useEffect(() => {
-    const query = window.matchMedia('(max-width: 759px)');
-    const change = () => setCompact(query.matches);
-    query.addEventListener('change', change);
-    return () => query.removeEventListener('change', change);
-  }, []);
-  const title = t('groupChat.agentThreadTitle', { name: agent.name });
-  return (
-    <Dialog
-      open
-      modal={compact}
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-    >
-      <DialogPortal>
-        <div className="pointer-events-none fixed inset-0 z-50">
-          <FloatingWindow
-            active={!compact}
-            boundaryRef={boundary}
-            storageKey="group-chat-agent-window:v1"
-            title={title}
-            moveLabel={t('chat.inspector.moveWindow')}
-            resizeLabel={(direction) =>
-              t(`chat.inspector.resizeWindow.${direction}`)
-            }
-            className="pointer-events-auto"
-            data-agent-thread-window
-            actions={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="size-6"
-                onClick={onClose}
-                aria-label={t('common.close')}
-              >
-                <X className="size-3.5" />
-              </Button>
-            }
-          >
-            <ThreadSession
-              key={agent.threadId}
-              agent={agent}
-              projectId={projectId}
-              compact={compact}
-              onClose={onClose}
-            />
-          </FloatingWindow>
-        </div>
-      </DialogPortal>
-    </Dialog>
-  );
-}
-
-function ThreadSession({
-  agent,
-  projectId,
-  compact,
-  onClose,
-}: {
-  agent: GroupChatAgent;
-  projectId?: string;
-  compact: boolean;
-  onClose: () => void;
+  container: HTMLElement;
+  opener: HTMLElement | null;
+  onBack: () => void;
 }) {
   const { t } = useTranslation();
   const chat = useThreadChat(agent.threadId, undefined, {
@@ -111,7 +41,6 @@ function ThreadSession({
   });
   const preview = useMessagePreviewController(chat.messages);
   const [filePath, setFilePath] = useState<string | null>(null);
-  const [opener] = useState(() => document.activeElement);
   const toolPreview = useRef<HTMLDivElement>(null);
   const filePreview = useRef<HTMLDivElement>(null);
   const previewOpen = !!filePath || !!preview.selection;
@@ -130,8 +59,12 @@ function ThreadSession({
     };
   }, [filePath, preview.selection]);
   return (
-    <DialogPrimitive.Content
-      className="flex min-h-0 flex-1 flex-col outline-none"
+    <SheetContent
+      container={container}
+      showOverlay={false}
+      showCloseButton={false}
+      className="absolute inset-0 h-full w-full max-w-none gap-0 border-0 bg-card shadow-none sm:max-w-none"
+      data-agent-thread-drawer
       onInteractOutside={(event) => event.preventDefault()}
       onCloseAutoFocus={(event) => {
         event.preventDefault();
@@ -150,14 +83,10 @@ function ThreadSession({
     >
       <header className="space-y-2 border-b px-3 py-3">
         <div className="flex items-center gap-2">
-          <DialogTitle
-            className={cn(
-              'min-w-0 flex-1 truncate text-sm leading-normal',
-              !compact && 'sr-only',
-            )}
-          >
-            {t('groupChat.agentThreadTitle', { name: agent.name })}
-          </DialogTitle>
+          <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2">
+            <ArrowLeft className="size-4" aria-hidden="true" />
+            {t('groupChat.backToMembers')}
+          </Button>
           <Badge variant="outline">{t('groupChat.agentThreadReadOnly')}</Badge>
           <Badge
             variant={
@@ -185,20 +114,13 @@ function ThreadSession({
               <ExternalLink className="size-3.5" aria-hidden="true" />
             </Link>
           </Button>
-          {compact && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={onClose}
-              aria-label={t('common.close')}
-            >
-              <X className="size-4" />
-            </Button>
-          )}
         </div>
-        <DialogDescription className="text-xs leading-relaxed">
+        <SheetTitle className="truncate text-sm leading-normal">
+          {t('groupChat.agentThreadTitle', { name: agent.name })}
+        </SheetTitle>
+        <SheetDescription className="text-xs leading-relaxed">
           {t('groupChat.agentThreadHint')}
-        </DialogDescription>
+        </SheetDescription>
       </header>
       <AssetAttachmentContext.Provider value={null}>
         <WorkspaceFileContext.Provider value={setFilePath}>
@@ -294,6 +216,6 @@ function ThreadSession({
           </MessagePreviewContext.Provider>
         </WorkspaceFileContext.Provider>
       </AssetAttachmentContext.Provider>
-    </DialogPrimitive.Content>
+    </SheetContent>
   );
 }

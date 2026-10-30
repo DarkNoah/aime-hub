@@ -254,6 +254,7 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     const historyCursors = [];
     const agentUpdates = [];
     const memberAdds = [];
+    const a2aCreates = [];
     const a2aUpdates = [];
     const a2aRemovals = [];
     const a2aMembersByRoom = new Map();
@@ -513,12 +514,15 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
           break;
         }
         case 'groupChats/createA2aMember': {
+          a2aCreates.push(structuredClone(input));
           const room = rooms.find((room) => room.id === input.params.roomId);
           assert.equal(detail(room).canManageMembers, true);
           const member = {
             id: `a2amember${String(roomA2aMembers(room.id).length + 1).padStart(7, '0')}`,
             roomId: room.id,
             name: input.body.name,
+            publicOrigin: input.body.publicOrigin ?? null,
+            description: input.body.description ?? '',
             enabled: true,
             keyPrefix: 'room_test',
             createdAt: new Date().toISOString(),
@@ -853,7 +857,7 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     await input.fill('@调');
     await page.getByRole('option', { name: /@调研助手/ }).waitFor();
     await input.press('Enter');
-    assert.equal(await input.inputValue(), '@调研助手  ');
+    assert.equal(await input.inputValue(), '@调研助手 ');
     assert.equal(sendIds.length, 0);
     await input.press('End');
     await input.pressSequentially('请检查');
@@ -873,7 +877,7 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     await page.waitForFunction(
       () => document.activeElement === document.querySelector('textarea'),
     );
-    assert.equal(await input.inputValue(), '草稿 @调研助手  ');
+    assert.equal(await input.inputValue(), '草稿 @调研助手 ');
     await page.getByRole('button', { name: '4 位成员', exact: true }).click();
     await input.fill('切换成员面板时保留草稿');
     await roster
@@ -889,11 +893,15 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     await roster.getByText('调研助手', { exact: true }).waitFor();
     assert.equal(await input.inputValue(), '切换成员面板时保留草稿');
     assert.equal(await page.locator('[data-chat-turn]').count(), 50);
-    // Agent history remains inside the room, with isolated, read-only previews.
+    // Agent history opens inside the member panel, preserving its roster and scroll.
+    const rosterScroll = roster.locator('[data-radix-scroll-area-viewport]');
+    const savedRosterScroll = await rosterScroll.evaluate(
+      (element) => element.scrollTop,
+    );
     await roster
       .getByRole('button', { name: '查看 调研助手 的线程消息', exact: true })
       .click();
-    const agentWindow = page.locator('[data-agent-thread-window]');
+    const agentDrawer = page.locator('[data-agent-thread-drawer]');
     const viewer = page.getByRole('dialog', {
       name: '调研助手 的线程',
       exact: true,
@@ -977,50 +985,51 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     await lastTurn
       .getByRole('button', { name: '收起详情', exact: true })
       .waitFor();
-    const rect = await agentWindow.boundingBox();
-    await agentWindow.getByRole('button', { name: /^移动聊天窗/ }).focus();
-    await page.keyboard.press('Shift+ArrowRight');
-    await page.waitForFunction(
-      (x) =>
-        document
-          .querySelector('[data-agent-thread-window]')
-          .getBoundingClientRect().x > x,
-      rect.x,
+    assert.equal(await roster.locator('[data-agent-thread-drawer]').count(), 1);
+    assert.equal(
+      await agentDrawer.locator('[data-resize-direction]').count(),
+      0,
     );
-    await agentWindow.locator('[data-resize-direction="e"]').focus();
-    await page.keyboard.press('Shift+ArrowRight');
-    await page.waitForFunction(
-      (width) =>
-        document
-          .querySelector('[data-agent-thread-window]')
-          .getBoundingClientRect().width > width,
-      rect.width,
+    const panelRect = await roster.boundingBox();
+    const threadRect = await agentDrawer.boundingBox();
+    assert.ok(
+      threadRect.x >= panelRect.x && threadRect.width <= panelRect.width,
     );
     await page.screenshot({ path: '/tmp/group-chat-agent-thread-desktop.png' });
-    // Selecting the leader replaces the one existing window and its preview scope.
-    await page.getByRole('button', { name: '4 位成员', exact: true }).click();
+    await viewer.getByRole('button', { name: '返回成员', exact: true }).click();
+    await viewer.waitFor({ state: 'hidden' });
+    await page.waitForFunction(
+      () =>
+        document.activeElement?.getAttribute('aria-label') ===
+        '查看 调研助手 的线程消息',
+    );
+    assert.equal(
+      await rosterScroll.evaluate((element) => element.scrollTop),
+      savedRosterScroll,
+    );
+    // Returning to the roster and opening the leader resets the preview scope.
     await roster
       .getByRole('button', {
         name: '查看 Room assistant 的线程消息',
         exact: true,
       })
       .click();
-    const leaderWindow = page.getByRole('dialog', {
+    const leaderDrawer = page.getByRole('dialog', {
       name: 'Room assistant 的线程',
       exact: true,
     });
-    await leaderWindow
+    await leaderDrawer
       .getByText('执行记录 30 · thread0000000001', { exact: true })
       .waitFor();
-    assert.equal(await page.locator('[data-agent-thread-window]').count(), 1);
+    assert.equal(await page.locator('[data-agent-thread-drawer]').count(), 1);
     assert.equal(
-      await leaderWindow.getByText('调研工具结果 2', { exact: true }).count(),
+      await leaderDrawer.getByText('调研工具结果 2', { exact: true }).count(),
       0,
     );
-    await agentWindow
-      .getByRole('button', { name: '关闭', exact: true })
+    await leaderDrawer
+      .getByRole('button', { name: '返回成员', exact: true })
       .click();
-    await agentWindow.waitFor({ state: 'hidden' });
+    await agentDrawer.waitFor({ state: 'hidden' });
     assert.ok(
       threadReads.includes('workerthread0001') &&
         threadReads.includes('thread0000000001'),
@@ -1032,7 +1041,6 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
         ),
       ),
     );
-    await page.getByRole('button', { name: '4 位成员', exact: true }).click();
     await roster
       .getByRole('button', { name: '移除 调研助手', exact: true })
       .click();
@@ -1252,7 +1260,7 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     await page.waitForFunction(
       () => document.activeElement === document.querySelector('textarea'),
     );
-    assert.ok((await input.inputValue()).includes('@Room assistant  '));
+    assert.ok((await input.inputValue()).includes('@Room assistant '));
     await input.fill(mobileDraft);
     await page.getByRole('button', { name: '工作区面板', exact: true }).click();
     await page.getByRole('menuitem', { name: '成员', exact: true }).click();
@@ -1288,25 +1296,27 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
         exact: true,
       })
       .click();
-    await leaderWindow
+    await leaderDrawer
       .getByText('执行记录 30 · thread0000000001', { exact: true })
       .waitFor();
-    const mobileRect = await agentWindow.boundingBox();
-    assert.deepEqual(
-      {
-        width: mobileRect.width,
-        height: mobileRect.height,
-        x: mobileRect.x,
-        y: mobileRect.y,
-      },
-      { width: 360, height: 780, x: 0, y: 0 },
+    const mobileRect = await agentDrawer.boundingBox();
+    const membersRect = await membersDrawer.boundingBox();
+    assert.ok(mobileRect.width <= membersRect.width);
+    assert.ok(mobileRect.height <= membersRect.height);
+    assert.ok(mobileRect.x >= membersRect.x && mobileRect.y >= membersRect.y);
+    assert.equal(
+      await membersDrawer.locator('[data-agent-thread-drawer]').count(),
+      1,
     );
-    assert.equal(await page.getByRole('dialog').count(), 1);
     await page.screenshot({ path: '/tmp/group-chat-agent-thread-mobile.png' });
-    await leaderWindow
+    await page.keyboard.press('Escape');
+    await agentDrawer.waitFor({ state: 'hidden' });
+    await membersDrawer.getByText('陈禾', { exact: true }).waitFor();
+    assert.equal(await page.getByRole('dialog').count(), 1);
+    await membersDrawer
       .getByRole('button', { name: '关闭', exact: true })
       .click();
-    await agentWindow.waitFor({ state: 'hidden' });
+    await membersDrawer.waitFor({ state: 'hidden' });
     assert.equal(await input.inputValue(), '切换和刷新后仍然保留的草稿');
     await page.screenshot({
       path: '/tmp/group-chat-mobile.png',
@@ -1427,12 +1437,17 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
         .click();
       await a2aEditor.getByRole('textbox', { name: '显示名称' }).fill(name);
       await a2aEditor
+        .getByRole('textbox', { name: 'Agent Card 描述', exact: true })
+        .fill(`${name}的协作说明`);
+      await a2aEditor
         .getByRole('button', { name: '创建成员与 API Key', exact: true })
         .click();
       await a2aEditor
         .getByText('请保存此 API Key，关闭后将无法再次查看。', { exact: true })
         .waitFor();
       const key = a2aEditor.locator('input[aria-label="API Key"]');
+      assert.equal(a2aCreates.at(-1).body.publicOrigin, origin);
+      assert.equal(a2aCreates.at(-1).body.description, `${name}的协作说明`);
       assert.match(await key.inputValue(), /^fixture_secret_a2amember/);
       assert.equal(await key.getAttribute('type'), 'password');
       assert.equal(
@@ -1468,7 +1483,7 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     assert.equal(a2aUpdates.at(-1).body.enabled, false);
     await input.fill('@远程核');
     await page.getByRole('option', { name: /@远程核验助手/ }).click();
-    assert.equal(await input.inputValue(), '@远程核验助手  ');
+    assert.equal(await input.inputValue(), '@远程核验助手 ');
     await input.fill('个人房间切换保留草稿');
     await personalRoster
       .getByRole('button', { name: '配置 远程核验助手', exact: true })
@@ -1482,8 +1497,19 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       0,
     );
     await a2aEdit.getByRole('textbox', { name: '显示名称' }).fill('外部核验');
+    const cardDescription = a2aEdit.getByRole('textbox', {
+      name: 'Agent Card 描述',
+      exact: true,
+    });
+    assert.equal(await cardDescription.inputValue(), '远程核验助手的协作说明');
+    await cardDescription.fill('协助核验项目资料并汇报结果');
     await a2aEdit.getByRole('button', { name: '保存', exact: true }).click();
     await a2aEdit.waitFor({ state: 'hidden' });
+    assert.equal(a2aUpdates.at(-1).body.publicOrigin, origin);
+    assert.equal(
+      a2aUpdates.at(-1).body.description,
+      '协助核验项目资料并汇报结果',
+    );
     await personalRoster.getByText('外部核验', { exact: true }).waitFor();
     const remoteMember = roomA2aMembers('personal00000001')[1];
     messages.push({
@@ -1511,7 +1537,7 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     await page.waitForFunction(
       () => document.activeElement === document.querySelector('textarea'),
     );
-    assert.equal(await input.inputValue(), '@外部核验  ');
+    assert.equal(await input.inputValue(), '@外部核验 ');
     await input.fill(remoteDraft);
     assert.ok(!userLookups.includes(remoteMember.id));
     await personalRoster

@@ -1,6 +1,4 @@
 import {
-  lazy,
-  Suspense,
   useContext,
   useMemo,
   useState,
@@ -41,8 +39,6 @@ import { RoomMemberEditor } from './room-member-editor';
 import { RoomAgentPicker } from './room-agent-picker';
 import { RoomA2aEditor } from './room-a2a-editor';
 
-const RoomAgentThreadWindow = lazy(() => import('./room-agent-thread-window'));
-
 export function RoomPanel({
   roomId,
   projectId,
@@ -62,7 +58,6 @@ export function RoomPanel({
   const [a2aEditor, setA2aEditor] = useState<GroupChatA2AMember | 'new' | null>(
     null,
   );
-  const [threadAgentId, setThreadAgentId] = useState<string | null>(null);
   const visibleMessages = useMemo<UIMessage[]>(
     () =>
       state.messages.map((message) => ({
@@ -109,9 +104,6 @@ export function RoomPanel({
   const bot = state.room.agents?.find(
     (agent) => agent.id === state.room!.botAgentId,
   );
-  const threadAgent = state.room.agents.find(
-    (agent) => agent.id === threadAgentId,
-  );
   return (
     <ChatWorkspace
       threadId={bot?.threadId}
@@ -133,7 +125,6 @@ export function RoomPanel({
             onA2aRemoved={state.removeA2aMember}
             onAgentUpdated={state.updateAgent}
             onAgentRemoved={state.removeAgent}
-            onOpenThread={(agent) => setThreadAgentId(agent.id)}
             onMention={(agent) => {
               onClose(() => composer.current?.mention(agent));
             }}
@@ -181,15 +172,6 @@ export function RoomPanel({
           onAdded={state.addMember}
           onClose={() => setMemberEditor(false)}
         />
-      )}
-      {threadAgent && (
-        <Suspense fallback={null}>
-          <RoomAgentThreadWindow
-            agent={threadAgent}
-            projectId={projectId}
-            onClose={() => setThreadAgentId(null)}
-          />
-        </Suspense>
       )}
       {a2aEditor && state.room.canManageMembers && (
         <RoomA2aEditor

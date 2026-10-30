@@ -121,7 +121,14 @@ export function RoomComposer({
         return;
       const start = textarea.current?.selectionStart ?? text.length;
       const end = textarea.current?.selectionEnd ?? start;
-      const command = getMentionCommand(text, start, end);
+      const command = getMentionCommand(
+        text,
+        start,
+        end,
+        mentionMembers.map((candidate) =>
+          roomAgentMention(candidate, mentionMembers),
+        ),
+      );
       const next = insertMention(
         text,
         command?.start ?? start,

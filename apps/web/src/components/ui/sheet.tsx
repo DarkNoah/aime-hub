@@ -22,20 +22,26 @@ export function SheetContent({
   children,
   side = 'right',
   showCloseButton = true,
+  showOverlay = true,
+  container,
   closeLabel,
   ...props
 }: ComponentProps<typeof DialogPrimitive.Content> & {
   side?: keyof typeof sheetSides;
   showCloseButton?: boolean;
+  showOverlay?: boolean;
+  container?: ComponentProps<typeof DialogPrimitive.Portal>['container'];
   closeLabel?: string;
 }) {
   const { t } = useTranslation();
   return (
-    <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay
-        data-slot="sheet-overlay"
-        className="fixed inset-0 z-50 bg-foreground/25 backdrop-blur-sm data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-300 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-300"
-      />
+    <DialogPrimitive.Portal container={container}>
+      {showOverlay && (
+        <DialogPrimitive.Overlay
+          data-slot="sheet-overlay"
+          className="fixed inset-0 z-50 bg-foreground/25 backdrop-blur-sm data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-300 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-300"
+        />
+      )}
       <DialogPrimitive.Content
         data-slot="sheet-content"
         data-side={side}

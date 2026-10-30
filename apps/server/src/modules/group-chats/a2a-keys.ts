@@ -6,6 +6,8 @@ import {
   groupChatA2aMemberCreateSchema,
   groupChatA2aMemberUpdateSchema,
   type GroupChatA2AMember,
+  type GroupChatA2AMemberInput,
+  type GroupChatA2AMemberUpdate,
 } from '@aime/shared/group-chats';
 
 type MemberRow = Omit<
@@ -16,7 +18,7 @@ type MemberRow = Omit<
   lastUsedAt: Date | null;
   revokedAt: Date | null;
 };
-const columns = `id,room_id AS "roomId",name,enabled,key_prefix AS "keyPrefix",created_at AS "createdAt",last_used_at AS "lastUsedAt",revoked_at AS "revokedAt"`;
+const columns = `id,room_id AS "roomId",name,public_origin AS "publicOrigin",description,enabled,key_prefix AS "keyPrefix",created_at AS "createdAt",last_used_at AS "lastUsedAt",revoked_at AS "revokedAt"`;
 const dto = (row: MemberRow): GroupChatA2AMember => ({
   ...row,
   createdAt: row.createdAt.toISOString(),
@@ -54,13 +56,13 @@ export class GroupChatA2aKeys {
       throw new ORPCError('FORBIDDEN');
   }
 
-  async create(userId: string, roomId: string, input: { name: string }) {
+  async create(userId: string, roomId: string, input: GroupChatA2AMemberInput) {
     const body = groupChatA2aMemberCreateSchema.parse(input);
     return this.database.transaction(async (manager) => {
       await this.manage(userId, roomId, manager);
       const apiKey = `room_a2a_${randomBytes(32).toString('base64url')}`;
       const rows: MemberRow[] = await manager.query(
-        `INSERT INTO group_chat_a2a_members(id,room_id,name,key_hash,key_prefix,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING ${columns}`,
+        `INSERT INTO group_chat_a2a_members(id,room_id,name,key_hash,key_prefix,created_by,public_origin,description) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING ${columns}`,
         [
           nanoid(16),
           roomId,
@@ -68,6 +70,8 @@ export class GroupChatA2aKeys {
           keyHash(apiKey),
           apiKey.slice(0, 17),
           userId,
+          body.publicOrigin ?? null,
+          body.description ?? '',
         ],
       );
       return { member: dto(rows[0]), apiKey };
@@ -78,7 +82,7 @@ export class GroupChatA2aKeys {
     userId: string,
     roomId: string,
     memberId: string,
-    input: { name?: string; enabled?: boolean },
+    input: GroupChatA2AMemberUpdate,
   ) {
     const body = groupChatA2aMemberUpdateSchema.parse(input);
     return this.database.transaction(async (manager) => {
@@ -93,8 +97,15 @@ export class GroupChatA2aKeys {
           message: 'API key has been revoked',
         });
       const rows: MemberRow[] = await manager.query(
-        `WITH updated AS (UPDATE group_chat_a2a_members SET name=COALESCE($3,name),enabled=COALESCE($4,enabled) WHERE room_id=$1 AND id=$2 AND deleted_at IS NULL RETURNING ${columns}) SELECT * FROM updated`,
-        [roomId, memberId, body.name ?? null, body.enabled ?? null],
+        `WITH updated AS (UPDATE group_chat_a2a_members SET name=COALESCE($3,name),enabled=COALESCE($4,enabled),public_origin=COALESCE($5,public_origin),description=COALESCE($6,description) WHERE room_id=$1 AND id=$2 AND deleted_at IS NULL RETURNING ${columns}) SELECT * FROM updated`,
+        [
+          roomId,
+          memberId,
+          body.name ?? null,
+          body.enabled ?? null,
+          body.publicOrigin ?? null,
+          body.description ?? null,
+        ],
       );
       return dto(rows[0]);
     });

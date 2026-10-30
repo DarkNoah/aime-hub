@@ -31,12 +31,24 @@ export function getSlashCommand(text: string, start: number, end = start) {
   return { query: text.slice(1, start), end: token.length };
 }
 
-/** Mentions can occur mid-message; two trailing spaces finish a chosen mention. */
-export function getMentionCommand(text: string, start: number, end = start) {
+/** A space after a known mention finishes it, while names may contain spaces. */
+export function getMentionCommand(
+  text: string,
+  start: number,
+  end = start,
+  mentions: readonly string[] = [],
+) {
   if (start !== end) return null;
   const before = text.slice(0, start);
   const match = /(?:^|[\s([{"'“‘，。！？、：；])@([^@\n]*)$/.exec(before);
   if (!match || match[1].includes('  ')) return null;
+  const token = `@${match[1]}`.toLocaleLowerCase();
+  const names = mentions.map((mention) => mention.toLocaleLowerCase());
+  if (
+    !names.some((name) => name.startsWith(token)) &&
+    names.some((name) => token.startsWith(`${name} `))
+  )
+    return null;
   return { query: match[1], start: before.lastIndexOf('@'), end: start };
 }
 
@@ -49,10 +61,11 @@ export function insertMention(
   const prefix = text.slice(0, start);
   const separator =
     prefix && !/[\s([{"'“‘，。！？、：；]$/.test(prefix) ? ' ' : '';
-  const inserted = `${separator}${mention}  `;
+  const suffix = text.slice(end);
+  const inserted = `${separator}${mention}`;
   return {
-    text: prefix + inserted + text.slice(end),
-    caret: prefix.length + inserted.length,
+    text: prefix + inserted + (suffix.startsWith(' ') ? '' : ' ') + suffix,
+    caret: prefix.length + inserted.length + 1,
   };
 }
 

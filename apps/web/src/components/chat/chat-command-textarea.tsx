@@ -66,7 +66,18 @@ export function ChatCommandTextarea({
   const [keyboardSelection, setKeyboardSelection] = useState(false);
   const mentionCommand =
     trigger === '@'
-      ? getMentionCommand(value, selection.start, selection.end)
+      ? getMentionCommand(
+          value,
+          selection.start,
+          selection.end,
+          groups.flatMap((group) =>
+            group.sections.flatMap((section) =>
+              section.items.flatMap((item) =>
+                item.action === 'mention' ? [item.mention] : [],
+              ),
+            ),
+          ),
+        )
       : null;
   const command =
     trigger === '@'

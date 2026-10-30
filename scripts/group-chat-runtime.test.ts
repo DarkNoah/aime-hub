@@ -74,6 +74,7 @@ function fixture(events = [event()], activeUser = true) {
   const disposals: { roomId: string; threadId: string; remove: boolean }[] = [];
   let lifecycle!: GroupChatLifecycle;
   let status = 'idle';
+  let queueCount = 0;
   let claim = true;
   let failure: unknown;
   const runtime = createGroupChatRuntime(
@@ -118,7 +119,7 @@ function fixture(events = [event()], activeUser = true) {
       },
       async validateGroupChatSettings() {},
       async getThread() {
-        return { thread: { status, queueCount: 0 } } as Awaited<
+        return { thread: { status, queueCount } } as Awaited<
           ReturnType<ThreadService['getThread']>
         >;
       },
@@ -149,6 +150,9 @@ function fixture(events = [event()], activeUser = true) {
     setStatus(value: string) {
       status = value;
     },
+    setQueueCount(value: number) {
+      queueCount = value;
+    },
     loseClaim() {
       claim = false;
     },
@@ -178,6 +182,7 @@ test('message events and future plans wake the same bound thread; final content 
   ]);
   await plan.runtime.tick();
   assert.equal(plan.runs[0].threadId, member.threadId);
+  assert.equal(plan.runs[0].input.isImmediate, false);
   assert.match(
     JSON.stringify(plan.runs[0].input.parts),
     /Check the build result/,
@@ -191,8 +196,8 @@ test('message events and future plans wake the same bound thread; final content 
   await plan.runtime.shutdown();
 });
 
-test('busy thread keeps its event pending and a refreshed debounce claim prevents early dispatch', async () => {
-  const f = fixture();
+test('scheduled work waits for the busy thread; stale event versions cannot dispatch', async () => {
+  const f = fixture([event({ kind: 'plan' })]);
   f.setStatus('running');
   await f.runtime.tick();
   assert.equal(f.runs.length, 0);
@@ -204,6 +209,26 @@ test('busy thread keeps its event pending and a refreshed debounce claim prevent
   assert.equal(f.runs.length, 0);
   assert.equal(f.acks.length, 0);
   await f.runtime.shutdown();
+});
+
+test('debounced message events use the immediate queue even while a thread is busy', async () => {
+  for (const status of ['idle', 'pending', 'running']) {
+    const f = fixture();
+    f.setStatus(status);
+    f.setQueueCount(2);
+    await f.runtime.tick();
+    assert.equal(f.runs.length, 1);
+    assert.equal(f.runs[0].input.isImmediate, true);
+    assert.equal(f.acks.length, 1);
+    assert.equal(f.defers.length, 0);
+    await f.runtime.shutdown();
+  }
+  const stale = fixture();
+  stale.loseClaim();
+  await stale.runtime.tick();
+  assert.equal(stale.runs.length, 0);
+  assert.equal(stale.acks.length, 0);
+  await stale.runtime.shutdown();
 });
 
 test('idle events proactively inspect useful work in the original thread without affecting normal configuration', async () => {
@@ -222,7 +247,7 @@ test('idle events proactively inspect useful work in the original thread without
   await f.runtime.shutdown();
 });
 
-test('mention events insert the addressed message into the existing thread once it is free', async () => {
+test('mention events enter the immediate queue of a running thread', async () => {
   const f = fixture([
     event({
       kind: 'task',
@@ -231,10 +256,7 @@ test('mention events insert the addressed message into the existing thread once 
   ]);
   f.setStatus('running');
   await f.runtime.tick();
-  assert.equal(f.runs.length, 0);
-  assert.equal(f.acks.length, 0);
-  f.setStatus('idle');
-  await f.runtime.tick();
+  assert.equal(f.defers.length, 0);
   assert.equal(f.runs.length, 1);
   assert.equal(f.runs[0].threadId, member.threadId);
   assert.match(
@@ -242,7 +264,7 @@ test('mention events insert the addressed message into the existing thread once 
     /message-1 from user Alice/,
   );
   assert.match(JSON.stringify(f.runs[0].input.parts), /@Researcher 请分析/);
-  assert.equal(f.runs[0].input.isImmediate, false);
+  assert.equal(f.runs[0].input.isImmediate, true);
   assert.equal(f.acks.length, 1);
   await f.runtime.shutdown();
 });

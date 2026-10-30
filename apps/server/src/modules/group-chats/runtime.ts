@@ -123,10 +123,12 @@ export function createGroupChatRuntime(
       }
       phase = 'snapshot';
       const snapshot = await threads.getThread(event.actorId, agent.threadId);
+      const isImmediate = event.kind === 'messages' || event.kind === 'task';
       if (
-        snapshot.thread.status === 'running' ||
-        snapshot.thread.status === 'pending' ||
-        snapshot.thread.queueCount
+        !isImmediate &&
+        (snapshot.thread.status === 'running' ||
+          snapshot.thread.status === 'pending' ||
+          snapshot.thread.queueCount)
       ) {
         await rooms.deferEvent(event.id, event.version, undefined, 5_000);
         return;
@@ -146,7 +148,7 @@ export function createGroupChatRuntime(
       await threads.runGroupChat(event.actorId, agent.threadId, {
         ...agent.settings,
         id: roomEventInputId(event.id, event.version),
-        isImmediate: false,
+        isImmediate,
         createdBy: event.actorId,
         createdAt: occurredAt,
         parts: [
