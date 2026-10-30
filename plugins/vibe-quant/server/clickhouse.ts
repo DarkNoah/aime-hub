@@ -142,13 +142,25 @@ export class MarketStore extends ClickHouseClient {
   }
   async orderBooks(engine: Engine, symbols: string[]): Promise<OrderBook[]> {
     if (!symbols.length) return [];
+    const params: Record<string, string> = { engine };
+    // Locate one immutable primary key per symbol before reading depth arrays.
+    // FINAL + LIMIT BY over all history loads/sorts every historical snapshot.
+    // Retries share a key, so only the bounded payload lookup needs FINAL.
+    const latest = [...new Set(symbols)].map((symbol, index) => {
+      params[`symbol${index}`] = symbol;
+      return `(SELECT symbol, receivedAt, snapshotId
+        FROM ${this.table('order_books')}
+        WHERE engine = {engine:String} AND symbol = {symbol${index}:String}
+        ORDER BY receivedAt DESC, snapshotId DESC LIMIT 1)`;
+    });
     const text = await this.request(
       `SELECT symbol, snapshotId, sourceTime, receivedAt, timePrecision,
         bidPrices, bidVolumes, askPrices, askVolumes, volumeUnit, underlying
        FROM ${this.table('order_books')} FINAL
-       WHERE engine = {engine:String} AND symbol IN (SELECT arrayJoin(JSONExtract({symbols:String}, 'Array(String)')))
-       ORDER BY receivedAt DESC, snapshotId DESC LIMIT 1 BY symbol FORMAT JSON`,
-      { engine, symbols: JSON.stringify(symbols) },
+       WHERE engine = {engine:String}
+         AND (symbol, receivedAt, snapshotId) IN (${latest.join(' UNION ALL ')})
+       ORDER BY receivedAt DESC, snapshotId DESC FORMAT JSON`,
+      params,
     );
     const saved: OrderBook[] = JSON.parse(text).data;
     return this.config.clickhouseReadOnly
