@@ -72,6 +72,7 @@ class CustomStrategy(Strategy):
 
     def on_stop(self, ctx, reason):
         # 可选清理逻辑；即使不使用 reason，重写时也必须接收这个参数。
+        # 结束诊断用 ctx.log("research_diagnostics", reason=reason)，不能用 ctx.emit。
         pass
 ```
 
@@ -84,9 +85,36 @@ class CustomStrategy(Strategy):
 | `quote(symbol)` / `instrument(symbol)`         | 最新已观察报价／本次运行使用的交易规则。                                                                  |
 | `resolve_contract(symbol)`                     | 股票返回自身；主连返回当时已观察到的真实合约；没有历史映射则报错。                                        |
 | `ctx.orders.target_position(symbol, quantity)` | 以实际合约下达目标净持仓。股票数量为股，期货为手。                                                        |
-| `ctx.emit(kind, **payload)`                    | 发出带稳定 ID 的业务信号，可附加 `stop_loss`、`take_profit`、`source_symbol` 等展示字段。                 |
-| `ctx.account` / `ctx.position(symbol)`         | 本次模拟账户与仓位；monitor 不连接券商账户。                                                              |
+| `ctx.emit(kind, **payload)`                    | 在非预热的活动事件回调中发出带稳定 ID 的业务信号；不能在 `on_start` 或 `on_stop` 中调用。                 |
+| `ctx.log(message, **fields)`                   | 写入结果 `logs`；可在初始化和结束阶段记录诊断信息。                                                      |
+| `ctx.account`                                 | 本次模拟账户字典；monitor 不连接券商账户。                                                               |
+| `ctx.position(symbol) -> int`                 | 有符号净持仓整数：正数为多仓、负数为空仓、0 为无持仓；股票单位为股，期货为手，点数模式为 -1/0/1。          |
 | `ctx.params` / `ctx.state` / `ctx.now`         | 参数、可恢复状态、当前事件可用时间。时间统一为 UTC epoch 秒。                                             |
+
+### 持仓数量与入场价格
+
+内置和天勤回测的 `ctx.position(symbol)` 都返回整数，不返回 Position 对象、字典或 `None`。不要访问 `quantity`、`qty`、`net_quantity` 等属性，也不要逐个尝试这些字段，否则即使没有持仓、返回 `0` 时也会误报“没有净持仓字段”。直接读取并比较即可：
+
+```python
+quantity = ctx.position(symbol)
+if quantity > 0:
+    pass  # 持有多仓
+elif quantity < 0:
+    pass  # 持有空仓
+else:
+    pass  # 无持仓
+```
+
+SDK 当前没有公开的持仓均价读取接口；`ctx.position(symbol)` 上也没有 `average_price`、`avg_price` 或 `entry_price`。需要价格时，在 `on_fill(self, ctx, fill)` 中按实际成交维护 `ctx.state`，以支持检查点恢复。`fill` 是字典，常用字段如下：
+
+| 字段 | 含义 |
+| --- | --- |
+| `fill["symbol"]` | 本次成交标的。 |
+| `fill["price"]` | 本次实际成交价。 |
+| `fill["quantity"]` | 有符号成交数量，买入为正、卖出为负；不等于成交后的净持仓。 |
+| `fill["offset"]` | `"open"` 或 `"close"`，用于区分开仓和平仓。 |
+
+单次单单位开仓可记录该笔开仓的 `fill["price"]`，平仓后清除。加仓、部分成交或部分平仓需要按数量及策略使用的成本口径维护成交台账；最后一笔成交价不能直接当作持仓均价，也不能用发出信号时的 K 线收盘价冒充实际入场价。
 
 ### 回调签名
 
@@ -104,6 +132,14 @@ class CustomStrategy(Strategy):
 | `on_stop(self, ctx, reason)` | 结束清理；`reason` 为结束原因字符串，正常结束通常是 `succeeded`，取消时是 `用户中止了操作`，失败时是错误信息。 |
 
 **`on_stop` 不能写成 `def on_stop(self, ctx):`。** runtime 调用 `strategy.on_stop(ctx, reason)`，Python 还会自动传入 `self`，所以方法须接收三个参数。漏掉 `reason` 会报 `on_stop() takes 2 positional arguments but 3 were given`；无需清理逻辑时可省略整个方法。结束回调中不能下单或发出交易信号。
+
+`on_stop` 执行时活动事件已清空，不能调用 `ctx.emit(...)`、`ctx.orders.target_position(...)` 或 `ctx.set_risk_levels(...)`。在这里调用 `ctx.emit` 也可能报 `Signals cannot be emitted during warm-up`，此时表示结束阶段没有活动事件，并非历史预热尚未完成。结束诊断应写入日志：
+
+```python
+def on_stop(self, ctx, reason):
+    ctx.log("research_diagnostics", reason=reason,
+            final_quantity=ctx.position(ctx.params["symbol"]))
+```
 
 预热只更新数据窗口；`on_ready` 在第一个有效计算事件前调用。首版 live 使用收盘 Bar 和 Quote，没有逐笔 Tick 策略接口。
 

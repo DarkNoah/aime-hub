@@ -17,6 +17,7 @@ import { optimizationSchema } from '../../server/strategies/optimization.js';
 import type { OptimizationReport } from '../../optimization-types.js';
 import { quantToolContext, type QuantDependencies } from './context.js';
 import { BacktestCompareTool } from './backtest-compare.js';
+import { adoptBacktest } from './backtest-background.js';
 
 function runView(run: BacktestRun): BacktestRun {
   return {
@@ -118,10 +119,18 @@ export class BacktestStartTool extends PluginTool {
       id: optimize
         ? 'plugin_vibe_quant_backtest_optimize'
         : 'plugin_vibe_quant_backtest_start',
-      title: optimize ? '调优参数并创建新草稿' : '提交策略回测',
+      title: optimize ? '提交后台调优任务' : '提交后台回测任务',
+      background: {
+        enabled: true,
+        defaultDisposition: 'deferred',
+        // Includes queueing, snapshot preparation and up to 65 minutes of optimization.
+        timeoutMs: 4 * 60 * 60 * 1000,
+        // Enqueue is not idempotent: a retry must never create a duplicate run.
+        maxRetries: 0,
+      },
       description: optimize
-        ? '管理员提交独立的 Optuna 参数调优任务，成功后以最佳参数自动新建一个未发布的策略草稿，不覆盖原策略。提供 version_id、symbol、start、end、rules 和 optimization.search_space。默认 30 次、600 秒、TPE 种子 42；可设置 validation_start 留出验证。调优不列入普通回测历史。返回 run_id 后用 backtest_status/result/cancel 查询或取消，完成后 optimization_draft_id 指向新草稿。'
-        : '管理员提交历史回测。默认内置引擎需要 version_id、symbol、start、end、rules。backtest_engine=tqsdk 使用天勤历史行情和 TqSim，仅支持单个期货实际合约；rules 可省略，tq_options 可覆盖每手手续费和保证金。默认资金 100 万、1 分钟 K 线、滑点 1 tick；内置引擎参与率 10%。立即返回队列记录，随后查询 status/result。',
+        ? '管理员提交独立的 Optuna 参数调优任务，默认由原生后台任务执行，不阻塞对话；后台任务持续到调优结束，成功后以最佳参数自动新建一个未发布的策略草稿，不覆盖原策略。提供 version_id、symbol、start、end、rules 和 optimization.search_space。默认 30 次、600 秒、TPE 种子 42；可设置 validation_start 留出验证。调优不列入普通回测历史。告知用户后台任务已启动，不在本轮持续轮询；收到完成结果后用 backtest_result 读取报告，optimization_draft_id 指向新草稿。后续按需用 backtest_status/result/cancel 查询或取消回测 run_id。'
+        : '管理员提交历史回测，默认由原生后台任务执行，不阻塞对话；后台任务持续到回测结束。默认内置引擎需要 version_id、symbol、start、end、rules。backtest_engine=tqsdk 使用天勤历史行情和 TqSim，仅支持单个期货实际合约；rules 可省略，tq_options 可覆盖每手手续费和保证金。默认资金 100 万、1 分钟 K 线、滑点 1 tick；内置引擎参与率 10%。告知用户后台任务已启动，不在本轮持续轮询；收到完成结果后用 backtest_result 读取指标和日志。后续按需用 backtest_status/result/cancel 查询或取消回测 run_id。',
       inputSchema: optimize
         ? agentBacktestSchema.extend({ optimization: optimizationSchema })
         : agentBacktestSchema,
@@ -150,7 +159,12 @@ export class BacktestStartTool extends PluginTool {
             }),
             signal,
           );
-          return { run: runView(run) };
+          adoptBacktest(execution, deps.records, actor.userId, run, runView);
+          return {
+            run_id: run.id,
+            message: `${optimize ? '调优' : '回测'}任务已提交。后续可用 backtest_status/result 查询回测 run_id，或用 backtest_cancel 取消。`,
+            run: runView(run),
+          };
         }),
     });
     super(tool);
@@ -193,7 +207,7 @@ export class BacktestStatusTool extends PluginTool {
       id: 'plugin_vibe_quant_backtest_status',
       title: '查询回测进度',
       description:
-        '查询共享回测状态。wait=true 时最多等待 10 秒或直至结束，仍在运行则继续查询同一 ID。中止此等待不会取消后台回测。',
+        '按需查询共享回测或调优任务状态，默认立即返回。wait=true 时最多等待 10 秒或直至结束；原生后台任务会跟踪完成，无需持续轮询。中止此等待不会取消后台回测。',
       inputSchema: z.object({
         run_id: z.uuid(),
         wait: z.boolean().default(false),

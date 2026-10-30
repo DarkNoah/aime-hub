@@ -19,6 +19,7 @@ import {
   strategyStatusSchema,
 } from './schema.js';
 import { enqueueBacktest } from './enqueue.js';
+import { backtestMarketRoutes } from './market-routes.js';
 import {
   replayQuerySchema,
   replayWindow,
@@ -53,6 +54,7 @@ export function strategyRoutes(
     );
     return c.json({ code: 'STRATEGY_SERVICE_UNAVAILABLE' }, 503);
   });
+  api.route('/', backtestMarketRoutes(getRecords, get));
   api.get('/template', async (c) =>
     c.json({
       canRun: c.get('isAdmin'),

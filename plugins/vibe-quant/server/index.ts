@@ -28,6 +28,7 @@ import { readVolumeProfile, volumeProfileQuery } from './volume-profile.js';
 import { TradeService } from './trades/service.js';
 import { MonitorStore } from './signals/store.js';
 import { SignalWorker } from './signals/worker.js';
+import { signalServiceId } from './signals/service-scope.js';
 import { FactorStore } from './factors/store.js';
 import { FactorService } from './factors/service.js';
 import { factorRoutes } from './factors/routes.js';
@@ -300,7 +301,10 @@ export default function createServer(context: PluginContext): PluginServer {
         config,
       });
       await migrateStrategies(context.database, records);
-      monitors = new MonitorStore(config);
+      monitors = new MonitorStore(
+        config,
+        await signalServiceId(context.database),
+      );
       await monitors.initialize();
       news = new NewsStore(config);
       await news.initialize();

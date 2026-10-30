@@ -19,7 +19,7 @@ export class StrategyGuideTool extends PluginTool {
       id: 'plugin_vibe_quant_strategy_guide',
       title: '策略编写指南',
       description:
-        '读取当前 quant_sdk 文档、完整回调签名、空白 Python 模板和回测权限。编写或修改策略前先调用；on_stop 必须接收 self、ctx、reason。',
+        '读取当前 quant_sdk 文档、完整回调签名、持仓与成交接口、空白 Python 模板和回测权限。编写或修改策略前先调用；ctx.position(symbol) 返回整数净持仓，on_stop 必须接收 self、ctx、reason。',
       inputSchema: z.object({}),
       execute: (_input, execution) =>
         run(execution, async (_deps, actor, signal) => {
@@ -47,8 +47,17 @@ export class StrategyGuideTool extends PluginTool {
               ],
               rules:
                 '所有回调均为同步实例方法，可只实现需要的回调，其余继承 Strategy 的空实现。重写时按上述签名接收 runtime 传入的全部位置参数；即使参数未使用也不能省略。',
+              on_fill:
+                'fill 为字典：symbol 是成交标的，price 是本次实际成交价，quantity 是有符号成交数量（买入为正、卖出为负），offset 为 open 或 close。需要入场价或持仓均价时，按成交维护 ctx.state；不能把最后一笔成交价直接当作多批次持仓均价。',
               on_stop:
-                'runtime 调用 strategy.on_stop(ctx, reason)，self 由 Python 自动传入。必须写 def on_stop(self, ctx, reason):，不能写 def on_stop(self, ctx):。reason 为结束原因字符串：正常结束通常为 succeeded，取消时为用户中止了操作，失败时为错误信息；无需清理逻辑时可省略整个 on_stop 方法。',
+                'runtime 调用 strategy.on_stop(ctx, reason)，self 由 Python 自动传入。必须写 def on_stop(self, ctx, reason):，不能写 def on_stop(self, ctx):。reason 为结束原因字符串：正常结束通常为 succeeded，取消时为用户中止了操作，失败时为错误信息。结束阶段没有活动行情事件，不能调用 ctx.emit、ctx.orders.target_position 或 ctx.set_risk_levels；诊断信息用 ctx.log(message, **fields)，例如 ctx.log("research_diagnostics", reason=reason)。无需清理逻辑时可省略整个 on_stop 方法。',
+            },
+            context_api: {
+              position:
+                'ctx.position(symbol) -> int，返回有符号净持仓：正数为多仓、负数为空仓、0 为无持仓。股票单位为股，期货为手，点数模式为 -1/0/1。内置和天勤回测均遵守此接口；它不是 Position 对象或字典，也不是 None，不存在 quantity、qty、net_quantity、average_price、avg_price、entry_price 等字段。直接使用 quantity = ctx.position(symbol)。',
+              entry_price:
+                'SDK 当前没有公开的持仓均价读取接口。单次单单位开仓可在 on_fill 中将 fill["price"] 保存到 ctx.state，并在平仓后清除；加仓、部分成交或部分平仓须按数量及策略使用的成本口径维护成交台账。不要从 ctx.position(symbol) 猜测入场价格字段。',
+              log: 'ctx.log(message, **fields) 写入结果 logs，可在 on_start/on_stop 中记录诊断；ctx.emit 仅能在非预热的活动事件回调中使用，结束时即使报 Signals cannot be emitted during warm-up，也应改用 ctx.log。',
             },
             reference,
             template: {
@@ -56,7 +65,7 @@ export class StrategyGuideTool extends PluginTool {
               parameters: {},
             },
             workflow:
-              'create/update → publish → backtest_start → backtest_status → backtest_result。策略及回测在同一数据库内共享，已发布版本不可变。',
+              'create/update → publish → backtest_start（默认原生 background deferred，不阻塞对话，不在本轮持续轮询）。收到后台完成结果的 run_id 后调用 backtest_result；中途按需 backtest_status，取消用原生后台任务入口或 backtest_cancel。原生 taskId 与回测 run_id 不同。策略及回测在同一数据库内共享，已发布版本不可变。',
             backtest: {
               engines: {
                 builtin: '默认；已保存历史快照与内置 PaperBroker。',

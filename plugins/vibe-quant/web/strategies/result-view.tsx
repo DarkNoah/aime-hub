@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { pluginRequest } from '@app/plugin-sdk/web';
 import {
   Badge,
@@ -40,7 +40,7 @@ import {
 import { exitReasonLabel } from '../trade-exit';
 import { PeriodReturns } from './period-returns';
 const EquityChart = lazy(() => import('./equity-chart'));
-const TradeView = lazy(() => import('./trade-view'));
+const BacktestMarketChart = lazy(() => import('./backtest-market-chart'));
 const metricLabels: [string, string, boolean?][] = [
   ['total_pnl', '总收益（元）'],
   ['total_return', '收益率', true],
@@ -81,7 +81,10 @@ export function ResultView({
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const [page, setPage] = useState(0);
-  const [trade, setTrade] = useState<TradeRecord | null>(null);
+  const [selection, setSelection] = useState<{ trade: TradeRecord } | null>(
+    null,
+  );
+  const marketSection = useRef<HTMLElement>(null);
   useEffect(() => {
     const abort = new AbortController();
     pluginRequest<{
@@ -343,6 +346,22 @@ export function ResultView({
               </p>
             )}
           </section>
+          <section
+            ref={marketSection}
+            aria-label="回测行情"
+            className="min-w-0 scroll-mt-4"
+          >
+            <Suspense fallback={<Skeleton className="h-[640px]" />}>
+              <BacktestMarketChart
+                key={run.id}
+                pluginId={pluginId}
+                run={run}
+                selection={selection}
+                riskLevels={result.risk_levels}
+                onClearSelection={() => setSelection(null)}
+              />
+            </Suspense>
+          </section>
           <Tabs defaultValue="trades">
             <TabsList>
               <TabsTrigger value="trades">
@@ -384,7 +403,14 @@ export function ResultView({
                       {sortedTrades
                         .slice(page * 20, (page + 1) * 20)
                         .map((item) => (
-                          <TableRow key={item.id}>
+                          <TableRow
+                            key={item.id}
+                            data-state={
+                              selection?.trade.id === item.id
+                                ? 'selected'
+                                : undefined
+                            }
+                          >
                             <TableCell>
                               <div className="font-mono text-xs">
                                 {item.symbol}
@@ -469,7 +495,18 @@ export function ResultView({
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => setTrade(item)}
+                                onClick={() => {
+                                  setSelection({ trade: item });
+                                  marketSection.current?.scrollIntoView({
+                                    block: 'start',
+                                    behavior: window.matchMedia(
+                                      '(prefers-reduced-motion: reduce)',
+                                    ).matches
+                                      ? 'auto'
+                                      : 'smooth',
+                                  });
+                                }}
+                                aria-pressed={selection?.trade.id === item.id}
                                 aria-label={`${item.status === 'open' ? '查看入场' : '回放'} ${item.symbol} ${dateTime(item.entry_time)} 的交易`}
                               >
                                 <ChartCandlestick className="size-4" />
@@ -578,20 +615,6 @@ export function ResultView({
             </p>
           )}
         </>
-      )}
-      {trade && (
-        <Suspense fallback={<Skeleton className="h-72" />}>
-          <TradeView
-            key={`${run.id}:${trade.id}`}
-            pluginId={pluginId}
-            runId={run.id}
-            trade={trade}
-            points={points}
-            native={native}
-            riskLevels={result?.risk_levels}
-            onClose={() => setTrade(null)}
-          />
-        </Suspense>
       )}
     </div>
   );

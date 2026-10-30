@@ -10,6 +10,7 @@ import type { StrategySignal } from '../../signal-types.js';
 import { monitorExecutionModel } from '../../signal-types.js';
 import { strategyNotifications } from '../../strategy-notifications.js';
 import type { StrategyStore } from '../strategies/store.js';
+import { StrategyError } from '../strategies/schema.js';
 import { ensurePython } from '../python.js';
 import type { MonitorStore, StoredMonitor } from './store.js';
 import { runSignalProcess } from './process.js';
@@ -47,7 +48,9 @@ type Running = {
   promise: Promise<void>;
   status: 'starting' | 'running';
   message: string;
+  pauseReason?: string;
 };
+type MonitorUser = { id: string; role: string | null; banned: boolean | null };
 export type MarketRequest = (
   owner: string,
   path: string,
@@ -79,7 +82,8 @@ export class SignalWorker {
     this.timer = setTimeout(() => {
       this.ticking = this.tick()
         .catch(() => {
-          for (const run of this.current.values()) run.abort.abort();
+          for (const run of this.current.values())
+            this.pause(run, '策略状态或账号权限校验失败，已暂停并等待重试');
         })
         .finally(() => {
           this.ticking = undefined;
@@ -90,32 +94,60 @@ export class SignalWorker {
   async stop() {
     this.stopped = true;
     clearTimeout(this.timer);
-    for (const run of this.current.values()) run.abort.abort();
+    for (const run of this.current.values())
+      this.pause(run, '策略监听服务已停止');
     await this.ticking;
     await Promise.allSettled(
       [...this.current.values()].map((run) => run.promise),
     );
   }
-  private async allowed(owner: string) {
+  private pause(run: Running, reason: string) {
+    run.pauseReason ??= reason;
+    run.abort.abort();
+  }
+  private async user(owner: string): Promise<MonitorUser | undefined> {
     const [user] = await this.context.database.query(
-      "SELECT id FROM users WHERE id=$1 AND banned IS NOT TRUE AND 'admin'=ANY(string_to_array(COALESCE(role,''),','))",
+      'SELECT id, role, banned FROM users WHERE id=$1',
       [owner],
     );
-    return !!user;
+    return user;
   }
-  private async valid(row: StoredMonitor) {
-    const [current, strategy, allowed] = await Promise.all([
-      this.monitors.get(row.id, row.user_id),
-      this.records.storedStrategy(row.strategy_id),
-      this.allowed(row.user_id),
+  private async pauseReason(row: StoredMonitor): Promise<string | undefined> {
+    const current = await this.monitors
+      .get(row.id, row.user_id)
+      .catch((error) => {
+        if (
+          error instanceof StrategyError &&
+          error.code === 'MONITOR_NOT_FOUND'
+        )
+          return undefined;
+        throw error;
+      });
+    if (!current || current.deleted) return '该策略监听已移除';
+    if (current.service_id !== this.monitors.serviceId)
+      return '该策略监听由其他服务负责运行';
+    if (!current.enabled) return '该策略监听已暂停，请开启计算开关';
+    const [strategy, user] = await Promise.all([
+      this.records.storedStrategy(current.strategy_id).catch((error) => {
+        if (
+          error instanceof StrategyError &&
+          error.code === 'STRATEGY_NOT_FOUND'
+        )
+          return undefined;
+        throw error;
+      }),
+      this.user(current.user_id),
     ]);
-    return (
-      current.enabled &&
-      !current.deleted &&
-      strategy.enabled &&
-      (strategy.status ?? 'active') === 'active' &&
-      allowed
-    );
+    if (!strategy) return '策略不存在，无法继续计算';
+    if (strategy.status === 'deleted') return '策略已删除，请先恢复策略';
+    if (strategy.status === 'archived') return '策略已归档，请先取消归档';
+    if (!strategy.enabled) return '策略已停用，请先在策略管理中启用';
+    if ((strategy.status ?? 'active') !== 'active')
+      return '策略状态异常，无法继续计算';
+    if (!user) return '加载该策略的账号已被删除';
+    if (user.banned) return '加载该策略的账号已被封禁';
+    if (!user.role?.split(',').includes('admin'))
+      return '加载该策略的账号已无管理员权限，无法运行策略';
   }
   private async tick() {
     if (this.stopped) return;
@@ -128,6 +160,7 @@ export class SignalWorker {
           (row) =>
             row.enabled &&
             !row.deleted &&
+            (!row.service_id || row.service_id === this.monitors.serviceId) &&
             (row.config.simulation_engine === 'tqsdk' ||
               row.engine === this.status().engine),
         )
@@ -135,12 +168,26 @@ export class SignalWorker {
     );
     await Promise.all(
       [...this.current].map(async ([id, run]) => {
-        const row = candidates.get(id);
+        // Read disabled rows as well so their actual stop reason is retained.
+        const row = rows.find((item) => item.id === id);
+        const reason = !row ? '该策略监听已移除' : await this.pauseReason(row);
+        if (reason) {
+          this.pause(run, reason);
+          return;
+        }
+        if (!candidates.has(id)) {
+          this.pause(run, '行情引擎已切换，策略监听已停止');
+          return;
+        }
         if (
-          !row ||
-          (this.status().state === 'standby' &&
-            row.config.simulation_engine !== 'tqsdk') ||
-          !(await this.valid(row)) ||
+          this.status().state === 'standby' &&
+          row!.config.simulation_engine !== 'tqsdk'
+        ) {
+          this.pause(run, '行情采集由其他服务接管，等待恢复实时计算');
+          return;
+        }
+        if (
+          !run.abort.signal.aborted &&
           !(await this.monitors.heartbeat(
             id,
             run.token,
@@ -148,10 +195,10 @@ export class SignalWorker {
             run.message,
           ))
         )
-          run.abort.abort();
+          this.pause(run, '实时计算租约已失效，已停止本次计算');
       }),
     );
-    for (const row of candidates.values()) {
+    for (let row of candidates.values()) {
       if (
         this.status().state === 'standby' &&
         row.config.simulation_engine !== 'tqsdk'
@@ -163,14 +210,27 @@ export class SignalWorker {
         (this.retry.get(row.id) ?? 0) > Date.now()
       )
         continue;
+      // An unknown user on THIS host does not revoke a different host's user.
+      // Legacy tasks can only be adopted after finding the user locally. Once
+      // bound, even identical user IDs in independent databases stay isolated.
+      if (!row.service_id) {
+        if (!(await this.user(row.user_id))) continue;
+        const bound = await this.monitors.bindService(row);
+        if (!bound) continue;
+        row = bound;
+      }
+      if (this.stopped) break;
       const token = randomUUID();
       if (!(await this.monitors.acquire(row.id, token))) continue;
-      if (this.stopped || !(await this.valid(row))) {
+      const reason = this.stopped
+        ? '策略监听服务已停止'
+        : await this.pauseReason(row);
+      if (reason || this.stopped) {
         await this.monitors.heartbeat(
           row.id,
           token,
           'paused',
-          '策略已停用、归档或运行权限已撤销',
+          reason ?? '策略监听服务已停止',
           undefined,
           true,
         );
@@ -193,7 +253,7 @@ export class SignalWorker {
               token,
               run.abort.signal.aborted ? 'paused' : 'error',
               run.abort.signal.aborted
-                ? '实时计算已停止'
+                ? (run.pauseReason ?? '实时计算已停止')
                 : error instanceof Error
                   ? error.message
                   : '实时计算失败',
@@ -389,7 +449,9 @@ export class SignalWorker {
         }
         if (message.kind === 'signal') {
           const raw = signalSchema.parse(message.signal);
-          if (!(await this.valid(row))) throw new Error('实时监控已停用');
+          const reason = await this.pauseReason(row);
+          if (reason) this.pause(run, reason);
+          signal.throwIfAborted();
           if (
             !(await this.monitors.heartbeat(
               row.id,

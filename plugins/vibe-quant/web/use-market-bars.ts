@@ -53,6 +53,7 @@ export function useMarketBars({
   retry,
   barsPath,
   initialTime = null,
+  live = true,
 }: {
   pluginId: string;
   symbol: string;
@@ -60,9 +61,10 @@ export function useMarketBars({
   intraday: boolean;
   identity: string;
   retry: number;
-  /** An authorized trade uses the same market history reader without requiring a watchlist entry. */
+  /** An authorized backtest uses the same history reader without a watchlist entry. */
   barsPath?: string;
   initialTime?: number | null;
+  live?: boolean;
 }) {
   const [view, setView] = useState(() => emptyView(identity));
   const session = useRef<Session | null>(null);
@@ -136,7 +138,7 @@ export function useMarketBars({
             });
         }
       }
-      if (!active.disposed)
+      if (!active.disposed && live)
         timer = setTimeout(() => void poll(), document.hidden ? 10000 : 3000);
     }
     if (symbol) {
@@ -161,6 +163,7 @@ export function useMarketBars({
     retry,
     barsPath,
     initialTime,
+    live,
   ]);
 
   function current() {
@@ -172,7 +175,7 @@ export function useMarketBars({
 
   async function navigate(time: number | null): Promise<boolean> {
     const active = current();
-    if (!active || active.navigating) return false;
+    if (!active) return false;
     const revision = ++active.revision;
     active.navigating = true;
     focus.current = time;
@@ -271,7 +274,7 @@ export function useMarketBars({
         bars: mergeBars(active.view.bars, data),
         [hasKey]: data.length === BAR_PAGE_SIZE,
         // Once the forward page reaches the live tail, polling can safely resume.
-        ...(direction === 'after' && data.length < BAR_PAGE_SIZE
+        ...(live && direction === 'after' && data.length < BAR_PAGE_SIZE
           ? { historical: false }
           : {}),
       });

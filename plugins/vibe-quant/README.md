@@ -53,6 +53,10 @@ RSS 使用宿主的安全 HTTP 传输（逐跳地址校验、响应体大小限�
 
 采集订阅来自共享 ClickHouse 中所有用户启用标的的并集，因此其他服务添加自选也会被入库服务采集。多个入库服务按引擎竞争共享租约，只有持有租约的实例可写入行情；不落库服务各自采集实时数据，并单独保存运行状态。租约、订阅上限检查使用同一服务器全局查询 ID 序列化单条条件插入，市场数据写入再次校验租约。此机制不会清理既有行情，也不承诺阻止绕过插件的外部写入。
 
+策略监听按宿主用户库隔离执行权限。PostgreSQL 的 `plugin_vibe_quant_signal_service` 保存稳定服务标识，重启及共用同一用户库的副本沿用该标识；新监听将其保存到 ClickHouse `quant_signal_monitors.payload.service_id`。执行器只抢占属于本服务的任务，其他服务不会因自己的用户库中缺少加载者或角色不同而覆盖其运行状态。旧监听没有服务标识时，仅找到对应本地用户的服务可以通过版本比较补齐归属，之后不再自动变更。旧数据若在不同用户库中存在相同用户 ID，无法还原原始来源，由首次成功补齐的服务负责；独立部署若复制整个 PostgreSQL，应为副本重新生成服务标识。所有共用 ClickHouse 的服务均需完成数据库迁移并升级重启，旧执行器不会识别新归属字段。
+
+监听暂停时分别显示策略停用、归档、删除、账号删除、账号封禁或管理员权限丢失的具体原因；权限由任务所属服务检查。手动暂停计算也有独立提示，账号和策略恢复可运行后会自动重试。
+
 ## 状态存储与旧数据迁移
 
 以下表位于 `clickhouseDatabase` 指定的数据库中，不存储插件配置对象或连接凭据。运行状态保留模式、交易窗口等展示字段。
@@ -304,13 +308,20 @@ QUANT_STRATEGY_INTEGRATION=1 node --import dotenv/config --import tsx --test plu
 | `strategy_create`、`strategy_update`    | 创建草稿、按 revision 更新；支持启停，省略字段保留原值             |
 | `strategy_versions`、`strategy_publish` | 查看版本摘要、固定当前草稿版本                                     |
 | `backtest_start`、`backtest_list`       | 提交回测、分页读取历史记录                                         |
-| `backtest_status`、`backtest_result`    | 等待进度、指标与说明、分页读取交易/委托/成交/信号/日志/权益/风险线 |
+| `backtest_status`、`backtest_result`    | 即时查询进度、指标与说明、分页读取交易/委托/成交/信号/日志/权益/风险线 |
 | `backtest_compare`                      | 同一策略不同版本的整体指标、逐年/逐月收益及中文描述对比            |
 | `backtest_optimize`                     | 提交独立的 Optuna 调优任务，成功后创建新的策略草稿                 |
 | `backtest_cancel`                       | 取消排队或运行中的回测                                             |
 | `news_search`、`news_read`              | 搜索已采集资讯、读取正文及来源；采集关闭后仍可读取已有数据         |
+| `factor_guide`、`factor_read`           | 因子 SDK、模板、列表、草稿、版本和分析摘要                         |
+| `factor_save`、`factor_publish`        | 保存因子草稿、发布不可变因子版本                                   |
+| `factor_analyze`                       | 对已采集期货日线执行横截面因子分析                                 |
 
-典型流程是 `guide → list/read → create/update → publish → backtest_start → status → result`。创建策略只需 `name`、`source`，`parameters` 默认空对象；更新传 `strategy_id`、`revision` 和要改的字段，`source`、`parameters` 直接放在顶层，无需 `draft`。省略字段保留原值，`parameters` 如提供则整体替换。读取结果仍保留 `strategy.draft` 结构。
+典型流程是 `guide → list/read → create/update → publish → backtest_start（原生后台执行）→ 完成后 result`，中途按需调用 status。创建策略只需 `name`、`source`，`parameters` 默认空对象；更新传 `strategy_id`、`revision` 和要改的字段，`source`、`parameters` 直接放在顶层，无需 `draft`。省略字段保留原值，`parameters` 如提供则整体替换。读取结果仍保留 `strategy.draft` 结构。
+
+`backtest_start` 和 `backtest_optimize` 使用 `createTool({ background: { enabled: true, defaultDisposition: 'deferred', timeoutMs: 14400000, maxRetries: 0 } })`。宿主的 Mastra 后台任务管理器已启用，聊天先收到原生任务确认并可继续响应；工具通过 `execution.background.adopt()` 将已有回测队列任务的完成与取消交给原生任务管理器。原生任务持续到回测结束，进度包含回测 `run_id`，失败会标记原生任务失败；取消或超时会向回测队列提交取消请求。4 小时上限包含排队、准备数据及执行；Python Worker 原有执行时限仍适用。关闭自动重试是为了避免重复入队。
+
+原生 `taskId` 与业务回测 `run_id` 是不同 ID：聊天后台任务入口使用 `taskId`，`backtest_status/result/cancel` 使用 `run_id`。宿主的 `untilIdle` 会处理后台完成结果；Agent 不需要循环调用状态工具。`backtest_status` 默认只读取一次当前状态，仍兼容显式 `wait=true` 最多等待 10 秒。直接调用工具且没有原生后台上下文时，仍只返回入队记录 `{ run_id, message, run }`，后续可按需查询。这里只调整策略回测与调优，`factor_analyze` 仍同步执行。
 
 版本效果对比：先用 `backtest_list` 找到同一策略各版本已完成的普通回测，调用 `backtest_compare({"run_ids":["版本1回测ID","版本2回测ID"]})`，每个版本选一条，第一条作为差值基准，支持多个版本。返回 `metrics`（总收益、年化、回撤、夏普、胜率、PF 等）、`yearly`、`monthly` 及可直接阅读的中文 `description`；每项含原值、相对基准的差值和描述。结构化收益率及其差值使用小数比例，描述用百分比/百分点；点数回测使用点，不转换成资金收益率。年度/月度直接采用原回测报告，按交易日所属期间对齐，不把月收益率相加作为年收益率；缺失期间为 null，首尾部分年/月不折算成完整期间。
 
@@ -322,10 +333,111 @@ QUANT_STRATEGY_INTEGRATION=1 node --import dotenv/config --import tsx --test plu
 
 资讯查询无需策略指南：`news_search` 可直接留空查看最新资讯，或传 `query` 和可选行业名称/`industry` key，每页 20 条，用 `next_cursor` 继续。把返回的资讯 `id` 传给 `news_read.article_id` 读取正文；返回原文链接、来源、发布时间、采集时间及正文状态，不触发额外抓取。引用时区分发布时间与采集时间，说明正文缺失、截断或同步关闭的限制。
 
-工具以当前消息作者的可信 `userId` 校验登录、记录创建者或任务提交者，每次执行检查账号和插件状态；策略和关联回测共享访问；Python 回测沿用 HTTP 接口的管理员限制，并重新查询账号角色。工具自动出现在后台工具配置中，可单独启停；聊天使用已有通用工具结果展示。中止工具等待会立即返回“用户中止了操作”；已提交的回测需通过 `backtest_cancel` 明确取消，提交过程中延迟写入的任务会在检测到中止后补充取消。数据库写入如已提交仍可能保留，恢复操作前应重新读取状态。
+工具以当前消息作者的可信 `userId` 校验登录、记录创建者或任务提交者，每次执行检查账号和插件状态；策略和关联回测共享访问；Python 回测沿用 HTTP 接口的管理员限制，并重新查询账号角色。工具自动出现在后台工具配置中，可单独启停；聊天使用已有通用工具结果及原生后台任务展示。中止工具读取会立即返回“用户中止了操作”；停止前台对话不会取消已提交的回测，需通过原生后台任务入口或 `backtest_cancel` 明确取消。提交过程中延迟写入的任务会在检测到中止后补充取消。数据库写入如已提交仍可能保留，恢复操作前应重新读取状态。
+
+### 工具输入参数完整说明
+
+以下为 `mastra/index.ts` 注册的 **22 个工具**，省略公共 ID 前缀 `plugin_vibe_quant_`。`?` 表示可省略，`=值` 表示省略时的默认值；`object` 表示 JSON 对象。标记必填以工具输入为准，额外业务校验见下文。所有工具都要求登录、账号可用且插件启用；`backtest_start`、`backtest_optimize`、`factor_save`、`factor_publish`、`factor_analyze` 另要求管理员。
+
+| 工具 | 输入参数 | 解析与行为 |
+| --- | --- | --- |
+| `strategy_guide` | `{}` | 读取 SDK、Python 模板、回调签名和执行权限；编写策略前调用 |
+| `instrument_search` | `query: string=""`；`symbol?: string` | 有非空 `symbol` 时精确读取，忽略 `query`；否则按关键词搜索当前行情引擎目录，不提供完整费用规则 |
+| `strategy_list` | `query: string=""`；`offset: integer=0` | 按名称/描述筛选，offset ≥ 0，每页 50 条，返回 `next_offset` |
+| `strategy_read` | `strategy_id: string`；`version_id?: string` | 读取当前草稿与 revision；指定版本时额外返回该版本，并校验属于同一策略 |
+| `strategy_create` | `name: string`；`source: string`；`parameters: object={}`；`description: string=""`；`enabled: boolean=true` | 保存完整 Python 源码，不执行；名称去除首尾空白后 1–100 字符，源码 1–60000 字符，描述最多 2000 字符 |
+| `strategy_update` | `strategy_id: string`；`revision: number`；`name?: string`；`description?: string`；`enabled?: boolean`；`source?: string`；`parameters?: object` | revision 必须匹配刚读取的值；省略的字段保留，source/parameters 整体替换；拒绝未声明字段；保存约束同创建 |
+| `strategy_versions` | `strategy_id: string` | 返回不可变版本摘要及参数，源码需通过 `strategy_read` 读取 |
+| `strategy_publish` | `strategy_id: string`；`revision: positive integer`；`note: string=""` | note 最多 2000 字符；固定当前草稿，返回 `strategy.revision` 与 `version.id`，不启动回测 |
+| `backtest_start` | 见“回测公共参数” | 原生后台回测；直接工具执行无后台上下文时返回入队记录 |
+| `backtest_optimize` | 回测公共参数 + `optimization: object` | 原生后台 Optuna 调优；成功后创建新的未发布策略草稿 |
+| `backtest_list` | `strategy_id: UUID`；`before?: UUID` | 最近 30 条普通回测；before 传上一页最后一条 ID，返回 `next_before`；不含调优记录 |
+| `backtest_status` | `run_id: UUID`；`wait: boolean=false` | 默认读取一次当前状态与 `terminal`；wait=true 最多等待 10 秒或至结束；queued/preparing/running 为进行中，completed/failed/cancelled 为终态 |
+| `backtest_result` | `run_id: UUID`；`section: enum="summary"`；`offset: integer=0` | section 可为 summary/trades/orders/fills/signals/logs/equity_curve/risk_levels/optimization_trials；offset ≥ 0，明细每页 50 条；summary 含指标、年/月收益、数量与最近 20 条日志；未产生报告时 `result=null` |
+| `backtest_compare` | `run_ids: string[]` | 同一策略至少两个不同版本的已完成普通回测，各版本选一条，第一条为基准；去重后校验；不接受调优训练结果，配置/覆盖不同会提示并停止相关排名 |
+| `backtest_cancel` | `run_id: UUID` | 排队任务立即取消，运行任务提交取消请求后由 Worker 停止；可继续查询确认终态 |
+| `news_search` | `query: string=""`；`industry?: string`；`cursor?: string` | 搜索已采集标题/摘要；industry 接受行业名称或返回的 key，cursor 原样传回 `next_cursor`；每页 20 条 |
+| `news_read` | `article_id: string` | 读取已存正文、来源及完整性状态，不触发新抓取 |
+| `factor_guide` | `{}` | 读取因子 SDK、Python 模板和执行权限 |
+| `factor_read` | `factor_id?: string`；`version_id?: string`；`analysis_id?: string`；`group_id?: string`；`query?: string` | 优先级 analysis_id → version_id → factor_id → 列表；列表才应用 group_id/query，最多返回 100 条并标记 truncated；factor_id 返回草稿、版本目录和分析记录 |
+| `factor_save` | `name: string`；`source: string`；`description: string=""`；`enabled: boolean=true`；`parameters: object={}`；`group_id?: UUID`；`factor_id?: string`；`revision?: number` | 不传 factor_id 创建；更新必须传 factor_id 及正整数 revision。源码和参数整体替换，name/source 始终必填；省略 description/enabled/parameters 会采用默认值；group_id 省略时保留原分组，新建归入未分组。名称/描述/源码长度约束同策略 |
+| `factor_publish` | `factor_id: string`；`revision: number`；`note: string=""` | revision 必须匹配；先校验 Python 入口，再发布不可变版本；因子必须启用 |
+| `factor_analyze` | `factor_id: string` + 见“因子分析参数” | 同步执行分析；AbortSignal 会中止任务 |
+
+#### 回测公共参数
+
+`backtest_start` 与 `backtest_optimize` 共用下表。即使页面有主版本，工具调用仍必须明确传入不可变 `version_id`。
+
+| 参数 | 类型、必填与默认值 | 含义与校验 |
+| --- | --- | --- |
+| `version_id` | 必填 string，后端校验 UUID | 已发布策略版本 ID |
+| `strategy_id` | 可选 string | 省略时由版本推导；提供时必须匹配版本归属 |
+| `symbol` | 必填 string | 标准标的代码，仅字母/数字/下划线/点/@/短横线，长度 1–100 |
+| `start`、`end` | 必填 number | UTC epoch **秒**，后端要求正整数；end > start，跨度最多 10 × 366 天；中文日期按 Asia/Shanghai 转换 |
+| `backtest_engine` | 可选 builtin/tqsdk，缺省 builtin | builtin 使用已采集数据；tqsdk 使用 TqBacktest + TqSim |
+| `tq_options` | 可选 object | `commission_per_lot?: number ≥ 0`（元/手）、`margin_per_lot?: number > 0`（元/手）；覆盖插件配置，再回退到 TqSim 默认 |
+| `duration` | number=60 | 仅 60/180/300/900/1800/3600/86400，单位秒 |
+| `initial_cash` | number=1000000 | 初始资金，必须 > 0；点数模式内部固定为 1 |
+| `parameters` | object={} | 合并到固定版本参数中，同名字段覆盖 |
+| `rules` | 条件必填 object | 内置资金回测必填；点数与天勤模式可省略，具体字段见下表 |
+| `execution_model` | 可选 actual_contract/continuous_price/points，缺省 actual_contract | 实际历史合约 / 主连价格模拟 / 固定 1 单位点差；continuous_price 仅用于 `KQ.m@` 主连 |
+| `point_cost` | number=0，≥ 0 | 每次开仓或平仓成本，单位点；仅点数模式适用 |
+| `slippage_ticks` | number=1，≥ 0 | 滑点 tick 数 |
+| `participation_rate` | number=0.1，0 < 值 ≤ 1 | 内置资金撮合的成交量参与率；点数和天勤模式内部固定为 1 |
+| `annualization` | integer=252，1–366 | 年化交易日数；点数模式固定为 252 |
+| `risk_free_rate` | number=0 | 无风险收益率，小数比例；点数模式固定为 0 |
+| `benchmark_symbol` | string/null=null | 基准标的；天勤模式只能为空或与 symbol 一致 |
+| `calendar` | 可选 `Record<YYYY-MM-DD, boolean>` | 交易日覆盖；天勤模式不支持 |
+
+`rules` 的所有下列字段均需提供，只有 `fees.mode` 可省略；两个平今字段可以显式传 `null`。
+
+| 字段 | 类型与约束 | 含义 |
+| --- | --- | --- |
+| `multiplier` | number > 0 | 合约乘数；股票内部固定为 1 |
+| `margin_rate` | number，0 < 值 ≤ 1 | 保证金率；股票内部固定为 1 |
+| `lot_size` | positive integer | 最小交易数量单位 |
+| `t_plus_one` | boolean | 是否启用 T+1 |
+| `fees.mode` | 可选 fixed/rate/combined | 固定费用 / 成交额比例 / 两者叠加；省略沿用历史组合口径 |
+| `fees.per_unit` | number ≥ 0 | 每手/股固定手续费 |
+| `fees.rate` | number ≥ 0 | 成交额手续费率，小数比例 |
+| `fees.minimum` | number ≥ 0 | 最低手续费 |
+| `fees.close_today_per_unit` | number ≥ 0 / null | 平今每单位手续费覆盖，null 沿用普通值 |
+| `fees.close_today_rate` | number ≥ 0 / null | 平今比例手续费覆盖，null 沿用普通值 |
+| `fees.sell_tax_rate` | number ≥ 0 | 卖出税率，小数比例 |
+
+天勤回测只接受 CFFEX/SHFE/DCE/CZCE/INE/GFEX 的单个实际期货合约（包括已到期合约），须配置天勤凭据；不支持主连、股票、点数、调优和自定义日历。点数模式忽略资金、保证金、乘数、成交量和 T+1。普通回测与调优共用持久化队列，同一提交者最多 3 个活动任务。工具描述要求 end 不晚于当前时间，但当前 `parseBacktestConfig` 只校验正整数、先后顺序和十年跨度，没有单独校验未来时间。
+
+#### 调优参数 optimization
+
+| 字段 | 类型、默认值与限制 | 含义 |
+| --- | --- | --- |
+| `search_space` | 必填 object，1–30 个参数 | key 为策略参数名（1–100 字符），value 为下面的搜索分布 |
+| `metric` | enum="sharpe" | 资金模式支持 sharpe/total_return/annual_return/max_drawdown/sortino/calmar/profit_factor；点数模式仅支持 total_points/max_drawdown_points/profit_factor，需显式选择匹配目标 |
+| `n_trials` | integer=30，1–200 | 最多试验次数 |
+| `timeout_seconds` | integer=600，1–3600 | 调优时间预算，单位秒 |
+| `seed` | integer=42，0–4294967295 | TPE 随机种子 |
+| `min_trades` | integer=1，≥ 1 | 试验有效所需的最低交易数 |
+| `validation_start` | 可选 positive integer | UTC epoch 秒，严格位于 start/end 之间；后段作为独立验证 |
+
+搜索分布为三选一：`{ type: "int", low: integer, high: integer, step?: positive integer, log?: boolean }`；`{ type: "float", low: number, high: number, step?: positive number, log?: boolean }`；`{ type: "categorical", choices: (string|number|boolean|null)[] }`。high ≥ low；对数搜索 low > 0，不能同时指定 step（整数 step=1 除外）；choices 为 1–100 项。不得搜索 `symbol`、`duration`、`execution_model`、`__proto__`、`constructor`、`prototype`。回撤目标最小化，其余目标最大化。
+
+#### 因子分析参数
+
+| 字段 | 类型、默认值与限制 | 含义 |
+| --- | --- | --- |
+| `factor_id` | 必填 string | 因子 ID |
+| `version_id` | UUID/null=null | 固定版本；省略或 null 使用当前已保存草稿 |
+| `symbols` | 必填 string[]，3–50 个，不重复 | 期货合约；数量不能少于 groups |
+| `start`、`end` | 必填 YYYY-MM-DD | 与回测工具的 epoch 秒不同；end > start，最多十年 |
+| `holding_days` | integer=5，1–60 | 持有天数 |
+| `groups` | integer=5，2–10 | 横截面分组数；默认 5 组时至少需要 5 个合约 |
+| `direction` | 1/-1，默认 1 | 因子方向 |
+
+参数定义来源：`mastra/tools/{strategies,backtests,backtest-compare,news,factors}.ts`，后端约束来源：`server/strategies/{schema,optimization}.ts` 和 `server/factors/schema.ts`。
 
 ```sh
 node --import tsx --test plugins/vibe-quant/tests/quant-agent.test.ts
+node --import tsx --test plugins/vibe-quant/tests/backtest-background.test.ts
 # 使用上述隔离测试数据库和插件 Python 环境，验证工具到真实回测的完整链路
 QUANT_STRATEGY_INTEGRATION=1 node --import dotenv/config --import tsx --test plugins/vibe-quant/tests/quant-agent.test.ts
 ```

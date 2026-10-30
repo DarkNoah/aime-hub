@@ -63,13 +63,39 @@ export function replayWindow(
   trade: TradeRecord,
   query: z.infer<typeof replayQuerySchema>,
 ): Omit<TradeReplay, 'snapshotHash'> {
+  const exitTime = tradeExitAnchor(trade);
+  const { anchors, ...window } = snapshotWindow(
+    dataset,
+    trade.symbol,
+    query,
+    query.at === 'exit' ? (exitTime ?? trade.entry_time) : trade.entry_time,
+  );
+  return {
+    ...window,
+    trade,
+    markerTimes: {
+      entry: anchors.get(Math.floor(trade.entry_time / 60) * 60) ?? null,
+      exit:
+        exitTime === null
+          ? null
+          : (anchors.get(Math.floor(exitTime / 60) * 60) ?? null),
+    },
+  };
+}
+
+function snapshotWindow(
+  dataset: ReplayDataset,
+  symbol: string,
+  query: z.infer<typeof replayQuerySchema>,
+  anchorTime?: number,
+) {
   const minutes = [
     ...new Map(
       dataset.events
         .filter(
           (event) =>
             event.type === 'bar' &&
-            event.payload.symbol === trade.symbol &&
+            event.payload.symbol === symbol &&
             event.payload.duration === 60 &&
             event.payload.is_final !== false,
         )
@@ -77,14 +103,11 @@ export function replayWindow(
     ).values(),
   ].sort((a, b) => a.time - b.time);
   const { duration } = query;
-  const exitTime = tradeExitAnchor(trade);
   const time =
     query.around ??
     (query.at === 'latest'
       ? (minutes.at(-1)?.time ?? 0)
-      : query.at === 'exit'
-        ? (exitTime ?? trade.entry_time)
-        : trade.entry_time);
+      : (anchorTime ?? minutes[0]?.time ?? 0));
   const day = minutes[nearest(minutes, time)]?.trading_day;
   const selected =
     query.intraday === 'true'
@@ -145,33 +168,26 @@ export function replayWindow(
     from = Math.max(0, to - query.limit);
   }
   return {
-    trade,
     bars: bars.slice(from, to),
     duration,
     targetTime:
       query.at === 'latest' && query.around === undefined ? null : targetTime,
     priceTick:
-      dataset.instruments.find((item) => item.symbol === trade.symbol)
-        ?.price_tick ?? 0.01,
+      dataset.instruments.find((item) => item.symbol === symbol)?.price_tick ??
+      0.01,
     hasBefore: from > 0,
     hasAfter: to < bars.length,
     range: minutes.length
       ? { start: minutes[0].time, end: minutes.at(-1)!.time + 60 }
       : null,
-    markerTimes: {
-      entry: anchors.get(Math.floor(trade.entry_time / 60) * 60) ?? null,
-      exit:
-        exitTime === null
-          ? null
-          : (anchors.get(Math.floor(exitTime / 60) * 60) ?? null),
-    },
+    anchors,
   };
 }
 
 /** Adapt a frozen TqBacktest dataset to the existing market-chart paging API. */
 export function nativeMarketWindow(
   dataset: ReplayDataset,
-  trade: TradeRecord,
+  trade: Pick<TradeRecord, 'symbol'>,
   query: {
     duration: number;
     limit: number;
@@ -181,7 +197,7 @@ export function nativeMarketWindow(
   },
   sessionAnchors = false,
 ) {
-  const window = replayWindow(dataset, trade, {
+  const window = snapshotWindow(dataset, trade.symbol, {
     ...query,
     at: query.around === undefined ? 'latest' : 'entry',
     intraday: 'false',

@@ -8,6 +8,7 @@ import type {
   SignalOverlay,
 } from '../../signal-types.js';
 import type { Engine } from '../../shared.js';
+import type { QuantConfig } from '../config.js';
 import {
   ClickHouseClient,
   ClickHouseError,
@@ -18,6 +19,8 @@ import { StrategyError } from '../strategies/schema.js';
 
 export type StoredMonitor = Omit<SignalMonitor, 'status' | 'message'> & {
   user_id: string;
+  /** Host user database identity; absent only on legacy monitors. */
+  service_id?: string;
   deleted: boolean;
   history_cleared?: boolean;
 };
@@ -29,6 +32,13 @@ export type MonitorRuntime = {
   checkpoint: string;
 };
 export class MonitorStore extends ClickHouseClient {
+  constructor(
+    config: QuantConfig,
+    readonly serviceId: string,
+  ) {
+    super(config);
+  }
+
   get history() {
     return new SignalHistoryStore(this.config);
   }
@@ -118,7 +128,9 @@ export class MonitorStore extends ClickHouseClient {
           : runtime?.status === 'error' || runtime?.status === 'paused'
             ? runtime.status
             : 'starting',
-      message: !row.enabled ? '已暂停' : (runtime?.message ?? '等待后台启动'),
+      message: !row.enabled
+        ? '该策略监听已暂停，请开启计算开关'
+        : (runtime?.message ?? '等待后台启动'),
     };
   }
   async create(
@@ -135,6 +147,7 @@ export class MonitorStore extends ClickHouseClient {
     const row: StoredMonitor = {
       id: randomUUID(),
       user_id: owner,
+      service_id: this.serviceId,
       strategy_id,
       version_number,
       engine,
@@ -198,15 +211,43 @@ export class MonitorStore extends ClickHouseClient {
     if (!result.writtenRows) throw new StrategyError('MONITOR_CONFLICT', 409);
     return this.view(deleted ? await this.finishDelete(row) : row);
   }
+  /** The caller must first find this legacy monitor's user in its host database. */
+  async bindService(row: StoredMonitor): Promise<StoredMonitor | undefined> {
+    if (row.service_id)
+      return row.service_id === this.serviceId ? row : undefined;
+    const next = {
+      ...row,
+      service_id: this.serviceId,
+      revision: row.revision + 1,
+    };
+    const result = await this.execute(
+      `INSERT INTO ${this.table('quant_signal_monitors')}
+       SELECT {id:String}, {owner:String}, payload, {next:UInt64} FROM input('payload String')
+       WHERE EXISTS (SELECT 1 FROM ${this.table('quant_signal_monitors')} FINAL
+         WHERE id={id:String} AND revision={revision:UInt64}
+           AND JSONExtractString(payload,'service_id')=''
+           AND NOT JSONExtractBool(payload,'deleted')) FORMAT JSONEachRow`,
+      {
+        id: row.id,
+        owner: row.user_id,
+        revision: String(row.revision),
+        next: String(next.revision),
+      },
+      JSON.stringify({ payload: JSON.stringify(next) }),
+      'signal-monitor-config',
+    );
+    return result.writtenRows ? next : undefined;
+  }
+
   async acquire(id: string, owner: string) {
     // Older databases also have an inline checkpoint column. Name the columns
     // so its implicit default is used without changing or dropping that data.
     const result = await this.execute(
       `INSERT INTO ${this.table('quant_signal_runtime')} (id, ownerId, expiresAt, status, message, version)
       SELECT {id:String}, {owner:String}, ${timeSql}+30, 'starting', '正在准备实时计算', ${versionSql}
-      WHERE EXISTS (SELECT 1 FROM ${this.table('quant_signal_monitors')} FINAL WHERE id={id:String} AND NOT JSONExtractBool(payload,'deleted') AND JSONExtractBool(payload,'enabled'))
+      WHERE EXISTS (SELECT 1 FROM ${this.table('quant_signal_monitors')} FINAL WHERE id={id:String} AND NOT JSONExtractBool(payload,'deleted') AND JSONExtractBool(payload,'enabled') AND JSONExtractString(payload,'service_id')={service:String})
       AND NOT EXISTS (SELECT 1 FROM ${this.table('quant_signal_runtime')} FINAL WHERE id={id:String} AND expiresAt>${timeSql} AND ownerId!={owner:String})`,
-      { id, owner },
+      { id, owner, service: this.serviceId },
       undefined,
       `signal-monitor:${id}`,
     );

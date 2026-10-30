@@ -496,12 +496,15 @@ test(
   { skip: process.env.QUANT_SIGNAL_INTEGRATION !== '1', timeout: 60000 },
   async () => {
     const database = `signal_test_${randomUUID().replaceAll('-', '')}`;
-    const store = new MonitorStore({
-      clickhouseUrl: 'http://127.0.0.1:18124',
-      clickhouseDatabase: database,
-      clickhouseUser: 'test',
-      clickhousePassword: 'test-only-local',
-    } as QuantConfig);
+    const store = new MonitorStore(
+      {
+        clickhouseUrl: 'http://127.0.0.1:18124',
+        clickhouseDatabase: database,
+        clickhouseUser: 'test',
+        clickhousePassword: 'test-only-local',
+      } as QuantConfig,
+      'service-a',
+    );
     await store.request(`CREATE DATABASE ${database}`);
     try {
       await store.initialize();
