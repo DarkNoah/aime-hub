@@ -4,6 +4,8 @@ import { z } from 'zod';
 import type { Auth } from '@aime/auth';
 import { hasAdminRole } from '@aime/shared';
 import type { PluginHttpEnv } from '@app/plugin-sdk/server';
+import { pluginAccessConfigurationSchema } from '@app/plugin-sdk';
+import { PluginAccessError } from './access.js';
 import { PluginError, type PluginService } from './service.js';
 
 export function pluginRoutes(
@@ -27,8 +29,24 @@ export function pluginRoutes(
     await next();
   });
   app.get('/', async (c) =>
-    c.json((await plugins.list()).filter((p) => c.get('isAdmin') || p.enabled)),
+    c.json(
+      c.get('isAdmin')
+        ? await plugins.list()
+        : await plugins.listForUser(c.get('userId')),
+    ),
   );
+  app.get('/:id/access', async (c) => {
+    if (!c.get('isAdmin')) return c.json({ code: 'FORBIDDEN' }, 403);
+    return c.json(await plugins.access.get(c.req.param('id')));
+  });
+  app.put('/:id/access', async (c) => {
+    if (!c.get('isAdmin')) return c.json({ code: 'FORBIDDEN' }, 403);
+    const body = pluginAccessConfigurationSchema.safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!body.success) return c.json({ code: 'VALIDATION_ERROR' }, 400);
+    return c.json(await plugins.access.save(c.req.param('id'), body.data));
+  });
   app.put('/:id/enabled', async (c) => {
     if (!c.get('isAdmin')) return c.json({ code: 'FORBIDDEN' }, 403);
     const body = z
@@ -61,14 +79,19 @@ export function pluginRoutes(
     );
   });
   for (const { manifest } of plugins.definitions) {
-    app.use(`/${manifest.id}/*`, async (_c, next) => {
-      await plugins.assertEnabled(manifest.id);
+    app.use(`/${manifest.id}/*`, async (c, next) => {
+      await plugins.assertAccessible(manifest.id, c.get('userId'));
       await next();
     });
     const api = plugins.api(manifest.id);
     if (api) app.route(`/${manifest.id}`, api);
   }
   app.onError(async (error, c) => {
+    if (error instanceof PluginAccessError)
+      return c.json(
+        { code: error.code },
+        error.status as 400 | 403 | 404 | 409,
+      );
     // A failed stop can still persist enabled=false. Return the actual
     // status so the admin switch never stays on after a cleanup failure.
     const isToggle =

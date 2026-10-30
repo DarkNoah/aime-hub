@@ -1,4 +1,5 @@
 import { Agent, type AgentConfig } from '@mastra/core/agent';
+import { createHash } from 'node:crypto';
 import type { AgentDefinition } from '@aime/shared/agents';
 import { getAgent } from './index.js';
 import {
@@ -110,6 +111,14 @@ function buildAgentInstance(
             ...Object.fromEntries(
               Object.entries(local)
                 // Explicit references retain their delegation names and precedence.
+                .filter(([, child]) => child.id !== config.id)
+                .map(([name, child]) => {
+                  // Provider tool names cannot contain colons. Keep aliases stable and distinct.
+                  const alias = name.includes(':')
+                    ? `${name.replace(/:/g, '_').slice(0, 36)}_${createHash('sha256').update(name).digest('hex').slice(0, 20)}`
+                    : name;
+                  return [alias, child] as const;
+                })
                 .filter(([name]) => !Object.hasOwn(configuredAgents, name))
                 .map(([name, child]) => [name, buildChild(name, child)]),
             ),

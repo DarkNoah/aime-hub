@@ -33,6 +33,7 @@ import { RequestLogService } from './modules/request-logs/service.js';
 import { ThreadService } from './modules/threads/service.js';
 import { ProjectService } from './modules/projects/service.js';
 import { SkillService } from './modules/skills/service.js';
+import { LocalAgentService } from './modules/agents/local-service.js';
 import { syncBuiltinSkills } from './modules/skills/builtin.js';
 import { EnvironmentVariableService } from './modules/environment-variables/service.js';
 import { projectAgentMounts } from './modules/threads/workspace.js';
@@ -136,8 +137,13 @@ const plugins = new PluginService(
 await syncPluginSkills(workspaceRoot);
 const disposePluginSkills = registerPluginSkillAccess(
   workspaceRoot,
-  async () =>
-    new Set((await plugins.list()).filter((p) => p.enabled).map((p) => p.id)),
+  async (userId) =>
+    new Set(
+      (userId
+        ? await plugins.listForUser(userId)
+        : (await plugins.list()).filter((p) => p.enabled)
+      ).map((p) => p.id),
+    ),
 );
 const providers = new ProviderService(database);
 const assets = new AssetService(database);
@@ -211,6 +217,7 @@ const tools: ToolService = new ToolService(
   () => automations.service,
   audio,
 );
+const localAgents = new LocalAgentService(workspaceRoot, projects);
 const agents = new AgentService(
   agentStore,
   skills,
@@ -218,6 +225,7 @@ const agents = new AgentService(
   providers,
   agentSettingsStore(database),
   plugins,
+  localAgents,
 );
 const models = new LanguageModelService(database, providers, agents);
 const threads = new ThreadService(
@@ -282,7 +290,11 @@ const app = createApp(
   },
   { service: requestLogs, webOrigin: env.WEB_ORIGINS },
   { service: tools, webOrigin: env.WEB_ORIGINS },
-  { service: agents, webOrigin: env.WEB_ORIGINS },
+  {
+    service: agents,
+    local: localAgents,
+    webOrigin: env.WEB_ORIGINS,
+  },
   { service: automations.service, webOrigin: env.WEB_ORIGINS },
   { service: notifications, webOrigin: env.WEB_ORIGINS },
   { service: mcp, webOrigin: env.WEB_ORIGINS },

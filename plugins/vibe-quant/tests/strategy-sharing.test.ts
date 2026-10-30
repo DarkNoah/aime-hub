@@ -37,7 +37,7 @@ test('public template works in a deployment without private examples', async () 
 });
 
 test(
-  'shared strategies support cross-account editing, versions, runs and optimization drafts without changing attribution',
+  'shared strategies support cross-account editing, versions, runs and optimization versions without changing attribution',
   { skip: process.env.QUANT_STRATEGY_INTEGRATION !== '1', timeout: 60000 },
   async () => {
     const f = await strategyFixture();
@@ -167,14 +167,14 @@ test(
           requested_trials: 1,
         }),
       );
-      const drafts = await Promise.all(
+      const optimized = await Promise.all(
         ['bob', 'alice'].map((actor) =>
-          f.records.createOptimizationDraft(actor, optimizationId),
+          f.records.createOptimizationVersion(actor, optimizationId),
         ),
       );
-      assert.equal(drafts[0].id, drafts[1].id);
-      assert.equal(drafts[0].draft.parameters.fast, 9);
-      assert.equal(drafts[0].version_count, 0);
+      assert.equal(optimized[0].version.id, optimized[1].version.id);
+      assert.equal(optimized[0].version.parameters.fast, 9);
+      assert.equal(optimized[0].strategy.version_count, 2);
       assert.equal(
         (await f.records.detail('bob', created.id)).draft.parameters.fast,
         2,
@@ -198,7 +198,7 @@ test(
       const archived = await f.records.setStatus(
         'bob',
         created.id,
-        published.strategy.revision,
+        (await f.records.detail('bob', created.id)).revision,
         'archived',
       );
       assert.equal(

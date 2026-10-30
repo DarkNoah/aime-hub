@@ -43,6 +43,8 @@ import type { RequestLogService } from './modules/request-logs/service.js';
 import type { ToolService } from './modules/tools/service.js';
 import { toolRouter } from './modules/tools/rpc.js';
 import { agentRouter } from './modules/agents/rpc.js';
+import { localAgentRouter } from './modules/agents/local-rpc.js';
+import type { LocalAgentService } from './modules/agents/local-service.js';
 import type { AgentService } from './modules/agents/service.js';
 import type { AutomationService } from './modules/automations/service.js';
 import { automationRouter } from './modules/automations/rpc.js';
@@ -79,7 +81,11 @@ export function createApp(
   },
   requestLogs?: { service: RequestLogService; webOrigin: WebOrigins },
   tools?: { service: ToolService; webOrigin: WebOrigins },
-  agents?: { service: AgentService; webOrigin: WebOrigins },
+  agents?: {
+    service: AgentService;
+    local?: LocalAgentService;
+    webOrigin: WebOrigins;
+  },
   automations?: { service: AutomationService; webOrigin: WebOrigins },
   notifications?: { service: NotificationService; webOrigin: WebOrigins },
   mcp?: { service: McpService; webOrigin: WebOrigins },
@@ -134,6 +140,7 @@ export function createApp(
     requestLogs: requestLogRouter(requestLogs?.service),
     tools: toolRouter(tools?.service),
     agents: agentRouter(agents?.service),
+    localAgents: localAgentRouter(agents?.local),
     mcp: mcpRouter(mcp?.service),
     systemSettings: systemSettingsRouter(systemSettings?.service),
     automations: automationRouter(automations?.service),

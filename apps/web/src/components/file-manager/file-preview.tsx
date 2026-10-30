@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { fileErrorKey } from './api';
 import { FilePreviewContent } from './preview/file-preview-content';
 import { PreviewLoading } from './preview/preview-loading';
@@ -20,8 +21,10 @@ import type { WorkspaceFileClient } from './workspace-client';
 import type { FileEdits } from './use-file-edits';
 import { DiscardEditsDialog } from './discard-edits-dialog';
 import { useFileWrap } from './use-file-wrap';
+import { getPreviewKind } from './preview/preview-kind';
 
 const TextEditor = lazy(() => import('./preview/text-editor'));
+type PreviewMode = 'rendered' | 'source' | 'edit';
 
 export function FilePreview({
   client,
@@ -41,7 +44,10 @@ export function FilePreview({
   const [loaded, setData] = useState<Preview | null>(null);
   const edit = edits.get(path);
   const hasEdit = !!edit;
-  const [editing, setEditing] = useState(hasEdit);
+  const [view, setView] = useState<{ mode: PreviewMode; line?: number }>({
+    mode: hasEdit ? 'edit' : line ? 'source' : 'rendered',
+    line,
+  });
   const [resetting, setResetting] = useState(false);
   const dirty = !!edit && edit.text !== edit.base.text;
   const data = edit?.base ?? loaded;
@@ -67,7 +73,7 @@ export function FilePreview({
   }, [client, path, revision, retry, hasEdit]);
   function reload() {
     edits.discard(path);
-    setEditing(false);
+    setView({ mode: line ? 'source' : 'rendered', line });
     setData(null);
     setError(null);
     setResetting(false);
@@ -88,7 +94,33 @@ export function FilePreview({
     );
   if (!data) return <PreviewLoading />;
   const editable = data.kind === 'text' && !data.truncated && !!data.version;
+  const markdown = getPreviewKind(data) === 'markdown';
+  // A newly selected search result should reveal its source line.
+  const mode = markdown && line && line !== view.line ? 'source' : view.mode;
+  const editing = mode === 'edit';
   const url = `${client.raw(path)}&v=${encodeURIComponent(data.modifiedAt)}&retry=${retry}`;
+  const content =
+    editing && edit ? (
+      <Suspense fallback={<PreviewLoading />}>
+        <TextEditor
+          text={edit.text}
+          line={line}
+          disabled={edit.saving}
+          wrap={wrap}
+          onChange={(text) => edits.change(path, text)}
+        />
+      </Suspense>
+    ) : (
+      <FilePreviewContent
+        key={path}
+        data={edit ? { ...data, text: edit.text } : data}
+        url={url}
+        downloadUrl={client.raw(path, true)}
+        line={line}
+        wrap={wrap}
+        source={markdown && mode === 'source'}
+      />
+    );
   return (
     <div
       className="flex h-full min-h-0 flex-col"
@@ -122,7 +154,7 @@ export function FilePreview({
             {t('files.unsaved')}
           </Badge>
         )}
-        {data.kind === 'text' && (
+        {data.kind === 'text' && (!markdown || mode !== 'rendered') && (
           <label className="mx-1 inline-flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
             <Switch
               size="sm"
@@ -135,22 +167,24 @@ export function FilePreview({
         )}
         {editable && (
           <>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t(editing ? 'files.renderedPreview' : 'files.edit')}
-              title={t(editing ? 'files.renderedPreview' : 'files.edit')}
-              onClick={() => {
-                if (!editing) edits.start(data);
-                setEditing(!editing);
-              }}
-            >
-              {editing ? (
-                <Eye className="size-3.5" />
-              ) : (
-                <Pencil className="size-3.5" />
-              )}
-            </Button>
+            {!markdown && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t(editing ? 'files.renderedPreview' : 'files.edit')}
+                title={t(editing ? 'files.renderedPreview' : 'files.edit')}
+                onClick={() => {
+                  if (!editing) edits.start(data);
+                  setView({ mode: editing ? 'rendered' : 'edit', line });
+                }}
+              >
+                {editing ? (
+                  <Eye className="size-3.5" />
+                ) : (
+                  <Pencil className="size-3.5" />
+                )}
+              </Button>
+            )}
             {edit && (
               <>
                 <Button
@@ -216,25 +250,47 @@ export function FilePreview({
         </p>
       )}
       <div className="min-h-0 min-w-0 flex-1">
-        {editing && edit ? (
-          <Suspense fallback={<PreviewLoading />}>
-            <TextEditor
-              text={edit.text}
-              line={line}
-              disabled={edit.saving}
-              wrap={wrap}
-              onChange={(text) => edits.change(path, text)}
-            />
-          </Suspense>
+        {markdown ? (
+          <Tabs
+            value={mode}
+            onValueChange={(value) => {
+              if (
+                value !== 'rendered' &&
+                value !== 'source' &&
+                value !== 'edit'
+              )
+                return;
+              if (value === 'edit') {
+                if (!editable) return;
+                edits.start(data);
+              }
+              setView({ mode: value, line });
+            }}
+            className="h-full min-h-0 min-w-0 gap-0"
+          >
+            <div className="shrink-0 border-b px-3 py-2">
+              <TabsList aria-label={t('files.previewMode')} className="h-8">
+                <TabsTrigger value="rendered" className="text-xs">
+                  {t('files.renderedPreview')}
+                </TabsTrigger>
+                <TabsTrigger value="source" className="text-xs">
+                  {t('files.markdownSource')}
+                </TabsTrigger>
+                <TabsTrigger
+                  value="edit"
+                  className="text-xs"
+                  disabled={!editable}
+                >
+                  {t('files.editMode')}
+                </TabsTrigger>
+              </TabsList>
+            </div>
+            <TabsContent key={mode} value={mode} className="min-h-0 min-w-0">
+              {content}
+            </TabsContent>
+          </Tabs>
         ) : (
-          <FilePreviewContent
-            key={path}
-            data={edit ? { ...data, text: edit.text } : data}
-            url={url}
-            downloadUrl={client.raw(path, true)}
-            line={line}
-            wrap={wrap}
-          />
+          content
         )}
       </div>
       <DiscardEditsDialog

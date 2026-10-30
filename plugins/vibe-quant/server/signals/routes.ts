@@ -1,3 +1,4 @@
+import { strategyVersionName } from '../../strategy-version.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { PluginHttpEnv } from '@app/plugin-sdk/server';
@@ -320,6 +321,7 @@ export function signalRoutes(
           },
         ),
         notifications_enabled: notifications_enabled ?? true,
+        version_name: strategyVersionName(version),
       },
     );
     wake();

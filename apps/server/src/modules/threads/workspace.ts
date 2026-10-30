@@ -7,15 +7,15 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { resolve, relative, basename, dirname, isAbsolute } from 'node:path';
 import { nanoid } from 'nanoid';
 import {
+  Workspace,
   CompositeFilesystem,
   LocalFilesystem,
-  Workspace,
   WORKSPACE_TOOLS,
   type WorkspaceFilesystem,
 } from '@mastra/core/workspace';
 import { ThreadError } from './errors.js';
 import { CommandSandbox } from '../../mastra/tools/command/sandbox.js';
-import { directorySkillConfig } from './skill-source.js';
+import { directorySkillConfig, ScopedSkillsWorkspace } from './skill-source.js';
 import { workspaceLspConfig, workspaceLspHooks } from './workspace-lsp.js';
 import type { EnvironmentVariableService } from '../environment-variables/service.js';
 import { BUILTIN_SKILL_GROUP } from '../skills/builtin.js';
@@ -109,7 +109,7 @@ export function getWorkspace(
   environmentVariables?: Pick<EnvironmentVariableService, 'getEnv'>,
   commandEnvironment?: (userId?: string) => Record<string, string>,
   workspacePlugin?: string,
-) {
+): Workspace<WorkspaceFilesystem, CommandSandbox> {
   const valid = workspacePlugin
     ? path === pluginWorkspaceDirectory(root, workspacePlugin)
     : projectId
@@ -177,77 +177,80 @@ export function getWorkspace(
     }),
   );
   const lspHooks = workspaceLspHooks(workingDirectory, workspaceFilesystem);
-  return new Workspace({
-    ...directorySkillConfig(skillPaths),
-    id: basename(path),
-    filesystem: workspaceFilesystem,
-    sandbox,
-    lsp: workspaceLspConfig(workingDirectory),
-    bm25: true,
-    tools: {
-      hooks: lspHooks,
-      [WORKSPACE_TOOLS.LSP.LSP_INSPECT]: {
-        name: 'lsp_inspect',
-      },
-      [WORKSPACE_TOOLS.SANDBOX.EXECUTE_COMMAND]: {
-        enabled: false,
-      },
-      [WORKSPACE_TOOLS.SANDBOX.GET_PROCESS_OUTPUT]: {
-        enabled: false,
-      },
-      [WORKSPACE_TOOLS.SANDBOX.KILL_PROCESS]: {
-        enabled: false,
-      },
-      [WORKSPACE_TOOLS.SEARCH.INDEX]: {
-        // enabled: false,
-        name: 'index',
-      },
-      [WORKSPACE_TOOLS.SEARCH.SEARCH]: {
-        // enabled: false,
-        name: 'search',
-      },
-      [WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE]: {
-        // enabled: false,
-        name: 'write_file',
-      },
-      [WORKSPACE_TOOLS.FILESYSTEM.READ_FILE]: {
-        // The application read_file combines native text reads with OCR.
-        enabled: false,
-        name: 'read_file',
-      },
-      [WORKSPACE_TOOLS.FILESYSTEM.EDIT_FILE]: {
-        // enabled: false,
-        name: 'edit_file',
-      },
-      [WORKSPACE_TOOLS.FILESYSTEM.GREP]: {
-        // enabled: false,
-        name: 'grep',
-      },
-      [WORKSPACE_TOOLS.FILESYSTEM.LIST_FILES]: {
-        enabled: false,
-        name: 'list_files',
-      },
-      [WORKSPACE_TOOLS.FILESYSTEM.FILE_STAT]: {
-        enabled: false,
-        name: 'file_stat',
-      },
-      [WORKSPACE_TOOLS.FILESYSTEM.MKDIR]: {
-        enabled: false,
-        name: 'mkdir',
-      },
-      [WORKSPACE_TOOLS.FILESYSTEM.DELETE]: {
-        enabled: false,
-        name: 'delete',
+  return new ScopedSkillsWorkspace(
+    {
+      ...directorySkillConfig(skillPaths, userId),
+      id: basename(path),
+      filesystem: workspaceFilesystem,
+      sandbox,
+      lsp: workspaceLspConfig(workingDirectory),
+      bm25: true,
+      tools: {
+        hooks: lspHooks,
+        [WORKSPACE_TOOLS.LSP.LSP_INSPECT]: {
+          name: 'lsp_inspect',
+        },
+        [WORKSPACE_TOOLS.SANDBOX.EXECUTE_COMMAND]: {
+          enabled: false,
+        },
+        [WORKSPACE_TOOLS.SANDBOX.GET_PROCESS_OUTPUT]: {
+          enabled: false,
+        },
+        [WORKSPACE_TOOLS.SANDBOX.KILL_PROCESS]: {
+          enabled: false,
+        },
+        [WORKSPACE_TOOLS.SEARCH.INDEX]: {
+          // enabled: false,
+          name: 'index',
+        },
+        [WORKSPACE_TOOLS.SEARCH.SEARCH]: {
+          // enabled: false,
+          name: 'search',
+        },
+        [WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE]: {
+          // enabled: false,
+          name: 'write_file',
+        },
+        [WORKSPACE_TOOLS.FILESYSTEM.READ_FILE]: {
+          // The application read_file combines native text reads with OCR.
+          enabled: false,
+          name: 'read_file',
+        },
+        [WORKSPACE_TOOLS.FILESYSTEM.EDIT_FILE]: {
+          // enabled: false,
+          name: 'edit_file',
+        },
+        [WORKSPACE_TOOLS.FILESYSTEM.GREP]: {
+          // enabled: false,
+          name: 'grep',
+        },
+        [WORKSPACE_TOOLS.FILESYSTEM.LIST_FILES]: {
+          enabled: false,
+          name: 'list_files',
+        },
+        [WORKSPACE_TOOLS.FILESYSTEM.FILE_STAT]: {
+          enabled: false,
+          name: 'file_stat',
+        },
+        [WORKSPACE_TOOLS.FILESYSTEM.MKDIR]: {
+          enabled: false,
+          name: 'mkdir',
+        },
+        [WORKSPACE_TOOLS.FILESYSTEM.DELETE]: {
+          enabled: false,
+          name: 'delete',
+        },
       },
     },
-  });
+    userId,
+  );
 }
 
 export type DiscoveredSkill = { id: string; group: string; path: string };
-export async function discoverInstalledSkills(root: string) {
+export async function discoverInstalledSkills(root: string, userId?: string) {
   const [skills, enabled] = await Promise.all([
     discover(resolve(root, '.agents', 'skills')),
-    enabledPluginSkills(root),
+    enabledPluginSkills(root, userId),
   ]);
   return skills.filter((skill) => {
     const parts = skill.group.split(/[\\/]/);
@@ -293,7 +296,7 @@ async function discover(root: string): Promise<DiscoveredSkill[]> {
 
 export async function discoverPersonalSkills(root: string, userId: string) {
   const [global, personal] = await Promise.all([
-    discoverInstalledSkills(root),
+    discoverInstalledSkills(root, userId),
     discover(resolve(userDirectory(root, userId), '.agents', 'skills')),
   ]);
   return [
@@ -303,9 +306,13 @@ export async function discoverPersonalSkills(root: string, userId: string) {
   ];
 }
 
-export async function discoverProjectSkills(root: string, projectId: string) {
+export async function discoverProjectSkills(
+  root: string,
+  projectId: string,
+  userId?: string,
+) {
   const [global, project] = await Promise.all([
-    discoverInstalledSkills(root),
+    discoverInstalledSkills(root, userId),
     discover(resolve(projectDirectory(root, projectId), '.agents', 'skills')),
   ]);
   return [

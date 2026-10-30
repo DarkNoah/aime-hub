@@ -10,6 +10,7 @@ import { VideoPreview } from './video-preview';
 const renderers: Record<PreviewKind, ComponentType<PreviewRendererProps>> = {
   text: lazy(() => import('./text-preview')),
   html: lazy(() => import('./html-preview')),
+  markdown: lazy(() => import('./markdown-preview')),
   pdf: lazy(() => import('./pdf-preview')),
   model: lazy(() => import('./model-preview')),
   image: ImagePreview,
@@ -18,8 +19,14 @@ const renderers: Record<PreviewKind, ComponentType<PreviewRendererProps>> = {
   binary: BinaryPreview,
 };
 
-export function FilePreviewContent(props: PreviewRendererProps) {
-  const Renderer = renderers[getPreviewKind(props.data)];
+export function FilePreviewContent({
+  source = false,
+  ...props
+}: PreviewRendererProps & { source?: boolean }) {
+  const Renderer =
+    renderers[
+      source && props.data.kind === 'text' ? 'text' : getPreviewKind(props.data)
+    ];
   return (
     <Suspense fallback={<PreviewLoading />}>
       <Renderer key={props.url} {...props} />

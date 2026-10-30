@@ -8,6 +8,7 @@ import {
   ChevronsUpDown,
   Clock3,
   BookOpen,
+  Bot,
   Home,
   LoaderCircle,
   LogOut,
@@ -132,6 +133,16 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             >
               <Sparkles className="size-4" />
               {t('nav.skills')}
+            </Link>
+            <Link
+              to="/agents"
+              className={linkClass}
+              activeProps={activeProps}
+              inactiveProps={inactiveProps}
+              onClick={onNavigate}
+            >
+              <Bot className="size-4" />
+              {t('localAgents.title.personal')}
             </Link>
             <Link
               to="/knowledge"

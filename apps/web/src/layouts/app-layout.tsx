@@ -84,15 +84,17 @@ function LayoutContent() {
           ? 'nav.automations'
           : location.pathname === '/skills'
             ? 'nav.skills'
-            : location.pathname === '/settings'
-              ? 'nav.personalSettings'
-              : isProject
-                ? 'nav.projects'
-                : isChat
-                  ? 'nav.chats'
-                  : adminNavigation.find(
-                      (item) => item.to === location.pathname,
-                    )?.label) ?? 'nav.home';
+            : location.pathname === '/agents'
+              ? 'localAgents.title.personal'
+              : location.pathname === '/settings'
+                ? 'nav.personalSettings'
+                : isProject
+                  ? 'nav.projects'
+                  : isChat
+                    ? 'nav.chats'
+                    : adminNavigation.find(
+                        (item) => item.to === location.pathname,
+                      )?.label) ?? 'nav.home';
 
   useEffect(() => {
     const desktop = window.matchMedia('(min-width: 768px)');

@@ -13,6 +13,7 @@ import {
   ArrowLeft,
   Clock3,
   BookOpen,
+  Bot,
   MessageSquare,
   MoreHorizontal,
   Plus,
@@ -61,6 +62,7 @@ export function ProjectPage() {
   const location = useLocation();
   if (
     location.pathname.endsWith('/automations') ||
+    location.pathname.endsWith('/agents') ||
     location.pathname.endsWith('/knowledge') ||
     location.pathname.includes('/group-chats')
   )
@@ -220,6 +222,12 @@ function ProjectSession({
               <Link to="/projects/$projectId/knowledge" params={{ projectId }}>
                 <BookOpen />
                 {t('nav.knowledge')}
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/projects/$projectId/agents" params={{ projectId }}>
+                <Bot />
+                {t('nav.agents')}
               </Link>
             </Button>
             <Button variant="outline" onClick={() => setSheet('members')}>

@@ -5,7 +5,12 @@ export function agentRouter(service?: AgentService) {
   const p = rpc.agents;
   const agents = () => required(service);
   return p.router({
-    available: p.available.handler(() => agents().available()),
+    available: p.available.handler(({ context, input }) =>
+      agents().available(
+        { userId: context.userId, projectId: input?.query?.projectId },
+        input?.query?.includeLocal !== false,
+      ),
+    ),
     defaults: p.defaults.handler(() => agents().getDefaults()),
     saveDefaults: p.saveDefaults.handler(({ input }) =>
       agents().setDefaults(input.body),

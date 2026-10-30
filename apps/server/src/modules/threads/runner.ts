@@ -103,24 +103,38 @@ export function createChatRunner(
   environmentVariables?: Pick<EnvironmentVariableService, 'getEnv'>,
   getMemoryConfig?: ResolveMemoryConfig,
   localApi?: LocalApiAccess,
-  plugins?: Pick<PluginService, 'workspaceDirectory'>,
+  plugins?: Pick<PluginService, 'workspaceDirectory' | 'access'>,
 ): ChatRunner {
-  const getConfig = async (id?: string | null) => {
-    if (agents) return agents.getConfig(id);
+  const getConfig = async (
+    id?: string | null,
+    userId?: string,
+    projectId?: string,
+  ) => {
+    if (agents)
+      return agents.getConfig(
+        id,
+        undefined,
+        userId ? { userId, projectId } : undefined,
+      );
     const config = getAgent(id ?? fallbackAgentId);
     if (!config) throw new AgentError('AGENT_NOT_FOUND', 404);
     return config;
   };
-  const createAgent = async (id: string, options: AgentRuntimeOptions) =>
+  const createAgent = async (
+    id: string,
+    options: AgentRuntimeOptions,
+    userId: string,
+    projectId?: string,
+  ) =>
     agents
-      ? agents.getAgent(id, options)
-      : buildAgent(await getConfig(id), options);
+      ? agents.getAgent(id, options, { userId, projectId })
+      : buildAgent(await getConfig(id, userId, projectId), options);
   const getModel = async (
     userId: string,
     input: ChatSettings,
     projectId?: string,
   ) => {
-    const config = await getConfig(input.agentId);
+    const config = await getConfig(input.agentId, userId, projectId);
     return models.getLanguageModel(
       userId,
       { ...input, model: config.model ?? input.model },
@@ -141,13 +155,13 @@ export function createChatRunner(
   };
   return {
     browsers,
-    resolveSettings: async (settings) => ({
+    resolveSettings: async (settings, userId, projectId) => ({
       ...settings,
-      agentId: (await getConfig(settings.agentId)).id,
+      agentId: (await getConfig(settings.agentId, userId, projectId)).id,
     }),
-    sessionKey: async (settings) => {
-      const config = await getConfig(settings.agentId);
-      return `${config.id}:${config.source === 'database' ? config.versionId : 'code'}`;
+    sessionKey: async (settings, userId, projectId) => {
+      const config = await getConfig(settings.agentId, userId, projectId);
+      return `${config.id}:${config.source === 'code' ? 'code' : config.versionId}`;
     },
     getGoal: (threadId) => readThreadGoal(storage, threadId),
     getConsumedTokens: usage?.threadConsumedTokens
@@ -178,12 +192,21 @@ export function createChatRunner(
       if (!projectId) return createPersonalWorkspace(workspaceRoot, userId);
       return createProjectWorkspace(workspaceRoot, projectId);
     },
-    async pluginWorkspace(pluginId) {
-      return plugins?.workspaceDirectory(pluginId);
+    async pluginWorkspace(pluginId, userId) {
+      return plugins?.workspaceDirectory(pluginId, userId);
+    },
+    async assertPluginAccess(pluginId, userId) {
+      if (!plugins) return;
+      // Preserve archived/disabled plugin chats, while enforcing current user grants.
+      try {
+        await plugins.access.assertAllowed(pluginId, userId);
+      } catch {
+        throw new ThreadError('PLUGIN_FORBIDDEN', 403);
+      }
     },
     removePersonalWorkspace: (userId, directory) =>
       removePersonalWorkspace(workspaceRoot, userId, directory),
-    async open({ thread, settings, onEvent }) {
+    async open({ thread, settings, onEvent, actorId }) {
       const scope = threadScope(thread.resourceId);
       const userId = scope.userId ?? String(thread.metadata?.createdBy ?? '');
       const projectId = scope.projectId;
@@ -192,7 +215,11 @@ export function createChatRunner(
           ? thread.metadata.workspacePlugin
           : undefined;
       const target = { threadId: thread.id, resourceId: thread.resourceId! };
-      const config = await getConfig(settings.agentId);
+      const config = await getConfig(
+        settings.agentId,
+        actorId ?? userId,
+        projectId,
+      );
       settings = { ...settings, agentId: config.id };
       // Pin the configuration for this native session, including queued inputs and tool resumes.
       const sessionModel = (next: ChatSettings) =>
@@ -284,8 +311,15 @@ export function createChatRunner(
           projectId,
           // The native resolver runs per execution, so automatic skills follow
           // current installations while the Agent configuration stays pinned.
-          () =>
-            resolveAgentSkillPaths(workspaceRoot, userId, config, projectId),
+          (context) =>
+            resolveAgentSkillPaths(
+              workspaceRoot,
+              String(
+                context.requestContext?.get('userId') ?? actorId ?? userId,
+              ),
+              config,
+              projectId,
+            ),
           filesystem,
           environmentVariables,
           (authorId) => ({
@@ -331,7 +365,7 @@ export function createChatRunner(
           ),
           new MemoryMDProcessor(memoryDirectory),
         ];
-        const agent = await createAgent(config.id, {
+        const agentOptions: AgentRuntimeOptions = {
           localSubagents: () =>
             loadLocalAgents(workspaceRoot, userId, projectId),
           versionId:
@@ -450,7 +484,13 @@ export function createChatRunner(
               ? workspace
               : undefined;
           },
-        });
+        };
+        const agent = await createAgent(
+          config.id,
+          agentOptions,
+          actorId ?? userId,
+          projectId,
+        );
         const messages = new Map<string, UIMessage>();
         const refreshMessages = async (streamedMessageIds: string[] = []) => {
           await memory.settled();
@@ -532,6 +572,20 @@ export function createChatRunner(
           createdBy?: string,
           retry = false,
         ): Promise<AgentExecutionOptions> => {
+          for (const reference of [
+            config.id,
+            ...Object.values(config.agents),
+          ]) {
+            if (reference.startsWith('plugin:'))
+              await getConfig(reference, createdBy ?? userId, projectId);
+          }
+          for (const plugin of new Set([
+            thread.metadata?.plugin,
+            workspacePlugin,
+          ])) {
+            if (typeof plugin === 'string')
+              await plugins?.access.assertAllowed(plugin, createdBy ?? userId);
+          }
           const selection = await sessionModel(next);
           const abortSignal = runAbort.signal;
           const requestContext = new RequestContext();

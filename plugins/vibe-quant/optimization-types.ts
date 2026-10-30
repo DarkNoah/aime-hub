@@ -1,3 +1,10 @@
+import type { StrategyDetail, StrategyVersion } from './strategy-types.js';
+
+export interface OptimizationVersionResult {
+  strategy: StrategyDetail;
+  version: StrategyVersion;
+}
+
 export const OPTIMIZATION_METRICS = {
   total_points: '累计收益（点）',
   max_drawdown_points: '最大回撤（点）',

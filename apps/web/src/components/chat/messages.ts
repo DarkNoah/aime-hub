@@ -10,6 +10,7 @@ import {
   type MessageCompression,
 } from './message-compression.js';
 import { getToolName, isSpecialTool } from './tool-renderers/registry.js';
+import { isSubagentTool } from '@aime/shared/chat-turns';
 import { lastTextDate, messageDate } from './message-time.js';
 import {
   mergeThreadMessages,
@@ -44,6 +45,7 @@ export function groupMessageParts(
     if (
       isToolUIPart(part) &&
       !isSpecialTool(getToolName(part)) &&
+      !isSubagentTool(getToolName(part)) &&
       !interactiveToolIds?.has(part.toolCallId)
     ) {
       if (toolGroup) toolGroup.tools.push(part);

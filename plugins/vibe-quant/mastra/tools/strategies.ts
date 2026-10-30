@@ -1,3 +1,4 @@
+import { strategyVersionName } from '../../strategy-version.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createTool } from '@mastra/core/tools';
@@ -269,6 +270,8 @@ export class StrategyVersionsTool extends PluginTool {
             id: version.id,
             strategy_id: version.strategy_id,
             number: version.number,
+            name: strategyVersionName(version),
+            optimization: version.optimization,
             source_hash: version.source_hash,
             parameters: version.parameters,
             note: version.note,

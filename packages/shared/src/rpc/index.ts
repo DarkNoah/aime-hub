@@ -10,6 +10,7 @@ import { environmentVariablesContract } from './environment-variables.js';
 import { requestLogsContract } from './request-logs.js';
 import { toolsContract } from './tools.js';
 import { agentsContract } from './agents.js';
+import { localAgentsContract } from './local-agents.js';
 import { mcpContract } from './mcp.js';
 import { automationsContract } from './automations.js';
 import { notificationsContract } from './notifications.js';
@@ -31,6 +32,7 @@ export const apiContract = {
   requestLogs: requestLogsContract,
   tools: toolsContract,
   agents: agentsContract,
+  localAgents: localAgentsContract,
   mcp: mcpContract,
   automations: automationsContract,
   notifications: notificationsContract,

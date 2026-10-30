@@ -54,6 +54,7 @@ export interface SignalMonitor {
   id: string;
   strategy_id: string;
   version_number: number;
+  version_name?: string;
   engine: Engine;
   config: SignalMonitorInput;
   enabled: boolean;

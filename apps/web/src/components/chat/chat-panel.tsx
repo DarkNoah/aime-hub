@@ -484,6 +484,7 @@ function ExistingChat({
           {chat.thread?.error && (
             <ChatErrorCard
               threadId={threadId}
+              projectId={projectId}
               error={chat.thread.error}
               disabled={!chat.connected || running || stopping || chat.sending}
             />

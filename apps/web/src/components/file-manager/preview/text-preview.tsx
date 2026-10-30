@@ -19,6 +19,7 @@ const languages: Record<string, BundledLanguage> = {
   css: 'css',
   scss: 'scss',
   md: 'markdown',
+  markdown: 'markdown',
   mdx: 'mdx',
   sh: 'shellscript',
   bash: 'shellscript',

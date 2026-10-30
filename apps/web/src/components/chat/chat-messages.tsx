@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { LoaderCircle, ScanText } from 'lucide-react';
 import { isToolUIPart, type UIMessage } from 'ai';
 import type { ToolInteraction, ToolResponse } from '@aime/shared/threads';
+import { isSubagentTool } from '@aime/shared/chat-turns';
 import {
   ChainOfThought,
   ChainOfThoughtContent,
@@ -35,6 +36,8 @@ import { splitMessageAttachments } from './message-attachments';
 import { ChatMessageCompression } from './chat-message-compression';
 import { ChatToolAttachments } from './chat-tool-attachments';
 import { ChatToolRenderer } from './tool-renderers';
+import { getToolName } from './tool-renderers/registry';
+import { SubagentBadge } from './subagent-badge';
 import { useMessagePreview } from './message-preview/context';
 import {
   groupChatMessages,
@@ -249,6 +252,21 @@ export const ChatMessage = memo(function ChatMessage({
               const interaction = toolInteractions.find(
                 (item) => item.toolCallId === part.toolCallId,
               );
+              const name = getToolName(part);
+              if (isSubagentTool(name) && !interaction)
+                return (
+                  <SubagentBadge
+                    key={part.toolCallId}
+                    agent={{
+                      toolCallId: part.toolCallId,
+                      toolName: name,
+                      state: part.state,
+                    }}
+                    onPreview={
+                      openPreview ? () => openPreview(part) : undefined
+                    }
+                  />
+                );
               return (
                 <div
                   key={interaction?.id ?? part.toolCallId}

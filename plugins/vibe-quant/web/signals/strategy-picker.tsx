@@ -1,3 +1,4 @@
+import { strategyVersionName } from '../../strategy-version';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { pluginRequest } from '@app/plugin-sdk/web';
@@ -303,7 +304,7 @@ export function StrategyPicker({
                 <div className="space-y-2 rounded-md border p-3">
                   <div className="flex items-center gap-2 text-sm font-medium">
                     <Badge variant="secondary">主要版本</Badge>
-                    {version ? `v${version.number}` : '正在加载…'}
+                    {version ? `${strategyVersionName(version)}` : '正在加载…'}
                   </div>
                   {version?.note && (
                     <p className="line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground [overflow-wrap:anywhere]">

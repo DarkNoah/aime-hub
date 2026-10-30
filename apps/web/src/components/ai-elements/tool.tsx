@@ -22,6 +22,7 @@ import { isValidElement } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { CodeBlock } from './code-block';
+import { toolStatusLabels } from './tool-status';
 
 export type ToolProps = ComponentProps<typeof Collapsible>;
 
@@ -50,16 +51,6 @@ export type ToolHeaderProps = {
     }
 );
 
-const statusLabels = {
-  'approval-requested': 'chat.toolAwaitingApproval',
-  'approval-responded': 'chat.toolApprovalResponded',
-  'input-available': 'chat.toolRunning',
-  'input-streaming': 'chat.toolPending',
-  'output-available': 'chat.toolDone',
-  'output-denied': 'chat.toolDenied',
-  'output-error': 'chat.toolFailed',
-} as const satisfies Record<ToolPart['state'], string>;
-
 const statusIcons: Record<ToolPart['state'], ReactNode> = {
   'approval-requested': <ClockIcon className="size-4 text-yellow-600" />,
   'approval-responded': <CheckCircleIcon className="size-4 text-blue-600" />,
@@ -78,7 +69,7 @@ const ToolStatusBadge = ({ status }: { status: ToolPart['state'] }) => {
       variant="secondary"
     >
       {statusIcons[status]}
-      {t(statusLabels[status])}
+      {t(toolStatusLabels[status])}
     </Badge>
   );
 };

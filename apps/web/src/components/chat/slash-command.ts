@@ -2,8 +2,13 @@ export type SlashCommandItem = {
   id: string;
   name: string;
   description: string;
-  action?: 'goal' | 'compact' | 'draw' | 'voices';
-};
+  keywords?: string[];
+  disabled?: boolean;
+  current?: boolean;
+} & (
+  | { action?: 'goal' | 'compact' | 'draw' | 'voices' }
+  | { action: 'agent'; agentId: string | null }
+);
 
 export type SlashCommandSection = {
   id: string;
@@ -37,9 +42,13 @@ export function filterCommandGroups(
         .map((section) => ({
           ...section,
           items: section.items.filter((item) =>
-            [item.name, item.description, section.label ?? ''].some((text) =>
-              text.toLocaleLowerCase().includes(search),
-            ),
+            [
+              item.name,
+              item.description,
+              section.label ?? '',
+              group.label ?? '',
+              ...(item.keywords ?? []),
+            ].some((text) => text.toLocaleLowerCase().includes(search)),
           ),
         }))
         .filter((section) => section.items.length > 0),
@@ -55,6 +64,17 @@ export function completeSlashCommand(text: string, end: number, name: string) {
     text: command + separator + suffix,
     caret: command.length + 1,
   };
+}
+
+/** Action commands consume only the command token; skills remain prompt text. */
+export function applySlashCommand(
+  text: string,
+  end: number,
+  item: SlashCommandItem,
+) {
+  return item.action
+    ? { text: text.slice(end).replace(/^\s+/, ''), caret: 0 }
+    : completeSlashCommand(text, end, item.name);
 }
 
 /** Built-in mode commands are consumed locally, never sent as prompt text. */

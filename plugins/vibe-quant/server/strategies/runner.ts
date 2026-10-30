@@ -488,9 +488,9 @@ export class BacktestWorker {
         result.metrics,
       );
       // A final heartbeat may observe the completed status and abort the lease.
-      // Draft creation checks durable completion/cancellation itself.
+      // Version creation checks durable completion/cancellation itself.
       if (optimization?.status === 'completed')
-        await this.records.createOptimizationDraft(job.user_id, job.id);
+        await this.records.createOptimizationVersion(job.user_id, job.id);
     } catch (error) {
       if (error instanceof ClickHouseError)
         throw new Error(

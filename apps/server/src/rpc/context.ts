@@ -87,6 +87,7 @@ export const rpc = implementation.use(
       return await next({
         context: {
           userId: delegatedUser ?? session!.user.id,
+          isAdmin: hasAdminRole(session?.user.role),
           session: session?.session,
         },
       });

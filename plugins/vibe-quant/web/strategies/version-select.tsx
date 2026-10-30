@@ -1,3 +1,4 @@
+import { strategyVersionName } from '../../strategy-version';
 import {
   Badge,
   Select,
@@ -20,7 +21,7 @@ function VersionLabel({
   return (
     <span className="flex min-w-0 flex-1 flex-col gap-1 text-left">
       <span className="flex items-center gap-2 text-sm font-medium">
-        v{version.number}
+        {strategyVersionName(version)}
         {primary && <Badge variant="secondary">主要版本</Badge>}
       </span>
       <span
@@ -56,7 +57,7 @@ export function VersionSelect({
         aria-label={includeDraft ? '选择草稿或版本' : '脚本版本'}
         title={
           selected
-            ? `v${selected.number} · ${selected.note || selected.source_hash.slice(0, 8)}`
+            ? `${strategyVersionName(selected)} · ${selected.note || selected.source_hash.slice(0, 8)}`
             : undefined
         }
       >
@@ -85,7 +86,7 @@ export function VersionSelect({
           <SelectItem
             key={version.id}
             value={version.id}
-            textValue={`v${version.number} ${version.note}`}
+            textValue={`${strategyVersionName(version)} ${version.note}`}
             className="py-2 [&>span:last-child]:min-w-0 [&>span:last-child]:flex-1"
           >
             <VersionLabel

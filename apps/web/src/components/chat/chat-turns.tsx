@@ -17,6 +17,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ChatMessage, ChatMessages } from './chat-messages';
 import { chatErrorKey } from './api';
+import { useMessagePreview } from './message-preview/context';
+import { SubagentBadge } from './subagent-badge';
 
 type Props = {
   turns: ChatTurnSummary[];
@@ -99,6 +101,9 @@ const ChatTurnRow = memo(function ChatTurnRow({
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [previewing, setPreviewing] = useState<string | null>(null);
+  const [previewRequested, setPreviewRequested] = useState(false);
+  const openPreview = useMessagePreview();
   const latestTurn = useRef(turn);
   useEffect(() => {
     latestTurn.current = turn;
@@ -118,7 +123,7 @@ const ChatTurnRow = memo(function ChatTurnRow({
     turn.user;
 
   useEffect(() => {
-    if (!detailsExpanded || !stale || failed) return;
+    if ((!detailsExpanded && !previewRequested) || !stale || failed) return;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const refresh = async () => {
@@ -141,7 +146,7 @@ const ChatTurnRow = memo(function ChatTurnRow({
       disposed = true;
       clearTimeout(timer);
     };
-  }, [detailsExpanded, stale, failed, loadDetails, t]);
+  }, [detailsExpanded, previewRequested, stale, failed, loadDetails, t]);
 
   return (
     <div data-chat-turn={turn.id} className="min-w-0 space-y-4">
@@ -185,6 +190,46 @@ const ChatTurnRow = memo(function ChatTurnRow({
         <Button variant="outline" size="sm" onClick={() => setFailed(false)}>
           {t('chat.retry')}
         </Button>
+      )}
+      {!detailsExpanded && !!turn.subagents?.length && (
+        <div className="flex min-w-0 flex-wrap gap-2">
+          {turn.subagents
+            .filter((agent) => !pendingToolCallIds.has(agent.toolCallId))
+            .map((agent) => (
+              <SubagentBadge
+                key={agent.toolCallId}
+                agent={agent}
+                loading={previewing === agent.toolCallId}
+                onPreview={
+                  openPreview
+                    ? () => {
+                        setPreviewing(agent.toolCallId);
+                        setPreviewRequested(true);
+                        setFailed(false);
+                        void (
+                          detail && !stale
+                            ? Promise.resolve(detail)
+                            : loadDetails(latestTurn.current)
+                        )
+                          .then((loaded) => {
+                            const tool = loaded.messages
+                              .flatMap((message) => message.parts)
+                              .find(
+                                (part) =>
+                                  isToolUIPart(part) &&
+                                  part.toolCallId === agent.toolCallId,
+                              );
+                            if (tool) openPreview(tool);
+                            else toast.error(t('chat.preview.empty'));
+                          })
+                          .catch((cause) => toast.error(t(chatErrorKey(cause))))
+                          .finally(() => setPreviewing(null));
+                      }
+                    : undefined
+                }
+              />
+            ))}
+        </div>
       )}
       {detailsExpanded && detail ? (
         <div className="min-w-0 space-y-6" data-chat-turn-detail={turn.id}>

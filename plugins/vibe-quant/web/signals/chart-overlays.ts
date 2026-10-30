@@ -1,3 +1,4 @@
+import { runVersionName } from '../../strategy-version';
 import type { IndicatorDrawing } from '../indicators/types';
 import type { SeriesMarker, UTCTimestamp } from 'lightweight-charts';
 import type { Bar } from '../../shared';
@@ -36,7 +37,7 @@ export function strategyHintMarkers(
           hint.config.symbol !== bars[0]?.symbol
             ? `${hint.config.symbol} ${name} `
             : visibleHints.length > 1
-              ? `${name} v${hint.version_number} `
+              ? `${name} ${runVersionName(hint)} `
               : '';
         return [
           {
@@ -85,7 +86,7 @@ export function strategyHintLines(
                   lineWidth: 1 as const,
                   lineStyle: 2 as const,
                   axisLabelVisible: true,
-                  title: `${hint.strategy_name.slice(0, 12)} v${hint.version_number} ${label}`,
+                  title: `${hint.strategy_name.slice(0, 12)} ${runVersionName(hint)} ${label}`,
                 },
               ],
         ),

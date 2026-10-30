@@ -26,6 +26,8 @@ import { Switch } from '@/components/ui/switch';
 import { AgentSheet } from './components/agent-sheet';
 import { DeleteAgentDialog } from './components/delete-dialog';
 import { agentErrorKey } from './api';
+import { LocalAgentsManager } from '@/components/local-agents/manager';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 type Action =
   | { kind: 'create' }
@@ -33,6 +35,24 @@ type Action =
   | { kind: 'edit' | 'delete'; agent: ManagedAgent };
 
 export function AdminAgentsPage() {
+  const { t } = useTranslation();
+  return (
+    <Tabs defaultValue="managed" className="space-y-6">
+      <TabsList aria-label={t('nav.agents')}>
+        <TabsTrigger value="managed">{t('localAgents.managedTab')}</TabsTrigger>
+        <TabsTrigger value="local">{t('localAgents.localTab')}</TabsTrigger>
+      </TabsList>
+      <TabsContent value="managed">
+        <ManagedAgentsPage />
+      </TabsContent>
+      <TabsContent value="local">
+        <LocalAgentsManager scope={{ scope: 'global' }} />
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+function ManagedAgentsPage() {
   const { t } = useTranslation();
   const [agents, setAgents] = useState<AdminAgent[]>();
   const [defaultAgentId, setDefaultAgentId] = useState<string | null>(null);

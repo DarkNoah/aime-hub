@@ -1,3 +1,4 @@
+import { runVersionName } from '../../strategy-version';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { pluginRequest } from '@app/plugin-sdk/web';
 import {
@@ -290,7 +291,7 @@ export function HintPerformance({
             {item.strategy_name} · {replaying ? '回放记录' : '历史记录'}
           </SheetTitle>
           <SheetDescription>
-            {item.config.symbol} · v{item.version_number} ·{' '}
+            {item.config.symbol} · {runVersionName(item)} ·{' '}
             {durationLabel(item.config.duration)}
             {replaying
               ? '。仅显示当前回放时点已产生的信号、持仓和交易，回退时同步恢复。'

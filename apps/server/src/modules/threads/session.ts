@@ -36,6 +36,7 @@ export type ChatSessionEvent =
   | { type: 'error'; error: unknown; runId?: string };
 
 export type ChatSessionContext = {
+  actorId?: string;
   thread: StorageThreadType;
   settings: ChatSettings;
   onEvent: (event: ChatSessionEvent) => void;

@@ -1,7 +1,7 @@
 import { Workspace } from '@mastra/core/workspace';
 import { resolve, sep } from 'node:path';
 import type { ChatSkill } from '@aime/shared/threads';
-import type { AdminAgent } from '@aime/shared/agents';
+import type { RuntimeAgent } from '@aime/shared/agents';
 import { AgentError } from '../agents/errors.js';
 import {
   discoverInstalledSkills,
@@ -14,12 +14,12 @@ import { directorySkillConfig } from './skill-source.js';
 export async function resolveAgentSkillPaths(
   root: string,
   userId: string,
-  agent: Pick<AdminAgent, 'source' | 'skillsMode' | 'skillPaths'>,
+  agent: Pick<RuntimeAgent, 'source' | 'skillsMode' | 'skillPaths'>,
   projectId?: string,
 ): Promise<string[]> {
   if (agent.source === 'code' || agent.skillsMode === 'auto') {
     const skills = await (projectId
-      ? discoverProjectSkills(root, projectId)
+      ? discoverProjectSkills(root, projectId, userId)
       : discoverPersonalSkills(root, userId));
     return skills.map((skill) => skill.path);
   }
@@ -27,7 +27,7 @@ export async function resolveAgentSkillPaths(
   // Custom selections pin exact global installation paths, including when a
   // personal/project skill has the same name. Never add an unselected override.
   const installed = new Set(
-    (await discoverInstalledSkills(root)).map((skill) => skill.path),
+    (await discoverInstalledSkills(root, userId)).map((skill) => skill.path),
   );
   return agent.skillPaths.map((path) => {
     const directory = resolve(root, '.agents', 'skills', path);
@@ -43,11 +43,15 @@ export async function listChatSkills(
   projectId?: string,
 ): Promise<ChatSkill[]> {
   const discovered = await (projectId
-    ? discoverProjectSkills(root, projectId)
+    ? discoverProjectSkills(root, projectId, userId)
     : discoverPersonalSkills(root, userId));
+  if (!discovered.length) return [];
   // The catalog and the Agent share directory-based identities and validation.
   const workspace = new Workspace(
-    directorySkillConfig(discovered.map((skill) => skill.path)),
+    directorySkillConfig(
+      discovered.map((skill) => skill.path),
+      userId,
+    ),
   );
   const groups = new Map(
     discovered.map((skill) => [

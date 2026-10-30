@@ -32,6 +32,9 @@ export interface StrategyVersion extends ScriptDraft {
   id: string;
   strategy_id: string;
   number: number;
+  /** Display name; legacy versions use v<number>. number remains the insertion order. */
+  name?: string;
+  optimization?: { source_version_id: string; run_id: string };
   source_hash: string;
   note: string;
   created_at: string;
@@ -97,12 +100,15 @@ export const POINT_BACKTEST_RULES: BacktestInput['rules'] = {
 export interface BacktestRun {
   /** Compact result metrics for successful runs; absent on legacy records. */
   metrics?: { profit_factor: number | null; sharpe: number | null };
-  /** A successful optimization creates a separate, unpublished strategy. */
+  /** Legacy optimization output, retained for historical records. */
   optimization_draft_id?: string;
+  /** A successful optimization creates a version in the same strategy. */
+  optimization_version_id?: string;
   id: string;
   strategy_id: string;
   version_id: string;
   version_number: number;
+  version_name?: string;
   source_hash: string;
   engine: Engine;
   status: RunStatus;

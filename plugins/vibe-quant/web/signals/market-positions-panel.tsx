@@ -1,3 +1,4 @@
+import { runVersionName } from '../../strategy-version';
 import { useState, type ReactNode } from 'react';
 import {
   Badge,
@@ -57,7 +58,7 @@ function PositionRow({
             {monitor.strategy_name}
           </p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            v{monitor.version_number} · {durationLabel(monitor.config.duration)}
+            {runVersionName(monitor)} · {durationLabel(monitor.config.duration)}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">

@@ -11,10 +11,12 @@ import { usePersonalChatSettings } from './use-personal-chat-settings';
 export function ChatErrorCard({
   error,
   threadId,
+  projectId,
   disabled,
 }: {
   error: string;
   threadId: string;
+  projectId?: string;
   disabled?: boolean;
 }) {
   const { t } = useTranslation();
@@ -23,7 +25,7 @@ export function ChatErrorCard({
     loading,
     saving,
     error: settingsError,
-  } = usePersonalChatSettings();
+  } = usePersonalChatSettings(projectId);
   const pending = useRef(false);
   const [retrying, setRetrying] = useState(false);
   const retryDisabled = disabled || loading || saving || !!settingsError;

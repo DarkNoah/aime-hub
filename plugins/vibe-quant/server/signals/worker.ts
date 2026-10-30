@@ -1,3 +1,4 @@
+import { runVersionName } from '../../strategy-version.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -495,7 +496,7 @@ export class SignalWorker {
               userId: row.user_id,
               eventId: event.id,
               title: `${strategy.name} · ${side}${event.type === 'entry' ? '入场' : '离场'}信号`,
-              body: `${event.symbol} · v${row.version_number} · ${time}${event.price === null ? '' : ` · 参考价 ${event.price}`}${event.reason ? ` · ${event.reason}` : ''}`,
+              body: `${event.symbol} · ${runVersionName(row)} · ${time}${event.price === null ? '' : ` · 参考价 ${event.price}`}${event.reason ? ` · ${event.reason}` : ''}`,
               url: `/plugins/vibe-quant/?symbol=${encodeURIComponent(row.config.display_symbol ?? row.config.symbol)}`,
               toast: channels.toast?.enabled ?? false,
               desktop: channels.desktop?.enabled ?? false,

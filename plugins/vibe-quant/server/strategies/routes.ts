@@ -239,16 +239,25 @@ export function strategyRoutes(
   api.get('/optimizations/:runId/result', async (c) => {
     const run = await optimizationRun(c.get('userId'), c.req.param('runId'));
     const artifact = await getRecords().artifact(run.id, 'optimization');
-    let draft = null;
-    if (run.optimization_draft_id) {
+    let version = null;
+    let strategy = null;
+    let versionDeleted = false;
+    if (run.optimization_version_id) {
+      const original = await getRecords().storedStrategy(run.strategy_id);
+      versionDeleted = Boolean(
+        original.versions.find(
+          (item) => item.id === run.optimization_version_id,
+        )?.deleted_at,
+      );
       try {
-        draft = await getRecords().detail(
+        version = await getRecords().version(
           c.get('userId'),
-          run.optimization_draft_id,
+          run.optimization_version_id,
         );
+        strategy = await getRecords().detail(c.get('userId'), run.strategy_id);
       } catch (error) {
         if (!(
-          error instanceof StrategyError && error.code === 'STRATEGY_NOT_FOUND'
+          error instanceof StrategyError && error.code === 'VERSION_NOT_FOUND'
         ))
           throw error;
       }
@@ -256,17 +265,19 @@ export function strategyRoutes(
     return c.json({
       run,
       optimization: artifact ? JSON.parse(artifact.text) : null,
-      draft,
+      version,
+      strategy,
+      version_deleted: versionDeleted,
     });
   });
   api.post('/optimizations/:runId/cancel', async (c) => {
     const run = await optimizationRun(c.get('userId'), c.req.param('runId'));
     return c.json(await getRecords().cancel(c.get('userId'), run.id));
   });
-  api.post('/optimizations/:runId/draft', async (c) => {
+  api.post('/optimizations/:runId/version', async (c) => {
     const run = await optimizationRun(c.get('userId'), c.req.param('runId'));
     return c.json(
-      await getRecords().createOptimizationDraft(c.get('userId'), run.id),
+      await getRecords().createOptimizationVersion(c.get('userId'), run.id),
     );
   });
   api.get('/runs/:runId/status', async (c) =>

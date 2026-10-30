@@ -9,6 +9,26 @@ export const agentIdSchema = z
   .string()
   .regex(/^[a-zA-Z0-9][a-zA-Z0-9:_-]{0,99}$/);
 export const subagentNameSchema = z.string().regex(/^[a-zA-Z0-9_-]{1,58}$/);
+export const localAgentNameSchema = z.string().regex(/^[a-zA-Z_:-]{1,58}$/);
+// Existing filenames may contain digits; new names use localAgentNameSchema.
+export const localAgentFileIdSchema = z
+  .string()
+  .regex(/^[a-zA-Z0-9_:-]{1,58}$/);
+export type AgentScopeContext = { userId: string; projectId?: string };
+
+export function localAgentProjectId(id: string | null | undefined) {
+  return id?.match(/^local:project:([a-zA-Z0-9_-]{16}):/)?.[1];
+}
+
+export function localAgentMatchesScope(
+  id: string | null | undefined,
+  projectId?: string,
+) {
+  if (id?.startsWith('local:personal:')) return !projectId;
+  if (id?.startsWith('local:project:'))
+    return !!projectId && localAgentProjectId(id) === projectId;
+  return true;
+}
 
 const text = (max: number) =>
   z
@@ -82,13 +102,56 @@ export type ManagedAgent = z.output<typeof agentInputSchema> & {
   updatedAt: string;
 };
 export type AdminAgent = ManagedAgent | BaseAgent;
+export type LocalRuntimeAgent = AgentDefinition & {
+  source: 'local';
+  versionId: string;
+};
+export type RuntimeAgent = AdminAgent | LocalRuntimeAgent;
 export type AvailableAgent = Pick<
   AgentDefinition,
   'id' | 'name' | 'description' | 'model'
-> & { source: AdminAgent['source'] };
+> & { source: RuntimeAgent['source'] };
 export type AvailableAgents = AgentDefaults & { agents: AvailableAgent[] };
 export type AgentCatalog = {
   agents: AvailableAgent[];
   tools: { id: AgentToolId; enabled: boolean }[];
   skills: InstalledSkill[];
 };
+
+export const localAgentScopeSchema = z.discriminatedUnion('scope', [
+  z.object({ scope: z.literal('global') }),
+  z.object({ scope: z.literal('personal') }),
+  z.object({
+    scope: z.literal('project'),
+    projectId: z.string().regex(/^[a-zA-Z0-9_-]{16}$/),
+  }),
+]);
+export type LocalAgentScope = z.infer<typeof localAgentScopeSchema>;
+export const localAgentDocumentSchema = z.object({
+  format: z.literal('md'),
+  content: z
+    .string()
+    .max(100_000)
+    .refine((value) => new TextEncoder().encode(value).length <= 100_000),
+});
+export type LocalAgentDocument = z.infer<typeof localAgentDocumentSchema>;
+export type LocalAgentIssue =
+  | 'syntax'
+  | 'name'
+  | 'displayName'
+  | 'description'
+  | 'enabled'
+  | 'instructions';
+export type LocalAgentFile = LocalAgentDocument & {
+  id: string;
+  filename: string;
+  name: string;
+  displayName: string;
+  description: string;
+  enabled: boolean;
+  version: string;
+};
+export type LocalAgentList = { agents: LocalAgentFile[]; canManage: boolean };
+export type LocalAgentCreateResult =
+  | { ok: true; agent: LocalAgentFile }
+  | { ok: false; issues: LocalAgentIssue[] };

@@ -65,7 +65,8 @@ const errors: Record<string, string> = {
   RUN_NOT_FOUND: '回测记录不存在或已删除',
   RUN_ACTIVE: '回测尚未结束，请先取消并等待任务停止后再删除',
   USE_OPTIMIZATION_ENDPOINT: '请通过「调优参数」入口创建调优任务',
-  OPTIMIZATION_NOT_COMPLETED: '调优尚未成功完成，暂时无法生成草稿',
+  OPTIMIZATION_NOT_COMPLETED: '调优尚未成功完成，暂时无法创建新版本',
+  OPTIMIZATION_PARAMETER_NOT_FOUND: '搜索范围只能包含所选版本已有的默认参数',
   OPTIMIZATION_RESULT_MISSING: '最佳参数结果尚未保存完整，请稍后重试',
   INVALID_BACKTEST_CONFIG: '请检查回测标的、版本、资金、交易规则和参数',
   INVALID_BACKTEST_TIME_RANGE:

@@ -1,7 +1,19 @@
-import { isToolUIPart, type UIMessage } from 'ai';
+import { isToolUIPart, type UIMessage, type ToolUIPart } from 'ai';
 import { getMessageCompression } from './message-compression.js';
 import type { ThreadSnapshot } from './threads.js';
 import { isIntelligentUiPart } from './intelligent-ui.js';
+
+export function isSubagentTool(
+  name: string | undefined,
+): name is `agent-${string}` {
+  return !!name?.startsWith('agent-') && name.length > 'agent-'.length;
+}
+
+export type ChatSubagentSummary = {
+  toolCallId: string;
+  toolName: string;
+  state: ToolUIPart['state'];
+};
 
 /** Answered questions remain visible when the rest of a turn is collapsed. */
 export function isCompletedAskUserPart(part: UIMessage['parts'][number]) {
@@ -49,6 +61,8 @@ export type ChatTurnSummary = {
   /** Whether details add visible content beyond the final assistant text. */
   hasDetails?: boolean;
   toolCount: number;
+  /** Lightweight badges; full delegation inputs and results stay in turn details. */
+  subagents?: ChatSubagentSummary[];
   elapsedMs?: number;
   revision: string;
   assetRevision: string;

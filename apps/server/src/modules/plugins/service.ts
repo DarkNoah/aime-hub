@@ -29,6 +29,7 @@ import type {
 } from '@app/plugin-sdk/tools';
 import { PluginLifecycle } from './lifecycle.js';
 import { createPluginRuntime, type PluginRuntimeOptions } from './runtime.js';
+import { PluginAccessService } from './access.js';
 
 export class PluginError extends Error {
   constructor(
@@ -55,6 +56,7 @@ type PluginState = PluginStatus & {
 
 /** Code is immutable for the lifetime of a process; activation is read from PostgreSQL. */
 export class PluginService {
+  readonly access: PluginAccessService;
   private servers = new Map<string, PluginServer>();
   private runtimes = new Map<string, ReturnType<typeof createPluginRuntime>>();
   private lifecycle = new PluginLifecycle(this.servers);
@@ -75,6 +77,7 @@ export class PluginService {
     web?: PluginWebServices,
     notifications?: (pluginId: string) => PluginNotifications,
   ) {
+    this.access = new PluginAccessService(database);
     const ids = new Set<string>();
     for (const definition of definitions) {
       const { id } = definition.manifest;
@@ -227,11 +230,28 @@ export class PluginService {
     return this.runtimeStates(await this.readStates());
   }
 
-  async workspaceDirectory(id: string): Promise<string | undefined> {
+  async listForUser(userId?: string): Promise<PluginStatus[]> {
+    const [states, allowed] = await Promise.all([
+      this.list(),
+      this.access.allowedIds(userId),
+    ]);
+    return states.filter((state) => state.enabled && allowed.has(state.id));
+  }
+
+  async assertAccessible(id: string, userId?: string) {
+    await this.assertEnabled(id);
+    await this.access.assertAllowed(id, userId);
+  }
+
+  async workspaceDirectory(
+    id: string,
+    userId?: string,
+  ): Promise<string | undefined> {
     const runtime = this.runtimes.get(id);
     if (!runtime?.paths.pluginWorkspace) return;
     if (!(await this.list()).some((state) => state.id === id && state.enabled))
       return;
+    await this.access.assertAllowed(id, userId);
     return runtime.ensureWorkspace();
   }
 
@@ -489,8 +509,8 @@ export class PluginService {
     return this.servers.get(id)?.api;
   }
 
-  async agents(): Promise<BaseAgent[]> {
-    const states = await this.list();
+  async agents(userId?: string): Promise<BaseAgent[]> {
+    const states = userId ? await this.listForUser(userId) : await this.list();
     return states
       .filter((s) => s.enabled)
       .flatMap((s) => structuredClone(this.servers.get(s.id)?.agents ?? []));
@@ -527,12 +547,18 @@ export class PluginService {
     dependencies: ToolDependencies = {},
     options: ToolRegistryOptions = {},
   ): Promise<ToolsInput> {
+    const caller = dependencies.context?.requestContext?.get('userId');
+    const allowed =
+      typeof caller === 'string'
+        ? await this.access.allowedIds(caller)
+        : undefined;
     const configs = new Map(
       (await this.toolConfigs(defaults)).map((tool) => [tool.id, tool.config]),
     );
     const entries = await Promise.all(
       [...this.servers.entries()].flatMap(([pluginId, server]) =>
         (server.tools ?? []).map(async (definition) => {
+          if (allowed && !allowed.has(pluginId)) return [];
           if (!configs.get(definition.id)?.enabled) return [];
           const tools = await definition.getTools(
             defaults,
@@ -549,7 +575,11 @@ export class PluginService {
               configurable: true,
               enumerable: true,
               value: async (...args: Parameters<typeof execute>) => {
-                await this.assertEnabled(pluginId);
+                const userId = args[1]?.requestContext?.get('userId') ?? caller;
+                await this.assertAccessible(
+                  pluginId,
+                  typeof userId === 'string' ? userId : undefined,
+                );
                 return Reflect.apply(execute, tool, args);
               },
             };

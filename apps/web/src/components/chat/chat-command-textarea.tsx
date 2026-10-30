@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PromptInputTextarea } from '@/components/ai-elements/prompt-input';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   Popover,
   PopoverAnchor,
@@ -10,7 +11,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import {
-  completeSlashCommand,
+  applySlashCommand,
   filterCommandGroups,
   getSlashCommand,
   type SlashCommandGroup,
@@ -40,7 +41,7 @@ export function ChatCommandTextarea({
   error?: TranslationKey;
   onRetry: () => void;
   onOpenChange: (open: boolean) => void;
-  onCommand?: (item: SlashCommandItem) => void;
+  onCommand?: (item: SlashCommandItem) => boolean | void;
 }) {
   const { t } = useTranslation();
   const id = useId();
@@ -58,11 +59,12 @@ export function ChatCommandTextarea({
   const matches = filteredGroups.flatMap((group) =>
     group.sections.flatMap((section) => section.items),
   );
+  const selectable = matches.filter((item) => !item.disabled);
   const activeIndex = Math.max(
     0,
-    matches.findIndex((item) => item.id === selected),
+    selectable.findIndex((item) => item.id === selected),
   );
-  const activeItem = matches[activeIndex];
+  const activeItem = selectable[activeIndex];
   const activeId = activeItem?.id;
 
   useEffect(() => {
@@ -77,11 +79,9 @@ export function ChatCommandTextarea({
   }, [open, activeId]);
 
   function complete(item: SlashCommandItem) {
-    if (!command) return;
-    const next = item.action
-      ? { text: value.slice(command.end).replace(/^\s+/, ''), caret: 0 }
-      : completeSlashCommand(value, command.end, item.name);
-    if (item.action) onCommand?.(item);
+    if (!command || disabled || item.disabled) return;
+    if (item.action && onCommand?.(item) === false) return;
+    const next = applySlashCommand(value, command.end, item);
     onValueChange(next.text);
     setDismissed(true);
     // The drawing dialog takes focus; leave its canvas keyboard shortcuts active.
@@ -154,14 +154,15 @@ export function ChatCommandTextarea({
               setDismissed(true);
             } else if (
               (event.key === 'ArrowDown' || event.key === 'ArrowUp') &&
-              matches.length
+              selectable.length
             ) {
               event.preventDefault();
               const step = event.key === 'ArrowDown' ? 1 : -1;
               setKeyboardSelection(true);
               setSelected(
-                matches[(activeIndex + step + matches.length) % matches.length]
-                  .id,
+                selectable[
+                  (activeIndex + step + selectable.length) % selectable.length
+                ].id,
               );
             } else if (
               (event.key === 'Enter' || event.key === 'Tab') &&
@@ -169,7 +170,10 @@ export function ChatCommandTextarea({
             ) {
               event.preventDefault();
               complete(activeItem);
-            } else if (event.key === 'Enter' && loading) {
+            } else if (
+              event.key === 'Enter' &&
+              (loading || matches.length > 0)
+            ) {
               event.preventDefault();
             }
           }}
@@ -271,6 +275,8 @@ export function ChatCommandTextarea({
                               type="button"
                               variant="ghost"
                               role="option"
+                              disabled={item.disabled}
+                              aria-disabled={item.disabled}
                               aria-selected={item.id === activeId}
                               data-keyboard-active={
                                 keyboardSelection && item.id === activeId
@@ -292,8 +298,15 @@ export function ChatCommandTextarea({
                                 className="chat-command-summary pointer-events-none absolute inset-0 flex min-w-0 items-center gap-2 px-2.5"
                               >
                                 <span className="max-w-1/2 shrink-0 truncate">
-                                  /{item.name}
+                                  {item.action === 'agent'
+                                    ? item.name
+                                    : `/${item.name}`}
                                 </span>
+                                {item.current && (
+                                  <Badge variant="secondary">
+                                    {t('chat.commands.currentAgent')}
+                                  </Badge>
+                                )}
                                 <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
                                   {item.description}
                                 </span>
@@ -301,7 +314,16 @@ export function ChatCommandTextarea({
                               <span className="chat-command-details grid min-w-0">
                                 <span className="min-h-0 overflow-hidden">
                                   <span className="flex min-w-0 flex-col gap-1 py-2 [overflow-wrap:anywhere]">
-                                    <span>/{item.name}</span>
+                                    <span className="flex flex-wrap items-center gap-2">
+                                      {item.action === 'agent'
+                                        ? item.name
+                                        : `/${item.name}`}
+                                      {item.current && (
+                                        <Badge variant="secondary">
+                                          {t('chat.commands.currentAgent')}
+                                        </Badge>
+                                      )}
+                                    </span>
                                     <span className="text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
                                       {item.description}
                                     </span>

@@ -1,3 +1,4 @@
+import { runVersionName } from '../../strategy-version';
 import { Badge, ScrollArea, Skeleton } from '@app/plugin-ui';
 import type { MarketPositionsPage } from '../../market-positions';
 import { durationLabel } from '../../shared';
@@ -52,7 +53,7 @@ export function MarketStrategyList({
                       {monitor.strategy_name}
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      v{monitor.version_number} ·{' '}
+                      {runVersionName(monitor)} ·{' '}
                       {durationLabel(monitor.config.duration)}
                     </p>
                   </div>

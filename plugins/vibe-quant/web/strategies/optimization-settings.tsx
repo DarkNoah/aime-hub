@@ -45,7 +45,7 @@ export function OptimizationSettings({
     <section className="space-y-4 border-t pt-5">
       <h3 className="text-sm font-medium">搜索范围与验证</h3>
       <p className="text-xs leading-5 text-muted-foreground">
-        在同一份行情和交易规则下搜索参数，完成后以最佳参数创建新的策略草稿。
+        在同一份行情和交易规则下搜索参数，完成后将最佳参数保存为当前策略的新版本。
       </p>
       <>
         <div className="grid gap-4 sm:grid-cols-2">
@@ -132,9 +132,9 @@ export function OptimizationSettings({
           />
         </Label>
         <p className="text-xs leading-5 text-muted-foreground">
-          使用策略实际读取的参数名。int / float 填 low、high，可选 step 或
-          log；categorical 填 choices 数组。
-          未搜索的参数沿用上方策略参数。symbol、duration、execution_model
+          只能填写所选版本已有的默认参数名。int / float 填 low、high，可选 step
+          或 log；categorical 填 choices 数组。
+          未搜索的参数沿用原版本默认值。symbol、duration、execution_model
           固定，不参与搜索。
         </p>
       </>

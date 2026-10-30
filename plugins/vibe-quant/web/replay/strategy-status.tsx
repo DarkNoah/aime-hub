@@ -1,3 +1,4 @@
+import { runVersionName } from '../../strategy-version';
 import { Badge, Button, Label, ScrollArea, Switch } from '@app/plugin-ui';
 import { useId } from 'react';
 import type { StrategyReplayView } from './use-strategy-replay';
@@ -59,7 +60,7 @@ export function ReplayStrategies({
                   aria-label={`${item.strategy_name} 回放持仓`}
                 >
                   <span className="font-medium">
-                    {item.strategy_name} · v{item.version_number}
+                    {item.strategy_name} · {runVersionName(item)}
                   </span>
                   <span className="text-muted-foreground">
                     {durationLabel(item.config.duration)}

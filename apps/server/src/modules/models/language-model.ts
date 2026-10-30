@@ -16,6 +16,7 @@ import type { ProviderService } from '../providers/service.js';
 import { ProviderError } from '../providers/network.js';
 import { ThreadError } from '../threads/errors.js';
 import type { AgentService } from '../agents/service.js';
+import { localAgentProjectId } from '@aime/shared/agents';
 
 export function getProviderOptions({
   reasoningEffort,
@@ -65,7 +66,10 @@ export class LanguageModelService {
   }
 
   async setPreferences(userId: string, input: ChatSettings) {
-    const agent = await this.agents?.getConfig(input.agentId);
+    const agent = await this.agents?.getConfig(input.agentId, undefined, {
+      userId,
+      projectId: localAgentProjectId(input.agentId),
+    });
     const model = agent?.model ?? input.model;
     if (model) await this.getLanguageModel(userId, { ...input, model });
     await this.database.manager.save(Setting, {

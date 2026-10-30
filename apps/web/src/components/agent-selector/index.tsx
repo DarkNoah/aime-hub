@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 export function AgentSelector({
   value,
   onValueChange,
+  onOpen,
   agents,
   defaultAgentId,
   disabled,
@@ -30,6 +31,7 @@ export function AgentSelector({
 }: {
   value: string | null;
   onValueChange: (id: string | null) => void;
+  onOpen?: () => void;
   agents: AvailableAgent[];
   defaultAgentId?: string;
   disabled?: boolean;
@@ -67,7 +69,10 @@ export function AgentSelector({
       open={open && !disabled}
       onOpenChange={(next) => {
         setOpen(next);
-        if (next) setSearch('');
+        if (next) {
+          setSearch('');
+          onOpen?.();
+        }
       }}
     >
       <ModelSelectorTrigger asChild>

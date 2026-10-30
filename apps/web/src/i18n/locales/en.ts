@@ -1,4 +1,67 @@
 export const en = {
+  'localAgents.title.personal': 'My agents',
+  'localAgents.title.project': 'Project agents',
+  'localAgents.title.global': 'Global local agents',
+  'localAgents.hint.personal':
+    'Create agents for your personal chats. Enabled agents can be selected in chat or used for delegation.',
+  'localAgents.hint.project':
+    'Subagents shared by this project. Project owners and admins can create, edit, delete and enable them.',
+  'localAgents.hint.global':
+    'File-based subagents available in personal and project chats. Scoped agents override global agents with the same ID.',
+  'localAgents.scope.personal': 'Personal',
+  'localAgents.scope.project': 'Project',
+  'localAgents.scope.global': 'Global',
+  'localAgents.managedTab': 'Managed agents',
+  'localAgents.localTab': 'Local subagents',
+  'localAgents.create': 'Create from text',
+  'localAgents.createHint':
+    'Paste a Markdown configuration or import a .md file.',
+  'localAgents.content': 'Agent configuration',
+  'localAgents.import': 'Import file',
+  'localAgents.requiredMd':
+    'Required YAML fields: name (1–58 letters A–Z/a–z or _ - :), displayName, description, and enabled (true or false). Add non-empty instructions below the frontmatter.',
+  'localAgents.storageHint':
+    'Saved as name.md in this scope’s .agents/agents directory. displayName is the label shown in lists and the chat agent selector.',
+  'localAgents.created': 'Created {{filename}}',
+  'localAgents.editNamed': 'Edit {{name}}',
+  'localAgents.editHint':
+    'Saving updates the original Markdown file in this scope, keeping its filename. Changing the display name does not change the delegation ID.',
+  'localAgents.updated': 'Updated {{filename}}',
+  'localAgents.deleteNamed': 'Delete {{name}}',
+  'localAgents.deleteHint':
+    'This permanently deletes the configuration file in this scope and cannot be undone. Another configuration with the same ID may take effect again. To disable it temporarily, use the enable switch.',
+  'localAgents.deleted': 'Deleted {{name}}',
+  'localAgents.deleting': 'Deleting…',
+  'localAgents.enabled': 'Enabled',
+  'localAgents.disabled': 'Disabled',
+  'localAgents.enabledSuccess': 'Agent enabled',
+  'localAgents.disabledSuccess': 'Agent disabled',
+  'localAgents.toggle': 'Enable {{name}}',
+  'localAgents.readOnly': 'Read only',
+  'localAgents.readOnlyHint':
+    'Ask a project owner or admin to create a project agent.',
+  'localAgents.list': 'Local agents',
+  'localAgents.empty': 'No local agents yet',
+  'localAgents.emptyHint':
+    'Create an agent by pasting Markdown. Enabled agents can be selected or delegated to in chats within this scope.',
+  'localAgents.exists':
+    'An agent file with this name already exists in this scope. Change name before creating.',
+  'localAgents.pathUnavailable':
+    'The agent directory is unavailable or redirects through a symbolic link.',
+  'localAgents.fileInvalid': 'Choose a .md file smaller than 100 KB.',
+  'localAgents.invalid': 'Check the configuration format and required fields.',
+  'localAgents.issue.syntax':
+    'Invalid format. Markdown must begin with YAML frontmatter between --- lines.',
+  'localAgents.issue.name':
+    'name must contain 1–58 letters A–Z/a–z or _ - : only.',
+  'localAgents.issue.displayName':
+    'displayName is required and must be a non-empty string.',
+  'localAgents.issue.description':
+    'description is required and must be a non-empty string.',
+  'localAgents.issue.enabled':
+    'enabled is required and must be true or false, without quotes.',
+  'localAgents.issue.instructions':
+    'Markdown instructions after the frontmatter must not be empty.',
   'groupChat.heading': 'Bots',
   'groupChat.create': 'Create Bots',
   'groupChat.rename': 'Rename Bots',
@@ -28,8 +91,7 @@ export const en = {
   'groupChat.loadMore': 'Load more Bots',
   'groupChat.saved': 'Bots saved',
   'groupChat.deleted': 'Bots deleted',
-  'groupChat.unavailable':
-    'Bots does not exist or you no longer have access.',
+  'groupChat.unavailable': 'Bots does not exist or you no longer have access.',
   'groupChat.invalid':
     'Check your input. Messages can contain up to 20,000 characters.',
   'groupChat.failed':
@@ -1053,9 +1115,11 @@ export const en = {
   'chat.intelligentUi.display': 'Interactive display',
   'chat.intelligentUi.skipped': 'Skipped',
   'chat.intelligentUi.skip': 'Skip',
-  'chat.intelligentUi.hint': 'Complete the panel to send your result and continue.',
+  'chat.intelligentUi.hint':
+    'Complete the panel to send your result and continue.',
   'chat.intelligentUi.result': 'Submitted data',
-  'chat.intelligentUi.invalidData': 'Submit a JSON object with at most 60,000 characters.',
+  'chat.intelligentUi.invalidData':
+    'Submit a JSON object with at most 60,000 characters.',
   'chat.intelligentUi.missingHtml': 'The panel has no HTML content.',
   'agents.tool.task_write': 'Create task',
   'agents.tool.task_update': 'Update task',
@@ -1289,6 +1353,30 @@ export const en = {
   'plugins.toggle': 'Enable plugin',
   'plugins.empty': 'No plugins installed',
   'plugins.configure': 'Configure',
+  'plugins.accessConfigure': 'User access',
+  'plugins.accessTitle': '{{name}} · User access',
+  'plugins.accessHint':
+    'Choose who can use this plugin. Administrators always have access. Only administrators can change plugin settings and permissions.',
+  'plugins.accessScope': 'Who can use this plugin',
+  'plugins.accessAll': 'All users',
+  'plugins.accessSelected': 'Selected users',
+  'plugins.accessSelectedCount': '{{count}} users selected',
+  'plugins.accessRemoveUser': 'Remove {{name}}',
+  'plugins.accessSearch': 'Search by name or email',
+  'plugins.accessUsersFailed': 'Could not load users',
+  'plugins.accessNoUsers': 'No matching users',
+  'plugins.accessPrevious': 'Previous page of users',
+  'plugins.accessNext': 'Next page of users',
+  'plugins.accessAdminOnly':
+    'No users selected. Only administrators will be able to use this plugin.',
+  'plugins.accessSave': 'Save access',
+  'plugins.accessSaved': 'Plugin user access updated',
+  'plugins.accessLoadFailed': 'Could not load plugin access. Please retry.',
+  'plugins.accessSaveFailed': 'Could not save plugin access. Please retry.',
+  'plugins.accessConflict':
+    'Another administrator changed access. Reload before saving.',
+  'plugins.accessUserMissing':
+    'A selected user no longer exists. Remove them before saving.',
   'plugins.configTitle': '{{name}} · Configuration',
   'plugins.configGroups': 'Configuration groups',
   'plugins.configGeneral': 'General',
@@ -1500,6 +1588,9 @@ export const en = {
   'files.previewMode': 'File preview mode',
   'files.renderedPreview': 'Preview',
   'files.sourcePreview': 'Source',
+  'files.markdownSource': 'Source',
+  'files.editMode': 'Edit',
+  'files.markdownPreview': 'Markdown preview of {{name}}',
   'files.htmlPreview': 'HTML preview of {{name}}',
   'files.previousPage': 'Previous page',
   'files.nextPage': 'Next page',
@@ -1702,6 +1793,24 @@ export const en = {
   'chat.compression.tokenChange': '{{before}} → {{after}} tokens',
   'chat.compression.duration': '{{seconds}} s',
   'chat.preview.title': 'Tool message preview',
+  'chat.subagent.title': 'Subagent delegation',
+  'chat.subagent.badge': 'Subagent · {{name}}',
+  'chat.subagent.open': 'View subagent {{name}} · {{status}}',
+  'chat.subagent.prompt': 'Delegated task',
+  'chat.subagent.response': 'Subagent response',
+  'chat.subagent.details': 'Execution details',
+  'chat.subagent.thread': 'Subagent thread ID',
+  'chat.subagent.resource': 'Resource ID',
+  'chat.subagent.reference': 'Result reference',
+  'chat.subagent.finishReason': 'Finish reason',
+  'chat.subagent.tools': 'Subagent tool calls',
+  'chat.subagent.toolErrors': '{{count}} failed calls',
+  'chat.subagent.unknownTool': 'Tool call {{index}}',
+  'chat.subagent.waiting': 'The subagent is running. Waiting for results…',
+  'chat.subagent.empty': 'The subagent returned no text.',
+  'chat.subagent.noTools': 'No tool calls were included in this response.',
+  'chat.subagent.failed':
+    'The subagent failed. Check the result or raw data for details.',
   'browser.title': 'Browser',
   'browser.screen': 'Live browser view',
   'browser.address': 'Enter URL',
@@ -2033,6 +2142,9 @@ export const en = {
   'chat.reasoning.max': 'Maximum',
   'chat.placeholder': 'Send message…',
   'chat.commands.title': 'Quick commands',
+  'chat.commands.agents': 'Switch agent',
+  'chat.commands.currentAgent': 'Current',
+  'chat.commands.defaultAgent': 'Use the default agent: {{name}}',
   'chat.drawing.title': 'Draw',
   'chat.drawing.command': 'Draw on a canvas and insert it as an image',
   'chat.drawing.hint':

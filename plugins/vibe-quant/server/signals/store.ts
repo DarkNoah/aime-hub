@@ -111,6 +111,7 @@ export class MonitorStore extends ClickHouseClient {
       id: row.id,
       strategy_id: row.strategy_id,
       version_number: row.version_number,
+      version_name: row.version_name,
       engine: row.engine,
       config: {
         ...row.config,
@@ -141,7 +142,7 @@ export class MonitorStore extends ClickHouseClient {
     config: SignalMonitorInput,
     notificationOptions: Pick<
       SignalMonitor,
-      'notifications' | 'notifications_enabled'
+      'notifications' | 'notifications_enabled' | 'version_name'
     > = {},
   ) {
     const row: StoredMonitor = {

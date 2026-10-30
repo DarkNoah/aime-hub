@@ -4,6 +4,7 @@ import {
   type PluginConfiguration,
 } from './config.js';
 export * from './config.js';
+export * from './access.js';
 
 /** Increment this when the host breaks the plugin contract. */
 export const PLUGIN_API_VERSION = 2;

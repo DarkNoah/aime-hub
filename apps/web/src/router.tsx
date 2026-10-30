@@ -49,6 +49,16 @@ const PersonalSkillsPage = lazy(() =>
     default: m.PersonalSkillsPage,
   })),
 );
+const PersonalAgentsPage = lazy(() =>
+  import('@/pages/agents/page').then((m) => ({
+    default: m.PersonalAgentsPage,
+  })),
+);
+const ProjectAgentsPage = lazy(() =>
+  import('@/pages/projects/agents-page').then((m) => ({
+    default: m.ProjectAgentsPage,
+  })),
+);
 const AdminAutomationsPage = lazy(() =>
   import('@/pages/admin/automations/page').then((m) => ({
     default: m.AdminAutomationsPage,
@@ -249,6 +259,11 @@ const routeTree = rootRoute.addChildren([
         }),
         createRoute({
           getParentRoute: () => layoutRoute,
+          path: '/agents',
+          component: PersonalAgentsPage,
+        }),
+        createRoute({
+          getParentRoute: () => layoutRoute,
           path: '/settings',
           component: PersonalSettingsPage,
         }),
@@ -279,6 +294,11 @@ const routeTree = rootRoute.addChildren([
         }),
         projectRoute.addChildren([
           projectGroupChatRoute,
+          createRoute({
+            getParentRoute: () => projectRoute,
+            path: 'agents',
+            component: ProjectAgentsPage,
+          }),
           createRoute({
             getParentRoute: () => projectRoute,
             path: 'knowledge',

@@ -146,6 +146,7 @@ export function chatErrorKey(error: unknown) {
     case 'UNAUTHORIZED':
       return 'errors.sessionExpired';
     case 'FORBIDDEN':
+    case 'PLUGIN_FORBIDDEN':
       return 'errors.forbidden';
     case 'THREAD_NOT_FOUND':
       return 'chat.errors.notFound';

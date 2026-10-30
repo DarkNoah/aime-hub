@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from '@tanstack/react-router';
-import { Puzzle, RefreshCw, Settings2 } from 'lucide-react';
+import { Puzzle, RefreshCw, Settings2, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePlugins } from '@/features/plugins/context';
 import { PageHeader } from '@/components/page-header';
@@ -10,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { PluginConfigDialog } from './components/config-dialog';
+import { PluginAccessDialog } from './components/access-dialog';
 import {
   Item,
   ItemActions,
@@ -26,6 +26,9 @@ export function AdminPluginsPage() {
   const [pending, setPending] = useState<Set<string>>(new Set());
   const changing = useRef(new Set<string>());
   const [configId, setConfigId] = useState<string | null>(null);
+  const [accessId, setAccessId] = useState<string | null>(null);
+  const accessTrigger = useRef<HTMLButtonElement | null>(null);
+  const accessPlugin = plugins.find((plugin) => plugin.id === accessId);
   const configTrigger = useRef<HTMLButtonElement | null>(null);
   const configuredPlugin = plugins.find((plugin) => plugin.id === configId);
   async function toggle(id: string, enabled: boolean) {
@@ -104,6 +107,18 @@ export function AdminPluginsPage() {
                 )}
               </ItemContent>
               <ItemActions>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!plugin.ready || pending.has(plugin.id)}
+                  onClick={(event) => {
+                    accessTrigger.current = event.currentTarget;
+                    setAccessId(plugin.id);
+                  }}
+                >
+                  <ShieldCheck />
+                  {t('plugins.accessConfigure')}
+                </Button>
                 {plugin.configFields.length > 0 && (
                   <Button
                     variant="outline"
@@ -118,28 +133,6 @@ export function AdminPluginsPage() {
                     {t('plugins.configure')}
                   </Button>
                 )}
-                {plugin.enabled &&
-                  plugin.pages
-                    .filter((p) => p.navigation)
-                    .map((page) => (
-                      <Button
-                        asChild
-                        variant="outline"
-                        size="sm"
-                        key={page.path}
-                      >
-                        <Link
-                          to={
-                            page.access === 'admin'
-                              ? '/admin/p/$pluginId/$'
-                              : '/p/$pluginId/$'
-                          }
-                          params={{ pluginId: plugin.id, _splat: page.path }}
-                        >
-                          {page.title}
-                        </Link>
-                      </Button>
-                    ))}
                 <Switch
                   checked={plugin.desiredEnabled}
                   disabled={!plugin.ready || pending.has(plugin.id)}
@@ -162,6 +155,14 @@ export function AdminPluginsPage() {
           plugin={configuredPlugin}
           onClose={() => setConfigId(null)}
           restoreFocus={() => configTrigger.current?.focus()}
+        />
+      )}
+      {accessPlugin && (
+        <PluginAccessDialog
+          key={accessPlugin.id}
+          plugin={accessPlugin}
+          onClose={() => setAccessId(null)}
+          restoreFocus={() => accessTrigger.current?.focus()}
         />
       )}
     </div>

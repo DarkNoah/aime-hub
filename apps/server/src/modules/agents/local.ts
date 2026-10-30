@@ -1,35 +1,47 @@
 import { readdir, readFile, realpath } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { relative, resolve } from 'node:path';
 import matter from 'gray-matter';
 import { z } from 'zod';
-import { subagentNameSchema, type AgentDefinition } from '@aime/shared/agents';
+import {
+  localAgentFileIdSchema,
+  type LocalRuntimeAgent,
+} from '@aime/shared/agents';
 import { projectDirectory, userDirectory } from '../threads/workspace.js';
 
 const metadataSchema = z.object({
   name: z.string().trim().min(1),
+  displayName: z.string().trim().min(1).optional(),
   description: z.string().trim().default(''),
   enabled: z.boolean().default(true),
 });
 
-/** The filename is the delegation ID; the Markdown body is preserved as instructions. */
-export function parseLocalAgent(
-  id: string,
-  markdown: string,
-): AgentDefinition | null {
-  subagentNameSchema.parse(id);
-  const source = markdown.replace(/^\uFEFF/, '');
+export function parseLocalAgentDocument(document: string) {
+  const source = document.replace(/^\uFEFF/, '');
   // Accept YAML only: gray-matter also supports executable JS frontmatter.
   if (!/^---[\t ]*\r?\n[\s\S]*?\r?\n---[\t ]*(?:\r?\n|$)/.test(source))
     throw new Error('Agent Markdown must start with YAML frontmatter');
-  const { data, content } = matter(source);
+  return matter(source);
+}
+
+/** The Markdown filename is the delegation ID. */
+export function parseLocalAgent(
+  id: string,
+  document: string,
+): LocalRuntimeAgent | null {
+  localAgentFileIdSchema.parse(id);
+  const { data, content } = parseLocalAgentDocument(document);
   const metadata = metadataSchema.parse(data);
   if (!metadata.enabled) return null;
-  if (!content.trim()) throw new Error('Agent instructions are empty');
+  const instructions = z.string().parse(content);
+  if (!instructions.trim()) throw new Error('Agent instructions are empty');
   return {
     id,
-    name: metadata.name,
+    name: metadata.displayName ?? metadata.name,
+    source: 'local',
+    versionId: createHash('sha256').update(document).digest('hex'),
     description: metadata.description,
-    instructions: content,
+    instructions,
     model: null,
     tools: [],
     disabledTools: [],
@@ -51,7 +63,7 @@ export async function loadLocalAgents(
   root: string,
   userId: string,
   projectId?: string,
-): Promise<Record<string, AgentDefinition>> {
+): Promise<Record<string, LocalRuntimeAgent>> {
   // Validate the caller's scope before filesystem access, even when root is absent.
   const directories = [
     resolve(root, '.agents', 'agents'),
@@ -65,7 +77,7 @@ export async function loadLocalAgents(
   ];
   const canonicalRoot = await existingPath(root);
   if (!canonicalRoot) return {};
-  const agents = new Map<string, AgentDefinition>();
+  const agents = new Map<string, LocalRuntimeAgent>();
   for (const source of directories) {
     const directory = resolve(canonicalRoot, relative(resolve(root), source));
     // Do not follow a scope directory or ancestor redirected through a symlink.
@@ -76,16 +88,26 @@ export async function loadLocalAgents(
         throw error;
       },
     );
-    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
       const id = entry.name.slice(0, -3);
-      if (!subagentNameSchema.safeParse(id).success) continue;
+      if (!localAgentFileIdSchema.safeParse(id).success) continue;
       const path = resolve(directory, entry.name);
       try {
         if ((await existingPath(path)) !== path) continue;
         const agent = parseLocalAgent(id, await readFile(path, 'utf8'));
         // A disabled scoped definition also masks an enabled global definition.
-        if (agent) agents.set(id, agent);
+        if (agent)
+          agents.set(id, {
+            ...agent,
+            id:
+              source === directories[0]
+                ? `local:global:${id}`
+                : projectId
+                  ? `local:project:${projectId}:${id}`
+                  : `local:personal:${id}`,
+          });
         else agents.delete(id);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;

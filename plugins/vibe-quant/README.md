@@ -238,9 +238,9 @@ Tick 测试另外覆盖最近窗口完整读取、多 Tick 合并到达、纳秒
 
 点击策略页独立的 **调优参数** 按钮，或调用 `plugin_vibe_quant_backtest_optimize`。调优任务在独立面板查看，不出现在普通回测记录中；底层共用执行队列、固定版本、共享访问和交易规则，占用一个任务名额。
 
-成功后自动创建一条新的、未发布的策略草稿：复制本次固定版本的源码和参数，仅替换参与搜索的参数；原策略的默认参数、已有草稿和已发布版本均保持不变。重复请求只返回同一份新草稿，不覆盖后续编辑。关闭页面不影响后台创建；如果保存失败，可在调优面板重试「生成调优草稿」。取消或失败的任务不自动生成草稿。
+先选择一个已发布版本，再配置其默认参数的搜索范围。成功后自动在当前策略中创建新版本：保留所选版本源码，仅替换参与搜索的默认参数，未搜索的参数沿用原版本默认值，忽略回测参数覆盖。名称使用 `原版本名.opt.vN`，例如 `v6.opt.v1`：前半部分 `v6` 是原版本，后半部分 `v1` 是该原版本的调优序号；再次基于 `v6` 调优生成 `v6.opt.v2`。序号包含已删除版本，避免复用名称；普通发布仍使用独立的 `vN` 序号。新版本按现有发布规则设为主要版本；已有工作草稿和原版本保持不变。重复请求返回同一版本，关闭页面不影响后台创建；保存失败可重试「保存调优版本」。取消或失败的任务不创建版本。
 
-HTTP 使用 `GET/POST /strategies/:id/optimizations` 查询和提交，`/strategies/optimizations/:runId/result`、`/cancel`、`/draft` 获取结果、取消和重试保存草稿；普通 `/strategies/:id/runs` 仅返回普通回测并拒绝带 `optimization` 的提交。Agent 为兼容既有调用保留工具 ID，状态/结果中返回 `optimization_draft_id`。
+HTTP 使用 `GET/POST /strategies/:id/optimizations` 查询和提交，`/strategies/optimizations/:runId/result`、`/cancel`、`/version` 获取结果、取消和重试保存版本；结果包含 `version` 和 `strategy`，保存返回 `{ strategy, version }`。普通 `/strategies/:id/runs` 仅返回普通回测并拒绝带 `optimization` 的提交。Agent 保留工具 ID，状态/结果中返回 `optimization_version_id`。历史记录中的 `optimization_draft_id` 仅保留用于追溯。
 
 `optimization` 配置示例（HTTP 与 Agent 共用）：
 
@@ -269,7 +269,7 @@ HTTP 使用 `GET/POST /strategies/:id/optimizations` 查询和提交，`/strateg
 - 使用 Optuna 4.5.0 的 `TPESampler`，最多 200 次、搜索时间最多 3600 秒，先达到的限制结束搜索；单次试验最多 300 秒。默认种子 42；策略自身的随机源仍需策略自行固定。每次试验仅保留指标和参数，最佳训练试验保留原始完整结果及 manifest，不通过重跑替代最佳结果。
 - 目标可选 `sharpe`、`total_return`、`annual_return`、`max_drawdown`、`sortino`、`calmar`、`profit_factor`。最大回撤取最小，其余取最大。交易不足或指标为 null 的试验不入选；策略错误记录为失败，继续其余试验。全部无效时整个任务失败。
 - 可选 `validation_start`（UTC epoch 秒）将区间按时间拆分：之前用于搜索，之后只用最佳参数验证一次。验证重新初始化资金和仓位，之前的行情仅用于 SDK 历史预热，不调用交易回调；建议按完整交易日划分。验证另有 300 秒上限。未设置时明确标记为仅样本内；这是单次留出验证，不是 walk-forward，训练最佳值不代表泛化表现。
-- 调优面板单独展示训练目标、验证指标、最佳参数和分页试验记录，完成后可直接打开新草稿。发布该草稿后可按普通流程创建回测。训练/验证的完整结果和 manifest 仍作为内部产物保存，`optimization` / `validation` 使用现有产物表，无需新表。
+- 调优面板单独展示训练目标、验证指标、最佳参数和分页试验记录，完成后可直接查看新版本，并按普通流程创建回测。训练/验证的完整结果和 manifest 仍作为内部产物保存，`optimization` / `validation` 使用现有产物表，无需新表。
 - 运行中通过状态消息显示试验进度；用户取消、插件停止或超时后尽可能保存最后完成的试验和最佳结果，状态仍为取消/失败。不会自动续跑崩溃任务。Agent 可使用现有 `backtest_status`、`backtest_cancel`；`backtest_result` 的 `optimization` 返回摘要，`section=optimization_trials` 每页 50 条。
 - 插件 Python 环境按 requirements 指纹自动安装/更新 Optuna；离线部署的 wheel 包需包含更新后的 `worker/requirements.txt` 及其依赖。
 
@@ -310,7 +310,7 @@ QUANT_STRATEGY_INTEGRATION=1 node --import dotenv/config --import tsx --test plu
 | `backtest_start`、`backtest_list`       | 提交回测、分页读取历史记录                                         |
 | `backtest_status`、`backtest_result`    | 即时查询进度、指标与说明、分页读取交易/委托/成交/信号/日志/权益/风险线 |
 | `backtest_compare`                      | 同一策略不同版本的整体指标、逐年/逐月收益及中文描述对比            |
-| `backtest_optimize`                     | 提交独立的 Optuna 调优任务，成功后创建新的策略草稿                 |
+| `backtest_optimize`                     | 提交独立的 Optuna 调优任务，成功后在当前策略中创建调优版本                 |
 | `backtest_cancel`                       | 取消排队或运行中的回测                                             |
 | `news_search`、`news_read`              | 搜索已采集资讯、读取正文及来源；采集关闭后仍可读取已有数据         |
 | `factor_guide`、`factor_read`           | 因子 SDK、模板、列表、草稿、版本和分析摘要                         |
@@ -350,7 +350,7 @@ QUANT_STRATEGY_INTEGRATION=1 node --import dotenv/config --import tsx --test plu
 | `strategy_versions` | `strategy_id: string` | 返回不可变版本摘要及参数，源码需通过 `strategy_read` 读取 |
 | `strategy_publish` | `strategy_id: string`；`revision: positive integer`；`note: string=""` | note 最多 2000 字符；固定当前草稿，返回 `strategy.revision` 与 `version.id`，不启动回测 |
 | `backtest_start` | 见“回测公共参数” | 原生后台回测；直接工具执行无后台上下文时返回入队记录 |
-| `backtest_optimize` | 回测公共参数 + `optimization: object` | 原生后台 Optuna 调优；成功后创建新的未发布策略草稿 |
+| `backtest_optimize` | 回测公共参数 + `optimization: object` | 原生后台 Optuna 调优；成功后在当前策略中创建调优版本 |
 | `backtest_list` | `strategy_id: UUID`；`before?: UUID` | 最近 30 条普通回测；before 传上一页最后一条 ID，返回 `next_before`；不含调优记录 |
 | `backtest_status` | `run_id: UUID`；`wait: boolean=false` | 默认读取一次当前状态与 `terminal`；wait=true 最多等待 10 秒或至结束；queued/preparing/running 为进行中，completed/failed/cancelled 为终态 |
 | `backtest_result` | `run_id: UUID`；`section: enum="summary"`；`offset: integer=0` | section 可为 summary/trades/orders/fills/signals/logs/equity_curve/risk_levels/optimization_trials；offset ≥ 0，明细每页 50 条；summary 含指标、年/月收益、数量与最近 20 条日志；未产生报告时 `result=null` |

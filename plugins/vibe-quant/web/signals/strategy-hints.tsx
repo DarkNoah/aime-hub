@@ -1,3 +1,4 @@
+import { runVersionName } from '../../strategy-version';
 import { lazy, Suspense, useState } from 'react';
 import {
   Badge,
@@ -116,9 +117,9 @@ export function StrategyHints({
                 >
                   <span
                     className="min-w-0 flex-1 truncate pr-2 text-xs font-medium"
-                    title={`${item.strategy_name} · v${item.version_number} · ${durationLabel(item.config.duration)}${monitorExecutionModel(item.config) === 'points' ? ' · 点数模拟' : monitorExecutionModel(item.config) === 'continuous_price' ? ' · 主连价格模拟' : ''}`}
+                    title={`${item.strategy_name} · ${runVersionName(item)} · ${durationLabel(item.config.duration)}${monitorExecutionModel(item.config) === 'points' ? ' · 点数模拟' : monitorExecutionModel(item.config) === 'continuous_price' ? ' · 主连价格模拟' : ''}`}
                   >
-                    {item.strategy_name} · v{item.version_number} ·{' '}
+                    {item.strategy_name} · {runVersionName(item)} ·{' '}
                     {item.config.symbol}
                     {item.config.simulation_engine === 'tqsdk' && (
                       <Badge variant="secondary" className="ml-1">
@@ -289,7 +290,7 @@ function HintSettings({
         <DialogHeader>
           <DialogTitle>编辑策略 · {item.strategy_name}</DialogTitle>
           <DialogDescription>
-            {item.config.symbol} · v{item.version_number} ·{' '}
+            {item.config.symbol} · {runVersionName(item)} ·{' '}
             {durationLabel(item.config.duration)}
             {monitorExecutionModel(item.config) === 'continuous_price' &&
               ' · 主连价格模拟'}

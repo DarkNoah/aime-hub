@@ -23,6 +23,21 @@ export const agentsContract = {
       path: '/agents/available',
       inputStructure: 'detailed',
     })
+    .input(
+      z
+        .object({
+          query: z
+            .object({
+              projectId: z
+                .string()
+                .regex(/^[a-zA-Z0-9_-]{16}$/)
+                .optional(),
+              includeLocal: z.boolean().optional(),
+            })
+            .optional(),
+        })
+        .optional(),
+    )
     .output(type<AvailableAgents>()),
   defaults: procedure
     .route({

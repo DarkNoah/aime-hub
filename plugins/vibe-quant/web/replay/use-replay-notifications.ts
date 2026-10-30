@@ -1,3 +1,4 @@
+import { runVersionName } from '../../strategy-version';
 import { useEffect, useRef } from 'react';
 import {
   enableNotificationSound,
@@ -95,7 +96,7 @@ export function useReplayNotifications(
               ? '空头'
               : '';
         const title = `回放 · ${hint.strategy_name} · ${side}${signal.type === 'entry' ? '入场' : '离场'}信号`;
-        const body = `${signal.symbol} · v${hint.version_number} · ${dateTime(signal.time)}${signal.price === null ? '' : ` · 参考价 ${number(signal.price)}`}${signal.reason ? ` · ${signal.type === 'exit' ? exitReasonLabel(signal.reason) : signal.reason}` : ''}`;
+        const body = `${signal.symbol} · ${runVersionName(hint)} · ${dateTime(signal.time)}${signal.price === null ? '' : ` · 参考价 ${number(signal.price)}`}${signal.reason ? ` · ${signal.type === 'exit' ? exitReasonLabel(signal.reason) : signal.reason}` : ''}`;
         if (channels.toast?.enabled)
           showMarketSignalToast({
             id,

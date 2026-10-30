@@ -4,6 +4,8 @@ import { isCompletedIntelligentUiPart } from '@aime/shared/intelligent-ui';
 import {
   hasChatTurnDetails,
   isCompletedAskUserPart,
+  isSubagentTool,
+  type ChatSubagentSummary,
   type ChatTurnSummary,
 } from '@aime/shared/chat-turns';
 
@@ -58,6 +60,7 @@ export function summarizeTurn(
   let finishedAt: number | undefined;
   const tools = new Set<string>();
   const assets = new Set<string>();
+  const subagents = new Map<string, ChatSubagentSummary>();
   for (const message of turn.messages) {
     if (message.role === 'user') {
       user = message;
@@ -79,6 +82,12 @@ export function summarizeTurn(
         tools.add(part.toolCallId);
         const name =
           part.type === 'dynamic-tool' ? part.toolName : part.type.slice(5);
+        if (isSubagentTool(name))
+          subagents.set(part.toolCallId, {
+            toolCallId: part.toolCallId,
+            toolName: name,
+            state: part.state,
+          });
         if (
           (name === 'image_gen' || name === 'speech') &&
           part.state === 'output-available'
@@ -108,6 +117,7 @@ export function summarizeTurn(
     assistant,
     hasDetails: hasChatTurnDetails(turn.messages),
     toolCount: tools.size,
+    ...(subagents.size ? { subagents: [...subagents.values()] } : {}),
     ...(startedAt !== undefined &&
     finishedAt !== undefined &&
     finishedAt >= startedAt

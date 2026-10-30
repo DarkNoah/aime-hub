@@ -22,7 +22,11 @@ import {
   type StrategySummary,
   type StrategyVersion,
 } from '../../strategy-types';
-import type { OptimizationReport } from '../../optimization-types';
+import type {
+  OptimizationReport,
+  OptimizationVersionResult,
+} from '../../optimization-types';
+import { runVersionName, strategyVersionName } from '../../strategy-version';
 import { dateTime, errorText } from './format';
 import { OptimizationResult } from './optimization-result';
 import { RunForm } from './run-form';
@@ -30,7 +34,9 @@ import { RunForm } from './run-form';
 type Summary = {
   run: BacktestRun;
   optimization: OptimizationReport | null;
-  draft: StrategyDetail | null;
+  version: StrategyVersion | null;
+  strategy: StrategyDetail | null;
+  version_deleted?: boolean;
 };
 
 export function OptimizationPanel({
@@ -40,8 +46,8 @@ export function OptimizationPanel({
   initial,
   canRun,
   onClose,
-  onDraft,
-  onOpenDraft,
+  onVersion,
+  onOpenVersion,
 }: {
   pluginId: string;
   strategy: StrategySummary;
@@ -49,8 +55,8 @@ export function OptimizationPanel({
   initial?: BacktestInput;
   canRun: boolean;
   onClose: () => void;
-  onDraft: (draft: StrategyDetail) => void;
-  onOpenDraft: (id: string) => void;
+  onVersion: (result: OptimizationVersionResult) => void;
+  onOpenVersion: (id: string) => void;
 }) {
   const [jobs, setJobs] = useState<BacktestRun[] | null>(null);
   const [selected, setSelected] = useState('');
@@ -61,10 +67,11 @@ export function OptimizationPanel({
   const [more, setMore] = useState(false);
   const [retry, setRetry] = useState(0);
   const notify = useRef('');
-  const onDraftRef = useRef(onDraft);
+  const applied = useRef(new Set<string>());
+  const onVersionRef = useRef(onVersion);
   useEffect(() => {
-    onDraftRef.current = onDraft;
-  }, [onDraft]);
+    onVersionRef.current = onVersion;
+  }, [onVersion]);
   const job = jobs?.find((item) => item.id === selected);
   const result = summary?.run.id === selected ? summary : null;
   useEffect(() => {
@@ -116,16 +123,28 @@ export function OptimizationPanel({
         );
         if (abort.signal.aborted) return;
         setSummary(next);
-        if (next.draft) {
-          onDraftRef.current(next.draft);
+        if (next.version && next.strategy) {
+          if (!applied.current.has(next.version.id)) {
+            applied.current.add(next.version.id);
+            onVersionRef.current({
+              version: next.version,
+              strategy: next.strategy,
+            });
+          }
           if (notify.current === selected) {
-            toast.success('调优完成，已创建新的策略草稿');
+            toast.success(
+              `调优完成，已创建 ${strategyVersionName(next.version)}`,
+            );
             notify.current = '';
           }
         }
         if (
           activeRun(next.run.status) ||
-          (next.run.status === 'completed' && !next.draft)
+          (next.run.status === 'completed' &&
+            !next.version &&
+            !next.version_deleted &&
+            (!next.run.optimization_draft_id ||
+              next.run.optimization_version_id))
         )
           timer = setTimeout(() => void poll(), 3000);
       } catch (e) {
@@ -168,7 +187,7 @@ export function OptimizationPanel({
             </SheetTitle>
             <SheetDescription>
               {strategy.name} · 通过 Optuna
-              搜索参数，成功后另存为未发布的策略草稿。
+              搜索所选版本的默认参数，成功后在当前策略中创建调优版本。
             </SheetDescription>
           </SheetHeader>
           <div className="flex items-center justify-between gap-3 border-b px-5 py-3">
@@ -223,7 +242,7 @@ export function OptimizationPanel({
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-sm">
-                          v{item.version_number} · {item.config.symbol}
+                          {runVersionName(item)} · {item.config.symbol}
                         </span>
                         <Badge
                           variant={
@@ -247,7 +266,8 @@ export function OptimizationPanel({
                   <SlidersHorizontal className="mx-auto mb-3 size-7 text-muted-foreground" />
                   <p className="text-sm font-medium">为策略寻找一组候选参数</p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                    选择已发布版本，设置搜索范围与验证区间。完成后可打开新草稿，继续编辑或发布。
+                    先选择原版本，再设置默认参数的搜索范围与验证区间。完成后自动创建新版本，例如
+                    v6.opt.v1。
                   </p>
                 </div>
               )}
@@ -313,25 +333,27 @@ export function OptimizationPanel({
                       </Button>
                     )}
                   </div>
-                  {result?.draft ? (
+                  {result?.version ? (
                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-primary/20 bg-primary/5 p-4">
                       <div>
-                        <Badge variant="secondary">新草稿已创建</Badge>
+                        <Badge variant="secondary">调优版本已创建</Badge>
                         <p className="mt-2 text-sm font-medium">
-                          {result.draft.name}
+                          {strategyVersionName(result.version)}
                         </p>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          包含最佳参数与所选版本源码，尚未发布。
+                          保留原版本源码，最佳参数已保存为新版本的默认参数。
                         </p>
                       </div>
                       <Button
                         size="sm"
-                        onClick={() => onOpenDraft(result.draft!.id)}
+                        onClick={() => onOpenVersion(result.version!.id)}
                       >
-                        打开新草稿
+                        查看新版本
                         <ArrowUpRight className="size-4" />
                       </Button>
                     </div>
+                  ) : result?.version_deleted ? (
+                    <Badge variant="outline">调优版本已删除</Badge>
                   ) : (
                     job.status === 'completed' && (
                       <Button
@@ -339,20 +361,26 @@ export function OptimizationPanel({
                         disabled={busy}
                         onClick={() =>
                           void action(async () => {
-                            const draft = await pluginRequest<StrategyDetail>(
-                              pluginId,
-                              `/strategies/optimizations/${job.id}/draft`,
-                              { method: 'POST' },
-                            );
-                            onDraftRef.current(draft);
+                            const saved =
+                              await pluginRequest<OptimizationVersionResult>(
+                                pluginId,
+                                `/strategies/optimizations/${job.id}/version`,
+                                { method: 'POST' },
+                              );
+                            applied.current.add(saved.version.id);
+                            onVersionRef.current(saved);
                             setSummary((old) =>
-                              old?.run.id === job.id ? { ...old, draft } : old,
+                              old?.run.id === job.id
+                                ? { ...old, ...saved }
+                                : old,
                             );
-                            toast.success('新策略草稿已保存');
+                            toast.success(
+                              `已创建 ${strategyVersionName(saved.version)}`,
+                            );
                           })
                         }
                       >
-                        生成调优草稿
+                        保存调优版本
                       </Button>
                     )
                   )}

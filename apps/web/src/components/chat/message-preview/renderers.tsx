@@ -31,6 +31,8 @@ import { TranscriptionsPreview } from './transcriptions';
 import { LspPreview } from './lsp';
 import { BrowserPreview } from './browser';
 import { SkillPreview } from './skill';
+import { SubagentPreview } from './subagent';
+import { isSubagentTool } from '@aime/shared/chat-turns';
 import type { PreviewPart } from './selection';
 import { getToolName } from '../tool-renderers/registry';
 
@@ -153,8 +155,25 @@ const previewRenderers: Partial<Record<string, ComponentType<PreviewProps>>> = {
   'data-om-activation': ObservationPreview,
 };
 
-export function MessagePartPreview({ part, threadId }: PreviewProps) {
+export function MessagePartPreview({
+  part,
+  threadId,
+  depth = 0,
+}: PreviewProps & { depth?: number }) {
   const toolName = isToolUIPart(part) ? getToolName(part) : undefined;
+  if (isSubagentTool(toolName) && depth < 3)
+    return (
+      <SubagentPreview
+        part={part}
+        renderTool={(child) => (
+          <MessagePartPreview
+            part={child}
+            threadId={threadId}
+            depth={depth + 1}
+          />
+        )}
+      />
+    );
   const Renderer =
     (toolName ? previewRenderers[`tool:${toolName}`] : undefined) ??
     (toolName?.startsWith('browser_') ? BrowserPreview : undefined) ??

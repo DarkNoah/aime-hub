@@ -202,7 +202,8 @@ const difference = (value: number | null, baseline: number | null) =>
   value === null || baseline === null ? null : value - baseline;
 const deltaText = (value: number, unit: string) =>
   `${value > 0 ? '+' : ''}${number(value)}${unit}`;
-const label = (entry: Entry) => `V${entry.run.version_number}`;
+const label = (entry: Entry) =>
+  entry.run.version_name ?? `V${entry.run.version_number}`;
 function coverageView(value: Coverage | undefined) {
   return value
     ? {
@@ -414,6 +415,7 @@ export function compareBacktests(entries: Entry[]) {
       run_id: entry.run.id,
       version_id: entry.run.version_id,
       version_number: entry.run.version_number,
+      version_name: entry.run.version_name,
       source_hash: entry.run.source_hash,
       result_hash: entry.result_hash,
       config: entry.run.config,

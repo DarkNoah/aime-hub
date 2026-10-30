@@ -122,8 +122,16 @@ type Runtime = {
 
 export interface ChatRunner {
   browsers?: ThreadBrowsers;
-  resolveSettings?(settings: ChatSettings): Promise<ChatSettings>;
-  sessionKey?(settings: ChatSettings): Promise<string>;
+  resolveSettings?(
+    settings: ChatSettings,
+    userId?: string,
+    projectId?: string,
+  ): Promise<ChatSettings>;
+  sessionKey?(
+    settings: ChatSettings,
+    userId?: string,
+    projectId?: string,
+  ): Promise<string>;
   getGoal?(threadId: string): Promise<ThreadGoal | null>;
   getConsumedTokens?(threadId: string): Promise<number | undefined>;
   clearGoal?(threadId: string): Promise<void>;
@@ -139,7 +147,11 @@ export interface ChatRunner {
     projectId?: string,
   ): Promise<void>;
   createWorkspace(userId: string, projectId?: string): Promise<string>;
-  pluginWorkspace?(pluginId: string): Promise<string | undefined>;
+  pluginWorkspace?(
+    pluginId: string,
+    userId: string,
+  ): Promise<string | undefined>;
+  assertPluginAccess?(pluginId: string, userId: string): Promise<void>;
   removePersonalWorkspace?(userId: string, directory: string): Promise<void>;
   open(context: ChatSessionContext): Promise<ChatSession>;
 }
@@ -352,6 +364,13 @@ export class ThreadService {
       throw new ThreadError('THREAD_NOT_FOUND', 404);
     if (!includeArchived && isArchived(thread))
       throw new ThreadError('THREAD_NOT_FOUND', 404);
+    for (const plugin of new Set([
+      thread.metadata?.plugin,
+      thread.metadata?.workspacePlugin,
+    ])) {
+      if (typeof plugin === 'string')
+        await this.runner.assertPluginAccess?.(plugin, userId);
+    }
     return thread;
   }
 
@@ -794,11 +813,19 @@ export class ThreadService {
     runtime: Runtime,
     settings: ChatSettings,
     handoff = true,
+    actorId?: string,
   ) {
     // Tool replies and compaction continue the existing native session, even if
     // its stored configuration has since been edited or removed.
     if (runtime.session && !handoff) return runtime.session;
-    const key = await this.runner.sessionKey?.(settings);
+    const scope = threadScope(runtime.thread.resourceId);
+    const key = await this.runner.sessionKey?.(
+      settings,
+      actorId ??
+        scope.userId ??
+        String(runtime.thread.metadata?.createdBy ?? ''),
+      scope.projectId,
+    );
     if (runtime.session && key !== runtime.sessionKey) {
       if (
         this.busy(runtime) ||
@@ -814,6 +841,7 @@ export class ThreadService {
     }
     if (!runtime.session) {
       runtime.session = await this.runner.open({
+        actorId,
         thread: runtime.thread,
         settings,
         onEvent: (event) => this.observe(runtime, event),
@@ -927,12 +955,17 @@ export class ThreadService {
   }
 
   private async create(userId: string, input: CreateThreadInput) {
+    if (input.plugin)
+      await this.runner.assertPluginAccess?.(input.plugin, userId);
     if (input.projectId) await this.projectAccess(userId, input.projectId);
-    input = { ...input, ...(await this.runner.resolveSettings?.(input)) };
+    input = {
+      ...input,
+      ...(await this.runner.resolveSettings?.(input, userId, input.projectId)),
+    };
     if (input.model) await this.runner.validate(userId, input, input.projectId);
     const pluginWorkspace =
       input.usePluginWorkspace && input.plugin
-        ? await this.runner.pluginWorkspace?.(input.plugin)
+        ? await this.runner.pluginWorkspace?.(input.plugin, userId)
         : undefined;
     const workspace =
       pluginWorkspace ??
@@ -971,6 +1004,7 @@ export class ThreadService {
     perPage = 10,
     plugin?: string,
   ) {
+    if (plugin) await this.runner.assertPluginAccess?.(plugin, userId);
     if (projectId) await this.projectAccess(userId, projectId);
     const threads = await this.listChatThreads(
       projectId ? `project:${projectId}` : `user:${userId}`,
@@ -1394,7 +1428,14 @@ export class ThreadService {
       const runtime = await this.runtime(userId, id);
       if (runtime.data.acceptedIds.includes(input.id))
         return this.summary(runtime.thread, runtime);
-      input = { ...input, ...(await this.runner.resolveSettings?.(input)) };
+      input = {
+        ...input,
+        ...(await this.runner.resolveSettings?.(
+          input,
+          userId,
+          threadScope(runtime.thread.resourceId).projectId,
+        )),
+      };
       if (runtime.data.toolInteractions.some((item) => !item.response))
         throw new ThreadError('TOOL_RESPONSE_REQUIRED', 409);
       await this.runner.validate(
@@ -1402,7 +1443,7 @@ export class ThreadService {
         input,
         threadScope(runtime.thread.resourceId).projectId,
       );
-      const session = await this.session(runtime, input);
+      const session = await this.session(runtime, input, true, userId);
       const previous = structuredClone(runtime.data);
       if (!this.busy(runtime)) runtime.data.status = 'pending';
       runtime.data.error = null;
@@ -1505,6 +1546,7 @@ export class ThreadService {
             reasoningEffort: runtime.data.reasoningEffort,
           },
           false,
+          userId,
         );
         return await session.compact();
       } finally {
@@ -1552,7 +1594,12 @@ export class ThreadService {
       )
         throw new ThreadError('THREAD_BUSY', 409);
       validateToolResponse(interaction, response);
-      const session = await this.session(runtime, interaction.settings, false);
+      const session = await this.session(
+        runtime,
+        interaction.settings,
+        false,
+        userId,
+      );
       await session.respond(interaction, response, interaction.settings);
       interaction.response = response;
       runtime.data.acceptedIds = [
@@ -1700,7 +1747,7 @@ export class ThreadService {
           settings,
           threadScope(runtime.thread.resourceId).projectId,
         );
-      const session = await this.session(runtime, settings);
+      const session = await this.session(runtime, settings, true, userId);
       // The native retry starts a stream with no new input, preserving tool results.
       await session.retry(settings);
       runtime.thread.metadata = {

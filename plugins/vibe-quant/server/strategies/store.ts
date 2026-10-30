@@ -17,7 +17,15 @@ import { sha256, StrategySources } from './sources.js';
 import { decodeArtifact, encodeArtifact } from './artifacts.js';
 import { FactorStore } from '../factors/store.js';
 import { writeFactorBundle } from '../factors/bundle.js';
-import type { OptimizationReport } from '../../optimization-types.js';
+import type {
+  OptimizationReport,
+  OptimizationVersionResult,
+} from '../../optimization-types.js';
+import {
+  nextOptimizationVersionName,
+  nextStrategyVersionName,
+  strategyVersionName,
+} from '../../strategy-version.js';
 import {
   strategyNotifications,
   type StrategyNotifications,
@@ -102,6 +110,8 @@ const versionDetail = (
   id: version.id,
   strategy_id: version.strategy_id,
   number: version.number,
+  name: strategyVersionName(version),
+  ...(version.optimization ? { optimization: version.optimization } : {}),
   source_hash: version.source_hash,
   parameters: version.parameters,
   note: version.note,
@@ -398,6 +408,7 @@ export class StrategyStore extends ClickHouseClient {
       id: randomUUID(),
       strategy_id: id,
       number: row.versions.reduce((max, v) => Math.max(max, v.number), 0) + 1,
+      name: nextStrategyVersionName(row.versions),
       source_hash: row.draft_hash,
       parameters: row.draft_parameters,
       note,
@@ -433,17 +444,27 @@ export class StrategyStore extends ClickHouseClient {
       (v) => v.id === config.version_id && !v.deleted_at,
     );
     if (!version) throw new StrategyError('VERSION_NOT_FOUND', 404);
+    if (
+      config.optimization &&
+      Object.keys(config.optimization.search_space).some(
+        (key) => !Object.hasOwn(version.parameters, key),
+      )
+    )
+      throw new StrategyError('OPTIMIZATION_PARAMETER_NOT_FOUND', 400);
     const row: StoredRun = {
       id: randomUUID(),
       strategy_id: id,
       version_id: version.id,
       version_number: version.number,
+      version_name: strategyVersionName(version),
       source_hash: version.source_hash,
       user_id: owner,
       engine,
       config: {
         ...config,
-        parameters: { ...version.parameters, ...config.parameters },
+        parameters: config.optimization
+          ? { ...version.parameters }
+          : { ...version.parameters, ...config.parameters },
       },
       status: 'queued',
       message: '',
@@ -560,11 +581,11 @@ export class StrategyStore extends ClickHouseClient {
     if (!deleted) throw new StrategyError('RUN_NOT_FOUND', 404);
   }
 
-  /** Reserve a target ID before insertion so retries/concurrent requests cannot clone twice. */
-  async createOptimizationDraft(
+  /** Reserve the version ID on the run; strategy CAS makes naming and retries atomic. */
+  async createOptimizationVersion(
     owner: string,
     id: string,
-  ): Promise<StrategyDetail> {
+  ): Promise<OptimizationVersionResult> {
     const run = await this.run(owner, id);
     if (
       !run.config.optimization ||
@@ -586,42 +607,73 @@ export class StrategyStore extends ClickHouseClient {
       )
     )
       throw new StrategyError('OPTIMIZATION_RESULT_MISSING', 409);
-    const version = await this.version(owner, run.version_id, true);
-    if (version.source_hash !== run.source_hash)
+    const source = await this.version(owner, run.version_id, true);
+    if (
+      source.strategy_id !== run.strategy_id ||
+      source.source_hash !== run.source_hash
+    )
       throw new Error('策略版本哈希不匹配');
-    const original = await this.storedStrategy(run.strategy_id);
     await this.updateRun(id, (current) =>
-      current.status === 'completed' && !current.optimization_draft_id
-        ? { ...current, optimization_draft_id: randomUUID() }
+      current.status === 'completed' &&
+      !current.cancel_requested &&
+      !current.optimization_version_id
+        ? { ...current, optimization_version_id: randomUUID() }
         : undefined,
     );
     const linked = await this.run(owner, id);
-    const draftId = linked.optimization_draft_id;
-    if (!draftId) throw new StrategyError('OPTIMIZATION_NOT_COMPLETED', 409);
-    const existing = await this.record<StoredStrategy>(
-      'quant_strategies',
-      draftId,
-    );
-    if (existing) return this.detail(owner, draftId);
-    const parameters = { ...version.parameters, ...run.config.parameters };
-    for (const key of Object.keys(run.config.optimization.search_space))
+    const versionId = linked.optimization_version_id;
+    if (!versionId) throw new StrategyError('OPTIMIZATION_NOT_COMPLETED', 409);
+    // Only searched defaults change. Run overrides from legacy jobs cannot leak into a version.
+    const parameters = { ...source.parameters };
+    for (const key of Object.keys(run.config.optimization.search_space)) {
+      if (!Object.hasOwn(source.parameters, key))
+        throw new StrategyError('OPTIMIZATION_PARAMETER_NOT_FOUND', 400);
       parameters[key] = report.best_parameters[key];
-    const row: StoredStrategy = {
-      id: draftId,
-      user_id: owner,
-      name: `${original.name.split(' · ')[0].slice(0, 120)} · 调优草稿`,
-      description: `基于「${original.name}」v${version.number} 的 Optuna 调优草稿。\n目标：${report.metric}，最佳值 ${report.best_value}；有效试验 ${report.completed_trials}/${report.requested_trials}。\n${report.validation ? `留出验证：${report.validation.status}，目标值 ${report.validation.metrics[report.metric] ?? '未定义'}。` : '仅样本内搜索，尚未做留出验证。'}\n来源任务：${id}。源码保留所选版本，尚未发布。`,
-      enabled: true,
-      status: 'active',
-      revision: 1,
-      version_count: 0,
-      updated_at: iso(),
-      draft_hash: version.source_hash,
-      draft_parameters: parameters,
-      versions: [],
-    };
-    await this.replace('quant_strategies', row, 0);
-    return this.detail(owner, draftId);
+    }
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const original = await this.storedStrategy(run.strategy_id);
+      const existing = original.versions.find(
+        (version) => version.id === versionId,
+      );
+      if (existing) {
+        if (existing.deleted_at)
+          throw new StrategyError('VERSION_NOT_FOUND', 404);
+        return {
+          strategy: await this.detail(owner, original.id),
+          version: versionDetail(existing, source.source),
+        };
+      }
+      assertEditable(original);
+      const version: StoredVersion = {
+        id: versionId,
+        strategy_id: original.id,
+        number:
+          original.versions.reduce(
+            (max, item) => Math.max(max, item.number),
+            0,
+          ) + 1,
+        name: nextOptimizationVersionName(source, original.versions),
+        optimization: { source_version_id: source.id, run_id: id },
+        source_hash: source.source_hash,
+        parameters,
+        note: `基于 ${strategyVersionName(source)} 的 Optuna 参数调优。目标：${report.metric}，最佳值 ${report.best_value}；有效试验 ${report.completed_trials}/${report.requested_trials}。\n${report.validation ? `留出验证：${report.validation.status}，目标值 ${report.validation.metrics[report.metric] ?? '未定义'}。` : '仅样本内搜索，尚未做留出验证。'}`,
+        created_at: iso(),
+      };
+      const next: StoredStrategy = {
+        ...original,
+        revision: original.revision + 1,
+        version_count: original.version_count + 1,
+        primary_version_id: version.id,
+        updated_at: iso(),
+        versions: [...original.versions, version],
+      };
+      if (await this.replace('quant_strategies', next, original.revision))
+        return {
+          strategy: await this.detail(owner, original.id),
+          version: versionDetail(version, source.source),
+        };
+    }
+    throw new StrategyError('STRATEGY_CONFLICT', 409);
   }
 
   private async updateRun(

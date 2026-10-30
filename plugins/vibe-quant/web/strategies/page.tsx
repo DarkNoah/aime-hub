@@ -85,11 +85,6 @@ export default function StrategiesPage({ pluginId }: PluginPageProps) {
     filtered?.find((item) => item.id === selected)?.id ??
     filtered?.[0]?.id ??
     '';
-  const openStrategy = (id: string) => {
-    setStatus(items?.find((item) => item.id === id)?.status ?? 'active');
-    setQuery('');
-    setSelected(id);
-  };
   return (
     <ScrollArea
       className="h-full"
@@ -240,7 +235,6 @@ export default function StrategiesPage({ pluginId }: PluginPageProps) {
                   id={selectedId}
                   canRun={template.canRun}
                   onUpdate={update}
-                  onOpenStrategy={openStrategy}
                 />
               ) : items && !filtered?.length ? (
                 <div className="flex h-full min-h-80 flex-col items-center justify-center px-6 text-center">
@@ -420,13 +414,11 @@ function DetailLoader({
   id,
   canRun,
   onUpdate,
-  onOpenStrategy,
 }: {
   pluginId: string;
   id: string;
   canRun: boolean;
   onUpdate: (item: StrategySummary) => void;
-  onOpenStrategy: (id: string) => void;
 }) {
   const [item, setItem] = useState<StrategyDetail | null>(null);
   const [error, setError] = useState('');
@@ -464,7 +456,6 @@ function DetailLoader({
       pluginId={pluginId}
       canRun={canRun}
       onUpdate={onUpdate}
-      onOpenStrategy={onOpenStrategy}
     />
   ) : (
     <div className="space-y-4 p-6">

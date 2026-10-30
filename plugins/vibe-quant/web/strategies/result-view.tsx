@@ -1,3 +1,4 @@
+import { runVersionName } from '../../strategy-version';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { pluginRequest } from '@app/plugin-sdk/web';
 import {
@@ -139,7 +140,7 @@ export function ResultView({
     <div className="space-y-6 p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <Badge variant="outline">v{run.version_number}</Badge>
+          <Badge variant="outline">{runVersionName(run)}</Badge>
           <Badge variant="secondary">
             {native ? '天勤回测 · TqSim' : '内置回测'}
           </Badge>

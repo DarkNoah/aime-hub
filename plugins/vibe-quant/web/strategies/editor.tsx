@@ -1,3 +1,4 @@
+import { runVersionName, strategyVersionName } from '../../strategy-version';
 import { useEffect, useRef, useState } from 'react';
 import { pluginRequest } from '@app/plugin-sdk/web';
 import {
@@ -79,13 +80,11 @@ export function StrategyEditor({
   pluginId,
   canRun,
   onUpdate,
-  onOpenStrategy,
 }: {
   initial: StrategyDetail;
   pluginId: string;
   canRun: boolean;
   onUpdate: (item: StrategySummary) => void;
-  onOpenStrategy: (id: string) => void;
 }) {
   const cacheKey = `vibe-quant:strategy-draft:${initial.id}`;
   const [record, setRecord] = useState(initial);
@@ -275,7 +274,7 @@ export function StrategyEditor({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `strategy-${viewed ? `v${viewed.number}` : 'draft'}.py`;
+    a.download = `strategy-${viewed ? strategyVersionName(viewed) : 'draft'}.py`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
@@ -457,7 +456,9 @@ export function StrategyEditor({
                       setRecord((old) => ({ ...old, ...next }));
                       setBaseRevision(next.revision);
                       onUpdate(next);
-                      toast.success(`v${viewed.number} 已设为主要版本`);
+                      toast.success(
+                        `${strategyVersionName(viewed)} 已设为主要版本`,
+                      );
                     })
                   }
                 >
@@ -566,7 +567,7 @@ export function StrategyEditor({
           {viewed && (
             <div className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
               <p>
-                v{viewed.number} · {dateTime(viewed.created_at)} ·{' '}
+                {strategyVersionName(viewed)} · {dateTime(viewed.created_at)} ·{' '}
                 {viewed.note || '无版本说明'}
               </p>
               {viewed.id === record.primary_version_id && (
@@ -649,7 +650,7 @@ export function StrategyEditor({
                       }
                     >
                       <TableCell className="pl-5">
-                        <span className="text-xs">v{item.version_number}</span>
+                        <span className="text-xs">{runVersionName(item)}</span>
                         {item.config.backtest_engine === 'tqsdk' && (
                           <Badge variant="secondary" className="ml-2">
                             天勤回测
@@ -851,7 +852,7 @@ export function StrategyEditor({
               </DialogDescription>
             </DialogHeader>
             <p className="text-sm text-muted-foreground">
-              v{deletingRun.version_number} · {deletingRun.config.symbol} ·{' '}
+              {runVersionName(deletingRun)} · {deletingRun.config.symbol} ·{' '}
               {dateTime(deletingRun.created_at)}
             </p>
             <DialogFooter>
@@ -894,7 +895,9 @@ export function StrategyEditor({
         >
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>删除 v{deletingVersion.number}</DialogTitle>
+              <DialogTitle>
+                删除 {strategyVersionName(deletingVersion)}
+              </DialogTitle>
               <DialogDescription>
                 删除后该版本将从选择列表移除，不能用于新建回测、调优或策略提示。历史记录和已提交的任务会保留。
                 {deletingVersion.id === record.primary_version_id &&
@@ -939,7 +942,9 @@ export function StrategyEditor({
                       old === deletingVersion.id ? 'draft' : old,
                     );
                     setDeletingVersion(null);
-                    toast.success(`v${deletingVersion.number} 已删除`);
+                    toast.success(
+                      `${strategyVersionName(deletingVersion)} 已删除`,
+                    );
                   })
                 }
               >
@@ -1099,7 +1104,7 @@ export function StrategyEditor({
                     setPublish(false);
                     setNote('');
                     toast.success(
-                      `v${result.version.number} 已发布并设为主要版本`,
+                      `${strategyVersionName(result.version)} 已发布并设为主要版本`,
                     );
                   })
                 }
@@ -1134,8 +1139,26 @@ export function StrategyEditor({
           initial={runs[0]?.config}
           canRun={canRun}
           onClose={() => setOptimizationOpen(false)}
-          onDraft={onUpdate}
-          onOpenDraft={onOpenStrategy}
+          onVersion={({ strategy, version }) => {
+            setVersions((old) =>
+              old.some((item) => item.id === version.id)
+                ? old
+                : [version, ...old].sort((a, b) => b.number - a.number),
+            );
+            if (strategy.revision < record.revision) return;
+            // Advance only a matching baseline; retain unsaved edits and genuine conflicts.
+            if (JSON.stringify(strategy.draft) === JSON.stringify(record.draft))
+              setBaseRevision((old) =>
+                old === record.revision ? strategy.revision : old,
+              );
+            setRecord(strategy);
+            onUpdate(strategy);
+          }}
+          onOpenVersion={(id) => {
+            setSelectedVersion(id);
+            setTab('script');
+            setOptimizationOpen(false);
+          }}
         />
       )}
     </div>

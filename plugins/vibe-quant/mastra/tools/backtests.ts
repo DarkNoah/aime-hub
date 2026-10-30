@@ -24,10 +24,14 @@ function runView(run: BacktestRun): BacktestRun {
     ...(run.optimization_draft_id
       ? { optimization_draft_id: run.optimization_draft_id }
       : {}),
+    ...(run.optimization_version_id
+      ? { optimization_version_id: run.optimization_version_id }
+      : {}),
     id: run.id,
     strategy_id: run.strategy_id,
     version_id: run.version_id,
     version_number: run.version_number,
+    version_name: run.version_name,
     source_hash: run.source_hash,
     engine: run.engine,
     status: run.status,
@@ -129,7 +133,7 @@ export class BacktestStartTool extends PluginTool {
         maxRetries: 0,
       },
       description: optimize
-        ? '管理员提交独立的 Optuna 参数调优任务，默认由原生后台任务执行，不阻塞对话；后台任务持续到调优结束，成功后以最佳参数自动新建一个未发布的策略草稿，不覆盖原策略。提供 version_id、symbol、start、end、rules 和 optimization.search_space。默认 30 次、600 秒、TPE 种子 42；可设置 validation_start 留出验证。调优不列入普通回测历史。告知用户后台任务已启动，不在本轮持续轮询；收到完成结果后用 backtest_result 读取报告，optimization_draft_id 指向新草稿。后续按需用 backtest_status/result/cancel 查询或取消回测 run_id。'
+        ? '管理员提交独立的 Optuna 参数调优任务，默认由原生后台任务执行，不阻塞对话；后台任务持续到调优结束，成功后以最佳参数在当前策略中创建新版本，命名为原版本名.opt.vN，例如 v6.opt.v1，末尾序号按该原版本递增。只搜索所选版本已有的默认参数，未搜索的参数沿用原默认值。提供 version_id、symbol、start、end、rules 和 optimization.search_space。默认 30 次、600 秒、TPE 种子 42；可设置 validation_start 留出验证。调优不列入普通回测历史。告知用户后台任务已启动，不在本轮持续轮询；收到完成结果后用 backtest_result 读取报告，optimization_version_id 指向新版本。后续按需用 backtest_status/result/cancel 查询或取消回测 run_id。'
         : '管理员提交历史回测，默认由原生后台任务执行，不阻塞对话；后台任务持续到回测结束。默认内置引擎需要 version_id、symbol、start、end、rules。backtest_engine=tqsdk 使用天勤历史行情和 TqSim，仅支持单个期货实际合约；rules 可省略，tq_options 可覆盖每手手续费和保证金。默认资金 100 万、1 分钟 K 线、滑点 1 tick；内置引擎参与率 10%。告知用户后台任务已启动，不在本轮持续轮询；收到完成结果后用 backtest_result 读取指标和日志。后续按需用 backtest_status/result/cancel 查询或取消回测 run_id。',
       inputSchema: optimize
         ? agentBacktestSchema.extend({ optimization: optimizationSchema })

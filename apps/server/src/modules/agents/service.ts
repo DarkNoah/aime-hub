@@ -19,6 +19,8 @@ import {
   type AgentUpdate,
   type AgentStatusInput,
   type ManagedAgent,
+  type RuntimeAgent,
+  type AgentScopeContext,
 } from '@aime/shared/agents';
 import type { SkillService } from '../skills/service.js';
 import type { ToolService } from '../tools/service.js';
@@ -30,6 +32,7 @@ import {
   getAgent,
 } from '../../mastra/agents/index.js';
 import type { AgentSettingsStore } from './settings.js';
+import type { LocalAgentService } from './local-service.js';
 import {
   buildAgent,
   type AgentRuntimeOptions,
@@ -50,6 +53,7 @@ export class AgentService {
     private readonly providers: Pick<ProviderService, 'listAvailableModels'>,
     private readonly settings?: AgentSettingsStore,
     private readonly plugins?: PluginService,
+    private readonly local?: LocalAgentService,
   ) {}
 
   async catalog(): Promise<AgentCatalog> {
@@ -131,7 +135,12 @@ export class AgentService {
   }
 
   async get(id: string): Promise<AdminAgent> {
-    if (id.startsWith('plugin:')) return this.getConfig(id);
+    if (id.startsWith('plugin:')) {
+      const config = await this.getConfig(id);
+      if (config.source === 'local')
+        throw new AgentError('AGENT_NOT_FOUND', 404);
+      return config;
+    }
     return getAgent(id) ?? this.getStored(id);
   }
 
@@ -151,7 +160,10 @@ export class AgentService {
     return this.view(row, version);
   }
 
-  async list(status?: StorageAgentType['status']): Promise<AdminAgent[]> {
+  async list(
+    status?: StorageAgentType['status'],
+    userId?: string,
+  ): Promise<AdminAgent[]> {
     const pages = await Promise.all(
       (status ? [status] : (['draft', 'published', 'archived'] as const)).map(
         (status) => this.store.list({ perPage: false, metadata, status }),
@@ -167,7 +179,7 @@ export class AgentService {
       );
     return [
       ...structuredClone(Object.values(agentRegistry)),
-      ...((await this.plugins?.agents()) ?? []),
+      ...((await this.plugins?.agents(userId)) ?? []),
       ...(await Promise.all(agents.map((agent) => this.getStored(agent.id)))),
     ];
   }
@@ -201,21 +213,36 @@ export class AgentService {
   }
 
   /** Code IDs take precedence; consult storage only when the code registry has no match. */
-  async getConfig(id?: string | null, versionId?: string): Promise<AdminAgent> {
+  async getConfig(
+    id?: string | null,
+    versionId?: string,
+    context?: AgentScopeContext,
+  ): Promise<RuntimeAgent> {
     const selectedId = id ?? (await this.getDefaults()).defaultAgentId;
+    if (selectedId.startsWith('local:')) {
+      if (!context || !this.local) throw new AgentError('AGENT_NOT_FOUND', 404);
+      return this.local.resolve(selectedId, context);
+    }
     if (selectedId.startsWith('plugin:')) {
-      const plugin = ((await this.plugins?.agents()) ?? []).find(
+      const plugin = ((await this.plugins?.agents(context?.userId)) ?? []).find(
         (agent) => agent.id === selectedId,
       );
-      if (!plugin) throw new AgentError('AGENT_NOT_FOUND', 404);
+      if (!plugin) {
+        if (!id) return this.getConfig(fallbackAgentId, undefined, context);
+        throw new AgentError('AGENT_NOT_FOUND', 404);
+      }
       return plugin;
     }
     return getAgent(selectedId) ?? this.getStored(selectedId, versionId, true);
   }
 
   /** Construct an executable Mastra Agent with caller-owned runtime dependencies. */
-  async getAgent(id: string | null | undefined, options: AgentRuntimeOptions) {
-    const config = await this.getConfig(id, options.versionId);
+  async getAgent(
+    id: string | null | undefined,
+    options: AgentRuntimeOptions,
+    context?: AgentScopeContext,
+  ) {
+    const config = await this.getConfig(id, options.versionId, context);
     const children = new Map(
       await Promise.all(
         [...new Set(Object.values(config.agents))].map(
@@ -224,7 +251,7 @@ export class AgentService {
               reference,
               reference === config.id
                 ? config
-                : await this.getSubagent(reference),
+                : await this.getSubagent(reference, context),
             ] as const,
         ),
       ),
@@ -235,9 +262,9 @@ export class AgentService {
     });
   }
 
-  private async getSubagent(reference: string) {
+  private async getSubagent(reference: string, context?: AgentScopeContext) {
     try {
-      return await this.getConfig(reference);
+      return await this.getConfig(reference, undefined, context);
     } catch (error) {
       if (
         error instanceof AgentError &&
@@ -259,24 +286,42 @@ export class AgentService {
     );
   }
 
-  async available(): Promise<AvailableAgents> {
-    const [agents, defaults] = await Promise.all([
-      this.list('published'),
+  async available(
+    context?: AgentScopeContext,
+    includeLocal = true,
+  ): Promise<AvailableAgents> {
+    const [agents, defaults, local] = await Promise.all([
+      this.list('published', context?.userId),
       this.getDefaults(),
+      context && includeLocal ? (this.local?.available(context) ?? []) : [],
     ]);
     return {
       ...defaults,
-      agents: agents
-        .filter(
-          (agent) => agent.source === 'code' || agent.status === 'published',
-        )
-        .map(({ id, name, description, model, source }) => ({
+      defaultAgentId: agents.some(
+        (agent) => agent.id === defaults.defaultAgentId,
+      )
+        ? defaults.defaultAgentId
+        : fallbackAgentId,
+      agents: [
+        ...agents
+          .filter(
+            (agent) => agent.source === 'code' || agent.status === 'published',
+          )
+          .map(({ id, name, description, model, source }) => ({
+            id,
+            name,
+            description,
+            model,
+            source,
+          })),
+        ...local.map(({ id, name, description, model, source }) => ({
           id,
           name,
           description,
           model,
           source,
         })),
+      ],
     };
   }
 

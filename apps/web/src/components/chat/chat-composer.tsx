@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowUp, RotateCw, Square } from 'lucide-react';
 import { nanoid } from 'nanoid';
@@ -35,6 +41,7 @@ import { ChatContextUsage } from './chat-context-usage';
 import { ChatCommandTextarea } from './chat-command-textarea';
 import { useChatSkills } from './use-chat-skills';
 import { skillCommandGroup } from './skill-commands';
+import { agentCommandGroup } from './agent-commands';
 import {
   consumeCompactCommand,
   consumeDrawCommand,
@@ -174,8 +181,8 @@ export function ChatComposer({
     error: settingsError,
     save: saveSettings,
     retry: retrySettings,
-  } = usePersonalChatSettings();
-  const agentCatalog = useAvailableAgents();
+  } = usePersonalChatSettings(projectId);
+  const agentCatalog = useAvailableAgents(projectId, true);
   const fixedModel = agentCatalog.data?.agents.find(
     (agent) =>
       agent.id === (settings.agentId ?? agentCatalog.data?.defaultAgentId),
@@ -213,6 +220,14 @@ export function ChatComposer({
   const [goalDraft, setGoalDraft] = useState(false);
   const [closingGoal, setClosingGoal] = useState(false);
   const [commandsOpen, setCommandsOpen] = useState(false);
+  const refreshAgents = agentCatalog.refresh;
+  const onCommandsOpenChange = useCallback(
+    (open: boolean) => {
+      setCommandsOpen(open);
+      if (open) refreshAgents();
+    },
+    [refreshAgents],
+  );
   const [drawingOpen, setDrawingOpen] = useState(false);
   const [voicesOpen, setVoicesOpen] = useState(false);
   const [editingDrawing, setEditingDrawing] = useState<ChatUpload | null>(null);
@@ -220,6 +235,36 @@ export function ChatComposer({
   const registerImageEdit = useImageEdit()?.register;
   const composer = useRef<HTMLDivElement>(null);
   const skillCatalog = useChatSkills(commandsOpen, threadId, projectId);
+  const [pending, setPending] = useState(false);
+  const [capturing, setCapturing] = useState(false);
+  const capturingRef = useRef(false);
+  const pendingRef = useRef(false);
+  const retryId = useRef<string | null>(null);
+  const unavailable =
+    disabled ||
+    closingGoal ||
+    loadingSettings ||
+    savingSettings ||
+    !!settingsError;
+  const agentSwitchDisabled = !!(
+    pending ||
+    stopping ||
+    running ||
+    unavailable ||
+    agentCatalog.loading ||
+    agentCatalog.error ||
+    goal?.status === 'active'
+  );
+  function switchAgent(agentId: string | null) {
+    if (
+      agentSwitchDisabled ||
+      (agentId !== null &&
+        !agentCatalog.data?.agents.some((agent) => agent.id === agentId))
+    )
+      return false;
+    changeSettings({ ...settings, agentId });
+    return true;
+  }
   const commandGroups = [
     {
       id: 'builtin',
@@ -255,6 +300,17 @@ export function ChatComposer({
         },
       ],
     },
+    agentCommandGroup(agentCatalog.data, settings.agentId ?? null, {
+      label: t('chat.commands.agents'),
+      defaultLabel: t('agents.useDefault'),
+      defaultDescription: t('chat.commands.defaultAgent', {
+        name:
+          agentCatalog.data?.agents.find(
+            (agent) => agent.id === agentCatalog.data?.defaultAgentId,
+          )?.name ?? '',
+      }),
+      disabled: agentSwitchDisabled,
+    }),
     skillCommandGroup(
       skillCatalog.skills.filter(
         (skill) =>
@@ -265,17 +321,6 @@ export function ChatComposer({
       t('chat.commands.skills'),
     ),
   ];
-  const [pending, setPending] = useState(false);
-  const [capturing, setCapturing] = useState(false);
-  const capturingRef = useRef(false);
-  const pendingRef = useRef(false);
-  const retryId = useRef<string | null>(null);
-  const unavailable =
-    disabled ||
-    closingGoal ||
-    loadingSettings ||
-    savingSettings ||
-    !!settingsError;
   useEffect(
     () =>
       registerImageEdit?.((image) => {
@@ -601,12 +646,20 @@ export function ChatComposer({
               <ChatCommandTextarea
                 value={text}
                 groups={commandGroups}
-                loading={skillCatalog.loading}
-                error={skillCatalog.error}
-                onRetry={skillCatalog.retry}
-                onOpenChange={setCommandsOpen}
+                loading={skillCatalog.loading || agentCatalog.loading}
+                error={
+                  skillCatalog.error ??
+                  (agentCatalog.error ? 'errors.generic' : undefined)
+                }
+                onRetry={() => {
+                  skillCatalog.retry();
+                  agentCatalog.retry();
+                }}
+                onOpenChange={onCommandsOpenChange}
                 onCommand={(item) => {
-                  if (item.action === 'voices') {
+                  if (item.action === 'agent') {
+                    return switchAgent(item.agentId);
+                  } else if (item.action === 'voices') {
                     setVoicesOpen(true);
                   } else if (item.action === 'draw') {
                     openDrawing();
@@ -677,18 +730,9 @@ export function ChatComposer({
                     value={settings.agentId ?? null}
                     agents={agentCatalog.data?.agents ?? []}
                     defaultAgentId={agentCatalog.data?.defaultAgentId}
-                    disabled={
-                      pending ||
-                      stopping ||
-                      running ||
-                      unavailable ||
-                      agentCatalog.loading ||
-                      agentCatalog.error ||
-                      goal?.status === 'active'
-                    }
-                    onValueChange={(agentId) =>
-                      changeSettings({ ...settings, agentId })
-                    }
+                    disabled={agentSwitchDisabled}
+                    onValueChange={switchAgent}
+                    onOpen={agentCatalog.refresh}
                   />
                 </div>
                 <ChatSettingsFields

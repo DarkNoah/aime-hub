@@ -29,6 +29,7 @@ import type {
 import { InstrumentInput } from '../components/instrument-input';
 import { errorText, parseObject } from './format';
 import { FeeSettings } from './fee-settings';
+import { nextOptimizationVersionName } from '../../strategy-version';
 import { VersionSelect } from './version-select';
 import {
   defaultOptimization,
@@ -60,13 +61,19 @@ export function RunForm({
   onClose: () => void;
   onCreated: (run: BacktestRun) => void;
 }) {
+  const optimize = mode === 'optimization';
   const defaultVersion =
     versions.find((version) => version.id === primaryVersionId) ?? versions[0];
   const [config, setConfig] = useState<BacktestInput>(() =>
     initial
-      ? { ...initial }
+      ? {
+          ...initial,
+          ...(optimize
+            ? { version_id: '', parameters: {}, optimization: undefined }
+            : {}),
+        }
       : {
-          version_id: defaultVersion.id,
+          version_id: optimize ? '' : defaultVersion.id,
           symbol: 'KQ.m@CFFEX.IM',
           duration: 60,
           start: Math.floor(Date.now() / 1000) - 7 * 86400,
@@ -77,7 +84,7 @@ export function RunForm({
           annualization: 252,
           risk_free_rate: 0,
           benchmark_symbol: 'KQ.m@CFFEX.IM',
-          parameters: defaultVersion.parameters,
+          parameters: optimize ? {} : defaultVersion.parameters,
           rules: {
             multiplier: 200,
             margin_rate: 0.12,
@@ -96,7 +103,6 @@ export function RunForm({
         },
   );
   const [start, setStart] = useState(localTime(config.start));
-  const optimize = mode === 'optimization';
   const [optimization, setOptimization] = useState(
     config.optimization ?? defaultOptimization,
   );
@@ -119,6 +125,9 @@ export function RunForm({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const selectedVersion = versions.find(
+    (version) => version.id === config.version_id,
+  );
   const points = config.execution_model === 'points';
   const native = !optimize && config.backtest_engine === 'tqsdk';
   const currentOptimization = {
@@ -157,7 +166,10 @@ export function RunForm({
     setError('');
     setBusy(true);
     try {
-      const parsed = parseObject(params);
+      if (!selectedVersion) throw new Error('请先选择原版本');
+      const parsed = optimize
+        ? selectedVersion.parameters
+        : parseObject(params);
       const input = {
         ...config,
         backtest_engine: native ? 'tqsdk' : 'builtin',
@@ -188,7 +200,7 @@ export function RunForm({
       onCreated(run);
       toast.success(
         optimize
-          ? '已开始调优，完成后会创建新的策略草稿'
+          ? '已开始调优，完成后会在当前策略中创建新版本'
           : '已创建回测，参数和版本已固定',
       );
     } catch (e) {
@@ -221,7 +233,7 @@ export function RunForm({
           <SheetTitle>{optimize ? '调优参数' : '配置回测'}</SheetTitle>
           <SheetDescription>
             {optimize
-              ? '选定版本和搜索范围，最佳参数将另存为新的策略草稿。时间按北京时间。'
+              ? '先选择原版本，再调优其默认参数。最佳参数将保存为当前策略的新版本，例如 v6.opt.v1。时间按北京时间。'
               : initial
                 ? '已复用该记录的参数，可修改后点击「开始回测」。时间按北京时间。'
                 : '时间按北京时间，可选择内置回测或天勤模拟账户回测。'}
@@ -273,7 +285,7 @@ export function RunForm({
               )}
               <div className="grid min-w-0 items-start gap-4 sm:grid-cols-[minmax(0,1fr)_10rem]">
                 <Label className="grid min-w-0 gap-2 text-xs">
-                  脚本版本
+                  {optimize ? '原版本' : '脚本版本'}
                   <VersionSelect
                     versions={versions}
                     primaryVersionId={primaryVersionId}
@@ -281,6 +293,7 @@ export function RunForm({
                     value={config.version_id}
                     onValueChange={(id) => {
                       field('version_id', id);
+                      if (optimize) setSpace('');
                       setParams(
                         JSON.stringify(
                           versions.find((v) => v.id === id)!.parameters,
@@ -531,15 +544,20 @@ export function RunForm({
                 </section>
               )}
               <JsonObjectEditor
-                label="策略参数"
+                label={optimize ? '原版本默认参数' : '策略参数'}
+                readOnly={optimize}
                 value={params}
                 onChange={setParams}
               />
               <p className="text-xs leading-5 text-muted-foreground">
-                同名参数覆盖版本默认值，未填写的参数沿用默认值。
+                {optimize
+                  ? selectedVersion
+                    ? `仅搜索该版本已有的默认参数；未参与搜索的参数保持原值。预计创建 ${nextOptimizationVersionName(selectedVersion, versions)}，序号以保存时为准。`
+                    : '请先选择原版本以加载默认参数。'
+                  : '同名参数覆盖版本默认值，未填写的参数沿用默认值。'}
                 symbol、duration 和 execution_model 由上方配置统一注入。
               </p>
-              {optimize && (
+              {optimize && selectedVersion && (
                 <OptimizationSettings
                   value={currentOptimization}
                   points={points}
@@ -607,12 +625,12 @@ export function RunForm({
               >
                 取消
               </Button>
-              <Button type="submit" disabled={busy}>
+              <Button type="submit" disabled={busy || !selectedVersion}>
                 <Play className="size-4" />
                 {busy
                   ? '正在提交…'
                   : optimize
-                    ? '开始调优并生成草稿'
+                    ? '开始调优并创建版本'
                     : '开始回测'}
               </Button>
             </div>
