@@ -4,7 +4,7 @@
 
 ## 通用用法
 
-`APP_API_SCRIPT` 由服务端自动注入，指向内置 `app-api.mjs` 的完整绝对路径（`<WORKSPACE_ROOT>/.agents/skills/builtin/docs/scripts/app-api.mjs`）；直接引用它，不拼接目录或硬编码机器路径。`SKILLS_ROOT` 仍指向全局技能目录 `<WORKSPACE_ROOT>/.agents/skills`，`SKILL_HOME` 表示当前用户或项目的技能安装目录。
+`APP_API_SCRIPT` 由服务端自动注入，指向内置 `app-api.mjs` 的完整绝对路径（`$BUILTIN_SKILLS_ROOT/docs/scripts/app-api.mjs`）；直接引用它，不拼接目录或硬编码机器路径。`BUILTIN_SKILLS_ROOT` 指向 `<WORKSPACE_ROOT>/.agents/skills/builtin`；`SKILLS_ROOT` 仍指向全局技能目录 `<WORKSPACE_ROOT>/.agents/skills`，`SKILL_HOME` 表示当前用户或项目的技能安装目录。通过 `write_stdin` 续接的 shell 会话保留 `exec_command` 启动时注入的这些变量，可以使用同样的命令。
 
 ```sh
 node "$APP_API_SCRIPT" list

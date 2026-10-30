@@ -18,6 +18,7 @@ import { CommandSandbox } from '../../mastra/tools/command/sandbox.js';
 import { directorySkillConfig } from './skill-source.js';
 import { workspaceLspConfig, workspaceLspHooks } from './workspace-lsp.js';
 import type { EnvironmentVariableService } from '../environment-variables/service.js';
+import { BUILTIN_SKILL_GROUP } from '../skills/builtin.js';
 import {
   projectWorkspaceSchema,
   type ProjectWorkspace,
@@ -144,9 +145,9 @@ export function getWorkspace(
     'skills',
   );
   const skillsRoot = resolve(root, '.agents', 'skills');
+  const builtinSkillsRoot = resolve(skillsRoot, BUILTIN_SKILL_GROUP);
   const appApiScript = resolve(
-    skillsRoot,
-    'builtin',
+    builtinSkillsRoot,
     'docs',
     'scripts',
     'app-api.mjs',
@@ -157,6 +158,7 @@ export function getWorkspace(
       env: {
         SKILL_HOME: skillHome,
         SKILLS_ROOT: skillsRoot,
+        BUILTIN_SKILLS_ROOT: builtinSkillsRoot,
         APP_API_SCRIPT: appApiScript,
       },
     },
@@ -164,6 +166,7 @@ export function getWorkspace(
       ...(await environmentVariables?.getEnv()),
       SKILL_HOME: skillHome,
       SKILLS_ROOT: skillsRoot,
+      BUILTIN_SKILLS_ROOT: builtinSkillsRoot,
       APP_API_SCRIPT: appApiScript,
       // Reserved, request-scoped values cannot come from shared admin settings.
       APP_API_URL: '',

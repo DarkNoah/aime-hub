@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { RequestContext } from '@mastra/core/request-context';
 import { LocalApiAccess } from '../auth/local-api.js';
@@ -15,7 +16,9 @@ import { ThreadService } from './service.js';
 import type { LanguageModelService } from '../models/language-model.js';
 import { noopObserve, isValidationError } from '@mastra/core/tools';
 import { execCommand } from '../../mastra/tools/exec_command.js';
+import { writeStdin } from '../../mastra/tools/write_stdin.js';
 import { commandInputSchema } from '../../mastra/tools/command/schema.js';
+import { syncBuiltinSkills } from '../skills/builtin.js';
 import {
   createPersonalWorkspace,
   createProjectWorkspace,
@@ -24,13 +27,13 @@ import {
 
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const inspectEnv = `${quote(process.execPath)} -e ${quote(
-  'console.log(JSON.stringify({ value: process.env.COMMAND_ENV_TEST ?? null, empty: process.env.COMMAND_ENV_EMPTY ?? null, skillHome: process.env.SKILL_HOME, skillsRoot: process.env.SKILLS_ROOT, appApiScript: process.env.APP_API_SCRIPT, path: Boolean(process.env.PATH) }))',
+  'console.log(JSON.stringify({ value: process.env.COMMAND_ENV_TEST ?? null, empty: process.env.COMMAND_ENV_EMPTY ?? null, skillHome: process.env.SKILL_HOME, skillsRoot: process.env.SKILLS_ROOT, builtinSkillsRoot: process.env.BUILTIN_SKILLS_ROOT, appApiScript: process.env.APP_API_SCRIPT, path: Boolean(process.env.PATH) }))',
 )}`;
 
 for (const projectId of [undefined, 'project000000001']) {
   test(`exec_command refreshes configured env in ${projectId ? 'project' : 'personal'} workspaces`, async (t) => {
     const root = await realpath(
-      await mkdtemp(join(tmpdir(), 'workspace-env-')),
+      await mkdtemp(join(tmpdir(), 'workspace env-')),
     );
     const directory = projectId
       ? await createProjectWorkspace(root, projectId)
@@ -43,9 +46,9 @@ for (const projectId of [undefined, 'project000000001']) {
       'skills',
     );
     const skillsRoot = join(root, '.agents', 'skills');
+    const builtinSkillsRoot = join(skillsRoot, 'builtin');
     const appApiScript = join(
-      skillsRoot,
-      'builtin',
+      builtinSkillsRoot,
       'docs',
       'scripts',
       'app-api.mjs',
@@ -55,6 +58,7 @@ for (const projectId of [undefined, 'project000000001']) {
       COMMAND_ENV_EMPTY: '',
       SKILL_HOME: '/should-not-replace-session-scope',
       SKILLS_ROOT: '/should-not-replace-global-root',
+      BUILTIN_SKILLS_ROOT: '/should-not-replace-builtin-root',
       APP_API_SCRIPT: '/should-not-replace-builtin-script',
     };
     let unavailable = false;
@@ -92,6 +96,7 @@ for (const projectId of [undefined, 'project000000001']) {
       empty: '',
       skillHome,
       skillsRoot,
+      builtinSkillsRoot,
       appApiScript,
       path: true,
     });
@@ -103,6 +108,7 @@ for (const projectId of [undefined, 'project000000001']) {
       empty: null,
       skillHome,
       skillsRoot,
+      builtinSkillsRoot,
       appApiScript,
       path: true,
     });
@@ -111,6 +117,7 @@ for (const projectId of [undefined, 'project000000001']) {
     const ptyEnv = JSON.parse(await run(inspectEnv, true));
     assert.equal(ptyEnv.value, 'pty');
     assert.equal(ptyEnv.skillsRoot, skillsRoot);
+    assert.equal(ptyEnv.builtinSkillsRoot, builtinSkillsRoot);
     assert.equal(ptyEnv.appApiScript, appApiScript);
 
     env = {};
@@ -119,9 +126,71 @@ for (const projectId of [undefined, 'project000000001']) {
       empty: null,
       skillHome,
       skillsRoot,
+      builtinSkillsRoot,
       appApiScript,
       path: true,
     });
+
+    await syncBuiltinSkills(
+      fileURLToPath(new URL('../../mastra/skills', import.meta.url)),
+      root,
+    );
+    for (const tty of [false, true]) {
+      const started = await execCommand.execute!(
+        commandInputSchema.parse({
+          cmd: 'exec /bin/sh -s',
+          shell: '/bin/sh',
+          login: false,
+          tty,
+          yield_time_ms: 250,
+        }),
+        { workspace, observe: noopObserve },
+      );
+      assert.ok(started && !isValidationError(started));
+      const sessionId = started.session_id;
+      assert.equal(typeof sessionId, 'number');
+      const resume = async (chars: string) => {
+        const result = await writeStdin.execute!(
+          {
+            session_id: sessionId!,
+            chars,
+            yield_time_ms: 1000,
+            max_output_tokens: 2000,
+          },
+          { workspace, observe: noopObserve },
+        );
+        assert.ok(result && !isValidationError(result));
+        return result;
+      };
+      let result = await resume(
+        [
+          inspectEnv,
+          `${quote(process.execPath)} "$BUILTIN_SKILLS_ROOT/docs/scripts/app-api.mjs" --help`,
+          'exit $?',
+          '',
+        ].join('\n'),
+      );
+      let output = result.output;
+      for (let attempt = 0; result.session_id && attempt < 5; attempt++) {
+        result = await resume('');
+        output += result.output;
+      }
+      assert.equal(result.exit_code, 0, output);
+      const envLine = output
+        .split(/\r?\n/)
+        .find((line) => line.startsWith('{'));
+      assert.ok(envLine, output);
+      assert.deepEqual(JSON.parse(envLine), {
+        value: null,
+        empty: null,
+        skillHome,
+        skillsRoot,
+        builtinSkillsRoot,
+        appApiScript,
+        path: true,
+      });
+      assert.match(output, /Operations and schemas are discovered/);
+    }
 
     unavailable = true;
     await assert.rejects(

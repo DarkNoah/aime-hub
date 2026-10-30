@@ -67,11 +67,11 @@ Inspect an existing skill before editing it. Preserve its useful constraints, re
 
 Use 1-64 characters consisting of lowercase letters, digits, and single hyphens. Avoid leading, trailing, or consecutive hyphens. Prefer a short action-oriented name, adding a tool or domain qualifier only when it improves discovery. The directory name must match the manifest name.
 
-All script paths below are relative to this skill's directory. Resolve them from its loaded location, not from the command runner's current directory. Python 3.10 or later is required.
+The runtime injects `BUILTIN_SKILLS_ROOT`, the absolute `<WORKSPACE_ROOT>/.agents/skills/builtin` directory. Use the quoted script paths below from any working directory. Shell sessions continued with `write_stdin` retain these environment variables from `exec_command`. Python 3.10 or later is required.
 
 ```sh
-python3 scripts/init_skill.py my-skill
-python3 scripts/init_skill.py another-skill --path "$SKILL_HOME" --resources scripts,references
+python3 "$BUILTIN_SKILLS_ROOT/skill-creator/scripts/init_skill.py" my-skill
+python3 "$BUILTIN_SKILLS_ROOT/skill-creator/scripts/init_skill.py" another-skill --path "$SKILL_HOME" --resources scripts,references
 ```
 
 Replace the example names with the intended name. The initializer uses `SKILL_HOME`; optional `--path` must match it. It creates a `SKILL.md` starter and only the resource directories requested. It refuses existing destinations, so update existing skills directly instead of initializing them again. Do not delete an existing skill to bypass a collision.
@@ -96,13 +96,13 @@ For multiple substantial modes, put selection criteria in the entrypoint and lin
 Run the bundled validator on the completed directory:
 
 ```sh
-python3 scripts/quick_validate.py "$SKILL_HOME/my-skill"
+python3 "$BUILTIN_SKILLS_ROOT/skill-creator/scripts/quick_validate.py" "$SKILL_HOME/my-skill"
 ```
 
-Validation requires the YAML parser declared in `scripts/requirements.txt`. If it is missing, use an available Python environment with that dependency or install it into a permitted virtual environment:
+Validation requires the YAML parser declared in `$BUILTIN_SKILLS_ROOT/skill-creator/scripts/requirements.txt`. If it is missing, use an available Python environment with that dependency or install it into a permitted virtual environment:
 
 ```sh
-python3 -m pip install -r scripts/requirements.txt
+python3 -m pip install -r "$BUILTIN_SKILLS_ROOT/skill-creator/scripts/requirements.txt"
 ```
 
 Do not claim validation passed if a dependency prevented it from running. The initializer itself uses only the standard library.

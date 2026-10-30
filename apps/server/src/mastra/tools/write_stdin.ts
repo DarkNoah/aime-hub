@@ -10,7 +10,7 @@ import {
 
 export const writeStdin = createTool({
   id: 'write_stdin',
-  description: `Send input to a command session returned by exec_command and read new output. Pass chars="" (or omit it) to poll without sending input. Use a newline to submit an answer, e.g. {session_id:123, chars:"my-app\\n"}. PTY sessions accept terminal control characters such as Ctrl-C (\\u0003) to interrupt or Ctrl-D (\\u0004) for EOF. Returns session_id while running, exit_code when complete; completed sessions are released after their final output is read. Only sessions in the current conversation are accessible.`,
+  description: `Send input to a command session returned by exec_command and read new output. The session retains the environment injected at startup, including SKILL_HOME, SKILLS_ROOT, BUILTIN_SKILLS_ROOT and APP_API_SCRIPT; shell commands sent here can use these variables. Input is forwarded unchanged to the running process. Pass chars="" (or omit it) to poll without sending input. Use a newline to submit an answer, e.g. {session_id:123, chars:"my-app\\n"}. PTY sessions accept terminal control characters such as Ctrl-C (\\u0003) to interrupt or Ctrl-D (\\u0004) for EOF. Returns session_id while running, exit_code when complete; completed sessions are released after their final output is read. Only sessions in the current conversation are accessible.`,
   inputSchema: z.object({
     session_id: z
       .number()
