@@ -15,6 +15,7 @@ import {
 } from '@/features/auth/route-guards';
 import { AppLayout } from '@/layouts/app-layout';
 import { LoadingState } from '@/components/loading-state';
+import { validateGroupChatSearch } from '@/pages/group-chats/search';
 
 const AdminPluginsPage = lazy(() =>
   import('@/pages/admin/plugins/page').then((m) => ({
@@ -208,6 +209,7 @@ const projectChatRoute = createRoute({
 const personalGroupChatRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: '/group-chats',
+  validateSearch: validateGroupChatSearch,
   component: GroupChatsPage,
 });
 const projectGroupChatRoute = createRoute({

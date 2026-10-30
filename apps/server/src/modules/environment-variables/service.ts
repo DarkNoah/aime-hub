@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { DataSource } from 'typeorm';
+import { IsNull, type DataSource } from 'typeorm';
 import { EnvironmentVariable } from '@aime/db';
 import type {
   EnvironmentVariable as EnvironmentVariableDto,
@@ -37,29 +37,44 @@ export class EnvironmentVariableService {
     return this.database.getRepository(EnvironmentVariable);
   }
 
-  // Values are selected explicitly for administrator reads and command execution.
-  private query() {
+  // Every CRUD query is scoped, including administrator reads (global only).
+  private query(userId?: string) {
     return this.repository
       .createQueryBuilder('variable')
-      .addSelect('variable.value');
+      .addSelect('variable.value')
+      .where(
+        userId === undefined
+          ? 'variable.userId IS NULL'
+          : 'variable.userId = :userId',
+        { userId },
+      );
   }
 
-  async list(): Promise<EnvironmentVariableDto[]> {
-    return (await this.query().orderBy('variable.name', 'ASC').getMany()).map(
-      toDto,
-    );
+  async list(userId?: string): Promise<EnvironmentVariableDto[]> {
+    return (
+      await this.query(userId).orderBy('variable.name', 'ASC').getMany()
+    ).map(toDto);
   }
 
-  async getEnv(): Promise<Record<string, string>> {
-    const rows = await this.repository
-      .createQueryBuilder('variable')
-      .select(['variable.name', 'variable.value'])
+  async getEnv(userId?: string): Promise<Record<string, string>> {
+    const query = this.query().select([
+      'variable.name',
+      'variable.value',
+      'variable.userId',
+    ]);
+    if (userId !== undefined)
+      query.orWhere('variable.userId = :userId', { userId });
+    // Apply the user's values last, including an explicit empty string.
+    const rows = await query
+      .orderBy('variable.userId', 'ASC', 'NULLS FIRST')
       .getMany();
     return Object.fromEntries(rows.map(({ name, value }) => [name, value]));
   }
 
-  async get(id: string): Promise<EnvironmentVariableDto> {
-    const row = await this.query().where('variable.id = :id', { id }).getOne();
+  async get(id: string, userId?: string): Promise<EnvironmentVariableDto> {
+    const row = await this.query(userId)
+      .andWhere('variable.id = :id', { id })
+      .getOne();
     if (!row)
       throw new EnvironmentVariableError('ENVIRONMENT_VARIABLE_NOT_FOUND', 404);
     return toDto(row);
@@ -67,11 +82,13 @@ export class EnvironmentVariableService {
 
   async create(
     input: EnvironmentVariableInput,
+    userId?: string,
   ): Promise<EnvironmentVariableDto> {
     try {
       const row = await this.repository.save(
         this.repository.create({
           ...input,
+          userId: userId ?? null,
           id: randomUUID(),
           description: input.description ?? '',
         }),
@@ -85,22 +102,29 @@ export class EnvironmentVariableService {
   async update(
     id: string,
     input: EnvironmentVariableUpdate,
+    userId?: string,
   ): Promise<EnvironmentVariableDto> {
     try {
-      const result = await this.repository.update(id, input);
+      const result = await this.repository.update(
+        { id, userId: userId ?? IsNull() },
+        input,
+      );
       if (!result.affected)
         throw new EnvironmentVariableError(
           'ENVIRONMENT_VARIABLE_NOT_FOUND',
           404,
         );
-      return await this.get(id);
+      return await this.get(id, userId);
     } catch (error) {
       writeError(error);
     }
   }
 
-  async remove(id: string): Promise<void> {
-    const result = await this.repository.delete(id);
+  async remove(id: string, userId?: string): Promise<void> {
+    const result = await this.repository.delete({
+      id,
+      userId: userId ?? IsNull(),
+    });
     if (!result.affected)
       throw new EnvironmentVariableError('ENVIRONMENT_VARIABLE_NOT_FOUND', 404);
   }

@@ -7,6 +7,11 @@ import {
 import * as applicationTools from '../../mastra/tools/index.js';
 import { agentAllowed, BaseTool, BuiltinTool } from './base.js';
 import { toolSources } from './sources.js';
+import {
+  NON_INTERACTIVE_TOOLS_CONTEXT,
+  isNonInteractiveTool,
+  guardNonInteractiveTool,
+} from './non-interactive.js';
 import type {
   RegisteredTool,
   ToolDefaultConfigs,
@@ -42,11 +47,13 @@ export function registerTools(tools: Record<string, ToolDefinition>) {
   return registry;
 }
 const registry = registerTools(applicationTools);
-export const registeredToolIds: readonly string[] = [...registry.keys()];
+export const registeredToolIds: readonly string[] = [...registry.values()]
+  .filter((tool) => !tool.hidden)
+  .map((tool) => tool.id);
 
 export function parseToolConfig(id: string, input: unknown): ToolConfig {
   const tool = registry.get(id);
-  if (!tool) throw new Error(`Unknown tool ID: ${id}`);
+  if (!tool || tool.hidden) throw new Error(`Unknown tool ID: ${id}`);
   return tool.parseConfig(input);
 }
 
@@ -62,14 +69,16 @@ export async function getTools(
   const selected = options.ids && [
     ...new Set(options.ids.map(normalizeToolId)),
   ];
-  const definitions = selected
-    ? selected.flatMap((id) => (registry.has(id) ? [registry.get(id)!] : []))
-    : [...registry.values()];
+  const definitions = (
+    selected
+      ? selected.flatMap((id) => (registry.has(id) ? [registry.get(id)!] : []))
+      : [...registry.values()]
+  ).filter((tool) => !tool.hidden);
   const boundDependencies = { ...dependencies, getTools };
   const sources = await Promise.all(
-    toolSources.map((source) =>
-      source.getTools(config, boundDependencies, options),
-    ),
+    toolSources
+      .filter((source) => !source.hidden)
+      .map((source) => source.getTools(config, boundDependencies, options)),
   );
   const discovered = new Set(sources.flat().map((tool) => tool.id));
   const disabled = new Set(
@@ -79,6 +88,11 @@ export async function getTools(
     ].map(normalizeToolId),
   );
   for (const id of selected ?? []) {
+    if (
+      registry.get(id)?.hidden ||
+      toolSources.some((source) => source.hidden && source.ids?.includes(id))
+    )
+      throw new Error(`Unknown tool ID: ${id}`);
     if (
       !registry.has(id) &&
       !dependencies.ownsPluginTool?.(id) &&
@@ -98,9 +112,16 @@ export async function getTools(
     tools.set(tool.id, tool);
   }
   dependencies.context?.abortSignal?.throwIfAborted();
-  return selected
+  const result = selected
     ? selected.flatMap((id) => (tools.has(id) ? [tools.get(id)!] : []))
     : [...tools.values()];
+  return dependencies.context?.requestContext?.get(
+    NON_INTERACTIVE_TOOLS_CONTEXT,
+  )
+    ? result
+        .filter((tool) => isNonInteractiveTool(tool))
+        .map(guardNonInteractiveTool)
+    : result;
 }
 
 /** Convert the public array to the mapping required by Mastra Agent.tools. */

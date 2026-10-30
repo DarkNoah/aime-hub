@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PanelsTopLeft, X } from 'lucide-react';
 import { nanoid } from 'nanoid';
+import { toast } from 'sonner';
 import {
   INTELLIGENT_UI_CHANNEL,
   intelligentUiInputSchema,
@@ -19,16 +20,28 @@ import {
   getIntelligentUiLinkUrl,
 } from './intelligent-ui-document';
 
-export function IntelligentUI(props: ToolInteractionProps) {
+type NonBlockingUi = {
+  input: { html: string; title?: string | null; tips?: string | null };
+  onSend: (
+    id: string,
+    data: ReturnType<typeof parseIntelligentUiResponse>,
+  ) => Promise<void>;
+};
+
+export function IntelligentUI(
+  props: ToolInteractionProps & { nonBlocking?: NonBlockingUi },
+) {
   const { t } = useTranslation();
   const { resolvedTheme } = useTheme();
-  const { interaction, tool } = props;
+  const { interaction, tool, nonBlocking } = props;
   const input = intelligentUiInputSchema.safeParse(
-    interaction?.input ?? tool?.input,
+    nonBlocking?.input ?? interaction?.input ?? tool?.input,
   ).data;
   const { response, pending, unavailable, error, submit } =
     useToolResponse(props);
   const [frameError, setFrameError] = useState('');
+  const [messagePending, setMessagePending] = useState(false);
+  const request = useRef<{ signature: string; id: string } | null>(null);
   const [height, setHeight] = useState(180);
   const [token] = useState(() => nanoid());
   const frame = useRef<HTMLIFrameElement>(null);
@@ -38,20 +51,30 @@ export function IntelligentUI(props: ToolInteractionProps) {
   const failed =
     tool?.state === 'output-error' || tool?.state === 'output-denied';
   const streaming = tool?.state === 'input-streaming';
-  const waits = input?.waitForResponse === true;
-  const enabled = waits && !unavailable && !done && !failed && !streaming;
-  const locked = !!failed || (waits && !enabled);
+  const waits = !nonBlocking && input?.waitForResponse === true;
+  const enabled = nonBlocking
+    ? !props.disabled && !messagePending
+    : waits && !unavailable && !done && !failed && !streaming;
+  const locked =
+    !!failed ||
+    (nonBlocking ? !!props.disabled || messagePending : waits && !enabled);
   const result = response?.action === 'resume' ? response.data : tool?.output;
   const cancelled =
     !!result &&
     typeof result === 'object' &&
     'cancelled' in result &&
     result.cancelled === true;
+  const isNonBlocking = !!nonBlocking;
   const html = streaming ? '' : (input?.html ?? '');
   // Status and theme changes must not recreate the document or erase form values.
   const srcDoc = useMemo(
-    () => buildIntelligentUiDocument(html, token),
-    [html, token],
+    () =>
+      buildIntelligentUiDocument(
+        html,
+        token,
+        isNonBlocking ? 'message' : 'resume',
+      ),
+    [html, token, isNonBlocking],
   );
   const send = (type: string, payload: Record<string, unknown> = {}) =>
     frame.current?.contentWindow?.postMessage(
@@ -114,8 +137,14 @@ export function IntelligentUI(props: ToolInteractionProps) {
       );
       return;
     }
-    if (data.type !== 'resume') return;
-    if (!enabled || sending.current || accepted.current) {
+    if (data.type !== (nonBlocking ? 'message' : 'resume')) return;
+    if (
+      nonBlocking &&
+      (document.activeElement !== frame.current ||
+        !navigator.userActivation?.isActive)
+    )
+      return;
+    if (!enabled || sending.current || (!nonBlocking && accepted.current)) {
       send('ack');
       return;
     }
@@ -123,11 +152,24 @@ export function IntelligentUI(props: ToolInteractionProps) {
     try {
       const value = parseIntelligentUiResponse(data.data);
       setFrameError('');
-      accepted.current = await submit({ action: 'resume', data: value });
+      if (nonBlocking) {
+        const signature = JSON.stringify(value);
+        if (request.current?.signature !== signature)
+          request.current = { signature, id: nanoid() };
+        setMessagePending(true);
+        await nonBlocking.onSend(request.current.id, value);
+        request.current = null;
+        toast.success(t('groupChat.uiSent'));
+      } else {
+        accepted.current = await submit({ action: 'resume', data: value });
+      }
     } catch {
-      setFrameError(t('chat.intelligentUi.invalidData'));
+      setFrameError(
+        t(nonBlocking ? 'groupChat.failed' : 'chat.intelligentUi.invalidData'),
+      );
     } finally {
       sending.current = false;
+      setMessagePending(false);
       send('ack');
     }
   });
@@ -146,13 +188,15 @@ export function IntelligentUI(props: ToolInteractionProps) {
       ? 'chat.intelligentUi.preparing'
       : cancelled
         ? 'chat.intelligentUi.skipped'
-        : pending
+        : pending || messagePending
           ? 'chat.toolInteraction.submitting'
-          : waits
-            ? done
-              ? 'chat.toolInteraction.completed'
-              : 'chat.toolInteraction.waiting'
-            : 'chat.intelligentUi.display';
+          : nonBlocking
+            ? 'groupChat.uiReady'
+            : waits
+              ? done
+                ? 'chat.toolInteraction.completed'
+                : 'chat.toolInteraction.waiting'
+              : 'chat.intelligentUi.display';
   return (
     <section
       className="my-3 min-w-0 overflow-hidden rounded-xl border bg-card text-card-foreground"

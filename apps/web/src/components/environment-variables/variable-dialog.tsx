@@ -6,7 +6,6 @@ import {
   environmentVariableInputSchema,
   type EnvironmentVariable,
 } from '@aime/shared/environment-variables';
-import { api } from '@/lib/rpc';
 import type { TranslationKey } from '@/i18n/config';
 import { PasswordInput } from '@/components/password-input';
 import { Button } from '@/components/ui/button';
@@ -23,19 +22,24 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { environmentVariableErrorKey } from '../api';
+import {
+  environmentVariableErrorKey,
+  type EnvironmentVariablesClient,
+} from './api';
 
 export type VariableAction =
   | { kind: 'create' }
   | { kind: 'edit' | 'delete'; variable: EnvironmentVariable };
 
 export function VariableDialog({
+  client,
   action,
   onClose,
   onSaved,
   onRemoved,
   restoreFocus,
 }: {
+  client: EnvironmentVariablesClient;
   action: VariableAction;
   onClose: () => void;
   onSaved: (variable: EnvironmentVariable) => void;
@@ -83,16 +87,16 @@ export function VariableDialog({
     setPending(true);
     try {
       if (deleting && variable) {
-        await api.environmentVariables.remove({ params: { id: variable.id } });
+        await client.remove({ params: { id: variable.id } });
         onRemoved(variable.id);
         toast.success(t('environmentVariables.deleted'));
       } else if (parsed.success) {
         const saved = variable
-          ? await api.environmentVariables.update({
+          ? await client.update({
               params: { id: variable.id },
               body: parsed.data,
             })
-          : await api.environmentVariables.create({ body: parsed.data });
+          : await client.create({ body: parsed.data });
         onSaved(saved);
         toast.success(
           t(

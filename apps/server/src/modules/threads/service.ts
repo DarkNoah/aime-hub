@@ -1,4 +1,8 @@
 import type { SpeechEvent } from '@aime/shared/audio';
+import {
+  groupChatThreadBinding,
+  type GroupChatThreadBinding,
+} from '../group-chats/metadata.js';
 import { nanoid } from 'nanoid';
 import {
   emptyBrowserState,
@@ -118,6 +122,7 @@ type Runtime = {
   backgroundTasks: ThreadBackgroundTask[];
   backgroundObserver?: ThreadBackgroundTasks;
   backgroundTasksError: 'BACKGROUND_TASKS_UNAVAILABLE' | null;
+  rejectedRoomRunId?: string;
 };
 
 export interface ChatRunner {
@@ -126,11 +131,13 @@ export interface ChatRunner {
     settings: ChatSettings,
     userId?: string,
     projectId?: string,
+    roomRole?: GroupChatThreadBinding['role'],
   ): Promise<ChatSettings>;
   sessionKey?(
     settings: ChatSettings,
     userId?: string,
     projectId?: string,
+    roomRole?: GroupChatThreadBinding['role'],
   ): Promise<string>;
   getGoal?(threadId: string): Promise<ThreadGoal | null>;
   getConsumedTokens?(threadId: string): Promise<number | undefined>;
@@ -145,6 +152,16 @@ export interface ChatRunner {
     userId: string,
     input: RunInput | ChatSettings,
     projectId?: string,
+    roomRole?: GroupChatThreadBinding['role'],
+  ): Promise<void>;
+  assertGroupChatAccess?(
+    userId: string,
+    thread: StorageThreadType,
+  ): Promise<void>;
+  assertGroupChatRun?(
+    userId: string,
+    thread: StorageThreadType,
+    settings: ChatSettings,
   ): Promise<void>;
   createWorkspace(userId: string, projectId?: string): Promise<string>;
   pluginWorkspace?(
@@ -168,6 +185,7 @@ type ThreadMemory = Pick<
 >;
 const PAGE_SIZE = 40;
 const isChatThread = (thread: StorageThreadType) =>
+  !groupChatThreadBinding(thread.metadata) &&
   !Object.hasOwn(thread.metadata ?? {}, 'goalJudge') &&
   (!thread.metadata?.automation ||
     (thread.metadata.automation as { visible?: boolean }).visible === true);
@@ -225,6 +243,11 @@ export class ThreadService {
   private runtimes = new Map<string, Runtime>();
   private locks = new Map<string, Promise<unknown>>();
   private closing = false;
+  private roomObserver?: (
+    binding: GroupChatThreadBinding,
+    status: ThreadStatus,
+    error: string | null,
+  ) => Promise<void>;
   constructor(
     private memory: ThreadMemory,
     private runner: ChatRunner,
@@ -233,6 +256,141 @@ export class ThreadService {
     private isSystemAdmin: (userId: string) => Promise<boolean> = async () =>
       false,
   ) {}
+
+  setGroupChatObserver(observer: NonNullable<ThreadService['roomObserver']>) {
+    this.roomObserver = observer;
+  }
+
+  /** Room records own these IDs. Repeated provisioning never creates another thread. */
+  ensureGroupChatThread(
+    input: GroupChatThreadBinding & {
+      threadId: string;
+      userId: string;
+      projectId?: string;
+      title: string;
+      settings: ChatSettings;
+    },
+  ) {
+    return this.locked(input.threadId, async () => {
+      const existing = await this.memory.getThreadById({
+        threadId: input.threadId,
+      });
+      if (existing) {
+        const binding = groupChatThreadBinding(existing.metadata);
+        if (
+          binding?.roomId !== input.roomId ||
+          binding.memberId !== input.memberId ||
+          binding.role !== input.role
+        )
+          throw new ThreadError('FORBIDDEN', 403);
+        const runtime = this.runtimes.get(input.threadId);
+        const data = runtime?.data ?? dataOf(existing);
+        if (
+          !runtime &&
+          (data.activeId ||
+            data.status === 'running' ||
+            data.status === 'pending')
+        ) {
+          data.status = 'failed';
+          data.activeId = null;
+          data.error = 'RUN_INTERRUPTED';
+          await this.memory.updateThread({
+            id: existing.id,
+            title: existing.title,
+            metadata: {
+              status: data.status,
+              activeId: null,
+              error: data.error,
+            },
+          });
+          // Reconcile an interrupted run without erasing errors from a rejected submission.
+          await this.roomObserver?.(binding, data.status, data.error);
+        }
+        return;
+      }
+      const workspace = input.projectId
+        ? await this.runner.createWorkspace(input.userId, input.projectId)
+        : await this.runner.personalSharedDirectory?.(input.userId);
+      if (!workspace) throw new ThreadError('WORKSPACE_UNAVAILABLE', 404);
+      await this.memory.createThread({
+        threadId: input.threadId,
+        resourceId: input.projectId
+          ? `project:${input.projectId}`
+          : `user:${input.userId}`,
+        title: input.title,
+        metadata: {
+          ...input.settings,
+          ...initialData(),
+          reasoningEffort: input.settings.reasoningEffort,
+          createdBy: input.userId,
+          workspace,
+          autoTitle: false,
+          groupChat: {
+            roomId: input.roomId,
+            memberId: input.memberId,
+            role: input.role,
+          },
+        },
+      });
+    });
+  }
+
+  async validateGroupChatSettings(
+    userId: string,
+    settings: ChatSettings,
+    projectId?: string,
+    role: GroupChatThreadBinding['role'] = 'worker',
+  ) {
+    const selected =
+      (await this.runner.resolveSettings?.(
+        settings,
+        userId,
+        projectId,
+        role,
+      )) ?? settings;
+    // Opening a room is allowed before a model is configured; execution validates it.
+    if (selected.model)
+      await this.runner.validate(userId, selected, projectId, role);
+  }
+
+  /** Internal lifecycle operation; caller has checked room management permissions. */
+  disposeGroupChatThread(roomId: string, threadId: string, remove = false) {
+    return this.locked(threadId, async () => {
+      const thread = await this.memory.getThreadById({ threadId });
+      if (!thread) return;
+      if (groupChatThreadBinding(thread.metadata)?.roomId !== roomId)
+        throw new ThreadError('FORBIDDEN', 403);
+      const runtime = this.runtimes.get(threadId);
+      if (runtime) {
+        clearTimeout(runtime.expiry);
+        clearTimeout(runtime.broadcast);
+        runtime.session?.abort();
+        await runtime.session?.close();
+        await runtime.backgroundObserver?.stop();
+        for (const subscription of runtime.listeners) {
+          subscription.active = false;
+          subscription.revoked?.('THREAD_NOT_FOUND');
+        }
+        this.runtimes.delete(threadId);
+      }
+      if (remove) {
+        await this.runner.browsers?.remove(threadId);
+        await this.memory.deleteThread(threadId);
+      } else {
+        await this.memory.updateThread({
+          id: threadId,
+          title: thread.title,
+          metadata: {
+            status: 'idle',
+            activeId: null,
+            error: null,
+            toolInteractions: [],
+          },
+        });
+      }
+      // The personal share/project directory belongs to the scope, never to this thread.
+    });
+  }
 
   subscribeNavigation(
     userId: string,
@@ -355,13 +513,19 @@ export class ThreadService {
     const thread = await this.memory.getThreadById({ threadId: id });
     if (!thread) throw new ThreadError('THREAD_NOT_FOUND', 404);
     const scope = threadScope(thread.resourceId);
+    const roomBinding = groupChatThreadBinding(thread.metadata);
     if (scope.type === 'system') {
       if (!(await this.isSystemAdmin(userId)))
         throw new ThreadError('THREAD_NOT_FOUND', 404);
     } else if (scope.type === 'project') {
       await this.projectAccess(userId, scope.projectId);
-    } else if (scope.userId !== userId)
+    } else if (
+      scope.userId !== userId &&
+      (!roomBinding || !this.runner.assertGroupChatAccess)
+    )
       throw new ThreadError('THREAD_NOT_FOUND', 404);
+    if (roomBinding && this.runner.assertGroupChatAccess)
+      await this.runner.assertGroupChatAccess(userId, thread);
     if (!includeArchived && isArchived(thread))
       throw new ThreadError('THREAD_NOT_FOUND', 404);
     for (const plugin of new Set([
@@ -380,6 +544,8 @@ export class ThreadService {
   }
 
   private async manageable(userId: string, thread: StorageThreadType) {
+    if (groupChatThreadBinding(thread.metadata))
+      throw new ThreadError('FORBIDDEN', 403);
     const { projectId } = threadScope(thread.resourceId);
     if (projectId) {
       const { role } = await this.projectAccess(userId, projectId);
@@ -656,6 +822,21 @@ export class ThreadService {
           : {}),
       },
     });
+    const binding = groupChatThreadBinding(runtime.thread.metadata);
+    if (binding && this.roomObserver) {
+      try {
+        await this.roomObserver(
+          binding,
+          runtime.data.status,
+          runtime.data.error,
+        );
+      } catch {
+        console.error(
+          'Could not persist group chat agent status',
+          runtime.thread.id,
+        );
+      }
+    }
   }
 
   private backgroundFailed(runtime: Runtime, error: unknown) {
@@ -694,6 +875,34 @@ export class ThreadService {
     // Serialize snapshot/storage updates only. Mastra schedules all model work.
     return this.locked(runtime.thread.id, async () => {
       if (this.runtimes.get(runtime.thread.id) !== runtime) return;
+      if (groupChatThreadBinding(runtime.thread.metadata)) {
+        const runId =
+          event.type === 'interaction'
+            ? event.interaction.runId
+            : event.type === 'status' || event.type === 'error'
+              ? event.runId
+              : undefined;
+        if (runId && runId === runtime.rejectedRoomRunId) return;
+        if (
+          event.type === 'interaction' ||
+          (event.type === 'status' && event.status === 'suspended')
+        ) {
+          runtime.rejectedRoomRunId = runId;
+          const session = runtime.session;
+          runtime.session = undefined;
+          session?.abort();
+          await session?.close();
+          runtime.data.toolInteractions = [];
+          runtime.data.status = 'failed';
+          runtime.data.error = 'ROOM_SUSPEND_NOT_SUPPORTED';
+          runtime.data.activeId = null;
+          runtime.activeMessageId = null;
+          await this.save(runtime);
+          this.publish(runtime);
+          this.release(runtime);
+          return;
+        }
+      }
       if (event.type === 'commands') {
         // Read the live registry, so delayed events cannot restore released handles.
         this.publish(runtime);
@@ -825,6 +1034,7 @@ export class ThreadService {
         scope.userId ??
         String(runtime.thread.metadata?.createdBy ?? ''),
       scope.projectId,
+      groupChatThreadBinding(runtime.thread.metadata)?.role,
     );
     if (runtime.session && key !== runtime.sessionKey) {
       if (
@@ -1212,7 +1422,7 @@ export class ThreadService {
     );
     if (target) return target;
     if (
-      threadScope(thread.resourceId).userId === userId &&
+      threadScope(thread.resourceId).type === 'user' &&
       this.runner.personalSharedDirectory
     ) {
       const shared = await this.withWorkspaceFiles(
@@ -1246,15 +1456,15 @@ export class ThreadService {
     scope: FileScope = 'thread',
   ) {
     const thread = await this.accessible(userId, id);
-    const { projectId } = threadScope(thread.resourceId);
+    const { type, projectId, userId: ownerId } = threadScope(thread.resourceId);
     if (scope === 'shared') {
-      if (threadScope(thread.resourceId).userId !== userId)
+      if (type !== 'user' || !ownerId)
         throw new ThreadError('FILE_FORBIDDEN', 403);
       return this.locked(id, async () => {
         await this.accessible(userId, id);
         if (!this.runner.personalSharedDirectory)
           throw new ThreadError('WORKSPACE_UNAVAILABLE', 404);
-        return action(await this.runner.personalSharedDirectory(userId));
+        return action(await this.runner.personalSharedDirectory(ownerId));
       });
     }
     if (!projectId || thread.metadata?.workspacePlugin)
@@ -1423,9 +1633,26 @@ export class ThreadService {
   }
 
   run(userId: string, id: string, input: RunInput) {
+    return this.runInput(userId, id, input, false);
+  }
+
+  runGroupChat(userId: string, id: string, input: RunInput) {
+    return this.runInput(userId, id, input, true);
+  }
+
+  private runInput(
+    userId: string,
+    id: string,
+    input: RunInput,
+    roomRun: boolean,
+  ) {
     return this.scopeLocked(userId, id, async () => {
       if (this.closing) throw new ThreadError('SERVER_STOPPING', 503);
       const runtime = await this.runtime(userId, id);
+      if (!!groupChatThreadBinding(runtime.thread.metadata) !== roomRun)
+        throw new ThreadError('FORBIDDEN', 403);
+      if (roomRun)
+        await this.runner.assertGroupChatRun?.(userId, runtime.thread, input);
       if (runtime.data.acceptedIds.includes(input.id))
         return this.summary(runtime.thread, runtime);
       input = {
@@ -1434,6 +1661,7 @@ export class ThreadService {
           input,
           userId,
           threadScope(runtime.thread.resourceId).projectId,
+          groupChatThreadBinding(runtime.thread.metadata)?.role,
         )),
       };
       if (runtime.data.toolInteractions.some((item) => !item.response))
@@ -1442,6 +1670,7 @@ export class ThreadService {
         userId,
         input,
         threadScope(runtime.thread.resourceId).projectId,
+        groupChatThreadBinding(runtime.thread.metadata)?.role,
       );
       const session = await this.session(runtime, input, true, userId);
       const previous = structuredClone(runtime.data);
@@ -1520,6 +1749,8 @@ export class ThreadService {
     return this.scopeLocked(userId, id, async () => {
       if (this.closing) throw new ThreadError('SERVER_STOPPING', 503);
       const runtime = await this.runtime(userId, id);
+      if (groupChatThreadBinding(runtime.thread.metadata))
+        throw new ThreadError('FORBIDDEN', 403);
       if (
         this.busy(runtime) ||
         runtime.data.status === 'suspended' ||
@@ -1558,6 +1789,8 @@ export class ThreadService {
   clearGoal(userId: string, id: string) {
     return this.scopeLocked(userId, id, async () => {
       const runtime = await this.runtime(userId, id);
+      if (groupChatThreadBinding(runtime.thread.metadata))
+        throw new ThreadError('FORBIDDEN', 403);
       const goal = await this.runner.getGoal?.(id);
       if (runtime.session) await runtime.session.clearGoal();
       else await this.runner.clearGoal?.(id);
@@ -1582,6 +1815,8 @@ export class ThreadService {
       if (this.closing) throw new ThreadError('SERVER_STOPPING', 503);
       const response = toolResponseSchema.parse(raw);
       const runtime = await this.runtime(userId, id);
+      if (groupChatThreadBinding(runtime.thread.metadata))
+        throw new ThreadError('FORBIDDEN', 403);
       if (runtime.data.acceptedIds.includes(response.id))
         return this.summary(runtime.thread, runtime);
       const interaction = runtime.data.toolInteractions.find(
@@ -1648,6 +1883,8 @@ export class ThreadService {
   abort(userId: string, id: string) {
     return this.scopeLocked(userId, id, async () => {
       const runtime = await this.runtime(userId, id);
+      if (groupChatThreadBinding(runtime.thread.metadata))
+        throw new ThreadError('FORBIDDEN', 403);
       runtime.session?.abort();
       runtime.data.status = 'canceled';
       runtime.data.activeId = null;
@@ -1713,6 +1950,8 @@ export class ThreadService {
     return this.scopeLocked(userId, id, async () => {
       if (this.closing) throw new ThreadError('SERVER_STOPPING', 503);
       const runtime = await this.runtime(userId, id);
+      if (groupChatThreadBinding(runtime.thread.metadata))
+        throw new ThreadError('FORBIDDEN', 403);
       if (this.busy(runtime) || (action === 'retry' && !runtime.data.error))
         return this.summary(runtime.thread, runtime);
       if (
@@ -1781,6 +2020,8 @@ export class ThreadService {
   ) {
     return this.scopeLocked(userId, id, async () => {
       const runtime = await this.runtime(userId, id);
+      if (groupChatThreadBinding(runtime.thread.metadata))
+        throw new ThreadError('FORBIDDEN', 403);
       if (!runtime.session)
         throw new ThreadError('QUEUED_MESSAGE_NOT_FOUND', 409);
       await runtime.session.updateQueued(messageId, patch);
@@ -1795,6 +2036,8 @@ export class ThreadService {
   ) {
     return this.scopeLocked(userId, id, async () => {
       const runtime = await this.runtime(userId, id);
+      if (groupChatThreadBinding(runtime.thread.metadata))
+        throw new ThreadError('FORBIDDEN', 403);
       if (!runtime.session)
         throw new ThreadError('QUEUED_MESSAGE_NOT_FOUND', 409);
       await runtime.session.moveQueued(messageId, beforeId);
@@ -1804,6 +2047,8 @@ export class ThreadService {
   cancelQueued(userId: string, id: string, messageId: string) {
     return this.scopeLocked(userId, id, async () => {
       const runtime = await this.runtime(userId, id);
+      if (groupChatThreadBinding(runtime.thread.metadata))
+        throw new ThreadError('FORBIDDEN', 403);
       if (!runtime.session)
         throw new ThreadError('QUEUED_MESSAGE_NOT_FOUND', 409);
       runtime.session.cancelQueued(messageId);
@@ -1813,6 +2058,8 @@ export class ThreadService {
   clearQueue(userId: string, id: string) {
     return this.scopeLocked(userId, id, async () => {
       const runtime = await this.runtime(userId, id);
+      if (groupChatThreadBinding(runtime.thread.metadata))
+        throw new ThreadError('FORBIDDEN', 403);
       runtime.session?.clearQueue();
       this.publish(runtime);
       return this.summary(runtime.thread, runtime);

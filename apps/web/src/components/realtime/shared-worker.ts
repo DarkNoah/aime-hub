@@ -1,3 +1,4 @@
+import { randomUUID } from '@aime/shared/uuid';
 import { RealtimeBroker } from './broker';
 import type { WorkerRequest, WorkerResponse } from './protocol';
 
@@ -28,7 +29,7 @@ setInterval(() => {
   event,
 ) => {
   const port = event.ports[0];
-  const peer = { id: crypto.randomUUID(), seen: Date.now() };
+  const peer = { id: randomUUID(), seen: Date.now() };
   ports.set(port, peer);
   port.onmessage = ({ data }: MessageEvent<WorkerRequest>) => {
     peer.seen = Date.now();

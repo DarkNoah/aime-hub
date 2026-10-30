@@ -91,6 +91,8 @@ export type AgentDefinition = z.output<typeof agentInputSchema> & {
 };
 export type BaseAgent = AgentDefinition & {
   source: 'code';
+  /** Internal lifecycle only; excluded from catalogs and ordinary chat selection. */
+  hidden?: boolean;
 };
 export type ManagedAgent = z.output<typeof agentInputSchema> & {
   source: 'database';

@@ -19,12 +19,10 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { chatApi, chatErrorKey, ChatApiError } from './api';
 import { ChatComposer } from './chat-composer';
-import { ChatConversation } from './chat-conversation';
+import { ChatThreadView, chatContentClassName } from './chat-thread-view';
 import { ChatQueue } from './chat-queue';
 import { ChatWorkspace } from './chat-workspace';
 import { LoadingState } from '@/components/loading-state';
-import { ChatTurns } from './chat-turns';
-import { ChatHistoryLoader } from './chat-history-loader';
 import { ChatErrorCard } from './chat-error-card';
 import { ChatContinueButton } from './chat-continue-button';
 import { ChatRunningTasks } from './chat-running-tasks';
@@ -32,8 +30,6 @@ import { useThreadChat } from './use-thread-chat';
 import { PersonalChatSettingsProvider } from './personal-chat-settings-provider';
 import { ChatWorkspaceMenuContext } from './layout-context';
 import { ThreadPluginBadge } from './thread-plugin-badge';
-
-const chatContentClassName = 'mx-auto w-full max-w-3xl px-4 @lg/chat:px-6';
 
 export type ChatPanelProps = {
   threadId?: string | null;
@@ -390,8 +386,10 @@ function ExistingChat({
         threadId={chat.thread?.plugin ? threadId : undefined}
         initialSettings={chat.thread ?? undefined}
       >
-        <ChatConversation
-          contentClassName={chatContentClassName}
+        <ChatThreadView
+          threadId={threadId}
+          chat={chat}
+          disabled={stopping}
           composer={
             chat.thread && (
               <ChatComposer
@@ -437,44 +435,6 @@ function ExistingChat({
             )
           }
         >
-          <ChatHistoryLoader
-            hasEarlier={chat.hasEarlier}
-            loading={chat.loadingHistory}
-            loadEarlier={chat.loadEarlier}
-            firstTurnId={chat.turns[0]?.id}
-          />
-          {!chat.thread && !chat.error && (
-            <div
-              role="status"
-              aria-label={t('chat.loading')}
-              className="space-y-5 motion-safe:animate-pulse"
-            >
-              <div className="h-4 w-1/3 rounded bg-muted" />
-              <div className="h-20 w-4/5 rounded-lg bg-muted" />
-              <div className="ml-auto h-14 w-3/5 rounded-lg bg-muted" />
-            </div>
-          )}
-          <ChatTurns
-            turns={chat.turns}
-            details={chat.details}
-            loadDetails={chat.loadDetails}
-            activeTurnId={chat.activeTurnId}
-            threadId={threadId}
-            running={running}
-            activeMessageId={chat.activeMessageId}
-            toolInteractions={chat.toolInteractions}
-            onToolResponse={chat.respondToTool}
-            disabled={!chat.connected || running || stopping}
-          />
-          {chat.thread && !chat.turns.length && <ChatWelcome />}
-          {running && !chat.activeMessageId && (
-            <p
-              role="status"
-              className="text-sm text-muted-foreground motion-safe:animate-pulse"
-            >
-              {t('chat.thinking')}
-            </p>
-          )}
           {canContinue && (
             <ChatContinueButton
               disabled={!chat.connected || stopping || chat.sending}
@@ -489,7 +449,7 @@ function ExistingChat({
               disabled={!chat.connected || running || stopping || chat.sending}
             />
           )}
-        </ChatConversation>
+        </ChatThreadView>
       </PersonalChatSettingsProvider>
     </>
   );

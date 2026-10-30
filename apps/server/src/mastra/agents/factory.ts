@@ -18,6 +18,8 @@ export type AgentRuntimeOptions = Omit<
   defaultToolConfigs?: ToolDefaultConfigs;
   /** Pin a stored configuration that the runtime has already resolved. */
   versionId?: string;
+  /** Room agents delegate through persistent room tasks rather than native children. */
+  allowSubagents?: boolean;
   /** Resolve direct references already loaded by the Agent service. */
   resolveSubagent?: (reference: string) => AgentDefinition | undefined;
   /** Automatically discovered session-scoped definitions, refreshed by the native resolver. */
@@ -40,7 +42,7 @@ export function buildAgent(
   config: AgentDefinition,
   options: AgentRuntimeOptions,
 ): Agent {
-  return buildAgentInstance(config, options, true);
+  return buildAgentInstance(config, options, options.allowSubagents !== false);
 }
 
 function buildAgentInstance(
@@ -58,6 +60,7 @@ function buildAgentInstance(
     ...runtime
   } = options;
   delete runtime.versionId;
+  delete runtime.allowSubagents;
   // Only the main Agent may delegate. Children never inspect their own references.
   const buildChild = (name: string, child: AgentDefinition) => {
     // Mastra exposes this as the model-facing tool name `agent-${name}`.

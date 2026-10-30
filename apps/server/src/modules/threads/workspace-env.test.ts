@@ -213,6 +213,10 @@ test('commands isolate credentials by current author, including concurrent pipe 
     'http://127.0.0.1:3000/api',
     async () => true,
   );
+  const userValues: Record<string, string> = {
+    alice: 'alice-value',
+    bob: 'bob-value',
+  };
   const workspace = getWorkspace(
     root,
     'creator',
@@ -220,7 +224,12 @@ test('commands isolate credentials by current author, including concurrent pipe 
     projectId,
     [],
     undefined,
-    { getEnv: async () => ({ APP_API_TOKEN: 'must-not-use-global-token' }) },
+    {
+      getEnv: async (author) => ({
+        APP_API_TOKEN: 'must-not-use-saved-token',
+        COMMAND_ENV_TEST: (author && userValues[author]) ?? 'global-value',
+      }),
+    },
     (author) => localApi.environment(author),
   );
   t.after(async () => {
@@ -233,7 +242,7 @@ test('commands isolate credentials by current author, including concurrent pipe 
     if (author) requestContext.set('userId', author);
     const result = await execCommand.execute!(
       commandInputSchema.parse({
-        cmd: `${quote(process.execPath)} -e ${quote('console.log(JSON.stringify({token:process.env.APP_API_TOKEN,url:process.env.APP_API_URL}))')}`,
+        cmd: `${quote(process.execPath)} -e ${quote('console.log(JSON.stringify({token:process.env.APP_API_TOKEN,url:process.env.APP_API_URL,value:process.env.COMMAND_ENV_TEST}))')}`,
         tty,
         login: false,
       }),
@@ -247,8 +256,18 @@ test('commands isolate credentials by current author, including concurrent pipe 
   assert.equal(await localApi.authenticate(`Bearer ${alice.token}`), 'alice');
   assert.equal(await localApi.authenticate(`Bearer ${bob.token}`), 'bob');
   assert.equal(alice.url, 'http://127.0.0.1:3000/api');
-  assert.deepEqual(await run(), { token: '', url: '' });
-  assert.deepEqual(await run('system'), { token: '', url: '' });
+  assert.equal(alice.value, 'alice-value');
+  assert.equal(bob.value, 'bob-value');
+  userValues.alice = '';
+  assert.equal((await run('alice')).value, '');
+  delete userValues.alice;
+  assert.equal((await run('alice')).value, 'global-value');
+  assert.deepEqual(await run(), { token: '', url: '', value: 'global-value' });
+  assert.deepEqual(await run('system'), {
+    token: '',
+    url: '',
+    value: 'global-value',
+  });
   assert.equal(process.env.APP_API_TOKEN, undefined);
   assert.equal(workspace.sandbox?.getEnv().APP_API_TOKEN, undefined);
 });
@@ -259,6 +278,7 @@ test('native shared-thread turns inject the message author rather than the threa
   const memory = new Memory({ storage, options: { generateTitle: false } });
   const mastra = new Mastra({ storage, logger: false });
   const authors: Array<string | undefined> = [];
+  const environmentAuthors: Array<string | undefined> = [];
   class ObservedLocalApi extends LocalApiAccess {
     override environment(author: string | undefined) {
       authors.push(author);
@@ -323,7 +343,12 @@ test('native shared-thread turns inject the message author rather than the threa
     { buildTools: async () => ({ exec_command: execCommand }) },
     undefined,
     undefined,
-    undefined,
+    {
+      getEnv: async (author) => {
+        environmentAuthors.push(author);
+        return { COMMAND_ENV_TEST: author ?? 'global' };
+      },
+    },
     undefined,
     localApi,
   );
@@ -363,4 +388,5 @@ test('native shared-thread turns inject the message author rather than the threa
     assert.equal(authors[index], author);
   }
   assert.deepEqual(authors, ['alice', 'bob']);
+  assert.deepEqual(environmentAuthors, ['alice', 'bob']);
 });

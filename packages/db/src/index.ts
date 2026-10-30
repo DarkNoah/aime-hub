@@ -1,3 +1,9 @@
+import { GroupChatReads1780000032000 } from './migrations/1780000032000-group-chat-reads.js';
+import { GroupChatMembers1780000027000 } from './migrations/1780000027000-group-chat-members.js';
+import { GroupChatA2aMembers1780000030000 } from './migrations/1780000030000-group-chat-a2a-members.js';
+import { GroupChatA2aMemberDeletion1780000031000 } from './migrations/1780000031000-group-chat-a2a-member-deletion.js';
+import { GroupChatIdleWake1780000029000 } from './migrations/1780000029000-group-chat-idle-wake.js';
+import { GroupChatAgents1780000026000 } from './migrations/1780000026000-group-chat-agents.js';
 import { CreateGroupChats1780000024000 } from './migrations/1780000024000-create-group-chats.js';
 import {
   KnowledgeBaseRecord,
@@ -29,6 +35,7 @@ import { Project, ProjectMember } from './project-entities.js';
 import { CreateProjectTables1780000002000 } from './migrations/1780000002000-create-project-tables.js';
 import { ProjectListState1780000003000 } from './migrations/1780000003000-project-list-state.js';
 import { EnvironmentVariable } from './environment-variable-entity.js';
+import { UserEnvironmentVariables1780000028000 } from './migrations/1780000028000-user-environment-variables.js';
 import { CreateEnvironmentVariables1780000004000 } from './migrations/1780000004000-create-environment-variables.js';
 import { ChatRequestLog } from './request-log-entity.js';
 import { CreateChatRequestLogs1780000005000 } from './migrations/1780000005000-create-chat-request-logs.js';
@@ -81,6 +88,13 @@ export function createDataSource(
       GeneratedAsset,
     ],
     migrations: [
+      GroupChatReads1780000032000,
+      GroupChatA2aMemberDeletion1780000031000,
+      GroupChatA2aMembers1780000030000,
+      GroupChatIdleWake1780000029000,
+      UserEnvironmentVariables1780000028000,
+      GroupChatMembers1780000027000,
+      GroupChatAgents1780000026000,
       PluginAccess1780000025000,
       CreateGroupChats1780000024000,
       ProviderAsrModel1780000023000,

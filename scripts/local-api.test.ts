@@ -308,7 +308,8 @@ test('skill scripts use existing APIs with scoped identity, ownership, paging an
   );
   const client = createAppApi({ env, fetchImpl });
   const catalog = await client.list();
-  assert.equal(catalog.length, 9);
+  assert.equal(catalog.length, 14);
+  assert.equal((await client.list('personalEnvironmentVariables')).length, 5);
   assert.ok(
     catalog.some(
       (operation: { operationId: string }) =>

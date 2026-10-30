@@ -1,5 +1,6 @@
 import type { GroupChatService } from './modules/group-chats/service.js';
 import { groupChatRouter } from './modules/group-chats/rpc.js';
+import { groupChatA2aRoutes } from './modules/group-chats/a2a-routes.js';
 import type { UserService } from './modules/users/service.js';
 import { userRouter } from './modules/users/rpc.js';
 import { knowledgeRouter } from './modules/knowledge/rpc.js';
@@ -37,7 +38,10 @@ import type { LanguageModelService } from './modules/models/language-model.js';
 import type { ProjectService } from './modules/projects/service.js';
 import type { SkillService } from './modules/skills/service.js';
 import type { EnvironmentVariableService } from './modules/environment-variables/service.js';
-import { environmentVariableRouter } from './modules/environment-variables/rpc.js';
+import {
+  environmentVariableRouter,
+  personalEnvironmentVariableRouter,
+} from './modules/environment-variables/rpc.js';
 import { requestLogRouter } from './modules/request-logs/rpc.js';
 import type { RequestLogService } from './modules/request-logs/service.js';
 import type { ToolService } from './modules/tools/service.js';
@@ -60,6 +64,11 @@ import type { SystemSettingsService } from './modules/system-settings/service.js
 import { systemSettingsRouter } from './modules/system-settings/rpc.js';
 import { audioRoutes } from './modules/audio/routes.js';
 import type { AudioService } from './modules/audio/service.js';
+import type { AvatarService } from './modules/profile/avatars.js';
+import {
+  avatarResourceRoutes,
+  profileRoutes,
+} from './modules/profile/routes.js';
 
 export function createApp(
   auth: Auth,
@@ -95,6 +104,7 @@ export function createApp(
   knowledge?: KnowledgeService,
   apiDocs?: OpenAPIReferencePlugin<RpcContext>,
   audio?: AudioService,
+  avatars?: { service: AvatarService; webOrigin: WebOrigins },
 ) {
   const app = new Hono<HttpEnv>();
   const webOrigins = normalizeWebOrigins(
@@ -110,8 +120,13 @@ export function createApp(
       mcp?.webOrigin ??
       systemSettings?.webOrigin ??
       usage?.webOrigin ??
+      avatars?.webOrigin ??
       [],
   );
+  // Public immutable assets own their cache and cross-origin embedding headers.
+  // Keep them ahead of the authenticated API's no-store middleware.
+  if (avatars)
+    app.route('/api/resources/avatars', avatarResourceRoutes(avatars.service));
   app.use('*', secureHeaders());
   app.route('/api', healthRoutes());
   // Better Auth owns its request bodies and its admin endpoints.
@@ -125,6 +140,13 @@ export function createApp(
   if (plugins)
     app.route('/api/plugins', pluginRoutes(auth, plugins, webOrigins));
   if (audio) app.route('/api/audio', audioRoutes(auth, audio, webOrigins));
+  if (avatars)
+    app.route('/api/profile', profileRoutes(auth, avatars.service, webOrigins));
+  if (chat?.groupChats)
+    app.route(
+      '/api/a2a/rooms',
+      groupChatA2aRoutes(chat.groupChats, webOrigins),
+    );
   const router = rpc.router({
     groupChats: groupChatRouter(chat?.groupChats),
     users: userRouter(chat?.users),
@@ -146,6 +168,9 @@ export function createApp(
     automations: automationRouter(automations?.service),
     notifications: notificationRouter(notifications?.service),
     environmentVariables: environmentVariableRouter(
+      environmentVariables?.service,
+    ),
+    personalEnvironmentVariables: personalEnvironmentVariableRouter(
       environmentVariables?.service,
     ),
   });

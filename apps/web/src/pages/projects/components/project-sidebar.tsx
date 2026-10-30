@@ -1,7 +1,13 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Link, useParams, useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
-import { ArrowUpRight, ChevronRight, Folder, Plus } from 'lucide-react';
+import {
+  ArrowUpRight,
+  ChevronRight,
+  Folder,
+  MessagesSquare,
+  Plus,
+} from 'lucide-react';
 import type { ProjectSummary } from '@aime/shared/projects';
 import type { ThreadSummary } from '@aime/shared/threads';
 import { Button } from '@/components/ui/button';
@@ -24,6 +30,7 @@ import { useProjectNavigation } from '../use-project-navigation';
 import { ProjectDialog } from './project-dialog';
 import { ProjectActions } from './project-actions';
 import { Badge } from '@/components/ui/badge';
+import { RoomUnreadDot } from '@/pages/group-chats/components/room-unread-dot';
 
 export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { t } = useTranslation();
@@ -198,6 +205,9 @@ function ProjectItem({
           <ThreadActivityTitle active={runningCount > 0}>
             {project.name}
           </ThreadActivityTitle>
+          {!open && (
+            <RoomUnreadDot projectId={project.id} className="ml-auto" />
+          )}
           {project.pinned && (
             <Badge variant="secondary" className="shrink-0 px-1 text-[10px]">
               {t('projects.pinned')}
@@ -223,6 +233,26 @@ function ProjectItem({
       </div>
       <CollapsibleContent forceMount hidden={!open}>
         <div className="ml-3">
+          <Link
+            to="/projects/$projectId/group-chats"
+            params={{ projectId: project.id }}
+            activeOptions={{ includeSearch: false }}
+            onClick={onNavigate}
+            title={`${project.name} · ${t('groupChat.heading')}`}
+            className="sidebar-link mb-1 flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            activeProps={{ className: 'bg-card font-semibold text-primary' }}
+            inactiveProps={{
+              className:
+                'text-muted-foreground hover:bg-card/60 hover:text-foreground',
+            }}
+          >
+            <MessagesSquare
+              aria-hidden="true"
+              className="size-3.5 shrink-0 text-primary"
+            />
+            <span>{t('groupChat.heading')}</span>
+            <RoomUnreadDot projectId={project.id} className="ml-auto" />
+          </Link>
           <SidebarPageList
             {...list}
             label={t('projects.threadList', { name: project.name })}

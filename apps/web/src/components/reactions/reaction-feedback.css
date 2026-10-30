@@ -1,0 +1,56 @@
+.reaction-feedback {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+.reaction-feedback-origin {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.reaction-feedback-emoji,
+.reaction-feedback-particle,
+.reaction-feedback-ring {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  line-height: 1;
+}
+
+.reaction-feedback-emoji {
+  inset: -20px;
+  width: 40px;
+  height: 40px;
+  font-size: 36px;
+}
+
+.reaction-feedback-particle {
+  inset: -8px;
+  width: 16px;
+  height: 16px;
+  font-size: 13px;
+}
+
+.reaction-feedback-spark {
+  color: var(--primary);
+  font-size: 11px;
+}
+
+.reaction-feedback-ring {
+  inset: -14px;
+  width: 28px;
+  height: 28px;
+  border: 1.5px solid var(--primary);
+  border-radius: 50%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reaction-feedback {
+    display: none;
+  }
+}

@@ -1,4 +1,5 @@
 import { GroupChatService } from './modules/group-chats/service.js';
+import { createGroupChatRuntime } from './modules/group-chats/runtime.js';
 import { UserService } from './modules/users/service.js';
 import { AudioService } from './modules/audio/service.js';
 import { PgVector } from '@mastra/pg';
@@ -52,6 +53,7 @@ import { createPushTransport } from './modules/notifications/push.js';
 import { AssetService } from './modules/assets/service.js';
 import { SystemSettingsService } from './modules/system-settings/service.js';
 import { LocalApiAccess } from './modules/auth/local-api.js';
+import { AvatarService } from './modules/profile/avatars.js';
 
 const env = loadEnv();
 const workspaceRoot = resolve(
@@ -156,7 +158,7 @@ const disposeChatRequestLogging = installChatRequestLogging(
   () => requestLoggingEnabled,
 );
 const projects = new ProjectService(database, { workspaceRoot });
-const groupChats = new GroupChatService(database);
+const groupChats = new GroupChatService(database, projects);
 const users = new UserService(database, groupChats);
 const environmentVariables = new EnvironmentVariableService(database);
 const localApi = new LocalApiAccess(
@@ -242,6 +244,7 @@ const threads = new ThreadService(
     getMemoryConfig,
     localApi,
     plugins,
+    groupChats,
   ),
   projects,
   mastra.backgroundTaskManager,
@@ -251,6 +254,17 @@ const threads = new ThreadService(
       [id],
     );
     return !!rows[0] && !rows[0].banned && hasAdminRole(rows[0].role);
+  },
+);
+const groupChatRuntime = createGroupChatRuntime(
+  groupChats,
+  threads,
+  async (userId) => {
+    const { rows } = await pool.query(
+      'SELECT banned FROM users WHERE id = $1',
+      [userId],
+    );
+    return !!rows[0] && !rows[0].banned;
   },
 );
 const automations = createAutomationRuntime({
@@ -304,6 +318,7 @@ const app = createApp(
   knowledge,
   await createApiDocsPlugin(env.NODE_ENV),
   audio,
+  { service: new AvatarService(workspaceRoot), webOrigin: env.WEB_ORIGINS },
 );
 
 async function disposeResources() {
@@ -347,6 +362,7 @@ function shutdown() {
     // Signals during restoration must wait for the callback before releasing resources.
     await startup.catch(() => {});
     for (const cleanup of [
+      () => groupChatRuntime.shutdown(),
       () => automations.shutdown(),
       () => knowledgeWorker.stop(),
       () => threads.shutdown(),
@@ -377,6 +393,7 @@ const startup = (async () => {
   // Restore plugin resources before schedules can execute plugin tools.
   await mastra.startWorkers();
   if (stopping) return;
+  groupChatRuntime.start();
   server = serve(
     { fetch: app.fetch, port: env.SERVER_PORT, hostname: env.SERVER_HOST },
     () =>

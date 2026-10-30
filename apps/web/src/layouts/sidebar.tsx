@@ -18,6 +18,7 @@ import {
   SquarePen,
 } from 'lucide-react';
 import { Brand } from '@/components/brand';
+import { UserAvatar } from '@/components/user-avatar';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,6 +33,7 @@ import { authClient, isAdmin } from '@/features/auth/client';
 import { authErrorKey } from '@/features/auth/errors';
 import { ThreadSidebar } from '@/components/chat/thread-sidebar';
 import { ProjectSidebar } from '@/pages/projects/components/project-sidebar';
+import { RoomUnreadDot } from '@/pages/group-chats/components/room-unread-dot';
 import { adminNavigation } from './navigation';
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
@@ -41,7 +43,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [pending, setPending] = useState(false);
   if (!data) return null;
   const admin = isAdmin(data.user.role);
-  const displayName = data.user.username || data.user.name;
+  const displayName = data.user.name || data.user.username || data.user.email;
 
   async function signOut() {
     if (pending) return;
@@ -163,6 +165,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             >
               <MessagesSquare className="size-4" />
               {t('groupChat.heading')}
+              <RoomUnreadDot className="ml-auto" />
             </Link>
             <PluginNavigation onNavigate={onNavigate} />
             <ThreadSidebar onNavigate={onNavigate} />
@@ -211,12 +214,11 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               aria-label={t('nav.accountMenu')}
               disabled={pending}
             >
-              <span
-                className="flex size-9 shrink-0 items-center justify-center rounded-full border bg-card text-sm font-medium text-primary"
-                aria-hidden="true"
-              >
-                {displayName.slice(0, 1).toUpperCase()}
-              </span>
+              <UserAvatar
+                name={displayName}
+                image={data.user.image}
+                className="size-9"
+              />
               <span className="min-w-0 flex-1">
                 <span
                   className="block truncate text-sm font-medium"

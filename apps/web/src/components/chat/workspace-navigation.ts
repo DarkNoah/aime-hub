@@ -1,3 +1,4 @@
+import { randomUUID } from '@aime/shared/uuid';
 import type { HistoryState } from '@tanstack/react-router';
 
 declare module '@tanstack/react-router' {
@@ -11,7 +12,7 @@ export function browserWorkspaceState(threadId: string): HistoryState {
     chatWorkspace: {
       threadId,
       view: 'browser',
-      requestId: crypto.randomUUID(),
+      requestId: randomUUID(),
     },
   };
 }

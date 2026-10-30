@@ -1,4 +1,4 @@
-import { Braces, ChevronDown, ScanText, X } from 'lucide-react';
+import { ArrowLeft, Braces, ChevronDown, ScanText, X } from 'lucide-react';
 import { useMemo } from 'react';
 import { isToolUIPart } from 'ai';
 import { transcriptionExcerpt } from '@aime/shared/audio';
@@ -20,10 +20,12 @@ export function ChatMessagePreview({
   part,
   threadId,
   onClose,
+  back = false,
 }: {
   part: PreviewPart | null;
   threadId?: string;
   onClose: () => void;
+  back?: boolean;
 }) {
   const { t } = useTranslation();
   const raw = useMemo(() => {
@@ -37,6 +39,12 @@ export function ChatMessagePreview({
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <header className="flex min-h-12 shrink-0 items-center gap-2 border-b px-3">
+        {back && (
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            <ArrowLeft className="size-4" aria-hidden="true" />
+            {t('chat.preview.backToMessages')}
+          </Button>
+        )}
         <ScanText
           className="size-4 shrink-0 text-muted-foreground"
           aria-hidden="true"
@@ -44,14 +52,16 @@ export function ChatMessagePreview({
         <h2 className="min-w-0 flex-1 truncate text-sm font-medium">
           {t('chat.preview.title')}
         </h2>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={onClose}
-          aria-label={t('common.close')}
-        >
-          <X className="size-4" aria-hidden="true" />
-        </Button>
+        {!back && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onClose}
+            aria-label={t('common.close')}
+          >
+            <X className="size-4" aria-hidden="true" />
+          </Button>
+        )}
       </header>
       {part ? (
         <ScrollArea

@@ -1,3 +1,4 @@
+import { randomUUID } from '@aime/shared/uuid';
 import type { IChartApi } from 'lightweight-charts';
 import { toast } from 'sonner';
 import type { Bar } from '../../shared';
@@ -300,7 +301,7 @@ export class DrawingController {
       if (this.tool === 'horizontal') {
         const price = this.series.coordinateToPrice(point.y);
         if (price !== null)
-          this.add({ id: crypto.randomUUID(), kind: 'horizontal', price });
+          this.add({ id: randomUUID(), kind: 'horizontal', price });
       } else {
         const anchor = this.anchor(point);
         if (!anchor) return;
@@ -320,7 +321,7 @@ export class DrawingController {
             : { id: 'draft', kind: 'horizontal', price: anchor.price };
           this.publish();
         } else if (this.tool === 'long' || this.tool === 'short') {
-          const position = this.positionCandidate(anchor, crypto.randomUUID());
+          const position = this.positionCandidate(anchor, randomUUID());
           if (position) this.add(position);
           else
             toast.error('请在入场价上方或下方设置止盈或止损', {
@@ -331,7 +332,7 @@ export class DrawingController {
           Math.abs(anchor.price - this.first.price) > 1e-8
         ) {
           this.add({
-            id: crypto.randomUUID(),
+            id: randomUUID(),
             kind: this.tool,
             start: this.first,
             end: anchor,
@@ -452,8 +453,7 @@ export class DrawingController {
     event.stopImmediatePropagation();
     if (this.placementDragged && this.inPane(this.point(event))) {
       const anchor = this.anchor(this.point(event));
-      const position =
-        anchor && this.positionCandidate(anchor, crypto.randomUUID());
+      const position = anchor && this.positionCandidate(anchor, randomUUID());
       if (position) this.add(position);
     }
     this.placementOrigin = null;

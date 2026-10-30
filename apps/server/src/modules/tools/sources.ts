@@ -1,5 +1,6 @@
 import { createSkillTools, createWorkspaceTools } from '@mastra/core/workspace';
 import { BaseTool, toolArray } from './base.js';
+import { BotAgentTools } from '../../mastra/tools/bot-agent.js';
 import type {
   ToolDefaultConfigs,
   ToolDependencies,
@@ -69,6 +70,7 @@ export class SkillTools extends BaseTool<ToolDependencies> {
 }
 
 export const toolSources: readonly BaseTool<ToolDependencies>[] = [
+  new BotAgentTools(),
   new PluginTools(),
   new McpTools(),
   new WorkspaceTools(),

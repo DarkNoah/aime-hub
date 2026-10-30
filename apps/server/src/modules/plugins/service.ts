@@ -513,12 +513,13 @@ export class PluginService {
     const states = userId ? await this.listForUser(userId) : await this.list();
     return states
       .filter((s) => s.enabled)
-      .flatMap((s) => structuredClone(this.servers.get(s.id)?.agents ?? []));
+      .flatMap((s) => structuredClone(this.servers.get(s.id)?.agents ?? []))
+      .filter((agent) => !agent.hidden);
   }
 
   ownsTool(id: string) {
     return [...this.servers.values()].some((s) =>
-      s.tools?.some((tool) => tool.id === id),
+      s.tools?.some((tool) => tool.id === id && !tool.hidden),
     );
   }
 
@@ -530,15 +531,18 @@ export class PluginService {
       "SELECT id, value FROM settings WHERE id LIKE 'tool:plugin_%' AND deleted_at IS NULL",
     );
     return states.flatMap((state) =>
-      (this.servers.get(state.id)?.tools ?? []).map((tool) =>
-        tool.parseConfig({
-          enabled:
-            state.enabled &&
-            (rows.find((row) => row.id === `tool:${tool.id}`)?.value.enabled ??
-              defaults[tool.id]?.enabled ??
-              true),
-        }),
-      ),
+      (this.servers.get(state.id)?.tools ?? [])
+        .filter((tool) => !tool.hidden)
+        .map((tool) =>
+          tool.parseConfig({
+            enabled:
+              state.enabled &&
+              (rows.find((row) => row.id === `tool:${tool.id}`)?.value
+                .enabled ??
+                defaults[tool.id]?.enabled ??
+                true),
+          }),
+        ),
     );
   }
 
@@ -558,6 +562,7 @@ export class PluginService {
     const entries = await Promise.all(
       [...this.servers.entries()].flatMap(([pluginId, server]) =>
         (server.tools ?? []).map(async (definition) => {
+          if (definition.hidden) return [];
           if (allowed && !allowed.has(pluginId)) return [];
           if (!configs.get(definition.id)?.enabled) return [];
           const tools = await definition.getTools(

@@ -1,3 +1,4 @@
+import { randomUUID } from '@aime/shared/uuid';
 import type {
   RealtimeEvent,
   RealtimeSubscription,
@@ -16,9 +17,18 @@ export function createTabBridge(
   sessionId: string,
   receive: (event: RealtimeEvent) => void,
 ): RealtimeBridge {
+  const peer = randomUUID();
+  // HTTP LAN origins lack Web Locks. Keep one connection per tab when
+  // cross-tab coordination is unavailable.
+  if (!navigator.locks || typeof BroadcastChannel === 'undefined') {
+    const broker = new RealtimeBroker(sessionId);
+    return {
+      update: (subscriptions) => broker.update(peer, subscriptions, receive),
+      close: () => broker.close(),
+    };
+  }
   const name = `realtime-v1:${sessionId}`;
   const channel = new BroadcastChannel(name);
-  const peer = crypto.randomUUID();
   const abort = new AbortController();
   let subscriptions: RealtimeSubscription[] = [];
   let broker: RealtimeBroker | undefined;

@@ -63,6 +63,8 @@ export const en = {
   'localAgents.issue.instructions':
     'Markdown instructions after the frontmatter must not be empty.',
   'groupChat.heading': 'Bots',
+  'groupChat.mentionNamed': 'Mention {{name}}',
+  'groupChat.unread': 'New room messages',
   'groupChat.create': 'Create Bots',
   'groupChat.rename': 'Rename Bots',
   'groupChat.delete': 'Delete Bots',
@@ -72,10 +74,12 @@ export const en = {
   'groupChat.personal': 'Personal',
   'groupChat.project': 'Project',
   'groupChat.personalHint':
-    'Your personal Bots space is private. Messages are saved automatically.',
+    'Room members share messages and the owner’s personal share directory.',
   'groupChat.projectHint':
     'All project members share this Bots space. Membership follows the project.',
   'groupChat.members': '{{count}} members',
+  'groupChat.participants': 'Members',
+  'groupChat.memberRole': 'Member',
   'groupChat.unknownMember': 'Member',
   'groupChat.you': 'You',
   'groupChat.actions': 'Bots actions',
@@ -97,6 +101,126 @@ export const en = {
   'groupChat.failed':
     'Something went wrong. Try again; your draft has been kept.',
   'groupChat.reconnecting': 'Message sync interrupted. Reconnecting…',
+
+  'groupChat.botSettingsHint':
+    'The lead agent is always enabled. Configure its model, reasoning effort and idle wake interval.',
+  'groupChat.idleWake': 'Start proactively when idle',
+  'groupChat.bookmark': 'Bookmark',
+  'groupChat.idleWakeHours': 'Idle wake interval (hours)',
+  'groupChat.idleWakeHint':
+    'After continuous inactivity, look for useful work in the same thread when no future_plan or messages are pending. Enabling or changing the interval restarts the timer; each completed run starts a new idle period.',
+  'groupChat.idleWakeInvalid':
+    'Enter a number greater than 0 and no greater than 8760. Decimals are supported.',
+  'groupChat.addMember': 'Add member',
+  'groupChat.memberAdded': 'Member added',
+  'groupChat.addingMember': 'Adding…',
+  'groupChat.searchMembers': 'Search members',
+  'groupChat.searchMembersHint':
+    'Enter at least 2 characters of a name or username',
+  'groupChat.searchingMembers': 'Searching…',
+  'groupChat.searchResults': 'Search results',
+  'groupChat.noMemberResults':
+    'No members available to add. Try another name or username.',
+  'groupChat.addProjectMemberHint':
+    'Adding someone makes them a project member, with access to this room, project files and shared project content.',
+  'groupChat.addPersonalMemberHint':
+    'Members can read this room’s messages and access your personal share directory.',
+  'groupChat.switchRoom': 'Switch room',
+  'groupChat.myRoom': 'My room',
+
+  'groupChat.agentSaved': 'Agent saved',
+  'groupChat.a2a.add': 'Add A2A member',
+  'groupChat.a2a.edit': 'Configure A2A member',
+  'groupChat.a2a.hint':
+    'Each API key represents a separate member that can read and send messages in this room.',
+  'groupChat.a2a.namePlaceholder': 'For example: External research assistant',
+  'groupChat.a2a.createKey': 'Create member and API key',
+  'groupChat.a2a.created': 'A2A member created',
+  'groupChat.a2a.saved': 'A2A member saved',
+  'groupChat.a2a.save': 'Save',
+  'groupChat.a2a.saving': 'Saving…',
+  'groupChat.a2a.keyOnce':
+    'Save this API key now. You cannot view it again after closing.',
+  'groupChat.a2a.keySaved': 'Key saved, close',
+  'groupChat.a2a.copyKey': 'Copy API key',
+  'groupChat.a2a.copyUrl': 'Copy {{name}} URL',
+  'groupChat.a2a.copied': 'Copied',
+  'groupChat.a2a.member': 'A2A member',
+  'groupChat.a2a.enabled': 'Enabled',
+  'groupChat.a2a.revoked': 'Revoked',
+  'groupChat.a2a.revoke': 'Revoke API key',
+  'groupChat.a2a.confirmRevoke': 'Confirm revocation',
+  'groupChat.a2a.revokeHint':
+    'This key will stop working permanently. Existing messages and member identity are retained.',
+  'groupChat.a2a.revokedToast': 'API key revoked',
+  'groupChat.a2a.deleteMember': 'Delete {{name}}',
+  'groupChat.a2a.deleteTitle': 'Delete A2A member',
+  'groupChat.a2a.deleteHint':
+    'Remove “{{name}}” from this room and permanently invalidate its API key? Existing messages and the author name will be retained.',
+  'groupChat.a2a.confirmDelete': 'Delete member',
+  'groupChat.a2a.deleting': 'Deleting…',
+  'groupChat.a2a.deleted': 'A2A member deleted',
+  'groupChat.a2a.connection': 'Connection details',
+  'groupChat.a2a.authHint':
+    'Authenticate every endpoint with this header. The API key determines the member identity.',
+  'groupChat.a2a.history': 'Message history',
+  'groupChat.a2a.events': 'Message subscription (SSE)',
+  'groupChat.a2a.protocolHint':
+    'A2A 0.3 message/send and message/stream publish a message and return a receipt. Receive room replies through the message subscription. After reading history, use its revision as afterRevision to continue subscribing.',
+  'groupChat.a2a.lastUsed': 'Last accessed: {{time}}',
+  'groupChat.a2a.neverUsed': 'Not connected yet',
+  'groupChat.agentRemoved': 'Agent removed',
+  'groupChat.editAgent': 'Configure agent',
+  'groupChat.addAgent': 'Add agent',
+  'groupChat.pickAgentsHint':
+    'Select agents to add. Their names and configurations are used automatically.',
+  'groupChat.noAvailableAgents': 'No agents available to add.',
+  'groupChat.agentJoined': 'Joined',
+  'groupChat.addSelectedAgents': 'Add selected agents',
+  'groupChat.mentionAgent': 'Choose an agent to mention',
+  'groupChat.mentionNoMatch': 'No matching agents',
+  'groupChat.mentionEmpty': 'No agents available to mention in this room',
+  'groupChat.mentionHint': '@ mention an agent · Enter to send',
+  'groupChat.botHint':
+    'The lead agent talks with members, delivers work and coordinates tasks.',
+  'groupChat.workerHint':
+    'Worker agents can receive tasks from the lead agent.',
+  'groupChat.agentName': 'Display name',
+  'groupChat.defaultModel': 'Use default model',
+  'groupChat.automatic': 'Automatic',
+  'groupChat.agentEnabled': 'Enable agent',
+  'groupChat.replyMessage': 'Referenced message',
+  'groupChat.reply': 'Reply to message',
+  'groupChat.replyingTo': 'Replying to {{name}}',
+  'groupChat.cancelReply': 'Cancel reply',
+  'groupChat.addReaction': 'Add reaction',
+  'groupChat.reactionCount': '{{emoji}} · {{count}} members',
+  'groupChat.uiSent': 'Sent to the room',
+  'groupChat.uiReady': 'Interactive',
+  'groupChat.agentError': 'Agent could not process messages',
+  'groupChat.configure': 'Configure',
+  'groupChat.agents': 'Agents',
+  'groupChat.people': 'People',
+  'groupChat.bot': 'Lead',
+  'groupChat.worker': 'Worker',
+  'groupChat.configureAgent': 'Configure {{name}}',
+  'groupChat.viewAgentThread': 'View {{name}}’s thread messages',
+  'groupChat.agentThreadTitle': '{{name}}’s thread',
+  'groupChat.agentThreadReadOnly': 'Read only',
+  'groupChat.agentThreadHint':
+    'Execution updates appear live. Talk to the agent in the room.',
+  'groupChat.agentThreadEmpty': 'This agent has no execution history yet.',
+  'groupChat.openFullThread': 'Open full thread',
+  'chat.preview.backToMessages': 'Back to messages',
+  'chat.preview.backToTool': 'Back to tool preview',
+  'chat.preview.fileOnly': 'Only files can be previewed here.',
+  'groupChat.removeAgent': 'Remove {{name}}',
+  'groupChat.toggleAgent': 'Enable {{name}}',
+  'groupChat.status.disabled': 'Disabled',
+  'groupChat.status.idle': 'Idle',
+  'groupChat.status.running': 'Working',
+  'groupChat.status.failed': 'Failed',
+  'groupChat.taskFor': 'Assigned to {{name}}',
 
   'chat.voiceInput.start': 'Start voice input',
   'chat.voiceInput.stop': 'Stop voice input',
@@ -1299,7 +1423,7 @@ export const en = {
   'environmentVariables.descriptionInvalid':
     'Use up to 1,000 characters without null characters.',
   'environmentVariables.formHint':
-    'Configuration is saved to the database. Runtime integration will be added later.',
+    'Changes apply to new commands. Existing terminal sessions keep their original values.',
   'environmentVariables.deleteHint':
     'Permanently delete the saved variable “{{name}}”?',
   'environmentVariables.showValues': 'Show values',
@@ -2413,7 +2537,28 @@ export const en = {
   'chat.archived': 'Chat archived.',
   'nav.personalSettings': 'Personal settings',
   'nav.accountMenu': 'Account menu',
-  'personalSettings.description': 'Manage your personal chat history.',
+  'personalSettings.description':
+    'Manage your profile, environment variables, and chat history.',
+  'personalSettings.profile': 'Profile',
+  'personalSettings.profileHint':
+    'Set the avatar and nickname shown in your workspace.',
+  'personalSettings.editProfile': 'Edit profile',
+  'personalSettings.nickname': 'Nickname',
+  'personalSettings.uploadAvatar': 'Upload avatar',
+  'personalSettings.cropAvatar': 'Crop avatar',
+  'personalSettings.cropAvatarHint':
+    'Move or resize the circular selection. The image is saved as a square and displayed as a circle.',
+  'personalSettings.avatarHint':
+    'JPG, PNG, or WebP, up to 10 MB. Cropped avatars are compressed and publicly accessible.',
+  'personalSettings.removeAvatar': 'Remove avatar',
+  'personalSettings.usernameHint':
+    'Your nickname is for display. Your login username stays the same.',
+  'personalSettings.profileSaved': 'Profile saved.',
+  'errors.avatarInvalid': 'Choose a readable JPG, PNG, or WebP image.',
+  'errors.avatarTooLarge': 'Avatar images must be 10 MB or smaller.',
+  'errors.profileUpdate': 'Could not save your profile. Please try again.',
+  'personalSettings.environmentVariablesDescription':
+    'Used by commands you start, overriding global variables with the same name. Changes apply to new commands; restart existing terminals to use them.',
   'personalSettings.failed':
     'Could not complete this operation. Please try again.',
   'personalSettings.archivedChats': 'Archived chats',

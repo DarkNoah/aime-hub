@@ -30,6 +30,7 @@ import {
   agentRegistry,
   fallbackAgentId,
   getAgent,
+  getCodeAgent,
 } from '../../mastra/agents/index.js';
 import type { AgentSettingsStore } from './settings.js';
 import type { LocalAgentService } from './local-service.js';
@@ -79,6 +80,7 @@ export class AgentService {
   }
 
   private async record(id: string) {
+    if (getCodeAgent(id)?.hidden) throw new AgentError('AGENT_NOT_FOUND', 404);
     if (getAgent(id) || id.startsWith('plugin:'))
       throw new AgentError('AGENT_READ_ONLY', 403);
     const row = await this.store.getById(id);
@@ -171,15 +173,21 @@ export class AgentService {
     );
     const agents = pages
       .flatMap((page) => page.agents)
-      .filter((agent) => !getAgent(agent.id) && !agent.id.startsWith('plugin:'))
+      .filter(
+        (agent) => !getCodeAgent(agent.id) && !agent.id.startsWith('plugin:'),
+      )
       .sort(
         (a, b) =>
           b.createdAt.getTime() - a.createdAt.getTime() ||
           a.id.localeCompare(b.id),
       );
     return [
-      ...structuredClone(Object.values(agentRegistry)),
-      ...((await this.plugins?.agents(userId)) ?? []),
+      ...structuredClone(
+        Object.values(agentRegistry).filter((agent) => !agent.hidden),
+      ),
+      ...((await this.plugins?.agents(userId)) ?? []).filter(
+        (agent) => !agent.hidden,
+      ),
       ...(await Promise.all(agents.map((agent) => this.getStored(agent.id)))),
     ];
   }
@@ -225,7 +233,7 @@ export class AgentService {
     }
     if (selectedId.startsWith('plugin:')) {
       const plugin = ((await this.plugins?.agents(context?.userId)) ?? []).find(
-        (agent) => agent.id === selectedId,
+        (agent) => agent.id === selectedId && !agent.hidden,
       );
       if (!plugin) {
         if (!id) return this.getConfig(fallbackAgentId, undefined, context);
@@ -245,7 +253,13 @@ export class AgentService {
     const config = await this.getConfig(id, options.versionId, context);
     const children = new Map(
       await Promise.all(
-        [...new Set(Object.values(config.agents))].map(
+        [
+          ...new Set(
+            options.allowSubagents === false
+              ? []
+              : Object.values(config.agents),
+          ),
+        ].map(
           async (reference) =>
             [
               reference,
@@ -400,7 +414,7 @@ export class AgentService {
       // Code IDs are reserved even if a future built-in uses a UUID.
       // The strict input schema also rejects client-supplied IDs.
       let id = randomUUID();
-      while (getAgent(id)) id = randomUUID();
+      while (getCodeAgent(id)) id = randomUUID();
       const row = await this.store.create({
         agent: { id, authorId, metadata, ...snapshot },
       });

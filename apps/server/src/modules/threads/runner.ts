@@ -1,4 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import { createGroupChatAgent } from '../../mastra/agents/group-chat.js';
+import { botAgent } from '../../mastra/agents/bot-agent.js';
+import {
+  groupChatThreadBinding,
+  type GroupChatThreadBinding,
+} from '../group-chats/metadata.js';
+import { groupChatMemoryLocation } from '../group-chats/memory.js';
+import type { GroupChatService } from '../group-chats/service.js';
 import { SpeechPlayback } from '../audio/playback.js';
 import { runtimeTokenCounts } from '../usage/runtime.js';
 import type { UsageService } from '../usage/service.js';
@@ -104,12 +112,16 @@ export function createChatRunner(
   getMemoryConfig?: ResolveMemoryConfig,
   localApi?: LocalApiAccess,
   plugins?: Pick<PluginService, 'workspaceDirectory' | 'access'>,
+  groupChats?: GroupChatService,
 ): ChatRunner {
   const getConfig = async (
     id?: string | null,
     userId?: string,
     projectId?: string,
+    roomRole?: GroupChatThreadBinding['role'],
   ) => {
+    // Only trusted room metadata selects the hidden leader, never a client-supplied ID.
+    if (roomRole === 'bot') return structuredClone(botAgent);
     if (agents)
       return agents.getConfig(
         id,
@@ -133,11 +145,17 @@ export function createChatRunner(
     userId: string,
     input: ChatSettings,
     projectId?: string,
+    roomRole?: GroupChatThreadBinding['role'],
   ) => {
-    const config = await getConfig(input.agentId, userId, projectId);
+    const config = await getConfig(input.agentId, userId, projectId, roomRole);
     return models.getLanguageModel(
       userId,
-      { ...input, model: config.model ?? input.model },
+      {
+        ...input,
+        model: roomRole
+          ? (input.model ?? config.model)
+          : (config.model ?? input.model),
+      },
       projectId,
     );
   };
@@ -155,12 +173,18 @@ export function createChatRunner(
   };
   return {
     browsers,
-    resolveSettings: async (settings, userId, projectId) => ({
+    resolveSettings: async (settings, userId, projectId, roomRole) => ({
       ...settings,
-      agentId: (await getConfig(settings.agentId, userId, projectId)).id,
+      agentId: (await getConfig(settings.agentId, userId, projectId, roomRole))
+        .id,
     }),
-    sessionKey: async (settings, userId, projectId) => {
-      const config = await getConfig(settings.agentId, userId, projectId);
+    sessionKey: async (settings, userId, projectId, roomRole) => {
+      const config = await getConfig(
+        settings.agentId,
+        userId,
+        projectId,
+        roomRole,
+      );
       return `${config.id}:${config.source === 'code' ? 'code' : config.versionId}`;
     },
     getGoal: (threadId) => readThreadGoal(storage, threadId),
@@ -185,8 +209,41 @@ export function createChatRunner(
         await filesystem?.destroy?.();
       }
     },
-    async validate(userId, input, projectId) {
-      await getModel(userId, input, projectId);
+    async validate(userId, input, projectId, roomRole) {
+      await getModel(userId, input, projectId, roomRole);
+    },
+    async assertGroupChatAccess(userId, thread) {
+      const binding = groupChatThreadBinding(thread.metadata);
+      if (!binding || !groupChats)
+        throw new ThreadError('THREAD_NOT_FOUND', 404);
+      const member = await groupChats.getAgent(
+        userId,
+        binding.roomId,
+        binding.memberId,
+      );
+      if (member.threadId !== thread.id || member.role !== binding.role)
+        throw new ThreadError('THREAD_NOT_FOUND', 404);
+    },
+    async assertGroupChatRun(userId, thread, settings) {
+      const binding = groupChatThreadBinding(thread.metadata);
+      if (!binding || !groupChats) throw new ThreadError('FORBIDDEN', 403);
+      const member = await groupChats.getAgent(
+        userId,
+        binding.roomId,
+        binding.memberId,
+      );
+      if (
+        !member.enabled ||
+        member.threadId !== thread.id ||
+        member.role !== binding.role
+      )
+        throw new ThreadError('ROOM_AGENT_DISABLED', 409);
+      if (
+        (member.settings.agentId ?? null) !== (settings.agentId ?? null) ||
+        member.settings.model !== settings.model ||
+        member.settings.reasoningEffort !== settings.reasoningEffort
+      )
+        throw new ThreadError('ROOM_AGENT_SETTINGS_CHANGED', 409);
     },
     async createWorkspace(userId, projectId) {
       if (!projectId) return createPersonalWorkspace(workspaceRoot, userId);
@@ -208,7 +265,11 @@ export function createChatRunner(
       removePersonalWorkspace(workspaceRoot, userId, directory),
     async open({ thread, settings, onEvent, actorId }) {
       const scope = threadScope(thread.resourceId);
-      const userId = scope.userId ?? String(thread.metadata?.createdBy ?? '');
+      const roomBinding = groupChatThreadBinding(thread.metadata);
+      const userId =
+        scope.userId ??
+        (roomBinding ? actorId : undefined) ??
+        String(thread.metadata?.createdBy ?? '');
       const projectId = scope.projectId;
       const workspacePlugin =
         typeof thread.metadata?.workspacePlugin === 'string'
@@ -219,13 +280,19 @@ export function createChatRunner(
         settings.agentId,
         actorId ?? userId,
         projectId,
+        roomBinding?.role,
       );
       settings = { ...settings, agentId: config.id };
       // Pin the configuration for this native session, including queued inputs and tool resumes.
       const sessionModel = (next: ChatSettings) =>
         models.getLanguageModel(
           userId,
-          { ...next, model: config.model ?? next.model },
+          {
+            ...next,
+            model: roomBinding
+              ? (next.model ?? config.model)
+              : (config.model ?? next.model),
+          },
           projectId,
         );
       let currentSettings = settings;
@@ -349,13 +416,22 @@ export function createChatRunner(
         const inputModalities = (selection: typeof resolved) =>
           selection.modalitiesInput ??
           (selection.supportsImages ? ['text', 'image'] : ['text']);
-        const memoryDirectory = resolve(
-          projectId
-            ? projectDirectory(workspaceRoot, projectId)
-            : userDirectory(workspaceRoot, userId),
-          '.agents',
-          'memory',
-        );
+        const roomMemory = roomBinding
+          ? groupChatMemoryLocation(
+              commands.workingDirectory,
+              roomBinding,
+              workspace.filesystem!,
+            )
+          : undefined;
+        const memoryDirectory = roomMemory
+          ? roomMemory.directory
+          : resolve(
+              projectId
+                ? projectDirectory(workspaceRoot, projectId)
+                : userDirectory(workspaceRoot, userId),
+              '.agents',
+              'memory',
+            );
         const inputProcessors = [
           compaction,
           new IncompleteToolCallsProcessor(),
@@ -485,12 +561,24 @@ export function createChatRunner(
               : undefined;
           },
         };
-        const agent = await createAgent(
-          config.id,
-          agentOptions,
-          actorId ?? userId,
-          projectId,
-        );
+        if (roomBinding && !groupChats)
+          throw new ThreadError('THREAD_NOT_FOUND', 404);
+        const build = (id: string, options: AgentRuntimeOptions) =>
+          createAgent(id, options, actorId ?? userId, projectId);
+        const agent = roomBinding
+          ? await createGroupChatAgent(
+              config.id,
+              agentOptions,
+              {
+                service: groupChats!,
+                userId: actorId ?? userId,
+                ...roomBinding,
+                threadId: thread.id,
+                memoryPath: roomMemory!.filePath,
+              },
+              build,
+            )
+          : await build(config.id, agentOptions);
         const messages = new Map<string, UIMessage>();
         const refreshMessages = async (streamedMessageIds: string[] = []) => {
           await memory.settled();
@@ -574,7 +662,7 @@ export function createChatRunner(
         ): Promise<AgentExecutionOptions> => {
           for (const reference of [
             config.id,
-            ...Object.values(config.agents),
+            ...(roomBinding ? [] : Object.values(config.agents)),
           ]) {
             if (reference.startsWith('plugin:'))
               await getConfig(reference, createdBy ?? userId, projectId);
@@ -589,6 +677,7 @@ export function createChatRunner(
           const selection = await sessionModel(next);
           const abortSignal = runAbort.signal;
           const requestContext = new RequestContext();
+          if (roomBinding) requestContext.set('nonInteractiveTools', true);
           requestContext.set('chatRetry', retry);
           requestContext.set('speechPlayback', speechPlayback);
           requestContext.set('userId', createdBy ?? userId);

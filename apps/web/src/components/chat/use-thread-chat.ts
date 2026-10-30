@@ -26,6 +26,7 @@ import { SharedEventSource } from '@/components/realtime/event-source';
 export function useThreadChat(
   threadId: string,
   onThreadUpdated?: (thread: ThreadSummary) => void,
+  { receiveSpeech: listenToSpeech = true }: { receiveSpeech?: boolean } = {},
 ) {
   const sessionId = useAuthSession().data?.session.id;
   const speech = useSpeechPlayback(threadId);
@@ -137,7 +138,7 @@ export function useThreadChat(
     };
     source.addEventListener('snapshot', receive);
     source.addEventListener('update', receive);
-    source.addEventListener('speech', receiveSpeech);
+    if (listenToSpeech) source.addEventListener('speech', receiveSpeech);
     const revoke = (code: string) => {
       controller.abort();
       source.close();
@@ -176,7 +177,14 @@ export function useThreadChat(
       source.close();
       stopSpeech();
     };
-  }, [threadId, sessionId, updateThread, receiveSpeech, stopSpeech]);
+  }, [
+    threadId,
+    sessionId,
+    updateThread,
+    receiveSpeech,
+    stopSpeech,
+    listenToSpeech,
+  ]);
 
   const loadDetails = useCallback(
     async (turn: ChatTurnSummary) => {

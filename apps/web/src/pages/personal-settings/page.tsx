@@ -18,6 +18,9 @@ import type { ThreadSummary } from '@aime/shared/threads';
 import { chatApi } from '@/components/chat/api';
 import { ThreadNavigationContext } from '@/components/chat/thread-navigation-context';
 import { PageHeader } from '@/components/page-header';
+import { EnvironmentVariablesManager } from '@/components/environment-variables/manager';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { api } from '@/lib/rpc';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,9 +28,10 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useThreadList } from '@/pages/threads/use-thread-list';
 import { DeleteArchivedDialog } from './components/delete-archived-dialog';
+import { ProfilePanel } from './components/profile-panel';
 import { archiveErrorKey } from './errors';
 
-export function PersonalSettingsPage() {
+function ArchivedChatsPanel() {
   const { t, i18n } = useTranslation();
   const { updateThread } = useThreadList();
   const navigation = useContext(ThreadNavigationContext);
@@ -98,10 +102,6 @@ export function PersonalSettingsPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-8">
-      <PageHeader
-        title={t('nav.personalSettings')}
-        description={t('personalSettings.description')}
-      />
       <section
         aria-labelledby="archived-chats-title"
         className="overflow-hidden rounded-xl border bg-card"
@@ -283,6 +283,43 @@ export function PersonalSettingsPage() {
           onDeleted={() => remove(deleting.id)}
         />
       )}
+    </div>
+  );
+}
+
+export function PersonalSettingsPage() {
+  const { t } = useTranslation();
+  return (
+    <div className="mx-auto max-w-4xl space-y-8">
+      <PageHeader
+        title={t('nav.personalSettings')}
+        description={t('personalSettings.description')}
+      />
+      <Tabs defaultValue="profile" className="gap-6">
+        <TabsList className="max-w-full flex-wrap group-data-[orientation=horizontal]/tabs:h-auto">
+          <TabsTrigger value="profile">
+            {t('personalSettings.profile')}
+          </TabsTrigger>
+          <TabsTrigger value="environment-variables">
+            {t('nav.environmentVariables')}
+          </TabsTrigger>
+          <TabsTrigger value="archived">
+            {t('personalSettings.archivedChats')}
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="profile">
+          <ProfilePanel />
+        </TabsContent>
+        <TabsContent value="environment-variables">
+          <EnvironmentVariablesManager
+            client={api.personalEnvironmentVariables}
+            description="personalSettings.environmentVariablesDescription"
+          />
+        </TabsContent>
+        <TabsContent value="archived">
+          <ArchivedChatsPanel />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

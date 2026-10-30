@@ -1,4 +1,5 @@
 import { groupChatsContract, usersContract } from './group-chats.js';
+export { groupChatMessagesQuery } from './group-chats.js';
 import { knowledgeContract } from './knowledge.js';
 import { usageContract } from './usage.js';
 import { threadsContract } from './threads.js';
@@ -6,7 +7,10 @@ import { projectsContract } from './projects.js';
 import { providersContract } from './providers.js';
 import { skillsContract, personalSkillsContract } from './skills.js';
 import { filesContract } from './files.js';
-import { environmentVariablesContract } from './environment-variables.js';
+import {
+  environmentVariablesContract,
+  personalEnvironmentVariablesContract,
+} from './environment-variables.js';
 import { requestLogsContract } from './request-logs.js';
 import { toolsContract } from './tools.js';
 import { agentsContract } from './agents.js';
@@ -29,6 +33,7 @@ export const apiContract = {
   personalSkills: personalSkillsContract,
   files: filesContract,
   environmentVariables: environmentVariablesContract,
+  personalEnvironmentVariables: personalEnvironmentVariablesContract,
   requestLogs: requestLogsContract,
   tools: toolsContract,
   agents: agentsContract,

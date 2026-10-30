@@ -1,4 +1,4 @@
-import { apiErrorCode } from '@/lib/rpc';
+import { apiErrorCode, type api } from '@/lib/rpc';
 import type { TranslationKey } from '@/i18n/config';
 
 const errorKeys = {
@@ -16,3 +16,5 @@ export function environmentVariableErrorKey(error: unknown): TranslationKey {
     ? errorKeys[code as keyof typeof errorKeys]
     : 'errors.generic';
 }
+
+export type EnvironmentVariablesClient = typeof api.environmentVariables;

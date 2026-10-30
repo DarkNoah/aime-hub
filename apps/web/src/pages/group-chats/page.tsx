@@ -1,21 +1,25 @@
 import { useEffect, useState } from 'react';
-import { useParams } from '@tanstack/react-router';
+import { useParams, useSearch } from '@tanstack/react-router';
+import type { GroupChatDetail } from '@aime/shared/group-chats';
 import { useTranslation } from 'react-i18next';
 import { useAuthSession } from '@/features/auth/session-context';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { groupChatApi, groupChatErrorKey, type GroupChatErrorKey } from './api';
 import { RoomPanel } from './components/room-panel';
+import { RoomSwitcher } from './components/room-switcher';
 
 export function GroupChatsPage() {
   const { projectId } = useParams({ strict: false });
+  const { roomId } = useSearch({ strict: false });
   const { data } = useAuthSession();
   if (!data) return null;
   return (
     <DefaultRoom
-      key={`${data.user.id}:${projectId ?? 'personal'}`}
+      key={`${data.user.id}:${projectId ?? 'personal'}:${projectId ? 'default' : (roomId ?? 'default')}`}
       projectId={projectId}
       userId={data.user.id}
+      requestedRoomId={projectId ? undefined : roomId}
     />
   );
 }
@@ -23,26 +27,31 @@ export function GroupChatsPage() {
 function DefaultRoom({
   projectId,
   userId,
+  requestedRoomId,
 }: {
   projectId?: string;
   userId: string;
+  requestedRoomId?: string;
 }) {
   const { t } = useTranslation();
-  const [roomId, setRoomId] = useState<string | null>(null);
+  const [room, setRoom] = useState<GroupChatDetail | null>(null);
   const [error, setError] = useState<GroupChatErrorKey | null>(null);
   const [revision, setRevision] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
-    void groupChatApi
-      .openDefault(projectId, controller.signal)
+    void (
+      requestedRoomId
+        ? groupChatApi.get(requestedRoomId, controller.signal)
+        : groupChatApi.openDefault(projectId, controller.signal)
+    )
       .then((room) => {
-        if (!controller.signal.aborted) setRoomId(room.id);
+        if (!controller.signal.aborted) setRoom(room);
       })
       .catch((cause) => {
         if (!controller.signal.aborted) setError(groupChatErrorKey(cause));
       });
     return () => controller.abort();
-  }, [projectId, revision]);
+  }, [projectId, requestedRoomId, revision]);
 
   return (
     <div className="flex h-full min-h-0 min-w-0">
@@ -61,12 +70,17 @@ function DefaultRoom({
             {t('chat.retry')}
           </Button>
         </div>
-      ) : roomId ? (
+      ) : room ? (
         <RoomPanel
-          key={roomId}
-          roomId={roomId}
+          key={room.id}
+          roomId={room.id}
           projectId={projectId}
           userId={userId}
+          roomSwitcher={
+            !projectId ? (
+              <RoomSwitcher current={room} userId={userId} />
+            ) : undefined
+          }
         />
       ) : (
         <div

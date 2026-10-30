@@ -71,6 +71,8 @@ export function toolArray(tools: ToolsInput): RegisteredTool[] {
 
 /** Every tool definition/source implements this array-returning construction contract. */
 export abstract class BaseTool<D extends ToolDependencies = ToolDependencies> {
+  /** Internal owners mount these explicitly; public registries must not expose them. */
+  readonly hidden: boolean = false;
   /** Known IDs allow selection and exclusions to skip construction entirely. */
   readonly ids?: readonly string[];
   readonly deferred: boolean = false;

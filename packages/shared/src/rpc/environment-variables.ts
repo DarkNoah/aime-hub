@@ -45,3 +45,55 @@ export const environmentVariablesContract = {
     .input(z.object({ params }))
     .output(type<void>()),
 };
+
+const personal = procedure.meta({ localApi: true });
+const personalPath = '/personal/environment-variables';
+
+export const personalEnvironmentVariablesContract = {
+  list: personal
+    .route({
+      method: 'GET',
+      path: personalPath,
+      inputStructure: 'detailed',
+      summary: '列出当前用户的环境变量',
+    })
+    .output(type<EnvironmentVariable[]>()),
+  get: personal
+    .route({
+      method: 'GET',
+      path: `${personalPath}/{id}`,
+      inputStructure: 'detailed',
+      summary: '读取当前用户的环境变量',
+    })
+    .input(z.object({ params }))
+    .output(type<EnvironmentVariable>()),
+  create: personal
+    .route({
+      method: 'POST',
+      path: personalPath,
+      inputStructure: 'detailed',
+      successStatus: 201,
+      summary: '创建当前用户的环境变量',
+    })
+    .input(z.object({ body: environmentVariableInputSchema }))
+    .output(type<EnvironmentVariable>()),
+  update: personal
+    .route({
+      method: 'PATCH',
+      path: `${personalPath}/{id}`,
+      inputStructure: 'detailed',
+      summary: '修改当前用户的环境变量',
+    })
+    .input(z.object({ params, body: environmentVariableUpdateSchema }))
+    .output(type<EnvironmentVariable>()),
+  remove: personal
+    .route({
+      method: 'DELETE',
+      path: `${personalPath}/{id}`,
+      inputStructure: 'detailed',
+      successStatus: 204,
+      summary: '删除当前用户的环境变量',
+    })
+    .input(z.object({ params }))
+    .output(type<void>()),
+};

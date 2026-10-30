@@ -18,3 +18,25 @@ export function environmentVariableRouter(
     ),
   });
 }
+
+export function personalEnvironmentVariableRouter(
+  service?: EnvironmentVariableService,
+) {
+  const p = rpc.personalEnvironmentVariables;
+  const variables = () => required(service);
+  return p.router({
+    list: p.list.handler(({ context }) => variables().list(context.userId)),
+    get: p.get.handler(({ input, context }) =>
+      variables().get(input.params.id, context.userId),
+    ),
+    create: p.create.handler(({ input, context }) =>
+      variables().create(input.body, context.userId),
+    ),
+    update: p.update.handler(({ input, context }) =>
+      variables().update(input.params.id, input.body, context.userId),
+    ),
+    remove: p.remove.handler(({ input, context }) =>
+      variables().remove(input.params.id, context.userId),
+    ),
+  });
+}

@@ -4,18 +4,28 @@ import {
   CreateDateColumn,
   Entity,
   PrimaryColumn,
-  Unique,
+  Index,
   UpdateDateColumn,
 } from 'typeorm';
 
 @Entity('environment_variables')
-@Unique('environment_variables_name_key', ['name'])
+@Index('environment_variables_global_name_key', ['name'], {
+  unique: true,
+  where: 'user_id IS NULL',
+})
+@Index('environment_variables_user_name_key', ['userId', 'name'], {
+  unique: true,
+  where: 'user_id IS NOT NULL',
+})
 export class EnvironmentVariable {
   @PrimaryColumn({
     type: 'uuid',
     primaryKeyConstraintName: 'environment_variables_pkey',
   })
   id!: string;
+
+  @Column({ name: 'user_id', type: 'text', nullable: true })
+  userId!: string | null;
 
   @Column({ type: 'varchar', length: 128 })
   name!: string;

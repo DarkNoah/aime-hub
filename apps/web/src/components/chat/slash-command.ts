@@ -8,6 +8,7 @@ export type SlashCommandItem = {
 } & (
   | { action?: 'goal' | 'compact' | 'draw' | 'voices' }
   | { action: 'agent'; agentId: string | null }
+  | { action: 'mention'; mention: string }
 );
 
 export type SlashCommandSection = {
@@ -28,6 +29,31 @@ export function getSlashCommand(text: string, start: number, end = start) {
   if (!token || token.slice(1).includes('/') || start > token.length)
     return null;
   return { query: text.slice(1, start), end: token.length };
+}
+
+/** Mentions can occur mid-message; two trailing spaces finish a chosen mention. */
+export function getMentionCommand(text: string, start: number, end = start) {
+  if (start !== end) return null;
+  const before = text.slice(0, start);
+  const match = /(?:^|[\s([{"'“‘，。！？、：；])@([^@\n]*)$/.exec(before);
+  if (!match || match[1].includes('  ')) return null;
+  return { query: match[1], start: before.lastIndexOf('@'), end: start };
+}
+
+export function insertMention(
+  text: string,
+  start: number,
+  end: number,
+  mention: string,
+) {
+  const prefix = text.slice(0, start);
+  const separator =
+    prefix && !/[\s([{"'“‘，。！？、：；]$/.test(prefix) ? ' ' : '';
+  const inserted = `${separator}${mention}  `;
+  return {
+    text: prefix + inserted + text.slice(end),
+    caret: prefix.length + inserted.length,
+  };
 }
 
 export function filterCommandGroups(

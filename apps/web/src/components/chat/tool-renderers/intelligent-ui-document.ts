@@ -26,13 +26,14 @@ const bootstrap = `(() => {
   const channel = config.channel;
   const token = config.token;
   const limit = Number(config.limit);
+  const nonBlocking = config.mode === 'message';
   let enabled = false;
   let pending = false;
   const send = (type, payload = {}) => parent.postMessage({ channel, token, type, ...payload }, '*');
   const reportError = (error) => send('error', { message: String(error?.message || error).slice(0, 500) });
   const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
   const resume = (value) => {
-    if (!enabled || pending) return false;
+    if (!enabled || pending || (nonBlocking && !navigator.userActivation?.isActive)) return false;
     try {
       if (!object(value)) throw new Error('Submit a JSON object.');
       const json = JSON.stringify(value, (_, item) => {
@@ -44,14 +45,14 @@ const bootstrap = `(() => {
       const data = JSON.parse(json);
       if (!object(data)) throw new Error('Submit a JSON object.');
       pending = true;
-      send('resume', { data });
+      send(nonBlocking ? 'message' : 'resume', { data });
       return true;
     } catch (error) {
       reportError(error);
       return false;
     }
   };
-  Object.defineProperty(window, 'IntelligentUI', { value: Object.freeze({ resume }), writable: false, configurable: false });
+  Object.defineProperty(window, 'IntelligentUI', { value: Object.freeze({ resume, send: resume }), writable: false, configurable: false });
   addEventListener('message', (event) => {
     const data = event.data;
     if (event.source !== parent || data?.channel !== channel || data.token !== token) return;
@@ -78,7 +79,7 @@ const bootstrap = `(() => {
     return values;
   };
   const declared = (element) => {
-    const value = JSON.parse(element.getAttribute('data-ui-resume')?.trim() || '{}');
+    const value = JSON.parse((element.getAttribute('data-ui-send') ?? element.getAttribute('data-ui-resume'))?.trim() || '{}');
     if (!object(value)) throw new Error('data-ui-resume must contain a JSON object.');
     return value;
   };
@@ -86,7 +87,7 @@ const bootstrap = `(() => {
     const target = event.target instanceof Element ? event.target : null;
     const link = target?.closest('a, area');
     if (link) event.preventDefault();
-    const trigger = target?.closest('[data-ui-resume]');
+    const trigger = target?.closest('[data-ui-resume], [data-ui-send]');
     if (!trigger && link) {
       if (event.isTrusted && !document.body.inert && (event.button === 0 || event.button === 1))
         send('open-link', { url: link.getAttribute('href') });
@@ -107,7 +108,7 @@ const bootstrap = `(() => {
   document.addEventListener('submit', (event) => {
     event.preventDefault();
     const form = event.target;
-    if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-ui-resume')) return;
+    if (!(form instanceof HTMLFormElement) || (!form.hasAttribute('data-ui-resume') && !form.hasAttribute('data-ui-send'))) return;
     try { resume({ ...valuesFor(form, event.submitter || undefined), ...declared(form) }); }
     catch (error) { reportError(error); }
   }, true);
@@ -132,7 +133,11 @@ const bootstrap = `(() => {
   });
 })();`;
 
-export function buildIntelligentUiDocument(html: string, token: string) {
+export function buildIntelligentUiDocument(
+  html: string,
+  token: string,
+  mode: 'resume' | 'message' = 'resume',
+) {
   // Keep only web links for the host bridge. Inline scripts stay sandboxed;
   // CSP permits image resources while blocking external code and network APIs.
   const template = document.createElement('template');
@@ -167,6 +172,8 @@ export function buildIntelligentUiDocument(html: string, token: string) {
     INTELLIGENT_UI_CHANNEL +
     '" data-token="' +
     safeToken +
+    '" data-mode="' +
+    mode +
     '" data-limit="' +
     INTELLIGENT_UI_MAX_RESPONSE +
     '">' +

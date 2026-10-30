@@ -37,6 +37,11 @@ plugins/vibe-quant/**/__pycache__/
 !scripts/chat-ask-user.test.ts
 
 !scripts/group-chats-browser.test.mjs
+!scripts/group-chats.test.ts
+!scripts/group-chat-runtime.test.ts
+!scripts/group-chat-a2a.test.ts
+!apps/server/src/modules/group-chats/*.test.ts
+!apps/server/src/modules/agents/hidden.test.ts
 !plugins/vibe-quant/tests/strategy-notifications.test.ts
 !plugins/vibe-quant/tests/signal-monitor.test.ts
 !plugins/vibe-quant/tests/signal-worker.test.ts
@@ -58,3 +63,5 @@ plugins/vibe-quant/**/__pycache__/
 
 !scripts/local-api.test.ts
 !apps/server/src/modules/threads/workspace-env.test.ts
+!scripts/environment-variables.test.ts
+!scripts/realtime-http-browser.test.mjs

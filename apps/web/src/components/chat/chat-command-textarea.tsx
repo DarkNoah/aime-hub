@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PromptInputTextarea } from '@/components/ai-elements/prompt-input';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,8 @@ import {
   applySlashCommand,
   filterCommandGroups,
   getSlashCommand,
+  getMentionCommand,
+  insertMention,
   type SlashCommandGroup,
   type SlashCommandItem,
 } from './slash-command';
@@ -31,6 +33,10 @@ export function ChatCommandTextarea({
   onRetry,
   onOpenChange,
   onCommand,
+  trigger = '/',
+  inputRef,
+  ariaLabel,
+  maxLength,
 }: {
   value: string;
   onValueChange: (value: string) => void;
@@ -42,10 +48,15 @@ export function ChatCommandTextarea({
   onRetry: () => void;
   onOpenChange: (open: boolean) => void;
   onCommand?: (item: SlashCommandItem) => boolean | void;
+  trigger?: '/' | '@';
+  inputRef?: RefObject<HTMLTextAreaElement | null>;
+  ariaLabel?: string;
+  maxLength?: number;
 }) {
   const { t } = useTranslation();
   const id = useId();
-  const textarea = useRef<HTMLTextAreaElement>(null);
+  const localTextarea = useRef<HTMLTextAreaElement>(null);
+  const textarea = inputRef ?? localTextarea;
   const list = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
   const [focused, setFocused] = useState(false);
@@ -53,7 +64,14 @@ export function ChatCommandTextarea({
   const [selection, setSelection] = useState({ start: 0, end: 0 });
   const [selected, setSelected] = useState('');
   const [keyboardSelection, setKeyboardSelection] = useState(false);
-  const command = getSlashCommand(value, selection.start, selection.end);
+  const mentionCommand =
+    trigger === '@'
+      ? getMentionCommand(value, selection.start, selection.end)
+      : null;
+  const command =
+    trigger === '@'
+      ? mentionCommand
+      : getSlashCommand(value, selection.start, selection.end);
   const open = focused && !disabled && !dismissed && command !== null;
   const filteredGroups = filterCommandGroups(groups, command?.query ?? '');
   const matches = filteredGroups.flatMap((group) =>
@@ -81,7 +99,11 @@ export function ChatCommandTextarea({
   function complete(item: SlashCommandItem) {
     if (!command || disabled || item.disabled) return;
     if (item.action && onCommand?.(item) === false) return;
-    const next = applySlashCommand(value, command.end, item);
+    const next =
+      item.action === 'mention' && mentionCommand
+        ? insertMention(value, mentionCommand.start, command.end, item.mention)
+        : applySlashCommand(value, command.end, item);
+    if (maxLength !== undefined && next.text.length > maxLength) return;
     onValueChange(next.text);
     setDismissed(true);
     // The drawing dialog takes focus; leave its canvas keyboard shortcuts active.
@@ -179,7 +201,8 @@ export function ChatCommandTextarea({
           }}
           disabled={disabled}
           placeholder={placeholder}
-          aria-label={t('chat.message')}
+          aria-label={ariaLabel ?? t('chat.message')}
+          maxLength={maxLength}
           aria-autocomplete="list"
           aria-controls={open ? `${id}-list` : undefined}
           aria-activedescendant={
@@ -205,7 +228,11 @@ export function ChatCommandTextarea({
             id={`${id}-list`}
             ref={list}
             role="listbox"
-            aria-label={t('chat.commands.title')}
+            aria-label={t(
+              trigger === '@'
+                ? 'groupChat.mentionAgent'
+                : 'chat.commands.title',
+            )}
             className="max-h-none overflow-hidden"
           >
             {loading && matches.length === 0 ? (
@@ -236,9 +263,13 @@ export function ChatCommandTextarea({
                 className="px-3 py-5 text-sm text-muted-foreground"
               >
                 {t(
-                  command?.query
-                    ? 'chat.commands.noMatch'
-                    : 'chat.commands.empty',
+                  trigger === '@'
+                    ? command?.query
+                      ? 'groupChat.mentionNoMatch'
+                      : 'groupChat.mentionEmpty'
+                    : command?.query
+                      ? 'chat.commands.noMatch'
+                      : 'chat.commands.empty',
                 )}
               </p>
             ) : (
@@ -298,9 +329,11 @@ export function ChatCommandTextarea({
                                 className="chat-command-summary pointer-events-none absolute inset-0 flex min-w-0 items-center gap-2 px-2.5"
                               >
                                 <span className="max-w-1/2 shrink-0 truncate">
-                                  {item.action === 'agent'
-                                    ? item.name
-                                    : `/${item.name}`}
+                                  {item.action === 'mention'
+                                    ? `@${item.name}`
+                                    : item.action === 'agent'
+                                      ? item.name
+                                      : `/${item.name}`}
                                 </span>
                                 {item.current && (
                                   <Badge variant="secondary">
@@ -315,9 +348,11 @@ export function ChatCommandTextarea({
                                 <span className="min-h-0 overflow-hidden">
                                   <span className="flex min-w-0 flex-col gap-1 py-2 [overflow-wrap:anywhere]">
                                     <span className="flex flex-wrap items-center gap-2">
-                                      {item.action === 'agent'
-                                        ? item.name
-                                        : `/${item.name}`}
+                                      {item.action === 'mention'
+                                        ? `@${item.name}`
+                                        : item.action === 'agent'
+                                          ? item.name
+                                          : `/${item.name}`}
                                       {item.current && (
                                         <Badge variant="secondary">
                                           {t('chat.commands.currentAgent')}

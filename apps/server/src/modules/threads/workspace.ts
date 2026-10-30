@@ -163,12 +163,14 @@ export function getWorkspace(
       },
     },
     async (authorId) => ({
-      ...(await environmentVariables?.getEnv()),
+      ...(await environmentVariables?.getEnv(
+        authorId === 'system' ? undefined : authorId,
+      )),
       SKILL_HOME: skillHome,
       SKILLS_ROOT: skillsRoot,
       BUILTIN_SKILLS_ROOT: builtinSkillsRoot,
       APP_API_SCRIPT: appApiScript,
-      // Reserved, request-scoped values cannot come from shared admin settings.
+      // Reserved, request-scoped values cannot come from saved settings.
       APP_API_URL: '',
       APP_API_TOKEN: '',
       APP_THREAD_ID: '',

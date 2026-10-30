@@ -21,6 +21,7 @@ import {
   Globe2,
   Images,
   ScanText,
+  type LucideIcon,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -46,12 +47,8 @@ import {
 import { ChatRawMessages } from './chat-raw-messages';
 import { ChatMessagePreview } from './message-preview/chat-message-preview';
 import { MessagePreviewContext } from './message-preview/context';
-import {
-  resolveMessagePart,
-  selectMessagePart,
-  type MessagePreviewSelection,
-  type PreviewPart,
-} from './message-preview/selection';
+import type { PreviewPart } from './message-preview/selection';
+import { useMessagePreviewController } from './message-preview/use-message-preview';
 import { cn } from '@/lib/utils';
 import { useFileManager } from '@/components/file-manager/use-file-manager';
 import { WorkspaceFileContext } from '@/components/file-manager/context';
@@ -63,6 +60,7 @@ import { usePluginRightSidebar } from '@/features/plugins/use-right-sidebar';
 import { PluginRightSidebar } from '@/features/plugins/right-sidebar';
 import {
   ChatWorkspaceMenuContext,
+  ChatWorkspacePanelContext,
   FloatingChatContext,
 } from './layout-context';
 import './chat-floating.css';
@@ -82,6 +80,17 @@ const FileManager = lazy(
 const BrowserPanel = lazy(() => import('@/components/browser/panel'));
 
 const EMPTY_MESSAGES: UIMessage[] = [];
+type CloseExtraPanel = (afterClose?: () => void) => void;
+
+function WorkspaceExtraPanel({
+  render,
+  onClose,
+}: {
+  render: (onClose: CloseExtraPanel) => ReactNode;
+  onClose: CloseExtraPanel;
+}) {
+  return render(onClose);
+}
 
 const workspaceViews = [
   { view: 'files', label: 'files.title', icon: Files },
@@ -91,7 +100,9 @@ const workspaceViews = [
   { view: 'browser', label: 'browser.title', icon: Globe2 },
 ] as const;
 type WorkspaceView =
-  (typeof workspaceViews)[number]['view'] | `plugin:${string}:${string}`;
+  | (typeof workspaceViews)[number]['view']
+  | `plugin:${string}:${string}`
+  | 'extra';
 
 /** Keep the chat mounted while resizing or switching to the compact drawer. */
 export function ChatWorkspace({
@@ -102,6 +113,8 @@ export function ChatWorkspace({
   assetRevision: turnAssetRevision,
   threadId,
   projectId,
+  defaultFileScope = 'thread',
+  extraPanel,
 }: {
   children: ReactNode;
   messages?: UIMessage[];
@@ -110,10 +123,17 @@ export function ChatWorkspace({
   assetRevision?: string;
   threadId?: string;
   projectId?: string;
+  defaultFileScope?: FileScope;
+  extraPanel?: {
+    title: string;
+    icon: LucideIcon;
+    render: (onClose: CloseExtraPanel) => ReactNode;
+  };
 }) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
+  const afterDrawerClose = useRef<(() => void) | null>(null);
   const panelRef = usePanelRef();
   const pendingLayoutAction = useRef<'restore' | 'collapse' | null>(null);
   const contentId = useId();
@@ -128,8 +148,10 @@ export function ChatWorkspace({
   const handledPanelRequest = useRef<string | null>(null);
   const pluginSidebars = usePluginRightSidebar();
   const activePlugin = pluginSidebars.find((entry) => entry.view === view);
+  const activeExtra = view === 'extra' ? extraPanel : undefined;
   // Drop the selection immediately when disabled or access is revoked. Keep chat mounted.
   if (view.startsWith('plugin:') && !activePlugin) setView('files');
+  if (view === 'extra' && !extraPanel) setView('files');
   // Only completed generation changes refresh the gallery, not every text delta.
   const assetRevision =
     turnAssetRevision ??
@@ -147,15 +169,22 @@ export function ChatWorkspace({
         ),
       )
       .join(',');
-  const [selection, setSelection] = useState<MessagePreviewSelection | null>(
-    null,
-  );
+  const {
+    selection,
+    part: previewPart,
+    open: selectPreview,
+  } = useMessagePreviewController(messages);
   useEffect(() => saveWorkspaceLayout(layout), [layout]);
   const expandInspector = useCallback(() => {
     if (!panelRef.current?.isCollapsed()) return;
     setLayout((previous) => ({ ...previous, mode: 'docked' }));
     panelRef.current.resize(`${layout.inspectorSize}%`);
   }, [layout.inspectorSize, panelRef]);
+  const openExtraPanel = useCallback(() => {
+    setView('extra');
+    if (compact) setDrawerOpen(true);
+    else expandInspector();
+  }, [compact, expandInspector]);
   useEffect(() => {
     if (
       !requestedPanel ||
@@ -176,14 +205,12 @@ export function ChatWorkspace({
   }, [requestedPanel, threadId, compact, expandInspector]);
   const openPreview = useCallback(
     (part: PreviewPart) => {
-      const next = selectMessagePart(messages, part);
-      if (!next) return;
-      setSelection(next);
+      if (!selectPreview(part)) return;
       setView('preview');
       if (compact) setDrawerOpen(true);
       else expandInspector();
     },
-    [messages, compact, expandInspector],
+    [selectPreview, compact, expandInspector],
   );
   const floating = !compact && layout.mode === 'floating';
   // Apply explicit exits only after React has removed the floating size constraint.
@@ -195,7 +222,9 @@ export function ChatWorkspace({
       panelRef.current?.resize(`${layout.inspectorSize}%`);
     else panelRef.current?.collapse();
   }, [compact, floating, layout.inspectorSize, panelRef]);
-  const [fileScope, setFileScope] = useState<FileScope>('thread');
+  const [fileScope, setFileScope] = useState<FileScope>(
+    projectId ? 'thread' : defaultFileScope,
+  );
   const filesVisible = view === 'files' && (compact ? drawerOpen : expanded);
   const files = useFileManager(
     threadId,
@@ -278,6 +307,15 @@ export function ChatWorkspace({
       toggleRef.current?.focus();
     }
   };
+  const closeExtraPanel: CloseExtraPanel = (afterClose) => {
+    if (compact && drawerOpen) {
+      afterDrawerClose.current = afterClose ?? null;
+      setDrawerOpen(false);
+    } else {
+      close();
+      afterClose?.();
+    }
+  };
   const workspaceMenu = compact ? (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
@@ -297,6 +335,12 @@ export function ChatWorkspace({
           if (drawerOpen) event.preventDefault();
         }}
       >
+        {extraPanel && (
+          <DropdownMenuItem onSelect={openExtraPanel}>
+            <extraPanel.icon className="size-4" aria-hidden="true" />
+            {extraPanel.title}
+          </DropdownMenuItem>
+        )}
         {workspaceViews.map(({ view: nextView, label, icon: Icon }) => (
           <DropdownMenuItem
             key={nextView}
@@ -329,6 +373,7 @@ export function ChatWorkspace({
     </DropdownMenu>
   ) : null;
   const title =
+    activeExtra?.title ??
     activePlugin?.title ??
     t(
       view === 'files'
@@ -341,7 +386,12 @@ export function ChatWorkspace({
               ? 'browser.title'
               : 'chat.preview.title',
     );
-  const content = activePlugin ? (
+  const content = activeExtra ? (
+    <WorkspaceExtraPanel
+      render={activeExtra.render}
+      onClose={closeExtraPanel}
+    />
+  ) : activePlugin ? (
     <PluginRightSidebar
       key={activePlugin.view}
       entry={activePlugin}
@@ -394,7 +444,7 @@ export function ChatWorkspace({
     <ChatMessagePreview
       key={JSON.stringify(selection)}
       threadId={threadId}
-      part={resolveMessagePart(messages, selection)}
+      part={previewPart}
       onClose={close}
     />
   ) : (
@@ -504,7 +554,11 @@ export function ChatWorkspace({
                 >
                   <FloatingChatContext.Provider value={floating}>
                     <ChatWorkspaceMenuContext.Provider value={workspaceMenu}>
-                      {children}
+                      <ChatWorkspacePanelContext.Provider
+                        value={extraPanel ? openExtraPanel : null}
+                      >
+                        {children}
+                      </ChatWorkspacePanelContext.Provider>
                     </ChatWorkspaceMenuContext.Provider>
                   </FloatingChatContext.Provider>
                 </FloatingWindow>
@@ -532,6 +586,28 @@ export function ChatWorkspace({
                     className="flex h-full min-h-0 bg-muted/20"
                   >
                     <div className="flex w-12 shrink-0 flex-col items-center gap-2 border-r py-3">
+                      {extraPanel && (
+                        <Button
+                          variant={
+                            expanded && view === 'extra' ? 'secondary' : 'ghost'
+                          }
+                          size="icon-sm"
+                          aria-label={extraPanel.title}
+                          title={extraPanel.title}
+                          aria-expanded={expanded && view === 'extra'}
+                          aria-controls={contentId}
+                          onClick={() => {
+                            if (expanded && view === 'extra')
+                              collapseInspector();
+                            else openExtraPanel();
+                          }}
+                        >
+                          <extraPanel.icon
+                            className="size-4"
+                            aria-hidden="true"
+                          />
+                        </Button>
+                      )}
                       <Button
                         ref={toggleRef}
                         variant={
@@ -667,13 +743,16 @@ export function ChatWorkspace({
                   showCloseButton={false}
                   onCloseAutoFocus={(event) => {
                     event.preventDefault();
-                    toggleRef.current?.focus();
+                    const afterClose = afterDrawerClose.current;
+                    afterDrawerClose.current = null;
+                    if (afterClose) afterClose();
+                    else toggleRef.current?.focus();
                   }}
                 >
                   <SheetTitle className="sr-only">{title}</SheetTitle>
                   <SheetDescription className="sr-only">
-                    {activePlugin
-                      ? activePlugin.title
+                    {activeExtra || activePlugin
+                      ? title
                       : t(
                           view === 'files'
                             ? 'files.previewHint'

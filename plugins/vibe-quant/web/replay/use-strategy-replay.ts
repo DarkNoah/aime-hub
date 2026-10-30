@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { randomUUID } from '@aime/shared/uuid';
 import { pluginRequest } from '@app/plugin-sdk/web';
 import type { MarketStrategyHint } from '../../signal-types';
 import type { SignalHistoryPage } from '../../signal-history';
@@ -78,7 +79,7 @@ export function useStrategyReplay({
     }
     const calculation: Calculation = {
       key,
-      token: crypto.randomUUID(),
+      token: randomUUID(),
       abort: new AbortController(),
       frames: new Map(),
       busy: false,

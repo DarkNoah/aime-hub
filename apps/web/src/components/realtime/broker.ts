@@ -1,3 +1,4 @@
+import { randomUUID } from '@aime/shared/uuid';
 import type {
   RealtimeEvent,
   RealtimeSubscription,
@@ -21,7 +22,7 @@ export class RealtimeBroker {
   private readonly url: string;
 
   constructor(sessionId: string) {
-    this.url = `/api/realtime/${crypto.randomUUID()}?session=${encodeURIComponent(sessionId)}`;
+    this.url = `/api/realtime/${randomUUID()}?session=${encodeURIComponent(sessionId)}`;
   }
 
   update(

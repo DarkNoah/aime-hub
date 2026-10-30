@@ -21,6 +21,7 @@ import { ProjectBreadcrumb } from '@/pages/projects/components/project-breadcrum
 import { PersonalChatSettingsProvider } from '@/components/chat/personal-chat-settings-provider';
 import { ThreadNavigationProvider } from '@/components/chat/thread-navigation-provider';
 import { Sidebar } from './sidebar';
+import { RoomUnreadProvider } from '@/pages/group-chats/unread-provider';
 import { adminNavigation } from './navigation';
 import { NotificationProvider } from '@/features/notifications/notification-provider';
 import { BrowserDock } from '@/components/browser/dock';
@@ -39,20 +40,22 @@ export function AppLayout() {
       <ThreadListProvider key={data?.session.id}>
         <ProjectNavigationProvider>
           <ThreadNavigationProvider>
-            <NotificationProvider />
-            <BrowserPanelOpenContext.Provider value={minimizeBrowserDock}>
-              {data?.user.id ? (
-                <BrowserDock
-                  ref={browserDock}
-                  key={data.user.id}
-                  userId={data.user.id}
-                >
+            <RoomUnreadProvider>
+              <NotificationProvider />
+              <BrowserPanelOpenContext.Provider value={minimizeBrowserDock}>
+                {data?.user.id ? (
+                  <BrowserDock
+                    ref={browserDock}
+                    key={data.user.id}
+                    userId={data.user.id}
+                  >
+                    <LayoutContent />
+                  </BrowserDock>
+                ) : (
                   <LayoutContent />
-                </BrowserDock>
-              ) : (
-                <LayoutContent />
-              )}
-            </BrowserPanelOpenContext.Provider>
+                )}
+              </BrowserPanelOpenContext.Provider>
+            </RoomUnreadProvider>
           </ThreadNavigationProvider>
         </ProjectNavigationProvider>
       </ThreadListProvider>

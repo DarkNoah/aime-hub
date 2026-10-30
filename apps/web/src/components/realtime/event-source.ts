@@ -1,3 +1,4 @@
+import { randomUUID } from '@aime/shared/uuid';
 import type {
   RealtimeEvent,
   RealtimeSubscription,
@@ -127,7 +128,7 @@ class SharedSession {
 
 /** EventSource-compatible logical observer; closing it never closes another tab. */
 export class SharedEventSource extends EventTarget {
-  readonly id = crypto.randomUUID();
+  readonly id = randomUUID();
   onerror: ((event: Event) => void) | null = null;
   private session: SharedSession;
   private closed = false;
