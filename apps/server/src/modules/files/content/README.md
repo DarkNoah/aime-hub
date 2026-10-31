@@ -36,6 +36,9 @@ const result = await readFileContent(
 共用层没有字符数和行数裁剪。Excel 默认取每张表前 20 个非空行，`sheets[].sampled`
 明确标记样例；指定 `excel_rows: "all"` 读取所选范围全部数据。
 `extract` 和知识库默认指定全量，`read_file` 默认样例。
+PDF 即使传入 `encoding` 也始终优先 OCR；OCR 配置不可用、识别报错或返回空文字时，所有调用方（包括 `extract`）均回退到本地文字层，并保留安全提示。用户中止和整体超时不触发兜底。
+PDF 本地文字提取使用 PDF.js 及其随包提供的 CMap、标准字体资源，支持未嵌入字体的中文发票；输出带页码标题的文字，不保证恢复 OCR 的表格布局。
+若 OCR 接口不支持页码选择，先在内存中提取所选 PDF 页面再上传；本地文字兜底仍使用原始 PDF 和相同页码范围。
 PDF 页码统一放在 `parameters.pdf_pages`，`read_file` 不再提供顶层 `page_ranges`。
 
 图片可通过 `parameters.image_zoom: { x: 100, y: 80, w: 300, h: 200, scale: 2 }`
@@ -59,5 +62,5 @@ PDF 页码统一放在 `parameters.pdf_pages`，`read_file` 不再提供顶层 `
 `read_file` 设置内部选项 `skipOcrErrors: true`：OCR 未配置、不可用或识别报错时跳过，
 PDF 继续读取本地文字层，图片在当前模型支持时附带图片（指定区域时返回处理后的图片）；没有可读内容时返回元信息和明确提示。
 回退提示通过 `warnings` 返回，不包含供应商原始错误。用户中止和工具整体超时仍立即停止。
-其他调用方默认保留严格的 OCR 错误处理。
+图片的其他调用方默认保留严格的 OCR 错误处理；PDF 始终优先 OCR、失败后本地转文本。
 旧版 DOC/XLS/PPT 需先转换为新版 Office 或 PDF。

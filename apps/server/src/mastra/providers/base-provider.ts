@@ -43,7 +43,11 @@ export type ProviderConfig = {
 export type ProviderModelInfo = { id: string; name: string } & Partial<
   Pick<
     ModelInput,
-    'modelType' | 'modalitiesInput' | 'modalitiesOutput' | 'limitContext'
+    | 'modelType'
+    | 'modalitiesInput'
+    | 'modalitiesOutput'
+    | 'limitContext'
+    | 'metadata'
   >
 >;
 

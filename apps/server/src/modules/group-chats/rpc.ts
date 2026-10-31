@@ -70,6 +70,14 @@ export function groupChatRouter(service?: GroupChatService) {
         input.body,
       ),
     ),
+    respondChoices: p.respondChoices.handler(({ context, input }) =>
+      rooms().respondChoices(
+        context.userId,
+        input.params.roomId,
+        input.params.messageId,
+        input.body,
+      ),
+    ),
     respondUi: p.respondUi.handler(({ context, input }) =>
       rooms().respondUi(
         context.userId,

@@ -3,6 +3,8 @@ import type { OfficeContentNode, OfficeIssue } from 'officeparser';
 import { includesPage, pageSelection } from './selection.js';
 import { spreadsheetContent } from './spreadsheet.js';
 import { zoomImage } from './image-zoom.js';
+import { selectPdfPages } from './pdf-pages.js';
+import { pdfText } from './pdf-text.js';
 import { withAbortSignal } from '../../../lib/abort.js';
 import { inspectImageFile, maxBinaryFileBytes } from '../binary-file.js';
 import {
@@ -164,6 +166,7 @@ export async function parseFileContent(
       } catch (error) {
         signal.throwIfAborted();
         if (
+          metadata.kind !== 'pdf' &&
           !options.skipOcrErrors &&
           !(
             error &&
@@ -177,19 +180,20 @@ export async function parseFileContent(
       signal.throwIfAborted();
       if (resolved) {
         try {
-          if (
+          const selectLocally =
             pageRanges !== undefined &&
-            resolved.model.supportsPageRanges === false
-          )
-            throw new FileContentError(
-              'PAGE_RANGES_UNSUPPORTED',
-              '当前 OCR 接口不支持 PDF 页码选择，请省略 pdf_pages 后读取完整 PDF。',
-            );
+            resolved.model.supportsPageRanges === false;
+          const ocrData = selectLocally
+            ? await selectPdfPages(data, pageRanges, signal)
+            : data;
+          validateFileContentSize(ocrData.byteLength);
           const result = await resolved.model.doOCR({
-            input: { data, fileName: metadata.fileName },
-            pageRanges: pageRanges,
+            input: { data: ocrData, fileName: metadata.fileName },
+            pageRanges: selectLocally ? undefined : pageRanges,
             abortSignal: signal,
           });
+          if (metadata.kind === 'pdf' && !result.markdown.trim())
+            throw new Error('OCR returned no PDF text');
           signal.throwIfAborted();
           return {
             ...textResult(result.markdown),
@@ -201,7 +205,12 @@ export async function parseFileContent(
           };
         } catch (error) {
           signal.throwIfAborted();
-          if (!options.skipOcrErrors) {
+          if (
+            error instanceof FileContentError &&
+            error.code === 'INVALID_PAGE_RANGES'
+          )
+            throw error;
+          if (metadata.kind !== 'pdf' && !options.skipOcrErrors) {
             if (error instanceof FileContentError) throw error;
             throw new FileContentError(
               'OCR_FAILED',
@@ -209,9 +218,13 @@ export async function parseFileContent(
             );
           }
           // Never include provider error bodies or credentials in fallback warnings.
-          warnings.push('OCR 识别失败或不支持当前选项，已跳过 OCR。');
+          warnings.push(
+            metadata.kind === 'pdf'
+              ? 'OCR 识别失败或未返回文字，已跳过 OCR，改用 PDF 本地文字提取。'
+              : 'OCR 识别失败或不支持当前选项，已跳过 OCR。',
+          );
         }
-      } else if (options.skipOcrErrors) {
+      } else if (metadata.kind === 'pdf' || options.skipOcrErrors) {
         warnings.push('OCR 未配置或不可用，已跳过 OCR。');
       }
       if (metadata.kind === 'image') {
@@ -242,6 +255,28 @@ export async function parseFileContent(
       }
     }
 
+    if (metadata.kind === 'pdf') {
+      try {
+        const text = await pdfText(data, pageRanges, signal);
+        if (text.trim()) return textResult(text);
+        if (options.skipOcrErrors) {
+          warnings.push('PDF 中没有可靠的可读文本，已跳过需要 OCR 的内容。');
+          return textResult('');
+        }
+        throw new FileContentError(
+          'OCR_NOT_CONFIGURED',
+          'PDF 中没有可靠的可读文本；扫描文档需要可用的 OCR 模型。',
+        );
+      } catch (error) {
+        signal.throwIfAborted();
+        if (error instanceof FileContentError) throw error;
+        throw new FileContentError(
+          'FILE_PARSE_FAILED',
+          'PDF 本地文字提取失败，请检查文件或重试 OCR。',
+        );
+      }
+    }
+
     if (metadata.kind === 'audio' || metadata.kind === 'video') {
       if (!dependencies.transcribe)
         throw new FileContentError(
@@ -261,7 +296,7 @@ export async function parseFileContent(
       }
     }
 
-    if (metadata.kind === 'document' || metadata.kind === 'pdf') {
+    if (metadata.kind === 'document') {
       try {
         const { OfficeParser } = await import('officeparser');
         signal.throwIfAborted();
@@ -270,9 +305,6 @@ export async function parseFileContent(
             ? 'html'
             : extension.slice(1)) as import('officeparser').SupportedFileType,
           abortSignal: signal,
-          ...(metadata.kind === 'pdf' && pageRanges
-            ? { pdfParserConfig: { pageRange: pageRanges } }
-            : {}),
           extractAttachments: false,
           includeRawContent: false,
           ocr: false,
@@ -283,23 +315,6 @@ export async function parseFileContent(
         });
         signal.throwIfAborted();
         assertCompleteDocument(document.warnings);
-        if (
-          metadata.kind === 'pdf' &&
-          document.warnings.some(
-            (issue) =>
-              issue.code === 'PDF_NO_TEXT_EXTRACTED' ||
-              issue.code === 'PDF_TEXT_ENCODING_SUSPECT',
-          )
-        ) {
-          if (options.skipOcrErrors) {
-            warnings.push('PDF 中没有可靠的可读文本，已跳过需要 OCR 的内容。');
-            return textResult('');
-          }
-          throw new FileContentError(
-            'OCR_NOT_CONFIGURED',
-            'PDF 中没有可靠的可读文本；扫描文档需要配置 OCR 模型。',
-          );
-        }
         if (document.type === 'xlsx' || document.type === 'ods')
           return {
             ...textResult(''),
@@ -354,16 +369,6 @@ export async function parseFileContent(
         });
         signal.throwIfAborted();
         assertCompleteDocument(messages);
-        if (metadata.kind === 'pdf' && !value.trim()) {
-          if (options.skipOcrErrors) {
-            warnings.push('PDF 中没有可读取的文本，已跳过需要 OCR 的内容。');
-            return textResult('');
-          }
-          throw new FileContentError(
-            'OCR_NOT_CONFIGURED',
-            'PDF 中没有可读取的文本；扫描文档需要配置 OCR 模型。',
-          );
-        }
         return textResult(value);
       } catch (error) {
         signal.throwIfAborted();

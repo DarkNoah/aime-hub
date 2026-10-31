@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Reply, SmilePlus } from 'lucide-react';
+import { LoaderCircle, Reply, SmilePlus } from 'lucide-react';
 import { toast } from 'sonner';
 import type { GroupChatMessage, MemberProfile } from '@aime/shared/group-chats';
 import {
@@ -21,6 +21,7 @@ import {
 import { groupChatErrorKey } from '../api';
 import { useReactionFeedback } from './use-reaction-feedback';
 import { RoomAgentAvatar } from './room-agent-avatar';
+import { RoomMessageChoices } from './room-message-choices';
 
 const emojiChoices = ['👍', '❤️', '🎉', '👀', '✅', '🤔', '⭐'];
 
@@ -33,9 +34,13 @@ export function RoomMessage({
   targetName,
   fileThreadId,
   onReply,
+  onJumpToReply,
+  loadingReply,
   onMention,
   onReact,
   onRespondUi,
+  submittedChoices,
+  onRespondChoices,
 }: {
   message: GroupChatMessage;
   reply?: GroupChatMessage;
@@ -45,12 +50,16 @@ export function RoomMessage({
   targetName?: string;
   fileThreadId?: string;
   onReply: () => void;
+  onJumpToReply: () => void;
+  loadingReply: boolean;
   onMention?: () => void;
   onReact: (emoji: string, active: boolean) => Promise<void>;
   onRespondUi: (
     id: string,
     data: NonNullable<GroupChatMessage['uiResponse']>['data'],
   ) => Promise<void>;
+  submittedChoices?: string[];
+  onRespondChoices: (id: string, selectedOptions: string[]) => Promise<void>;
 }) {
   const { t, i18n } = useTranslation();
   const [reacting, setReacting] = useState(false);
@@ -76,7 +85,8 @@ export function RoomMessage({
   return (
     <div
       data-chat-turn={message.id}
-      className={`group flex min-w-0 gap-3 ${own ? 'flex-row-reverse' : ''}`}
+      tabIndex={-1}
+      className={`group flex min-w-0 gap-3 rounded-lg outline-none transition-colors duration-500 data-[message-highlight]:bg-primary/10 motion-reduce:transition-none ${own ? 'flex-row-reverse' : ''}`}
     >
       {message.senderKind !== 'user' ? (
         <RoomAgentAvatar
@@ -115,10 +125,25 @@ export function RoomMessage({
           </time>
         </div>
         {message.replyToId && (
-          <div className="max-w-full truncate border-l-2 border-primary/40 px-2 py-1 text-xs text-muted-foreground">
-            <Reply className="mr-1 inline size-3" />
-            {reply?.text || reply?.ui?.title || t('groupChat.replyMessage')}
-          </div>
+          <button
+            type="button"
+            onClick={onJumpToReply}
+            disabled={loadingReply}
+            aria-busy={loadingReply}
+            aria-label={t('groupChat.jumpToOriginal')}
+            title={t('groupChat.jumpToOriginal')}
+            className="max-w-full cursor-pointer truncate rounded-r border-l-2 border-primary/40 px-2 py-1 text-left text-xs text-muted-foreground outline-none transition-colors hover:bg-primary/10 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait"
+          >
+            {loadingReply ? (
+              <LoaderCircle className="mr-1 inline size-3 animate-spin motion-reduce:animate-none" />
+            ) : (
+              <Reply className="mr-1 inline size-3" />
+            )}
+            {reply?.text ||
+              reply?.ui?.title ||
+              reply?.files?.[0]?.name ||
+              t('groupChat.replyMessage')}
+          </button>
         )}
         {message.text && (
           <MessageContent className="rounded-lg bg-muted/60 px-4 py-3 [overflow-wrap:anywhere]">
@@ -151,6 +176,14 @@ export function RoomMessage({
               nonBlocking={{ input: message.ui, onSend: onRespondUi }}
             />
           </div>
+        )}
+        {message.choices && (
+          <RoomMessageChoices
+            key={`${message.id}:${userId}`}
+            choices={message.choices}
+            submittedOptions={submittedChoices}
+            onSend={onRespondChoices}
+          />
         )}
         <div
           ref={reactionsRef}

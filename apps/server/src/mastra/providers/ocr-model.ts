@@ -11,12 +11,15 @@ export type OcrOptions = {
   enableFormula?: boolean;
   enableTable?: boolean;
   pageRanges?: string;
+  responseFormat?: 'json' | 'md';
   // Provider-specific recognition options (PaddleOCR: official optionalPayload).
   providerOptions?: Record<string, unknown>;
 };
 
 export type OcrResult = {
   markdown: string;
+  // Original structured response, when the provider returns JSON.
+  data?: unknown;
   archiveUrl?: string;
   // Some providers return structured results instead of a ZIP archive.
   resultUrl?: string;

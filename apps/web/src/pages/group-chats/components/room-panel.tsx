@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useContext,
   useMemo,
   useState,
@@ -32,6 +33,7 @@ import { useRoom } from '../use-room';
 import { RoomComposer, type RoomComposerHandle } from './room-composer';
 import { RoomReadMarker } from './room-read-marker';
 import { RoomMessage } from './room-message';
+import { RoomMessageNavigation } from './room-message-navigation';
 import { RoomAgentEditor } from './room-agent-editor';
 import { RoomMembersPanel } from './room-members-panel';
 import { AgentStatus } from './agent-status';
@@ -207,6 +209,10 @@ function RoomContent({
   const workspaceMenu = useContext(ChatWorkspaceMenuContext);
   const openMembersPanel = useContext(ChatWorkspacePanelContext);
   const [reply, setReply] = useState<GroupChatMessage | null>(null);
+  const [jumpTarget, setJumpTarget] = useState<string | null>(null);
+  const completeJump = useCallback((id: string) => {
+    setJumpTarget((current) => (current === id ? null : current));
+  }, []);
   const room = state.room!;
   const agents = room.agents ?? [];
   const bot = agents.find((agent) => agent.id === room.botAgentId);
@@ -230,6 +236,19 @@ function RoomContent({
     fallback ||
     t('groupChat.unknownMember');
   const byId = new Map(state.messages.map((message) => [message.id, message]));
+  const ownChoiceResponses = new Map<string, string[]>();
+  for (const message of state.messages) {
+    if (
+      message.senderKind === 'user' &&
+      message.senderId === userId &&
+      message.choiceResponse
+    ) {
+      ownChoiceResponses.set(
+        message.choiceResponse.sourceMessageId,
+        message.choiceResponse.selectedOptions,
+      );
+    }
+  }
   return (
     <section
       className="flex min-h-0 min-w-0 flex-1 flex-col"
@@ -237,10 +256,15 @@ function RoomContent({
     >
       <header
         data-chat-header
-        className="flex min-h-16 shrink-0 items-center gap-3 border-b px-4 py-3"
+        className="flex min-h-13 shrink-0 items-center gap-1.5 border-b px-3 py-0.5 sm:min-h-16 sm:gap-3 sm:px-4 sm:py-3"
       >
         {projectId && (
-          <Button asChild variant="ghost" size="icon-sm">
+          <Button
+            asChild
+            variant="ghost"
+            size="icon-sm"
+            className="size-11 sm:size-8"
+          >
             <Link
               to="/projects/$projectId"
               params={{ projectId }}
@@ -250,14 +274,19 @@ function RoomContent({
             </Link>
           </Button>
         )}
-        <div className="min-w-0 flex-1">
-          {roomSwitcher ?? (
-            <h1 className="truncate text-sm font-semibold">
-              {t('groupChat.heading')}
-            </h1>
-          )}
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            <Badge variant="secondary" className="text-[10px]">
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:block">
+          <div className="min-w-0 sm:contents">
+            {roomSwitcher ?? (
+              <h1 className="truncate text-sm font-semibold">
+                {t('groupChat.heading')}
+              </h1>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5 sm:mt-1 sm:flex-wrap">
+            <Badge
+              variant="secondary"
+              className="hidden text-[10px] sm:inline-flex"
+            >
               {t(room.projectId ? 'groupChat.project' : 'groupChat.personal')}
             </Badge>
             {bot && <AgentStatus agent={bot} />}
@@ -267,7 +296,7 @@ function RoomContent({
           data-group-chat-members
           type="button"
           onClick={() => openMembersPanel?.()}
-          className="flex shrink-0 items-center gap-2 rounded-md p-1 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-md p-1 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0 sm:min-w-0"
           aria-label={t('groupChat.members', { count: members })}
         >
           {room.projectId && (
@@ -288,11 +317,21 @@ function RoomContent({
             </AvatarGroup>
           )}
           <Users className="size-4 sm:hidden" />
-          <span className="text-xs text-muted-foreground">
+          <span
+            className="text-xs text-muted-foreground sm:hidden"
+            aria-hidden="true"
+          >
+            {members}
+          </span>
+          <span className="hidden text-xs text-muted-foreground sm:inline">
             {t('groupChat.members', { count: members })}
           </span>
         </button>
-        {workspaceMenu}
+        {workspaceMenu && (
+          <div className="flex shrink-0 items-center max-sm:[&_button]:size-11">
+            {workspaceMenu}
+          </div>
+        )}
       </header>
       {bot?.error && (
         <div
@@ -347,9 +386,17 @@ function RoomContent({
           />
         }
       >
+        <RoomMessageNavigation
+          targetId={jumpTarget}
+          firstMessageId={state.messages[0]?.id}
+          hasEarlier={state.hasEarlier}
+          loadingEarlier={state.loadingEarlier}
+          loadEarlier={state.loadEarlier}
+          onComplete={completeJump}
+        />
         <ChatHistoryLoader
           hasEarlier={state.hasEarlier}
-          loading={state.loadingEarlier}
+          loading={state.loadingEarlier || jumpTarget !== null}
           loadEarlier={state.loadEarlier}
           firstTurnId={state.messages[0]?.id}
         />
@@ -377,6 +424,12 @@ function RoomContent({
               message.targetAgentId ? name(message.targetAgentId) : undefined
             }
             onReply={() => setReply(message)}
+            onJumpToReply={() => {
+              if (message.replyToId) setJumpTarget(message.replyToId);
+            }}
+            loadingReply={
+              jumpTarget !== null && jumpTarget === message.replyToId
+            }
             onMention={
               message.senderKind !== 'user' &&
               mentionMembers.has(message.senderId)
@@ -385,6 +438,10 @@ function RoomContent({
             }
             onReact={(emoji, active) => state.react(message.id, emoji, active)}
             onRespondUi={(id, data) => state.respondUi(message.id, id, data)}
+            submittedChoices={ownChoiceResponses.get(message.id)}
+            onRespondChoices={(id, selectedOptions) =>
+              state.respondChoices(message.id, id, selectedOptions)
+            }
           />
         ))}
         <RoomReadMarker

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { createDeepSeekResponsesModel } from '../providers/deepseek.js';
 import type { OpenAICompatibleConfig } from '@mastra/core/llm';
 import type {
   Processor,
@@ -42,7 +43,7 @@ export function modelResponseScope({ reference, model }: Selection) {
 export function compatiblePrompt(
   prompt: ProcessLLMRequestArgs['prompt'],
   scope: string,
-  deepseek: boolean,
+  deepseekChat: boolean,
 ): ProcessLLMRequestArgs['prompt'] {
   return prompt.flatMap((message): ProcessLLMRequestArgs['prompt'] => {
     if (message.role !== 'assistant' && message.role !== 'tool')
@@ -55,7 +56,7 @@ export function compatiblePrompt(
         {
           ...part,
           providerOptions:
-            sameOrigin && !deepseek ? part.providerOptions : undefined,
+            sameOrigin && !deepseekChat ? part.providerOptions : undefined,
         },
       ];
     });
@@ -65,7 +66,7 @@ export function compatiblePrompt(
         ...message,
         content,
         providerOptions:
-          deepseek && message.role === 'assistant'
+          deepseekChat && message.role === 'assistant'
             ? {
                 openaiCompatible: {
                   // Old or foreign turns have no DeepSeek reasoning. An explicit empty
@@ -83,7 +84,7 @@ export function compatiblePrompt(
   });
 }
 
-/** Use Mastra's native model routing and message hooks; no SDK or fetch wrapper. */
+/** Scope replay metadata and select the provider's native wire format per step. */
 export class ModelCompatibilityProcessor implements Processor {
   readonly id = 'model-compatibility';
 
@@ -106,7 +107,8 @@ export class ModelCompatibilityProcessor implements Processor {
         /(?:^|\/)deepseek(?:[-/:]|$)/i.test(config.modelId) ||
         /^https?:\/\/api\.deepseek\.com(?:\/|$)/i.test(config.url ?? ''));
     args.state.scope = modelResponseScope(selection);
-    args.state.deepseek = deepseek;
+    const deepseekResponses = deepseek && config.api === 'responses';
+    args.state.deepseekChat = deepseek && !deepseekResponses;
     const providerOptions: NonNullable<Selection['providerOptions']> = {
       ...selection.providerOptions,
     };
@@ -120,29 +122,31 @@ export class ModelCompatibilityProcessor implements Processor {
           options.thinking !== null &&
           'type' in options.thinking &&
           options.thinking.type === 'disabled');
-      providerOptions.deepseek = {
-        ...options,
-        thinking: { type: disabled ? 'disabled' : 'enabled' },
-        ...(!disabled
-          ? {
-              reasoningEffort:
-                effort === 'minimal' || effort === 'low'
-                  ? 'low'
-                  : effort === 'max' || effort === 'ultra'
-                    ? 'max'
-                    : 'high',
-            }
-          : { reasoningEffort: undefined }),
-      };
+      const reasoningEffort = disabled
+        ? 'none'
+        : effort === 'minimal' || effort === 'low'
+          ? 'low'
+          : effort === 'max' || effort === 'ultra'
+            ? 'max'
+            : 'high';
+      providerOptions.deepseek = deepseekResponses
+        ? { reasoningEffort }
+        : {
+            ...options,
+            thinking: { type: disabled ? 'disabled' : 'enabled' },
+            reasoningEffort: disabled ? undefined : reasoningEffort,
+          };
     } else if (config?.api === 'responses') {
       providerOptions.openai = { ...providerOptions.openai, store: false };
     }
     return {
-      // The native compatible chat adapter round-trips reasoning_content. The
-      // Responses adapter currently drops DeepSeek's reasoning_text events.
-      model: deepseek
-        ? { ...config!, providerId: 'deepseek', api: 'chat' }
-        : selection.model,
+      // Open Responses preserves reasoning_text and serializes tool images as
+      // input_image. Honor the selected protocol instead of forcing Chat.
+      model: deepseekResponses
+        ? await createDeepSeekResponsesModel(config)
+        : deepseek
+          ? { ...config!, providerId: 'deepseek' }
+          : selection.model,
       providerOptions,
       ...(selection.modelSettings
         ? { modelSettings: selection.modelSettings }
@@ -156,7 +160,11 @@ export class ModelCompatibilityProcessor implements Processor {
   }: ProcessLLMRequestArgs): ProcessLLMRequestResult {
     if (typeof state.scope !== 'string') return;
     return {
-      prompt: compatiblePrompt(prompt, state.scope, state.deepseek === true),
+      prompt: compatiblePrompt(
+        prompt,
+        state.scope,
+        state.deepseekChat === true,
+      ),
     };
   }
 

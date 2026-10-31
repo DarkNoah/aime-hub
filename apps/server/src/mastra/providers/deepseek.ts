@@ -1,3 +1,8 @@
+import { createOpenResponses } from '@ai-sdk/open-responses';
+import {
+  resolveModelConfig,
+  type OpenAICompatibleConfig,
+} from '@mastra/core/llm';
 import { z } from 'zod';
 import { allowAllNetworks } from '../../modules/network/policy.js';
 import { requestProviderJson } from '../../modules/providers/network.js';
@@ -26,6 +31,26 @@ const fetchResponseSchema = z.object({
   title: z.string(),
   content: z.string(),
 });
+
+/** DeepSeek uses plaintext reasoning.content, not OpenAI's encrypted reasoning. */
+export async function createDeepSeekResponsesModel(
+  config: Extract<OpenAICompatibleConfig, { providerId: string }>,
+) {
+  if (!config.url)
+    throw new Error('DeepSeek Responses requires a provider URL');
+  const native = createOpenResponses({
+    name: 'deepseek',
+    url: `${config.url.replace(/\/+$/, '')}/responses`,
+    apiKey: config.apiKey ?? '',
+    headers: config.headers,
+  })(config.modelId);
+  // Mastra's public resolver wraps generate as a stream and hides credentials
+  // from tracing. Keep the V4 model directly, without a V2 router boundary.
+  const model = await resolveModelConfig(native);
+  if (model.specificationVersion !== 'v4')
+    throw new Error('Expected an Open Responses V4 model');
+  return model;
+}
 
 export class DeepSeekProvider extends OpenAICompatibleProvider {
   constructor(

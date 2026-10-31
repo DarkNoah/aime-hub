@@ -8,7 +8,7 @@ import type { DataSource } from 'typeorm';
 import { Setting } from '@aime/db';
 import type { ToolId, ToolConfig } from '@aime/shared/tools';
 import {
-  isOcrProvider,
+  providerModelTypes,
   modelSupportsType,
   providerSupportsWebTool,
 } from '@aime/shared/providers';
@@ -274,7 +274,7 @@ export class ToolService {
       const provider = await this.providers.getProviderInstance(
         model.providerId,
       );
-      if (!isOcrProvider(provider.type))
+      if (!providerModelTypes(provider.type).includes('ocr'))
         throw new Error('Invalid OCR provider');
       return { reference, model: provider.ocrModel(model.id) };
     } catch {

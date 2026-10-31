@@ -105,7 +105,8 @@ export function createChatRunner(
   workspaceRoot: string,
   projects?: Pick<ProjectService, 'get'>,
   tools?: Pick<ToolService, 'buildTools'>,
-  agents?: Pick<AgentService, 'getConfig' | 'getAgent'>,
+  agents?: Pick<AgentService, 'getConfig' | 'getAgent'> &
+    Partial<Pick<AgentService, 'available'>>,
   usage?: Pick<UsageService, 'record'> &
     Partial<Pick<UsageService, 'latestThreadUsage' | 'threadConsumedTokens'>>,
   environmentVariables?: Pick<EnvironmentVariableService, 'getEnv'>,
@@ -576,6 +577,9 @@ export function createChatRunner(
               agentOptions,
               {
                 service: groupChats!,
+                availableAgents: agents?.available
+                  ? (userId) => agents.available!({ userId, projectId })
+                  : undefined,
                 userId: actorId ?? userId,
                 ...roomBinding,
                 threadId: thread.id,

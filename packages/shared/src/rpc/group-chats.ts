@@ -11,6 +11,7 @@ import {
   groupChatAgentUpdateSchema,
   groupChatReactionSchema,
   groupChatUiResponseSchema,
+  groupChatChoiceResponseSchema,
   groupChatA2aMemberCreateSchema,
   groupChatA2aMemberUpdateSchema,
   type GroupChatA2AMember,
@@ -157,6 +158,20 @@ export const groupChatsContract = {
       z.object({
         params: params.extend({ messageId: id }),
         body: groupChatReactionSchema,
+      }),
+    )
+    .output(type<GroupChatMessage>()),
+  respondChoices: procedure
+    .route({
+      method: 'POST',
+      path: '/group-chats/{roomId}/messages/{messageId}/choices-response',
+      inputStructure: 'detailed',
+      successStatus: 201,
+    })
+    .input(
+      z.object({
+        params: params.extend({ messageId: id }),
+        body: groupChatChoiceResponseSchema,
       }),
     )
     .output(type<GroupChatMessage>()),

@@ -2,7 +2,14 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createTool, type ToolExecutionContext } from '@mastra/core/tools';
 import { z } from 'zod';
 import { intelligentUiInputSchema } from '@aime/shared/intelligent-ui';
-import { roomAgentMention } from '@aime/shared/group-chats';
+import type { AvailableAgents } from '@aime/shared/agents';
+import { updateThreadSchema } from '@aime/shared/threads';
+import {
+  groupChatAgentCreateSchema,
+  groupChatAgentUpdateSchema,
+  groupChatChoicesSchema,
+  roomAgentMention,
+} from '@aime/shared/group-chats';
 import type { GroupChatService } from '../../modules/group-chats/service.js';
 import { BaseTool, toolArray } from '../../modules/tools/base.js';
 
@@ -11,12 +18,14 @@ export class BotAgentTools extends BaseTool {
   override readonly hidden = true;
   override readonly ids = [
     'send_message',
+    'reaction',
     'get_room_info',
     'get_room_messages',
     'search_room_messages',
     'get_room_recent_messages',
     'future_plan',
     'send_ui',
+    'room_management',
   ];
 
   constructor(private readonly room?: GroupChatAgentContext) {
@@ -24,7 +33,13 @@ export class BotAgentTools extends BaseTool {
   }
 
   protected createTools() {
-    return this.room ? toolArray(createGroupChatTools(this.room)) : [];
+    if (!this.room) return [];
+    return [
+      ...toolArray(createGroupChatTools(this.room)),
+      ...(this.room.role === 'bot'
+        ? [createRoomManagementTool(this.room)]
+        : []),
+    ];
   }
 }
 
@@ -39,7 +54,11 @@ export type GroupChatAgentContext = {
     | 'recentMessages'
     | 'search'
     | 'createPlan'
+    | 'addAgent'
+    | 'updateAgent'
+    | 'removeAgent'
   >;
+  availableAgents?: (userId: string) => Promise<AvailableAgents>;
   userId: string;
   roomId: string;
   memberId: string;
@@ -100,61 +119,141 @@ async function runTool<T>(
   }
 }
 
-export function createGroupChatTools(context: GroupChatAgentContext) {
-  const { service, roomId, memberId } = context;
-  const assertActive = async (userId: string) => {
-    const member = await service.getAgent(userId, roomId, memberId);
+function runInRoom<T>(
+  context: GroupChatAgentContext,
+  execution: ToolExecutionContext,
+  action: (userId: string) => Promise<T>,
+  botOnly = false,
+) {
+  return runTool(execution, async () => {
+    const actor = execution.requestContext?.get('userId');
+    const userId = typeof actor === 'string' ? actor : context.userId;
+    const member = await context.service.getAgent(
+      userId,
+      context.roomId,
+      context.memberId,
+    );
     if (!member.enabled || member.threadId !== context.threadId)
       throw new Error('This room agent is no longer active.');
-  };
+    if (botOnly && (context.role !== 'bot' || member.role !== 'bot'))
+      throw new Error('Room management is only available to the room bot.');
+    if (execution.abortSignal?.aborted) return abortedMessage;
+    return action(userId);
+  });
+}
+
+/** Only the leader mounts this tool; mutations reuse the room service's permissions and lifecycle. */
+export function createRoomManagementTool(context: GroupChatAgentContext) {
+  const { service, roomId } = context;
+  return createTool({
+    id: 'room_management',
+    title: '房间管理',
+    description: `Manage this room's local Agent members. Only the room bot can use this tool, with the current user's existing room management permissions. Inputs are action and args only; the room and acting user are bound by the server.
+list_agents: args {}. Returns current members and available Agent configurations (including project/workspace Agents). Use configuration IDs from availableAgents to add or switch an Agent; use memberId from members or get_room_info to update/remove a room member.
+add_agent: args {name, settings: {agentId, model?, reasoningEffort?}, enabled?}. Adds a worker with its own dedicated thread. Use the chosen configuration's name by default; model defaults to null and reasoningEffort to auto.
+update_agent: args {memberId, name?, settings?: {agentId?, model?, reasoningEffort?}, enabled?, idleWakeHours?}. Only supplied fields change, including within settings. null model restores the configured default. The sole bot cannot be renamed, disabled, switched to another Agent or deleted; only its model, reasoningEffort and idleWakeHours can change. idleWakeHours is bot-only; null disables idle wake-ups. Changing the bot's own model/settings interrupts its current run.
+remove_agent: args {memberId}. Removes a worker and its dedicated thread. Does not delete the underlying Agent configuration. Read current members before changing or removing them.`,
+    inputSchema: z.object({
+      action: z.enum([
+        'list_agents',
+        'add_agent',
+        'update_agent',
+        'remove_agent',
+      ]),
+      args: z.record(z.string(), z.unknown()),
+    }),
+    execute: async ({ action, args }, execution) =>
+      runInRoom(
+        context,
+        execution,
+        async (userId) => {
+          if (action === 'list_agents') {
+            const room = await service.get(userId, roomId);
+            if (execution.abortSignal?.aborted) return abortedMessage;
+            if (!context.availableAgents)
+              throw new Error(
+                'Available Agent configurations cannot be loaded.',
+              );
+            const catalog = await context.availableAgents(userId);
+            return {
+              members: room.agents,
+              availableAgents: catalog.agents,
+              defaultAgentId: catalog.defaultAgentId,
+              canManage: room.canManage,
+            };
+          }
+          if (action === 'add_agent')
+            return service.addAgent(
+              userId,
+              roomId,
+              groupChatAgentCreateSchema.parse(args),
+            );
+          const { memberId } = z.object({ memberId: z.string() }).parse(args);
+          if (action === 'remove_agent') {
+            await service.removeAgent(userId, roomId, memberId);
+            return { memberId, removed: true };
+          }
+          const patch = groupChatAgentUpdateSchema
+            .extend({
+              settings: updateThreadSchema
+                .pick({
+                  agentId: true,
+                  model: true,
+                  reasoningEffort: true,
+                })
+                .optional(),
+            })
+            .parse(args);
+          if (!Object.values(patch).some((value) => value !== undefined))
+            throw new Error('Provide at least one Agent field to update.');
+          const previous = await service.getAgent(userId, roomId, memberId);
+          if (execution.abortSignal?.aborted) return abortedMessage;
+          return service.updateAgent(
+            userId,
+            roomId,
+            memberId,
+            groupChatAgentUpdateSchema.parse({
+              ...patch,
+              settings: patch.settings
+                ? { ...previous.settings, ...patch.settings }
+                : undefined,
+            }),
+          );
+        },
+        true,
+      ),
+  });
+}
+
+export function createGroupChatTools(context: GroupChatAgentContext) {
+  const { service, roomId, memberId } = context;
   const run = <T>(
     execution: ToolExecutionContext,
     action: (userId: string) => Promise<T>,
-  ) =>
-    runTool(execution, async () => {
-      const actor = execution.requestContext?.get('userId');
-      const userId = typeof actor === 'string' ? actor : context.userId;
-      await assertActive(userId);
-      if (execution.abortSignal?.aborted) return abortedMessage;
-      return action(userId);
-    });
+  ) => runInRoom(context, execution, action);
 
   return {
     send_message: createTool({
       id: 'send_message',
       description:
-        'Publish a visible room message, reply, reaction or file. Returns only the affected message ID as plain text on success. To delegate, include the exact @mention from get_room_info in text; each mentioned room agent wakes in its own existing thread. Use action send for delegation too. Your final assistant response stays private. Use messageId for replies/reactions. File paths must belong to this room workspace.',
+        'Publish a visible room message, reply or file. For a simple question, put the question in text and add choices: { options: ["Option A", "Option B"], multiple: false }. Single choice sends on click; multiple: true lets the user select several options then send. Returns immediately without waiting for an answer; a human selection becomes a new user message delivered immediately to the bot thread. Returns plain text: Send message success Id: <id>. To delegate, include the exact @mention from get_room_info in text; each mentioned room agent wakes in its own existing thread. Use action send for delegation too. Your final assistant response stays private. Use messageId for replies and the separate reaction tool for reactions. File paths must belong to this room workspace.',
       inputSchema: z.object({
-        action: z.enum(['send', 'reply', 'reaction', 'file']).default('send'),
+        action: z.enum(['send', 'reply', 'file']).default('send'),
         text: z.string().optional(),
         messageId: z.string().optional(),
-        emoji: z.string().optional(),
-        active: z.boolean().optional(),
+        choices: groupChatChoicesSchema.optional(),
         files: z
           .array(z.object({ path: z.string(), name: z.string() }))
           .optional(),
       }),
       execute: async (input, execution) =>
         run(execution, async (userId) => {
-          if (input.action === 'reaction') {
-            if (!input.messageId || !input.emoji)
-              throw new Error('Provide messageId and emoji for a reaction.');
-            const message = await service.react(
-              userId,
-              roomId,
-              input.messageId,
-              {
-                emoji: input.emoji,
-                active: input.active ?? true,
-              },
-              memberId,
-            );
-            return message.id;
-          }
           if (input.action === 'reply' && !input.messageId)
             throw new Error('Provide messageId for the message to reply to.');
           if (input.action === 'file' && !input.files?.length)
             throw new Error('Provide at least one workspace file.');
+          if (input.choices && !input.text?.trim())
+            throw new Error('Provide the question in text when using choices.');
           if (!input.text?.trim() && !input.files?.length)
             throw new Error('Provide message text or a workspace file.');
           const message = await service.sendAgent(userId, roomId, memberId, {
@@ -164,8 +263,50 @@ export function createGroupChatTools(context: GroupChatAgentContext) {
               input.files!.map((file) => file.name).join(', '),
             ...(input.messageId ? { replyToId: input.messageId } : {}),
             ...(input.files ? { files: input.files } : {}),
+            ...(input.choices ? { choices: input.choices } : {}),
           });
-          return message.id;
+          return `Send message success Id: ${message.id}`;
+        }),
+    }),
+    reaction: createTool({
+      id: 'reaction',
+      description:
+        'Add or remove your own reactions on one or more room messages. Provide a reactions list of messageId, emoji and optional active (true adds, false removes; defaults to true). Different messages can use different emojis; use 👀 for read/received, ✅ for completed and ⭐ for bookmarks. Entries run in order, including repeated message IDs. Returns a plain-text result for each entry; a failed entry does not undo successful entries or prevent later entries. Reactions do not send new messages or wake agents. Aborting stops the remaining entries.',
+      inputSchema: z.object({
+        reactions: z.array(
+          z.object({
+            messageId: z.string(),
+            emoji: z.string(),
+            active: z.boolean().optional(),
+          }),
+        ),
+      }),
+      execute: async (input, execution) =>
+        run(execution, async (userId) => {
+          if (!input.reactions.length)
+            throw new Error('Provide at least one reaction.');
+          const results: string[] = [];
+          for (const { messageId, emoji, active = true } of input.reactions) {
+            if (execution.abortSignal?.aborted) return abortedMessage;
+            try {
+              await service.react(
+                userId,
+                roomId,
+                messageId,
+                { emoji, active },
+                memberId,
+              );
+              results.push(
+                `OK ${messageId}: ${active ? 'added' : 'removed'} ${emoji}`,
+              );
+            } catch (error) {
+              if (execution.abortSignal?.aborted) return abortedMessage;
+              results.push(
+                `ERROR ${messageId} (${emoji}): ${error instanceof Error ? error.message : 'Reaction failed'}`,
+              );
+            }
+          }
+          return results.join('\n');
         }),
     }),
     get_room_info: createTool({

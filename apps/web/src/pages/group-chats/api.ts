@@ -75,6 +75,16 @@ export const groupChatApi = {
       params: { roomId, messageId },
       body: { id, data },
     }),
+  respondChoices: (
+    roomId: string,
+    messageId: string,
+    id: string,
+    selectedOptions: string[],
+  ) =>
+    api.groupChats.respondChoices({
+      params: { roomId, messageId },
+      body: { id, selectedOptions },
+    }),
   addAgent: (roomId: string, body: GroupChatAgentInput) =>
     api.groupChats.addAgent({ params: { roomId }, body }),
   updateAgent: (roomId: string, agentId: string, body: GroupChatAgentUpdate) =>

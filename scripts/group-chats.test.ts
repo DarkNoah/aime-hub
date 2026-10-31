@@ -9,11 +9,14 @@ import {
   groupChatMessageSchema,
   mentionedRoomAgentIds,
   roomAgentMention,
+  type GroupChatAgent,
 } from '@aime/shared/group-chats';
+import { createRoomManagementTool } from '../apps/server/src/mastra/tools/bot-agent.js';
 import { groupChatMessagesQuery } from '../packages/shared/src/rpc/group-chats.js';
 import { GroupChatA2aMembers1780000030000 } from '../packages/db/src/migrations/1780000030000-group-chat-a2a-members.js';
 import { GroupChatA2aMemberDeletion1780000031000 } from '../packages/db/src/migrations/1780000031000-group-chat-a2a-member-deletion.js';
 import { GroupChatA2aCard1780000033000 } from '../packages/db/src/migrations/1780000033000-group-chat-a2a-card.js';
+import { GroupChatChoices1780000034000 } from '../packages/db/src/migrations/1780000034000-group-chat-choices.js';
 import { GroupChatIdleWake1780000029000 } from '../packages/db/src/migrations/1780000029000-group-chat-idle-wake.js';
 import { GroupChatAgents1780000026000 } from '../packages/db/src/migrations/1780000026000-group-chat-agents.js';
 import { GroupChatMembers1780000027000 } from '../packages/db/src/migrations/1780000027000-group-chat-members.js';
@@ -131,6 +134,7 @@ test(
     await new GroupChatA2aMemberDeletion1780000031000().up(runner);
     await new GroupChatA2aCard1780000033000().up(runner);
     await new GroupChatReads1780000032000().up(runner);
+    await new GroupChatChoices1780000034000().up(runner);
     assert.equal(
       (
         await runner.query(
@@ -158,6 +162,125 @@ test(
       typeof error === 'object' &&
       'code' in error &&
       error.code === value;
+
+    await t.test(
+      'bot room management persists agent changes with permissions and lifecycle cleanup',
+      async () => {
+        const room = await rooms.create('alice', {
+          title: 'Managed agents',
+          projectId: 'project000000001',
+        });
+        const otherRoom = await rooms.create('alice', {
+          title: 'Other managed agents',
+        });
+        const bot = room.agents[0];
+        const foreign = await rooms.addAgent('alice', otherRoom.id, {
+          name: 'Foreign',
+          settings: { model: null, reasoningEffort: 'auto' },
+        });
+        const removed: string[] = [];
+        rooms.setLifecycle({
+          ensureAgent: async () => {},
+          removeAgents: async (_room, members) => {
+            removed.push(...members.map((member) => member.threadId));
+          },
+        });
+        const invoke = (
+          userId: string,
+          action: 'add_agent' | 'update_agent' | 'remove_agent',
+          args: Record<string, unknown>,
+        ) => {
+          const tool = createRoomManagementTool({
+            service: rooms,
+            userId,
+            roomId: room.id,
+            memberId: bot.id,
+            threadId: bot.threadId,
+            role: 'bot',
+            memoryPath: '/MEMORY.md',
+          });
+          return tool.execute!(
+            { action, args },
+            {} as Parameters<NonNullable<typeof tool.execute>>[1],
+          );
+        };
+        try {
+          const input = {
+            name: 'Research',
+            settings: {
+              agentId: 'code:code',
+              model: 'test/model',
+              reasoningEffort: 'high',
+            },
+          };
+          await assert.rejects(
+            invoke('bob', 'add_agent', input),
+            code('FORBIDDEN'),
+          );
+          const worker = (await invoke(
+            'alice',
+            'add_agent',
+            input,
+          )) as GroupChatAgent;
+          assert.notEqual(worker.threadId, bot.threadId);
+          await assert.rejects(
+            invoke('bob', 'update_agent', { memberId: worker.id, name: 'No' }),
+            code('FORBIDDEN'),
+          );
+          await assert.rejects(
+            invoke('alice', 'update_agent', {
+              memberId: foreign.id,
+              name: 'No',
+            }),
+            code('NOT_FOUND'),
+          );
+          await invoke('alice', 'update_agent', {
+            memberId: worker.id,
+            name: 'Renamed',
+            enabled: false,
+            settings: { reasoningEffort: 'low' },
+          });
+          const saved = await rooms.getAgent('alice', room.id, worker.id);
+          assert.equal(saved.name, 'Renamed');
+          assert.equal(saved.enabled, false);
+          assert.deepEqual(saved.settings, {
+            agentId: 'code:code',
+            model: 'test/model',
+            reasoningEffort: 'low',
+          });
+          await assert.rejects(
+            invoke('alice', 'update_agent', {
+              memberId: bot.id,
+              enabled: false,
+            }),
+            code('FORBIDDEN'),
+          );
+          await assert.rejects(
+            invoke('alice', 'remove_agent', { memberId: bot.id }),
+            code('CONFLICT'),
+          );
+          await assert.rejects(
+            invoke('alice', 'remove_agent', { memberId: foreign.id }),
+            code('NOT_FOUND'),
+          );
+          await assert.rejects(
+            invoke('bob', 'remove_agent', { memberId: worker.id }),
+            code('FORBIDDEN'),
+          );
+          await invoke('alice', 'remove_agent', { memberId: worker.id });
+          assert.deepEqual(removed, [worker.threadId]);
+          await assert.rejects(
+            rooms.getAgent('alice', room.id, worker.id),
+            code('NOT_FOUND'),
+          );
+          assert.equal((await rooms.get('alice', room.id)).agents.length, 1);
+        } finally {
+          rooms.setLifecycle({ ensureAgent: async () => {} });
+          await rooms.remove('alice', room.id);
+          await rooms.remove('alice', otherRoom.id);
+        }
+      },
+    );
 
     await t.test(
       'unread receipts isolate members, exclude own messages and reactions, and never consume a newer reply',
@@ -1010,6 +1133,154 @@ test(
     );
 
     await t.test(
+      'choice replies persist and immediately wake only the bot with the human identity',
+      async () => {
+        const room = await rooms.create('alice', { title: 'Choices' });
+        await rooms.addMember('alice', room.id, 'bob');
+        const other = await rooms.create('alice', { title: 'Other choices' });
+        const bot = room.agents.find((agent) => agent.role === 'bot')!;
+        const worker = await rooms.addAgent('alice', room.id, {
+          name: 'Research',
+          settings: { agentId: null, model: null, reasoningEffort: 'auto' },
+        });
+        const question = await rooms.sendAgent('alice', room.id, worker.id, {
+          id: 'choicequestion01',
+          text: '接下来做什么？',
+          choices: { options: ['调研', '@Research 检查'], multiple: false },
+        });
+        assert.deepEqual(question.choices, {
+          options: ['调研', '@Research 检查'],
+          multiple: false,
+        });
+        assert.deepEqual(
+          (await rooms.messages('bob', room.id, { limit: 50 })).messages[0]
+            .choices,
+          question.choices,
+        );
+        const response = await rooms.respondChoices(
+          'bob',
+          room.id,
+          question.id,
+          {
+            id: 'choiceresponse01',
+            selectedOptions: ['@Research 检查'],
+          },
+        );
+        assert.equal(response.senderKind, 'user');
+        assert.equal(response.senderId, 'bob');
+        assert.equal(response.senderName, 'Bob');
+        assert.equal(response.replyToId, question.id);
+        assert.equal(response.text, '接下来做什么？\n\n选择：@Research 检查');
+        assert.deepEqual(response.choiceResponse, {
+          sourceMessageId: question.id,
+          selectedOptions: ['@Research 检查'],
+        });
+        const events = await database.query(
+          'SELECT agent_id,actor_id,kind,text,due_at <= now() AS due FROM group_chat_events WHERE room_id=$1',
+          [room.id],
+        );
+        assert.equal(events.length, 1);
+        assert.equal(events[0].agent_id, bot.id);
+        assert.equal(events[0].actor_id, 'bob');
+        assert.equal(events[0].kind, 'task');
+        assert.equal(events[0].due, true);
+        assert.match(events[0].text, /from user Bob \(bob\)/);
+        assert.match(events[0].text, /接下来做什么/);
+        assert.match(events[0].text, /@Research 检查/);
+        const retries = await Promise.all(
+          Array.from({ length: 3 }, () =>
+            rooms.respondChoices('bob', room.id, question.id, {
+              id: response.id,
+              selectedOptions: ['@Research 检查'],
+            }),
+          ),
+        );
+        assert.ok(retries.every((item) => item.sequence === response.sequence));
+        assert.equal(
+          (
+            await database.query(
+              'SELECT id FROM group_chat_events WHERE room_id=$1',
+              [room.id],
+            )
+          ).length,
+          1,
+        );
+        await assert.rejects(
+          rooms.respondChoices('bob', room.id, question.id, {
+            id: response.id,
+            selectedOptions: ['调研'],
+          }),
+          code('CONFLICT'),
+        );
+        for (const selectedOptions of [
+          [],
+          ['未知'],
+          ['调研', '@Research 检查'],
+          ['调研', '调研'],
+        ])
+          await assert.rejects(
+            rooms.respondChoices('bob', room.id, question.id, {
+              id: 'invalidchoices01',
+              selectedOptions,
+            }),
+          );
+        await assert.rejects(
+          rooms.respondChoices('outsider', room.id, question.id, {
+            id: 'invalidchoices02',
+            selectedOptions: ['调研'],
+          }),
+          code('NOT_FOUND'),
+        );
+        await assert.rejects(
+          rooms.respondChoices('alice', other.id, question.id, {
+            id: 'invalidchoices03',
+            selectedOptions: ['调研'],
+          }),
+          code('NOT_FOUND'),
+        );
+        await assert.rejects(
+          rooms.respondChoices('bob', room.id, response.id, {
+            id: 'invalidchoices04',
+            selectedOptions: ['调研'],
+          }),
+          code('BAD_REQUEST'),
+        );
+        await assert.rejects(
+          rooms.sendAgent('alice', room.id, bot.id, {
+            id: 'invalidchoices05',
+            text: 'a'.repeat(20_000),
+            choices: { options: ['One'], multiple: false },
+          }),
+          code('BAD_REQUEST'),
+        );
+        const multi = await rooms.sendAgent('alice', room.id, bot.id, {
+          id: 'choicequestion02',
+          text: '选择交付内容',
+          choices: { options: ['报告', '代码', '测试'], multiple: true },
+        });
+        const multiple = await rooms.respondChoices('bob', room.id, multi.id, {
+          id: 'choiceresponse02',
+          selectedOptions: ['测试', '报告'],
+        });
+        assert.deepEqual(multiple.choiceResponse?.selectedOptions, [
+          '报告',
+          '测试',
+        ]);
+        assert.equal(
+          (
+            await rooms.respondChoices('bob', room.id, multi.id, {
+              id: multiple.id,
+              selectedOptions: ['报告', '测试'],
+            })
+          ).sequence,
+          multiple.sequence,
+        );
+        await rooms.remove('alice', room.id);
+        await rooms.remove('alice', other.id);
+      },
+    );
+
+    await t.test(
       'agent membership, reactions, revisions, unread cursors and nonblocking UI',
       async () => {
         const room = await rooms.create('alice', {
@@ -1645,6 +1916,63 @@ test(
         );
         assert.equal(sent.status, 201);
         assert.equal((await sent.json()).senderId, 'alice');
+        const question = await rooms.sendAgent(
+          'alice',
+          project.id,
+          project.botAgentId,
+          {
+            id: 'httpquestion0001',
+            text: 'Choose a task',
+            choices: { options: ['Research', 'Build'], multiple: false },
+          },
+        );
+        const choicePath = `/group-chats/${project.id}/messages/${question.id}/choices-response`;
+        assert.equal(
+          (
+            await request(
+              choicePath,
+              'POST',
+              {
+                id: 'httpchoice000001',
+                selectedOptions: ['Research'],
+              },
+              '',
+            )
+          ).status,
+          401,
+        );
+        assert.equal(
+          (
+            await request(choicePath, 'POST', {
+              id: 'httpchoice000001',
+              selectedOptions: ['Invalid'],
+            })
+          ).status,
+          400,
+        );
+        const choice = await request(choicePath, 'POST', {
+          id: 'httpchoice000001',
+          selectedOptions: ['Research'],
+          senderId: 'outsider',
+        });
+        assert.equal(choice.status, 201);
+        const choiceMessage = await choice.json();
+        assert.equal(choiceMessage.senderId, 'alice');
+        assert.deepEqual(choiceMessage.choiceResponse, {
+          sourceMessageId: question.id,
+          selectedOptions: ['Research'],
+        });
+        const rpcChoice = await request(
+          '/rpc/groupChats/respondChoices',
+          'POST',
+          {
+            json: {
+              params: { roomId: project.id, messageId: question.id },
+              body: { id: 'httpchoice000002', selectedOptions: ['Build'] },
+            },
+          },
+        );
+        assert.equal(rpcChoice.status, 200);
         assert.equal(
           (await request('/group-chats/unread', 'GET', undefined, '')).status,
           401,

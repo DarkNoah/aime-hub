@@ -326,6 +326,7 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       revoked = false,
       sendIds = [],
       earlierCalls = 0;
+    let failEarlier = false;
     const uploadSessions = new Map();
     const uploadedFiles = new Map();
     let failUpload = true;
@@ -665,6 +666,10 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
           if (before) {
             earlierCalls++;
             historyCursors.push(before);
+            if (failEarlier) {
+              failEarlier = false;
+              return failure('INTERNAL_ERROR', 500);
+            }
           }
           const found = messages.filter(
             (message) =>
@@ -1779,6 +1784,123 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     await page.screenshot({
       path: '/tmp/group-chat-desktop.png',
       fullPage: true,
+    });
+
+    // Reply navigation uses the real history hook and scroll container.
+    const navigationMessages = Array.from({ length: 160 }, (_, index) => ({
+      ...messages[0],
+      id: `navigation-${index + 1}`,
+      roomId,
+      sequence: String(index + 1),
+      revision: String(++revision),
+      text: `定位消息 ${index + 1}`,
+      files: [],
+      reactions: [],
+      replyToId:
+        index === 159
+          ? 'navigation-130'
+          : index === 158
+            ? 'navigation-5'
+            : index === 157
+              ? 'unavailable-message'
+              : null,
+    }));
+    messages.splice(0, messages.length, ...navigationMessages);
+    await page.reload();
+    const messageRow = (id) =>
+      page.locator(`[data-chat-turn="navigation-${id}"]`);
+    const jump = (id) =>
+      messageRow(id).getByRole('button', {
+        name: '跳转到原消息',
+        exact: true,
+      });
+    const expectNavigation = async (id) => {
+      await page.waitForFunction((id) => {
+        const element = document.querySelector(
+          `[data-chat-turn="navigation-${id}"]`,
+        );
+        if (!element?.hasAttribute('data-message-highlight')) return false;
+        const viewport = element.closest('[data-radix-scroll-area-viewport]');
+        const offset =
+          element.getBoundingClientRect().top -
+          viewport.getBoundingClientRect().top;
+        return offset >= 0 && offset <= 100;
+      }, id);
+      assert.equal(
+        await messageRow(id).evaluate(
+          (element) => element === document.activeElement,
+        ),
+        true,
+      );
+    };
+    const toLatest = async () => {
+      const button = page.getByRole('button', {
+        name: '跳至最新消息',
+        exact: true,
+      });
+      if (await button.isVisible()) await button.click();
+      await jump(160).waitFor();
+    };
+    await jump(160).waitFor();
+    const beforeNavigation = historyCursors.length;
+    await jump(160).click();
+    await expectNavigation(130);
+    assert.equal(historyCursors.length, beforeNavigation);
+    await toLatest();
+
+    // A failed history request leaves the reply available for retry.
+    failEarlier = true;
+    await jump(159).click();
+    await page
+      .getByText('操作失败，请重试。输入内容已保留。', { exact: true })
+      .waitFor();
+    assert.equal(await jump(159).isEnabled(), true);
+    assert.equal(await messageRow(5).count(), 0);
+    const beforeRetry = historyCursors.length;
+    await jump(159).click();
+    await expectNavigation(5);
+    assert.deepEqual(historyCursors.slice(beforeRetry), ['111', '61', '11']);
+    assert.equal(await page.locator('[data-chat-turn]').count(), 160);
+    await page.screenshot({ path: '/tmp/group-chat-reply-navigation.png' });
+    await page.waitForFunction(
+      () => !document.querySelector('[data-message-highlight]'),
+    );
+
+    // Polling new messages must not pull the user away from the original.
+    const originalTop = await messageRow(5).evaluate(
+      (element) => element.getBoundingClientRect().top,
+    );
+    messages.push({
+      ...navigationMessages[0],
+      id: 'navigation-161',
+      sequence: '161',
+      revision: String(++revision),
+      text: '定位期间的新消息',
+    });
+    await messageRow(161).waitFor({ state: 'attached' });
+    assert.ok(
+      Math.abs(
+        (await messageRow(5).evaluate(
+          (element) => element.getBoundingClientRect().top,
+        )) - originalTop,
+      ) < 4,
+    );
+
+    await toLatest();
+    await jump(158).click();
+    await page
+      .getByText('找不到原消息或该消息已不可用', { exact: true })
+      .waitFor();
+    assert.equal(await jump(158).isEnabled(), true);
+    assert.equal(historyCursors.length, beforeRetry + 3);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await toLatest();
+    await jump(160).focus();
+    await jump(160).press('Enter');
+    await expectNavigation(130);
+    await page.screenshot({
+      path: '/tmp/group-chat-reply-navigation-mobile.png',
     });
     revoked = true;
     await page

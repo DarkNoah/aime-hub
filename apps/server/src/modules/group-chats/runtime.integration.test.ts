@@ -102,6 +102,7 @@ test('native room agent publishes only tools, refreshes MEMORY.md and continues 
   const recentReads: string[] = [];
   const prompts: string[] = [];
   const catalogs: string[][] = [];
+  const catalogReads: unknown[] = [];
   let event = 1;
   const page: GroupChatMessages = {
     messages: [],
@@ -109,6 +110,11 @@ test('native room agent publishes only tools, refreshes MEMORY.md and continues 
     revision: '0',
   };
   const rooms = {
+    get: async (userId: string, roomId: string) => {
+      assert.equal(userId, 'alice');
+      assert.equal(roomId, member.roomId);
+      return { agents: [member], canManage: true };
+    },
     getAgent: async (userId: string, roomId: string, memberId: string) => {
       assert.equal(userId, 'alice');
       assert.equal(roomId, member.roomId);
@@ -168,6 +174,17 @@ test('native room agent publishes only tools, refreshes MEMORY.md and continues 
       catalogs.push(
         (tools ?? []).flatMap((tool) => ('name' in tool ? [tool.name] : [])),
       );
+      if (event === 3) {
+        if (call === 8)
+          return toolReply(
+            'room_management',
+            { action: 'list_agents', args: {} },
+            call,
+          );
+        assert.equal(call, 9);
+        assert.match(JSON.stringify(prompt), /Available room researcher/);
+        return textReply('Private final summary 3');
+      }
       if (call === 1 || call === 5)
         return toolReply('get_room_recent_messages', {}, call);
       assert.ok(JSON.stringify(prompt).includes('Alice Example'));
@@ -175,7 +192,11 @@ test('native room agent publishes only tools, refreshes MEMORY.md and continues 
       if (call === 2 || call === 6)
         return toolReply(
           'send_message',
-          { action: 'send', text: `Visible room delivery ${event}` },
+          {
+            action: 'send',
+            text: `Visible room delivery ${event}`,
+            choices: { options: ['Research', 'Implement'], multiple: false },
+          },
           call,
         );
       if (call === 3)
@@ -241,6 +262,21 @@ test('native room agent publishes only tools, refreshes MEMORY.md and continues 
         assert.fail('Room leader must not resolve ordinary agent defaults'),
       getAgent: async () =>
         assert.fail('Room leader must construct its own hidden agent'),
+      available: async (scope) => {
+        catalogReads.push(scope);
+        return {
+          defaultAgentId: 'code:assistant',
+          agents: [
+            {
+              id: 'code:assistant',
+              name: 'Available room researcher',
+              description: 'Research room tasks',
+              model: null,
+              source: 'code',
+            },
+          ],
+        };
+      },
     },
     undefined,
     undefined,
@@ -298,6 +334,10 @@ test('native room agent publishes only tools, refreshes MEMORY.md and continues 
   assert.deepEqual(recentReads, ['alice']);
   assert.equal(publications.length, 2);
   assert.equal(publications[0].text, 'Visible room delivery 1');
+  assert.deepEqual(publications[0].choices, {
+    options: ['Research', 'Implement'],
+    multiple: false,
+  });
   assert.equal(publications[1].ui?.title, 'Task choices');
   assert.equal(
     publications.some((message) => message.text.includes('Private final')),
@@ -308,6 +348,7 @@ test('native room agent publishes only tools, refreshes MEMORY.md and continues 
     assert.ok(names.includes('send_message'));
     assert.ok(names.includes('send_ui'));
     assert.ok(names.includes('get_room_recent_messages'));
+    assert.ok(names.includes('room_management'));
     assert.ok(
       !names.some(
         (name) =>
@@ -342,6 +383,12 @@ test('native room agent publishes only tools, refreshes MEMORY.md and continues 
       ),
     ),
   );
+  event = 3;
+  await run();
+  await settled(threads);
+  assert.deepEqual(catalogReads, [{ userId: 'alice', projectId: undefined }]);
+  assert.equal(prompts.length, 9);
+  assert.equal(publications.length, 3);
   await threads.ensureGroupChatThread({
     ...member,
     memberId: 'roomworker000001',

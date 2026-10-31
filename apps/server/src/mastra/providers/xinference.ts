@@ -1,6 +1,7 @@
 import type { EmbeddingModel, RerankingModel, SpeechModel } from 'ai';
 import type { OpenAICompatibleConfig } from '@mastra/core/llm';
 import { z } from 'zod';
+import { createDocumentOcrModel } from './xinference-ocr.js';
 import {
   BaseProvider,
   type ProviderConfig,
@@ -18,7 +19,7 @@ const modelsResponse = z.object({
       z.object({
         id: z.string().trim().min(1).max(256),
         model_name: z.string().optional(),
-        model_type: z.string(),
+        model_type: z.string().nullish(),
         model_ability: z.array(z.string()).default([]),
         max_tokens: z.number().int().positive().nullish(),
       }),
@@ -90,33 +91,45 @@ export class XinferenceProvider extends BaseProvider {
 
   async getModelList(): Promise<ProviderModelInfo[]> {
     const { data } = await this.requestJson('models', modelsResponse);
-    const models = data.data.flatMap((model): ProviderModelInfo[] => {
-      const rawType = model.model_type.toLowerCase();
+    const models = data.data.map((model): ProviderModelInfo => {
+      const rawType = model.model_type?.toLowerCase();
       const modelType =
-        rawType === 'llm'
-          ? 'language'
-          : rawType === 'embedding' || rawType === 'rerank' || rawType === 'asr'
-            ? rawType
-            : rawType === 'audio' &&
-                model.model_ability.some((ability) =>
-                  ability.startsWith('text2audio'),
-                )
-              ? 'speech'
+        rawType === 'image' && model.model_ability.includes('ocr')
+          ? 'ocr'
+          : rawType === 'llm'
+            ? 'language'
+            : rawType === 'embedding' ||
+                rawType === 'rerank' ||
+                rawType === 'asr' ||
+                rawType === 'ocr'
+              ? rawType
               : rawType === 'audio' &&
                   model.model_ability.some((ability) =>
-                    ability.startsWith('audio2text'),
+                    ability.startsWith('text2audio'),
                   )
-                ? 'asr'
-                : undefined;
-      // Do not expose unrecognized model types as chat models.
-      if (!modelType) return [];
-      return [
-        {
-          id: model.id,
-          name: model.model_name || model.id,
-          modelType,
-          modalitiesInput:
-            modelType === 'asr'
+                ? 'speech'
+                : rawType === 'audio' &&
+                    model.model_ability.some((ability) =>
+                      ability.startsWith('audio2text'),
+                    )
+                  ? 'asr'
+                  : undefined;
+      // Discovery includes every model; capability inference must not hide IDs.
+      return {
+        id: model.id,
+        name: model.model_name || model.id,
+        ...(modelType ? { modelType } : {}),
+        metadata: {
+          xinference: {
+            model_type: model.model_type ?? null,
+            model_ability: model.model_ability,
+          },
+        },
+        modalitiesInput: !modelType
+          ? []
+          : modelType === 'ocr'
+            ? ['pdf', 'image']
+            : modelType === 'asr'
               ? ['audio']
               : [
                   'text',
@@ -124,18 +137,34 @@ export class XinferenceProvider extends BaseProvider {
                     ? ['image' as const]
                     : []),
                 ],
-          modalitiesOutput:
-            modelType === 'speech'
-              ? ['audio']
-              : modelType === 'language' || modelType === 'asr'
-                ? ['text']
-                : [],
-          limitContext: model.max_tokens ?? null,
-        },
-      ];
+        modalitiesOutput:
+          modelType === 'speech'
+            ? ['audio']
+            : modelType === 'language' ||
+                modelType === 'asr' ||
+                modelType === 'ocr'
+              ? ['text']
+              : [],
+        limitContext: model.max_tokens ?? null,
+      };
     });
     return [...new Map(models.map((model) => [model.id, model])).values()].sort(
       (a, b) => a.id.localeCompare(b.id),
+    );
+  }
+
+  ocrModel(modelId: string) {
+    this.assertModelId(modelId);
+    return createDocumentOcrModel(
+      { ...this.provider, baseUrl: this.baseUrl },
+      modelId,
+      this.request,
+    );
+  }
+
+  async getOcrModelList() {
+    return (await this.getModelList()).filter(
+      (model) => model.modelType === 'ocr',
     );
   }
 

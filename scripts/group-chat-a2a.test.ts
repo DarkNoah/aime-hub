@@ -11,6 +11,7 @@ import { GroupChatIdleWake1780000029000 } from '../packages/db/src/migrations/17
 import { GroupChatA2aMembers1780000030000 } from '../packages/db/src/migrations/1780000030000-group-chat-a2a-members.js';
 import { GroupChatA2aMemberDeletion1780000031000 } from '../packages/db/src/migrations/1780000031000-group-chat-a2a-member-deletion.js';
 import { GroupChatA2aCard1780000033000 } from '../packages/db/src/migrations/1780000033000-group-chat-a2a-card.js';
+import { GroupChatChoices1780000034000 } from '../packages/db/src/migrations/1780000034000-group-chat-choices.js';
 
 const code = (expected: string) => (error: unknown) =>
   !!error &&
@@ -54,6 +55,7 @@ test(
       new GroupChatA2aMembers1780000030000(),
       new GroupChatA2aMemberDeletion1780000031000(),
       new GroupChatA2aCard1780000033000(),
+      new GroupChatChoices1780000034000(),
     ])
       await migration.up(runner);
     await runner.release();

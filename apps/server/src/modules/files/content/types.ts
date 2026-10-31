@@ -33,7 +33,7 @@ export type FileContentOptions = {
   signal?: AbortSignal;
   model?: FileContentModel | null;
   parameters?: FileContentParameters;
-  /** Let read_file return available content when optional OCR is unavailable or fails. */
+  /** Tolerate image OCR failures and PDFs without readable text. PDFs always fall back to local text on OCR failure. */
   skipOcrErrors?: boolean;
 };
 

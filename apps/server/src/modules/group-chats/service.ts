@@ -17,6 +17,7 @@ import type {
   GroupChatA2AMemberUpdate,
   GroupChatFile,
   GroupChatUi,
+  GroupChatChoices,
   GroupChatEvent,
   GroupChatSearch,
   MemberProfile,
@@ -30,6 +31,8 @@ import {
   groupChatReactionSchema,
   groupChatUiSchema,
   groupChatUiResponseSchema,
+  groupChatChoicesSchema,
+  groupChatChoiceResponseSchema,
   mentionedRoomAgentIds,
 } from '@aime/shared/group-chats';
 import { messageSearchTerms } from './search.js';
@@ -62,6 +65,7 @@ export type AgentRoomMessageInput = {
   replyToId?: string;
   files?: GroupChatFile[];
   ui?: GroupChatUi;
+  choices?: GroupChatChoices;
   targetAgentId?: string;
 };
 type RoomRow = Omit<GroupChat, 'createdAt' | 'updatedAt'> & {
@@ -77,7 +81,7 @@ const idleAgentReady = `a.role='bot' AND a.enabled AND NOT a.deleting AND a.stat
   AND EXISTS(SELECT 1 FROM group_chats r WHERE r.id=a.room_id AND NOT r.deleting)
   AND NOT EXISTS(SELECT 1 FROM group_chat_events waiting WHERE waiting.agent_id=a.id AND waiting.status='pending' AND waiting.kind<>'idle')`;
 const eventColumns = `id,version,room_id AS "roomId",agent_id AS "agentId",actor_id AS "actorId",kind,text,due_at AS "dueAt",status,error`;
-const messageColumns = `m.id,m.room_id AS "roomId",m.sequence::text,m.revision::text,m.sender_id AS "senderId",m.sender_kind AS "senderKind",CASE WHEN m.sender_kind='agent' THEN sender_agent.name WHEN m.sender_kind='a2a' THEN sender_a2a.name ELSE NULLIF(btrim(sender_user.name),'') END AS "senderName",NULLIF(btrim(sender_user.username),'') AS "senderUsername",m.text,m.reply_to_id AS "replyToId",m.files,m.ui,m.ui_response AS "uiResponse",m.target_agent_id AS "targetAgentId",m.created_at AS "createdAt", COALESCE((SELECT jsonb_agg(r) FROM (SELECT emoji, jsonb_agg(member_id ORDER BY member_id) AS "memberIds" FROM group_chat_reactions WHERE room_id=m.room_id AND message_id=m.id GROUP BY emoji ORDER BY emoji) r),'[]'::jsonb) AS reactions`;
+const messageColumns = `m.id,m.room_id AS "roomId",m.sequence::text,m.revision::text,m.sender_id AS "senderId",m.sender_kind AS "senderKind",CASE WHEN m.sender_kind='agent' THEN sender_agent.name WHEN m.sender_kind='a2a' THEN sender_a2a.name ELSE NULLIF(btrim(sender_user.name),'') END AS "senderName",NULLIF(btrim(sender_user.username),'') AS "senderUsername",m.text,m.reply_to_id AS "replyToId",m.files,m.ui,m.ui_response AS "uiResponse",m.choices,m.choice_response AS "choiceResponse",m.target_agent_id AS "targetAgentId",m.created_at AS "createdAt", COALESCE((SELECT jsonb_agg(r) FROM (SELECT emoji, jsonb_agg(member_id ORDER BY member_id) AS "memberIds" FROM group_chat_reactions WHERE room_id=m.room_id AND message_id=m.id GROUP BY emoji ORDER BY emoji) r),'[]'::jsonb) AS reactions`;
 const messageSenderJoins = `LEFT JOIN users sender_user ON m.sender_kind='user' AND sender_user.id=m.sender_id
   LEFT JOIN group_chat_agents sender_agent ON m.sender_kind='agent' AND sender_agent.room_id=m.room_id AND sender_agent.id=m.sender_id
   LEFT JOIN group_chat_a2a_members sender_a2a ON m.sender_kind='a2a' AND sender_a2a.room_id=m.room_id AND sender_a2a.id=m.sender_id`;
@@ -666,6 +670,7 @@ export class GroupChatService {
     senderKind: GroupChatMessage['senderKind'],
     input: AgentRoomMessageInput & {
       uiResponse?: GroupChatMessage['uiResponse'];
+      choiceResponse?: GroupChatMessage['choiceResponse'];
     },
   ) {
     const body = {
@@ -674,6 +679,8 @@ export class GroupChatService {
       files: input.files ?? [],
       ui: input.ui ?? null,
       uiResponse: input.uiResponse ?? null,
+      choices: input.choices ?? null,
+      choiceResponse: input.choiceResponse ?? null,
       targetAgentId: input.targetAgentId ?? null,
     };
     if (!body.text || body.text.length > 20_000)
@@ -700,13 +707,14 @@ export class GroupChatService {
         body.text,
         body.ui?.title,
         body.ui?.tips,
+        ...(body.choices?.options ?? []),
         ...body.files.map((file) => file.name),
       ]
         .filter(Boolean)
         .join(' '),
     );
     await manager.query(
-      `INSERT INTO group_chat_messages(room_id,id,sender_id,sender_kind,text,reply_to_id,files,ui,ui_response,target_agent_id,search_terms,token_count) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      `INSERT INTO group_chat_messages(room_id,id,sender_id,sender_kind,text,reply_to_id,files,ui,ui_response,target_agent_id,search_terms,token_count,choices,choice_response) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [
         roomId,
         input.id,
@@ -720,6 +728,8 @@ export class GroupChatService {
         body.targetAgentId,
         JSON.stringify(search.terms),
         search.count,
+        body.choices ? JSON.stringify(body.choices) : null,
+        body.choiceResponse ? JSON.stringify(body.choiceResponse) : null,
       ],
     );
     await manager.query('UPDATE group_chats SET updated_at=now() WHERE id=$1', [
@@ -822,6 +832,20 @@ export class GroupChatService {
     groupChatMessageSchema.parse(input);
     const agent = await this.getAgent(userId, roomId, memberId);
     if (input.ui) input = { ...input, ui: groupChatUiSchema.parse(input.ui) };
+    if (input.choices)
+      input = {
+        ...input,
+        choices: groupChatChoicesSchema.parse(input.choices),
+      };
+    if (
+      input.choices &&
+      `${input.text.trim()}\n\n选择：${input.choices.options.join('、')}`
+        .length > 20_000
+    )
+      throw new ORPCError('BAD_REQUEST', {
+        message:
+          'Shorten the question or options so its answer fits in a room message',
+      });
     if (input.files?.length) {
       if (!this.lifecycle?.validateFiles)
         throw new ORPCError('CONFLICT', {
@@ -882,6 +906,61 @@ export class GroupChatService {
         [roomId, messageId],
       );
       return this.readMessage(manager, roomId, messageId);
+    });
+  }
+
+  async respondChoices(
+    userId: string,
+    roomId: string,
+    messageId: string,
+    input: Parameters<typeof groupChatChoiceResponseSchema.parse>[0],
+  ): Promise<GroupChatMessage> {
+    const parsed = groupChatChoiceResponseSchema.parse(input);
+    return this.database.transaction(async (manager) => {
+      await this.access(userId, roomId, manager, true);
+      const source = await this.readMessage(manager, roomId, messageId);
+      const choices = source.choices;
+      if (
+        source.senderKind !== 'agent' ||
+        !choices ||
+        (!choices.multiple && parsed.selectedOptions.length !== 1) ||
+        new Set(parsed.selectedOptions).size !==
+          parsed.selectedOptions.length ||
+        parsed.selectedOptions.some(
+          (option) => !choices.options.includes(option),
+        )
+      )
+        throw new ORPCError('BAD_REQUEST', {
+          message: 'Invalid choice response',
+        });
+      // Normalize by the question order so an identical multi-select retry is stable.
+      const selectedOptions = choices.options.filter((option) =>
+        parsed.selectedOptions.includes(option),
+      );
+      const result = await this.insertMessage(manager, roomId, userId, 'user', {
+        id: parsed.id,
+        text: `${source.text}\n\n选择：${selectedOptions.join('、')}`,
+        replyToId: messageId,
+        choiceResponse: { sourceMessageId: messageId, selectedOptions },
+      });
+      if (result.created) {
+        await this.ensureBot(manager, roomId);
+        // A distinct immediate event cannot be postponed by normal message debounce.
+        // Do not interpret @mentions in the question or options as delegation.
+        await manager.query(
+          `INSERT INTO group_chat_events(id,version,room_id,agent_id,actor_id,kind,text,due_at)
+          SELECT $1,$2,$3,id,$4,'task',$5,now() FROM group_chat_agents WHERE room_id=$3 AND role='bot'
+          ON CONFLICT(id) DO NOTHING`,
+          [
+            `choice:${result.message.id}`,
+            nanoid(),
+            roomId,
+            userId,
+            `Room choice response ${result.message.id} from user ${result.message.senderName || result.message.senderUsername || userId} (${userId}) to message ${messageId}:\nQuestion: ${source.text}\nSelected options: ${JSON.stringify(selectedOptions)}`,
+          ],
+        );
+      }
+      return result.message;
     });
   }
 

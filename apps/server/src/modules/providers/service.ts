@@ -40,6 +40,7 @@ const discoverySchema = z.object({
         id: modelInputSchema.shape.id,
         name: z.string().optional(),
         modelType: modelTypeSchema.optional(),
+        metadata: modelInputSchema.shape.metadata.removeDefault().optional(),
         modalitiesInput: modelInputSchema.shape.modalitiesInput
           .removeDefault()
           .optional(),

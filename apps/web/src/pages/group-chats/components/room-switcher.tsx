@@ -73,9 +73,11 @@ export function RoomSwitcher({
     >
       <SelectTrigger
         aria-label={t('groupChat.switchRoom')}
-        className="h-7 w-fit max-w-full gap-1 border-0 bg-transparent px-0 text-sm font-semibold shadow-none dark:bg-transparent"
+        className="w-fit min-w-0 max-w-full gap-1 border-0 bg-transparent px-0 text-sm font-semibold shadow-none data-[size=default]:h-11 sm:data-[size=default]:h-9 *:data-[slot=select-value]:min-w-0 dark:bg-transparent"
       >
-        <SelectValue>{label(current)}</SelectValue>
+        <SelectValue>
+          <span className="truncate">{label(current)}</span>
+        </SelectValue>
       </SelectTrigger>
       <SelectContent align="start" className="max-w-[calc(100vw-2rem)]">
         {options.map((room) => (

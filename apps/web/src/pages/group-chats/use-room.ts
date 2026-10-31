@@ -262,6 +262,20 @@ export function useRoom(roomId: string, projectId?: string) {
     ) => {
       merge(await groupChatApi.respondUi(roomId, messageId, id, data));
     },
+    respondChoices: async (
+      messageId: string,
+      id: string,
+      selectedOptions: string[],
+    ) => {
+      const signal = lifecycle.current?.signal;
+      const message = await groupChatApi.respondChoices(
+        roomId,
+        messageId,
+        id,
+        selectedOptions,
+      );
+      if (!signal?.aborted) merge(message);
+    },
     updateAgent,
     updateA2aMember: (member: GroupChatA2AMember) => {
       if (

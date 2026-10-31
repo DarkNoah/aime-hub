@@ -1,4 +1,5 @@
 import { CreateIssues1780000035000 } from './migrations/1780000035000-create-issues.js';
+import { GroupChatChoices1780000034000 } from './migrations/1780000034000-group-chat-choices.js';
 import { GroupChatA2aCard1780000033000 } from './migrations/1780000033000-group-chat-a2a-card.js';
 import { GroupChatReads1780000032000 } from './migrations/1780000032000-group-chat-reads.js';
 import { GroupChatMembers1780000027000 } from './migrations/1780000027000-group-chat-members.js';
@@ -91,6 +92,7 @@ export function createDataSource(
     ],
     migrations: [
       CreateIssues1780000035000,
+      GroupChatChoices1780000034000,
       GroupChatA2aCard1780000033000,
       GroupChatReads1780000032000,
       GroupChatA2aMemberDeletion1780000031000,

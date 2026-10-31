@@ -22,6 +22,20 @@ export const groupChatMessageSchema = z.object({
   replyToId: z.string().optional(),
   files: z.array(groupChatFileSchema).max(20).optional(),
 });
+export const groupChatChoicesSchema = z.object({
+  options: z
+    .array(z.string().trim().min(1))
+    .min(1)
+    .refine((options) => new Set(options).size === options.length, {
+      message: 'Options must be distinct',
+    }),
+  multiple: z.boolean().default(false),
+});
+export const groupChatChoiceResponseSchema = z.object({
+  id: groupChatMessageSchema.shape.id,
+  selectedOptions: z.array(z.string()).min(1),
+});
+export type GroupChatChoices = z.infer<typeof groupChatChoicesSchema>;
 export const groupChatUiSchema = intelligentUiInputSchema
   .omit({ waitForResponse: true })
   .extend({
@@ -190,6 +204,11 @@ export type GroupChatMessage = {
   replyToId: string | null;
   files: GroupChatFile[];
   ui: GroupChatUi | null;
+  choices?: GroupChatChoices | null;
+  choiceResponse?: {
+    sourceMessageId: string;
+    selectedOptions: string[];
+  } | null;
   uiResponse: {
     sourceMessageId: string;
     data: z.infer<typeof groupChatUiResponseSchema>['data'];

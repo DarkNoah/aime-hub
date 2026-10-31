@@ -22,23 +22,28 @@ bot 负责对话、交付、协调，主动提出候选工作，必要时通过�
 
 ## 非阻塞工具
 
-| 工具                       | 用途                                                          |
-| -------------------------- | ------------------------------------------------------------- |
-| `send_message`             | 可见消息、回复、reaction、文件交付、向房间其他 agent 派发任务 |
-| `send_ui`                  | 将 HTML 面板存为房间消息，立即返回 messageId                  |
-| `get_room_info`            | 房间、当前用户成员 ID、agent 成员、身份及状态                 |
-| `get_room_messages`        | 按 sequence 游标分页读取历史，不改变未读游标                  |
-| `get_room_recent_messages` | 原子获取当前 agent 未读内容，仅标记实际返回的消息已阅         |
-| `search_room_messages`     | 房间范围内 BM25 搜索，中文分词和字双元组，英文规范化          |
-| `future_plan`              | 持久化带时区绝对时间的一次性计划，到期继续原线程              |
+| 工具                       | 用途                                                                                                               |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `send_message`             | 可见消息、回复、文件交付、单选／多选提问、向房间其他 agent 派发任务；成功返回文本 `Send message success Id: ${id}` |
+| `reaction`                 | 批量添加或撤销多条消息的 reaction，逐项返回文本结果                                                                |
+| `send_ui`                  | 将 HTML 面板存为房间消息，立即返回 messageId                                                                       |
+| `get_room_info`            | 房间、当前用户成员 ID、agent 成员、身份及状态                                                                      |
+| `get_room_messages`        | 按 sequence 游标分页读取历史，不改变未读游标                                                                       |
+| `get_room_recent_messages` | 原子获取当前 agent 未读内容，仅标记实际返回的消息已阅                                                              |
+| `search_room_messages`     | 房间范围内 BM25 搜索，中文分词和字双元组，英文规范化                                                               |
+| `future_plan`              | 持久化带时区绝对时间的一次性计划，到期继续原线程                                                                   |
 
 所有具有 suspend/resume schema 或人工审批能力的工具均不挂载；`ask_user`、`submit_plan`、原始 `intelligent_ui` 不可用。未声明的 suspend 调用也会被运行时拒绝。规则覆盖 `exec` 延迟发现的插件/MCP 工具。关闭原生子 agent 委派，协作通过房间的持久化任务事件完成。
 
+简单选项提问使用 `send_message({ text: "先处理哪一项？", choices: { options: ["修复问题", "补充测试"], multiple: false } })`，`multiple` 省略时默认单选。单选点击即发送；多选设置 `multiple: true`，勾选后点击“发送选择”，不提供自由文本输入。工具发布后立即返回，不等待选择。服务端校验原问题、选项及当前用户权限，保存带原问题、所选项和回复关联的普通用户消息，并立即创建发往 bot 专属线程的事件，跳过普通消息的 30 秒防抖；bot 正在运行时也通过即时队列投递。选项中的 `@` 不派发给其他成员。网络重试复用消息 ID，不重复创建消息或事件；每位用户独立提交。没有回答不表示授权。选项与回答持久化需要运行 `group-chat-choices` 数据库迁移。此能力仍属于隐藏的房间工具，无需新增后台配置，聊天室使用专属选项组件，线程工具记录沿用通用预览。
+
 `send_ui` 复用现有 IntelligentUI 的 CSP、隔离 iframe、主题和渲染器。面板通过用户点击的 `window.IntelligentUI.send({...})` 或 `data-ui-send` 提交。服务端保存一条新的普通用户消息，记录原面板 ID、提交用户与 JSON 数据，然后按普通房间事件唤醒 bot。不存在 suspend、resume 或工具等待状态。面板可被多人、多次独立使用，网络重试使用同一消息 ID。
 
-Bot 善用 reaction 做简洁反馈，`⭐` 表示共享收藏标记。消息 reaction 菜单支持收藏和取消收藏；`search_room_messages` 接收 `reactions` 标签数组（匹配任一标签），支持与关键词 BM25 搜索组合，也可省略关键词按最新顺序查找收藏。筛选在分页截断之前应用，不改变未读游标。
+Bot 善用独立的 `reaction` 工具做简洁反馈，输入为 `{ reactions: [{ messageId, emoji, active? }] }`，`active` 默认 true，false 撤销当前 Agent 自己的标记。支持不同消息、不同 emoji 和同一消息多个标记，按输入顺序执行并逐项返回文本结果；单项失败不撤销已有成功操作，其余项继续执行，中止后不再启动后续项。该工具与其他房间工具一样隐藏，不提供全局配置，线程内复用通用工具预览，聊天室内复用现有 reaction 展示和动画。`⭐` 表示共享收藏标记。消息 reaction 菜单支持收藏和取消收藏；`search_room_messages` 接收 `reactions` 标签数组（匹配任一标签），支持与关键词 BM25 搜索组合，也可省略关键词按最新顺序查找收藏。筛选在分页截断之前应用，不改变未读游标。
 
 所有工具在 AbortSignal 触发时立即返回“用户中止了操作”。文件交付验证当前成员权限及文件所属工作区，文件必须真实存在。
+
+领导 Bot 额外挂载 `room_management({ action, args })`，协作 Agent、普通线程及公共工具目录不可使用。`list_agents`（`args: {}`）返回当前成员和当前用户在房间所属个人／项目范围内可用的 Agent 配置；`add_agent` 接收 `{ name, settings: { agentId, model?, reasoningEffort? }, enabled? }`；`update_agent` 接收 `{ memberId, name?, settings?, enabled?, idleWakeHours? }`；`remove_agent` 接收 `{ memberId }`。配置 ID 与房间成员 ID 分开使用，更新 settings 仅修改提交的字段，删除成员会清理其专属线程但保留 Agent 配置。所有修改复用现有服务的当前用户权限、唯一 Bot 保护和线程生命周期；修改 Bot 自己的模型或思考等级会中止当前执行。工具记录沿用通用预览，成员面板通过既有轮询同步，无需新增后台配置或数据库迁移。
 
 ## 调度和恢复
 

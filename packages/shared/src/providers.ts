@@ -99,6 +99,7 @@ export const modelTypeSchema = z.enum(modelTypes);
 export type ModelType = z.infer<typeof modelTypeSchema>;
 export function providerModelTypes(type: string): readonly ModelType[] {
   if (isOcrProvider(type)) return ['ocr'];
+  if (type === 'xinference') return modelTypes;
   return providerSupportsModels(type)
     ? modelTypes.filter((modelType) => modelType !== 'ocr')
     : [];
