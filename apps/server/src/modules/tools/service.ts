@@ -1,3 +1,4 @@
+import type { ResolveIssues } from '../../mastra/tools/issue.js';
 import type { KnowledgeService } from '../knowledge/service.js';
 import type { AudioService } from '../audio/service.js';
 import type { ResolveAutomations } from '../../mastra/tools/automations.js';
@@ -67,6 +68,7 @@ export class ToolService {
     private readonly knowledge?: KnowledgeService,
     private readonly automations?: ResolveAutomations,
     private readonly audio?: AudioService,
+    private readonly issues?: ResolveIssues,
   ) {}
 
   async get(id: ToolId): Promise<ToolConfig> {
@@ -356,6 +358,7 @@ export class ToolService {
         ...dependencies,
         audio: this.audio,
         automations: this.automations,
+        issues: this.issues,
         knowledgeSearch: this.knowledge?.searchContext.bind(this.knowledge),
         knowledge: this.knowledge,
         pluginTools: (defaults, dependencies, options) =>

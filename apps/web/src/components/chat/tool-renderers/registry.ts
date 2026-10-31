@@ -3,6 +3,7 @@ import { INTELLIGENT_UI_TOOL } from '@aime/shared/intelligent-ui';
 
 // Keep this registry free of React imports so message grouping can use it too.
 export const specialToolNames = [
+  'issue',
   'ask_user',
   'submit_plan',
   INTELLIGENT_UI_TOOL,

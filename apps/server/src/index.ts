@@ -1,3 +1,4 @@
+import { IssueService } from './modules/issues/service.js';
 import { GroupChatService } from './modules/group-chats/service.js';
 import { createGroupChatRuntime } from './modules/group-chats/runtime.js';
 import { UserService } from './modules/users/service.js';
@@ -218,6 +219,7 @@ const tools: ToolService = new ToolService(
   knowledge,
   () => automations.service,
   audio,
+  () => issues,
 );
 const localAgents = new LocalAgentService(workspaceRoot, projects);
 const agents = new AgentService(
@@ -256,6 +258,8 @@ const threads = new ThreadService(
     return !!rows[0] && !rows[0].banned && hasAdminRole(rows[0].role);
   },
 );
+const issues = new IssueService(database, projects, threads);
+threads.setIssueObserver((id, status) => issues.observeThread(id, status));
 const groupChatRuntime = createGroupChatRuntime(
   groupChats,
   threads,
@@ -289,6 +293,7 @@ const app = createApp(
   },
   {
     threads,
+    issues,
     models,
     projects,
     assets,

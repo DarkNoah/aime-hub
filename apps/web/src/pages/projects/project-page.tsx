@@ -1,3 +1,4 @@
+import { IssueBoard } from '@/components/issues/board';
 import { isThreadActive } from '@aime/shared/threads';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import {
@@ -269,6 +270,7 @@ function ProjectSession({
           </>
         }
       />
+      <IssueBoard projectId={projectId} settings={project.settings} />
       <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-5">
         <div className="flex items-center gap-3">
           <h2 className="font-semibold">{t('projects.conversations')}</h2>

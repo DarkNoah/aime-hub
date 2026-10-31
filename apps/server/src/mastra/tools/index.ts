@@ -1,3 +1,4 @@
+import { IssueTool } from './issue.js';
 import {
   askUserTool as nativeAskUser,
   taskWriteTool as nativeTaskWrite,
@@ -64,3 +65,5 @@ export const automation_save = new AutomationTool('automation_save');
 export const automation_delete = new AutomationTool('automation_delete');
 export const automation_run = new AutomationTool('automation_run');
 export const automation_history = new AutomationTool('automation_history');
+
+export const issue = new IssueTool();

@@ -11,6 +11,7 @@
     "./intelligent-ui": "./src/intelligent-ui.ts",
     "./agents": "./src/agents.ts",
     "./mcp": "./src/mcp.ts",
+    "./issues": "./src/issues.ts",
     "./automations": "./src/automations.ts",
     "./notifications": "./src/notifications.ts",
     "./realtime": "./src/realtime.ts",

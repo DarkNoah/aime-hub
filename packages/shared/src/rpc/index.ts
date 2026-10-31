@@ -1,3 +1,4 @@
+import { issuesContract } from './issues.js';
 import { groupChatsContract, usersContract } from './group-chats.js';
 export { groupChatMessagesQuery } from './group-chats.js';
 import { knowledgeContract } from './knowledge.js';
@@ -22,6 +23,7 @@ import { assetsContract } from './assets.js';
 import { systemSettingsContract } from './system-settings.js';
 
 export const apiContract = {
+  issues: issuesContract,
   groupChats: groupChatsContract,
   users: usersContract,
   knowledge: knowledgeContract,

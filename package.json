@@ -18,7 +18,7 @@
     "format:check": "prettier --check .",
     "db:migrate": "pnpm plugins:generate && node --import tsx scripts/migrate.ts",
     "auth:create-admin": "tsx scripts/create-admin.ts",
-    "test": "tsx --test scripts/*.test.ts apps/server/src/modules/agents/*.test.ts apps/server/src/modules/group-chats/*.test.ts apps/server/src/modules/automations/*.test.ts apps/server/src/modules/notifications/*.test.ts apps/server/src/modules/mcp/*.test.ts apps/server/src/modules/tools/*.test.ts apps/server/src/modules/models/*.test.ts apps/server/src/modules/threads/*.test.ts apps/web/src/i18n/*.test.ts apps/web/src/pages/admin/*/*.test.ts apps/server/src/modules/plugins/*.test.ts",
+    "test": "tsx --test scripts/*.test.ts apps/server/src/modules/agents/*.test.ts apps/server/src/modules/group-chats/*.test.ts apps/server/src/modules/automations/*.test.ts apps/server/src/modules/issues/*.test.ts apps/server/src/modules/notifications/*.test.ts apps/server/src/modules/mcp/*.test.ts apps/server/src/modules/tools/*.test.ts apps/server/src/modules/models/*.test.ts apps/server/src/modules/threads/*.test.ts apps/web/src/i18n/*.test.ts apps/web/src/pages/admin/*/*.test.ts apps/server/src/modules/plugins/*.test.ts",
     "plugins:generate": "node --import tsx scripts/plugins.ts",
     "test:plugins": "node --import tsx --test scripts/plugins.test.ts apps/server/src/modules/plugins/*.test.ts",
     "test:plugins:integration": "PLUGIN_INTEGRATION=1 pnpm test:plugins"

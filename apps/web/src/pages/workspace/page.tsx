@@ -1,3 +1,4 @@
+import { IssueBoard } from '@/components/issues/board';
 import {
   ArrowRight,
   Clock3,
@@ -85,6 +86,7 @@ export function WorkspacePage() {
           ))}
         </div>
       </section>
+      <IssueBoard />
       <div className="grid gap-8 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
         <section aria-labelledby="workspace-recent-title" className="min-w-0">
           <div className="mb-4 flex items-center justify-between gap-3">

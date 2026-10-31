@@ -1,3 +1,5 @@
+import type { IssueService } from './modules/issues/service.js';
+import { issueRouter } from './modules/issues/rpc.js';
 import type { GroupChatService } from './modules/group-chats/service.js';
 import { groupChatRouter } from './modules/group-chats/rpc.js';
 import { groupChatA2aRoutes } from './modules/group-chats/a2a-routes.js';
@@ -75,6 +77,7 @@ export function createApp(
   providers?: { service: ProviderService; webOrigin: WebOrigins },
   chat?: {
     threads: ThreadService;
+    issues?: IssueService;
     models: LanguageModelService;
     webOrigin: WebOrigins;
     projects?: ProjectService;
@@ -163,6 +166,7 @@ export function createApp(
     mcp: mcpRouter(mcp?.service),
     systemSettings: systemSettingsRouter(systemSettings?.service),
     automations: automationRouter(automations?.service),
+    issues: issueRouter(chat?.issues),
     notifications: notificationRouter(notifications?.service),
     environmentVariables: environmentVariableRouter(
       environmentVariables?.service,

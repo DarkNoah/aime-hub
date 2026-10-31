@@ -447,7 +447,12 @@ export function createChatRunner(
           versionId:
             config.source === 'database' ? config.versionId : undefined,
           mastra,
-          instructions: config.instructions + workspaceInstructions,
+          instructions:
+            config.instructions +
+            workspaceInstructions +
+            (typeof thread.metadata?.issueId === 'number'
+              ? `\nThis chat belongs to Issue #${thread.metadata.issueId}. Use issue view ${thread.metadata.issueId} to read its current task and comments before working. Continue this issue instead of creating a duplicate. Use issue edit ${thread.metadata.issueId} --state decision when a user decision is needed. Close it with issue close ${thread.metadata.issueId} only after the task is fulfilled and verified. Simple exploration, search, research or direct answers do not need new issues.`
+              : ''),
           model: resolved.model,
           // Matching native processor IDs suppress Memory's default OM processors.
           // Keep the same processor for input and output so native turn cleanup,
@@ -689,6 +694,7 @@ export function createChatRunner(
             ),
           );
           requestContext.set('projectId', projectId);
+          requestContext.set('issueId', thread.metadata?.issueId);
           requestContext.set('chatSettings', {
             agentId: config.id,
             model: next.model,

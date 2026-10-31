@@ -100,6 +100,7 @@ type ThreadData = {
   toolInteractions: (ToolInteraction & { settings: ChatSettings })[];
 };
 type Runtime = {
+  issueStatus?: ThreadStatus;
   thread: StorageThreadType;
   data: ThreadData;
   goal: ThreadGoal | null;
@@ -243,6 +244,12 @@ export class ThreadService {
   private runtimes = new Map<string, Runtime>();
   private locks = new Map<string, Promise<unknown>>();
   private closing = false;
+  private issueObserver?: (id: number, status: ThreadStatus) => Promise<void>;
+
+  setIssueObserver(observer: NonNullable<ThreadService['issueObserver']>) {
+    this.issueObserver = observer;
+  }
+
   private roomObserver?: (
     binding: GroupChatThreadBinding,
     status: ThreadStatus,
@@ -822,6 +829,19 @@ export class ThreadService {
           : {}),
       },
     });
+    const issueId = runtime.thread.metadata?.issueId;
+    if (
+      typeof issueId === 'number' &&
+      this.issueObserver &&
+      runtime.issueStatus !== runtime.data.status
+    ) {
+      try {
+        await this.issueObserver(issueId, runtime.data.status);
+        runtime.issueStatus = runtime.data.status;
+      } catch {
+        console.error('Could not persist issue status', runtime.thread.id);
+      }
+    }
     const binding = groupChatThreadBinding(runtime.thread.metadata);
     if (binding && this.roomObserver) {
       try {
@@ -1164,7 +1184,34 @@ export class ThreadService {
       : create();
   }
 
-  private async create(userId: string, input: CreateThreadInput) {
+  createIssueThread(userId: string, input: CreateThreadInput, issueId: number) {
+    const create = () => this.create(userId, input, issueId);
+    return input.projectId
+      ? this.locked(`project:${input.projectId}`, create)
+      : create();
+  }
+
+  /** Compensate only an uncommitted issue creation. Never exposed over RPC. */
+  async discardIssueThread(id: string, issueId: number) {
+    const thread = await this.memory.getThreadById({ threadId: id });
+    if (thread?.metadata?.issueId !== issueId) return;
+    await this.memory.deleteThread(id);
+    this.navigation.refresh();
+    if (
+      !thread.resourceId?.startsWith('project:') &&
+      typeof thread.metadata?.workspace === 'string'
+    )
+      await this.runner.removePersonalWorkspace?.(
+        String(thread.metadata.createdBy),
+        thread.metadata.workspace,
+      );
+  }
+
+  private async create(
+    userId: string,
+    input: CreateThreadInput,
+    issueId?: number,
+  ) {
     if (input.plugin)
       await this.runner.assertPluginAccess?.(input.plugin, userId);
     if (input.projectId) await this.projectAccess(userId, input.projectId);
@@ -1197,6 +1244,7 @@ export class ThreadService {
         ...initialData(),
         reasoningEffort: input.reasoningEffort,
         autoTitle: !input.title,
+        ...(issueId ? { issueId } : {}),
       },
     });
     const summary = this.summary(thread);
@@ -1880,6 +1928,31 @@ export class ThreadService {
     });
   }
 
+  stopIssueThread(userId: string, id: string) {
+    return this.scopeLocked(userId, id, async () => {
+      const runtime = await this.runtime(userId, id);
+      if (typeof runtime.thread.metadata?.issueId !== 'number')
+        throw new ThreadError('FORBIDDEN', 403);
+      runtime.session?.clearQueue();
+      runtime.session?.abort();
+      if (runtime.session) await runtime.session.clearGoal();
+      else await this.runner.clearGoal?.(id);
+      runtime.goal = null;
+      runtime.data.toolInteractions = [];
+      for (const task of runtime.backgroundTasks.filter(isBackgroundTaskActive))
+        await this.backgroundTaskManager?.cancel(task.id);
+      for (const command of runtime.session?.commands?.list() ?? [])
+        if (command.status !== 'exited')
+          await runtime.session?.commands?.cleanup(command.sessionId);
+      runtime.data.status = 'canceled';
+      runtime.data.activeId = null;
+      runtime.activeMessageId = null;
+      await this.save(runtime);
+      this.publish(runtime);
+      return this.summary(runtime.thread, runtime);
+    });
+  }
+
   abort(userId: string, id: string) {
     return this.scopeLocked(userId, id, async () => {
       const runtime = await this.runtime(userId, id);
@@ -2124,6 +2197,8 @@ export class ThreadService {
       async () => {
         const thread = await this.accessible(userId, id, true);
         await this.manageable(userId, thread);
+        if (typeof thread.metadata?.issueId === 'number')
+          throw new ThreadError('ISSUE_THREAD_REQUIRED', 409);
         // Repeating an old DELETE request must never permanently delete an archive.
         if (isArchived(thread)) return;
         const runtime = await this.runtime(userId, id);

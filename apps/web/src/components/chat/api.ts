@@ -182,6 +182,8 @@ export function chatErrorKey(error: unknown) {
       return 'chat.errors.retryUnavailable';
     case 'CONTINUE_UNAVAILABLE':
       return 'chat.errors.continueUnavailable';
+    case 'ISSUE_THREAD_REQUIRED':
+      return 'issues.threadRequired';
     case 'THREAD_BUSY':
       return 'chat.errors.busy';
     case 'COMPACTION_BUSY':

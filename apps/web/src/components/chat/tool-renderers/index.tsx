@@ -1,3 +1,4 @@
+import { IssueToolResult } from './issue';
 import type { ComponentType } from 'react';
 import { INTELLIGENT_UI_TOOL } from '@aime/shared/intelligent-ui';
 import {
@@ -12,6 +13,7 @@ const renderers: Record<
   SpecialToolName,
   ComponentType<ToolInteractionProps>
 > = {
+  issue: IssueToolResult,
   ask_user: ChatToolInteraction,
   submit_plan: SubmitPlan,
   [INTELLIGENT_UI_TOOL]: IntelligentUI,

@@ -1,3 +1,4 @@
+import type { ResolveIssues } from '../../mastra/tools/issue.js';
 import type { ToolsInput } from '@mastra/core/agent';
 import type {
   RegisteredTool,
@@ -33,6 +34,7 @@ export type ToolDependencies = SharedToolDependencies & {
   getTools?: ToolBuilder;
   audio?: AudioService;
   automations?: ResolveAutomations;
+  issues?: ResolveIssues;
   knowledgeSearch?: KnowledgeService['searchContext'];
   knowledge?: KnowledgeService;
   mcpTools?: () => Promise<ToolsInput>;

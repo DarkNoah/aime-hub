@@ -14,6 +14,7 @@ import type { FileScope } from '@aime/shared/files';
 import { useLocation } from '@tanstack/react-router';
 import './workspace-navigation';
 import {
+  CircleDot,
   Braces,
   ChevronDown,
   Columns2,
@@ -77,6 +78,7 @@ const AssetPanel = lazy(
 const FileManager = lazy(
   () => import('@/components/file-manager/file-manager'),
 );
+const IssueBoard = lazy(() => import('@/components/issues/board'));
 const BrowserPanel = lazy(() => import('@/components/browser/panel'));
 
 const EMPTY_MESSAGES: UIMessage[] = [];
@@ -93,6 +95,7 @@ function WorkspaceExtraPanel({
 }
 
 const workspaceViews = [
+  { view: 'issues', label: 'issues.heading', icon: CircleDot },
   { view: 'files', label: 'files.title', icon: Files },
   { view: 'assets', label: 'assets.title', icon: Images },
   { view: 'messages', label: 'chat.inspector.title', icon: Braces },
@@ -376,15 +379,17 @@ export function ChatWorkspace({
     activeExtra?.title ??
     activePlugin?.title ??
     t(
-      view === 'files'
-        ? 'files.title'
-        : view === 'assets'
-          ? 'assets.title'
-          : view === 'messages'
-            ? 'chat.inspector.title'
-            : view === 'browser'
-              ? 'browser.title'
-              : 'chat.preview.title',
+      view === 'issues'
+        ? 'issues.heading'
+        : view === 'files'
+          ? 'files.title'
+          : view === 'assets'
+            ? 'assets.title'
+            : view === 'messages'
+              ? 'chat.inspector.title'
+              : view === 'browser'
+                ? 'browser.title'
+                : 'chat.preview.title',
     );
   const content = activeExtra ? (
     <WorkspaceExtraPanel
@@ -399,6 +404,21 @@ export function ChatWorkspace({
       projectId={projectId}
       onClose={close}
     />
+  ) : view === 'issues' ? (
+    <Suspense
+      fallback={
+        <p role="status" className="p-4 text-sm text-muted-foreground">
+          {t('chat.loading')}
+        </p>
+      }
+    >
+      <IssueBoard
+        compact
+        projectId={projectId}
+        threadId={threadId}
+        onClose={close}
+      />
+    </Suspense>
   ) : view === 'files' ? (
     <Suspense
       fallback={
@@ -609,6 +629,24 @@ export function ChatWorkspace({
                         </Button>
                       )}
                       <Button
+                        variant={
+                          expanded && view === 'issues' ? 'secondary' : 'ghost'
+                        }
+                        size="icon-sm"
+                        aria-label={t('issues.heading')}
+                        title={t('issues.heading')}
+                        aria-expanded={expanded && view === 'issues'}
+                        aria-controls={contentId}
+                        onClick={() => {
+                          setView('issues');
+                          if (expanded && view === 'issues')
+                            collapseInspector();
+                          else expandInspector();
+                        }}
+                      >
+                        <CircleDot className="size-4" aria-hidden="true" />
+                      </Button>
+                      <Button
                         ref={toggleRef}
                         variant={
                           expanded && view === 'files' ? 'secondary' : 'ghost'
@@ -754,15 +792,17 @@ export function ChatWorkspace({
                     {activeExtra || activePlugin
                       ? title
                       : t(
-                          view === 'files'
-                            ? 'files.previewHint'
-                            : view === 'assets'
-                              ? 'assets.emptyHint'
-                              : view === 'messages'
-                                ? 'chat.inspector.hint'
-                                : view === 'browser'
-                                  ? 'browser.watchHint'
-                                  : 'chat.preview.hint',
+                          view === 'issues'
+                            ? 'issues.detailHint'
+                            : view === 'files'
+                              ? 'files.previewHint'
+                              : view === 'assets'
+                                ? 'assets.emptyHint'
+                                : view === 'messages'
+                                  ? 'chat.inspector.hint'
+                                  : view === 'browser'
+                                    ? 'browser.watchHint'
+                                    : 'chat.preview.hint',
                         )}
                   </SheetDescription>
                   {content}
