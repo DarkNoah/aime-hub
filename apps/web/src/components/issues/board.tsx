@@ -65,15 +65,18 @@ function ScopedIssueBoard({
     <li
       key={issue.id}
       className={cn(
-        'group flex items-start gap-1 border-b last:border-b-0',
+        'group flex items-center gap-1 border-b last:border-b-0',
         issue.threadId === threadId && 'bg-primary/5',
       )}
     >
       <IssueThreadLink
         issue={issue}
-        className="min-w-0 flex-1 px-3 py-3 transition-colors hover:bg-accent/70"
+        className={cn(
+          'flex min-w-0 flex-1 flex-col gap-1.5 px-3 py-3 transition-colors hover:bg-accent/70',
+          !compact && 'sm:flex-row sm:items-center sm:gap-4',
+        )}
       >
-        <div className="flex items-baseline gap-2">
+        <div className="flex min-w-0 flex-1 items-baseline gap-2">
           <span className="shrink-0 font-mono text-xs text-muted-foreground">
             #{issue.id}
           </span>
@@ -81,7 +84,7 @@ function ScopedIssueBoard({
             {issue.title}
           </span>
         </div>
-        <div className="mt-1.5 flex items-center justify-between gap-2 pl-1 text-xs text-muted-foreground">
+        <div className="flex shrink-0 items-center justify-between gap-3 text-xs text-muted-foreground">
           <time dateTime={issue.updatedAt}>
             {new Date(issue.updatedAt).toLocaleDateString(i18n.language, {
               month: 'short',
@@ -94,7 +97,7 @@ function ScopedIssueBoard({
       <Button
         variant="ghost"
         size="icon-xs"
-        className="mt-3 mr-1 shrink-0"
+        className="mr-1 shrink-0"
         aria-label={t('issues.detailsFor', { title: issue.title })}
         onClick={() => setSelected(issue)}
       >
@@ -102,20 +105,15 @@ function ScopedIssueBoard({
       </Button>
     </li>
   );
-  const columns = (
-    <div
-      className={cn(
-        'grid gap-4',
-        compact ? 'grid-cols-1' : 'md:grid-cols-2 xl:grid-cols-4',
-      )}
-    >
+  const groups = (
+    <div className="flex flex-col gap-4">
       {issueStates.map((state) => {
         const column = board[state];
         const content = (
           <>
             <ul>{column.items.map(row)}</ul>
             {!loading && !column.items.length && (
-              <p className="px-4 py-8 text-center text-xs leading-6 text-muted-foreground">
+              <p className="px-4 py-4 text-sm leading-6 text-muted-foreground">
                 {t(`issues.empty.${state}`)}
               </p>
             )}
@@ -149,15 +147,8 @@ function ScopedIssueBoard({
                 <Skeleton className="h-4 w-4/5" />
                 <Skeleton className="h-4 w-3/5" />
               </div>
-            ) : compact ? (
-              content
             ) : (
-              <ScrollArea
-                className="max-h-72 md:h-72"
-                viewportProps={{ className: 'max-h-72' }}
-              >
-                {content}
-              </ScrollArea>
+              content
             )}
           </section>
         );
@@ -227,11 +218,11 @@ function ScopedIssueBoard({
                 <IssueStateBadge state={current.state} />
               </div>
             )}
-            {columns}
+            {groups}
           </div>
         </ScrollArea>
       ) : (
-        columns
+        groups
       )}
       {creating && (
         <IssueFormDialog
