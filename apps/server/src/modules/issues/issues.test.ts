@@ -17,6 +17,10 @@ import {
 import type { RunInput } from '@aime/shared/threads';
 import { CreateIssues1780000035000 } from '../../../../../packages/db/src/migrations/1780000035000-create-issues.js';
 import { IssueSourceThread1780000036000 } from '../../../../../packages/db/src/migrations/1780000036000-issue-source-thread.js';
+import { CreateGroupChats1780000024000 } from '../../../../../packages/db/src/migrations/1780000024000-create-group-chats.js';
+import { GroupChatAgents1780000026000 } from '../../../../../packages/db/src/migrations/1780000026000-group-chat-agents.js';
+import { GroupChatIdleWake1780000029000 } from '../../../../../packages/db/src/migrations/1780000029000-group-chat-idle-wake.js';
+import { IssueEvents1780000038000 } from '../../../../../packages/db/src/migrations/1780000038000-issue-events.js';
 import { fakeMemory } from '../../../../../scripts/fixtures/thread-memory.js';
 import { sessionStub } from '../../../../../scripts/fixtures/thread-session.js';
 import { ThreadService } from '../threads/service.js';
@@ -38,6 +42,7 @@ import type { LanguageModelService } from '../models/language-model.js';
 import { createChatRunner } from '../threads/runner.js';
 import { botAgent } from '../../mastra/agents/bot-agent.js';
 import { fallbackAgentId } from '../../mastra/agents/index.js';
+import type { GroupChatService } from '../group-chats/service.js';
 
 const settings = { model: null, reasoningEffort: 'auto' } as const;
 const code = (expected: string) => (error: unknown) =>
@@ -77,6 +82,7 @@ test('issue command parser handles quoted Markdown, literal shell text, aliases 
     'edit 1 --stop --message go',
     'edit 1 --state done --message go',
     'create --title x --state done --start',
+    'create --title x --start --no-start',
     'edit 1 --delivery immediate',
     'edit 1 --state invalid',
     'create --title x --title y',
@@ -162,6 +168,66 @@ test('issue tool inherits authenticated scope/settings, registers admin controls
   release();
 });
 
+test('Bot auto-starts tasks, supports deferred creation, and preserves the Issue on submission failure', async () => {
+  const ctx = new RequestContext();
+  ctx.set('userId', 'alice');
+  ctx.set('issueSourceThreadId', 'bot-source');
+  ctx.set('issueActorThreadId', 'bot-source');
+  ctx.set('chatSettings', { ...settings, agentId: botAgent.id });
+  const submissions: unknown[][] = [];
+  let fail = false;
+  const issue = {
+    id: 42,
+    title: 'Implement task',
+    body: 'Acceptance details',
+    state: 'todo',
+    threadId: 'task-thread',
+  };
+  const tool = createIssueTool(
+    () =>
+      ({
+        create: async () => issue,
+        message: async (...args: unknown[]) => {
+          submissions.push(args);
+          if (fail) throw new Error('Model unavailable');
+          return issue;
+        },
+      }) as unknown as ReturnType<ResolveIssues>,
+  );
+  const execute = (command: string) =>
+    tool.execute!({ command }, { requestContext: ctx, observe: noopObserve });
+  assert.deepEqual(await execute('create --title task'), {
+    issue,
+    taskSubmitted: true,
+  });
+  assert.match(
+    String(submissions[0]![3]),
+    /Issue #42: Implement task\n\nAcceptance details/,
+  );
+  assert.equal(submissions[0]![6], 'bot-source');
+  for (const command of [
+    'create --title backlog --no-start',
+    'create --title decision --state decision',
+  ])
+    assert.deepEqual(await execute(command), { issue, taskSubmitted: false });
+  assert.equal(submissions.length, 1);
+  ctx.set('chatSettings', settings);
+  assert.deepEqual(await execute('create --title ordinary'), {
+    issue,
+    taskSubmitted: false,
+  });
+  assert.equal(submissions.length, 1);
+  fail = true;
+  const failure = (await execute('create --title retry --start')) as {
+    issue: unknown;
+    taskSubmitted: boolean;
+    error: string;
+  };
+  assert.equal(failure.issue, issue);
+  assert.equal(failure.taskSubmitted, false);
+  assert.match(failure.error, /已创建/);
+});
+
 test(
   'PostgreSQL issues isolate scopes, bind chats, persist comments, paginate and route messages',
   { skip: !process.env.TEST_DATABASE_URL },
@@ -196,10 +262,12 @@ test(
     INSERT INTO projects(id) VALUES ('project000000001'),('project000000002');
     INSERT INTO project_members(project_id,user_id,role) VALUES ('project000000001','alice','owner'),('project000000001','bob','member'),('project000000002','alice','owner');`);
     const migration = db.createQueryRunner();
-    await db.query(`CREATE TABLE group_chats(id text PRIMARY KEY,project_id text,deleting boolean NOT NULL DEFAULT false);
-      CREATE TABLE group_chat_agents(id text PRIMARY KEY,room_id text REFERENCES group_chats(id),thread_id text UNIQUE NOT NULL,deleting boolean NOT NULL DEFAULT false)`);
+    await new CreateGroupChats1780000024000().up(migration);
+    await new GroupChatAgents1780000026000().up(migration);
+    await new GroupChatIdleWake1780000029000().up(migration);
     await new CreateIssues1780000035000().up(migration);
     await new IssueSourceThread1780000036000().up(migration);
+    await new IssueEvents1780000038000().up(migration);
     await migration.release();
     const projects = new ProjectService(db);
     const sends: RunInput[] = [];
@@ -234,7 +302,9 @@ test(
     );
     cleanup.threads = threads;
     const issues = new IssueService(db, projects, threads);
-    threads.setIssueObserver((id, state) => issues.observeThread(id, state));
+    threads.setIssueObserver((id, state, execution) =>
+      issues.observeThread(id, state, execution),
+    );
     const personal = await issues.create(
       'alice',
       {},
@@ -456,11 +526,11 @@ test(
             threadId: projectId ? 'projectbotchat01' : 'personalbotchat1',
           };
           await db.query(
-            'INSERT INTO group_chats(id,project_id) VALUES ($1,$2)',
+            "INSERT INTO group_chats(id,project_id,title,created_by) VALUES ($1,$2,'Room','alice')",
             [source.roomId, projectId ?? null],
           );
           await db.query(
-            'INSERT INTO group_chat_agents(id,room_id,thread_id) VALUES ($1,$2,$3)',
+            "INSERT INTO group_chat_agents(id,room_id,thread_id,name,role) VALUES ($1,$2,$3,'Bot','bot')",
             [source.agentId, source.roomId, source.threadId],
           );
           await memory.createThread({
@@ -484,6 +554,98 @@ test(
           assert.equal(created.projectId, projectId ?? null);
           assert.deepEqual(created.source, source);
           assert.notEqual(created.threadId, source.threadId);
+          assert.equal(lastSession?.thread.id, created.threadId);
+          assert.match(
+            JSON.stringify(sends.at(-1)?.parts),
+            new RegExp(`Issue #${created.id}`),
+          );
+          assert.match(
+            JSON.stringify(sends.at(-1)?.parts),
+            /Keep this acceptance criterion/,
+          );
+          const events = async () =>
+            (await db.query(
+              "SELECT agent_id,actor_id,text FROM group_chat_events WHERE kind='issue' AND (text::jsonb->>'issueId')::int=$1 ORDER BY created_at,id",
+              [created.id],
+            )) as { agent_id: string; actor_id: string; text: string }[];
+          assert.equal(
+            (await events()).length,
+            0,
+            'Bot creation/submission must not echo',
+          );
+          await issues.edit(
+            'alice',
+            created.id,
+            { projectId },
+            { title: 'Human renamed' },
+          );
+          assert.equal(
+            (await events()).length,
+            1,
+            'Same human identity must still notify',
+          );
+          await execute(`edit ${created.id} --title "Bot task"`);
+          assert.equal((await events()).length, 1, 'Bot edits must not echo');
+          await issues.comment(
+            'alice',
+            created.id,
+            { projectId },
+            'Verified task result',
+            created.threadId,
+          );
+          await issues.edit(
+            'alice',
+            created.id,
+            { projectId },
+            { state: 'done' },
+            created.threadId,
+          );
+          const completion = {
+            threadId: created.threadId,
+            runId: 'task-run',
+            status: 'success' as const,
+            result: 'Verified task result',
+            error: null,
+          };
+          await issues.observeThread(created.id, 'success', completion);
+          await issues.observeThread(created.id, 'success', completion);
+          const received = await events();
+          assert.equal(
+            received.length,
+            4,
+            'Task updates and one deduplicated completion',
+          );
+          assert.ok(
+            received.every((event) => event.agent_id === source.agentId),
+          );
+          assert.equal(JSON.parse(received.at(-1)!.text).state, 'done');
+          assert.equal(
+            JSON.parse(received.at(-1)!.text).event.execution.result,
+            'Verified task result',
+          );
+          await issues.observeThread(created.id, 'failed', {
+            ...completion,
+            runId: 'failed-run',
+            status: 'failed',
+            error: 'TEST_FAILURE',
+            result: '',
+          });
+          assert.equal((await events()).length, 5);
+          assert.equal(
+            JSON.parse((await events()).at(-1)!.text).event.execution.error,
+            'TEST_FAILURE',
+          );
+          await issues.observeThread(created.id, 'canceled', {
+            ...completion,
+            runId: 'bot-stopped-run',
+            status: 'canceled',
+            actorThreadId: source.threadId,
+          });
+          assert.equal(
+            (await events()).length,
+            5,
+            'Bot-initiated stops must not echo through completion events',
+          );
           assert.deepEqual(
             (await issues.get('alice', created.id, { projectId })).source,
             source,
@@ -506,6 +668,118 @@ test(
           assert.equal(target.metadata?.reasoningEffort, 'high');
           assert.equal(target.metadata?.groupChat, undefined);
           assert.equal(target.metadata?.issueId, created.id);
+          assert.equal(target.metadata?.issueSourceThreadId, source.threadId);
+          const workerThreadId = `worker-thread-${created.id}`;
+          await db.query(
+            "INSERT INTO group_chat_agents(id,room_id,thread_id,name,role) VALUES($1,$2,$3,'Worker','worker')",
+            [`worker-${created.id}`, source.roomId, workerThreadId],
+          );
+          await memory.createThread({
+            threadId: workerThreadId,
+            resourceId: target.resourceId,
+            title: 'Worker',
+            metadata: {
+              ...settings,
+              createdBy: 'alice',
+              groupChat: {
+                roomId: source.roomId,
+                memberId: `worker-${created.id}`,
+                role: 'worker',
+              },
+            },
+          });
+          const external = await issues.create(
+            'alice',
+            { projectId },
+            issueCreateSchema.parse({ title: 'Worker-created task' }),
+            undefined,
+            workerThreadId,
+            workerThreadId,
+          );
+          const [externalEvent] = await db.query(
+            "SELECT agent_id,text FROM group_chat_events WHERE kind='issue' AND (text::jsonb->>'issueId')::int=$1",
+            [external.id],
+          );
+          assert.equal(
+            externalEvent.agent_id,
+            source.agentId,
+            'Worker creation notifies the associated Bot',
+          );
+          assert.equal(JSON.parse(externalEvent.text).event.type, 'created');
+          const defaultCalls: unknown[][] = [];
+          const manualIssues = new IssueService(db, projects, threads, {
+            openDefault: async (...args: unknown[]) => {
+              defaultCalls.push(args);
+              return {
+                projectId: projectId ?? null,
+                agents: [
+                  { role: 'bot', enabled: true, threadId: source.threadId },
+                ],
+              };
+            },
+          } as unknown as Pick<GroupChatService, 'openDefault'>);
+          const manualApp = createApp(auth, undefined, {
+            threads,
+            issues: manualIssues,
+            models: {} as LanguageModelService,
+            projects,
+            webOrigin: ['http://issues.test'],
+          });
+          const response = await manualApp.request('/api/rpc/issues/create', {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              origin: 'http://issues.test',
+              cookie: 'alice',
+            },
+            body: JSON.stringify({
+              json: {
+                projectId,
+                data: {
+                  title: 'Manually created',
+                  body: 'Manual requirements',
+                  state: 'todo',
+                },
+                actorThreadId: source.threadId,
+                sourceThreadId: 'untrusted',
+              },
+            }),
+          });
+          assert.equal(response.status, 200);
+          const manual = (await response.json()).json as Issue;
+          assert.deepEqual(defaultCalls, [['alice', projectId]]);
+          assert.deepEqual(manual.source, source);
+          assert.equal(
+            stored.get(manual.threadId)?.metadata?.issueId,
+            manual.id,
+          );
+          const [manualEvent] = await db.query(
+            "SELECT agent_id,text FROM group_chat_events WHERE kind='issue' AND (text::jsonb->>'issueId')::int=$1",
+            [manual.id],
+          );
+          assert.equal(manualEvent.agent_id, source.agentId);
+          assert.equal(JSON.parse(manualEvent.text).event.type, 'created');
+          assert.equal(JSON.parse(manualEvent.text).event.actorId, 'alice');
+          assert.equal(
+            JSON.parse(manualEvent.text).event.actorThreadId,
+            undefined,
+            'Human creation must not be suppressed as a Bot echo',
+          );
+          if (projectId) {
+            await assert.rejects(
+              manualIssues.createManual(
+                'bob',
+                { projectId },
+                issueCreateSchema.parse({ title: 'No membership' }),
+              ),
+              code('PROJECT_NOT_FOUND'),
+            );
+            assert.equal(
+              defaultCalls.length,
+              1,
+              'Check project membership before opening a room',
+            );
+          }
           const changed = await execute(
             `edit ${created.id} --state in_progress`,
           );
@@ -527,6 +801,17 @@ test(
           await db.query('DELETE FROM group_chat_agents WHERE id=$1', [
             source.agentId,
           ]);
+          await issues.comment(
+            'alice',
+            created.id,
+            { projectId },
+            'No recipient after source deletion',
+          );
+          assert.equal(
+            (await events()).length,
+            0,
+            'Deleting the recipient cascades queued events',
+          );
           assert.equal(
             (await issues.get('alice', created.id, { projectId })).source,
             null,

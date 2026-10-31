@@ -20,6 +20,9 @@ import {
 } from '@aime/shared/issues';
 import type { ProjectService } from '../projects/service.js';
 import type { ThreadService } from '../threads/service.js';
+import type { IssueThreadObservation } from '../threads/session.js';
+import type { GroupChatService } from '../group-chats/service.js';
+import { enqueueIssueEvent } from './events.js';
 
 const columns = `id,title,body,state,project_id AS "projectId",created_by AS "createdBy",thread_id AS "threadId",created_at AS "createdAt",updated_at AS "updatedAt",closed_at AS "closedAt",
   (SELECT json_build_object('roomId',a.room_id,'agentId',a.id,'threadId',a.thread_id)
@@ -65,8 +68,45 @@ export class IssueService {
       | 'getIssueSourceThread'
       | 'run'
       | 'stopIssueThread'
+      | 'recoverIssueThread'
     >,
+    private rooms?: Pick<GroupChatService, 'openDefault'>,
   ) {}
+
+  /** Page/API creation joins the same scope's default Bot without impersonating it. */
+  async createManual(userId: string, scope: IssueScope, raw: IssueCreate) {
+    const data = issueCreateSchema.parse(raw);
+    await this.authorize(userId, scope);
+    if (!this.rooms) throw new ORPCError('INTERNAL_SERVER_ERROR');
+    const room = await this.rooms.openDefault(userId, scope.projectId);
+    const bot = room.agents.find(
+      (agent) => agent.role === 'bot' && agent.enabled,
+    );
+    if (!bot || room.projectId !== (scope.projectId ?? null))
+      throw new ORPCError('ISSUE_BOT_UNAVAILABLE', { status: 409 });
+    return this.create(userId, scope, data, undefined, bot.threadId);
+  }
+
+  async recoverThreadEvents() {
+    let cursor = 0;
+    for (;;) {
+      const rows: { id: number; userId: string; threadId: string }[] =
+        await this.database.query(
+          `SELECT id,created_by AS "userId",thread_id AS "threadId" FROM issues WHERE source_thread_id IS NOT NULL AND id>$1 ORDER BY id LIMIT 100`,
+          [cursor],
+        );
+      if (!rows.length) return;
+      for (const row of rows) {
+        try {
+          await this.threads.recoverIssueThread(row.userId, row.threadId);
+        } catch {
+          // Membership changes/deleted threads must not block server startup.
+          console.error('Could not recover Issue thread events', row.id);
+        }
+      }
+      cursor = rows.at(-1)!.id;
+    }
+  }
 
   private async authorize(userId: string, scope: IssueScope) {
     if (scope.projectId)
@@ -165,6 +205,7 @@ export class IssueService {
     raw: IssueCreate,
     signal?: AbortSignal,
     sourceThreadId?: string,
+    actorThreadId?: string,
   ): Promise<Issue> {
     const data = issueCreateSchema.parse(raw);
     await this.authorize(userId, scope);
@@ -197,6 +238,7 @@ export class IssueService {
             projectId: scope.projectId,
           },
           id,
+          source ?? undefined,
         );
         threadId = thread.id;
         signal?.throwIfAborted();
@@ -214,6 +256,11 @@ export class IssueService {
             source,
           ],
         );
+        await enqueueIssueEvent(manager, id, {
+          type: 'created',
+          actorId: userId,
+          actorThreadId,
+        });
         return dto(row!);
       });
     } catch (error) {
@@ -225,23 +272,58 @@ export class IssueService {
     }
   }
 
-  edit(userId: string, id: number, scope: IssueScope, raw: IssuePatch) {
+  edit(
+    userId: string,
+    id: number,
+    scope: IssueScope,
+    raw: IssuePatch,
+    actorThreadId?: string,
+  ) {
     const patch = issuePatchSchema.parse(raw);
     return this.locked(id, async () => {
-      await this.get(userId, id, scope);
-      const [row]: Row[] = await this.database.query(
-        `WITH updated AS (UPDATE issues SET title=COALESCE($2,title),body=COALESCE($3,body),state=COALESCE($4,state),closed_at=CASE WHEN $4='done' THEN COALESCE(closed_at,now()) WHEN $4 IS NOT NULL THEN NULL ELSE closed_at END,updated_at=now() WHERE id=$1 RETURNING ${columns}) SELECT * FROM updated`,
-        [id, patch.title ?? null, patch.body ?? null, patch.state ?? null],
+      const previous = await this.get(userId, id, scope);
+      const changes = Object.fromEntries(
+        Object.entries(patch).filter(
+          ([key, value]) =>
+            value !== undefined && value !== previous[key as keyof IssuePatch],
+        ),
       );
-      return dto(row!);
+      if (!Object.keys(changes).length) return previous;
+      return this.database.transaction(async (manager) => {
+        const [row]: Row[] = await manager.query(
+          `WITH updated AS (UPDATE issues SET title=COALESCE($2,title),body=COALESCE($3,body),state=COALESCE($4,state),closed_at=CASE WHEN $4='done' THEN COALESCE(closed_at,now()) WHEN $4 IS NOT NULL THEN NULL ELSE closed_at END,updated_at=now() WHERE id=$1 RETURNING ${columns}) SELECT * FROM updated`,
+          [id, patch.title ?? null, patch.body ?? null, patch.state ?? null],
+        );
+        await enqueueIssueEvent(manager, id, {
+          type: 'updated',
+          actorId: userId,
+          actorThreadId,
+          changes,
+        });
+        return dto(row!);
+      });
     });
   }
 
-  comment(userId: string, id: number, scope: IssueScope, body: string) {
+  comment(
+    userId: string,
+    id: number,
+    scope: IssueScope,
+    body: string,
+    actorThreadId?: string,
+  ) {
     body = issueCommentSchema.parse({ body }).body;
     return this.locked(id, async () => {
       await this.get(userId, id, scope);
-      return this.addComment(userId, id, body, 'comment', null);
+      return this.addComment(
+        userId,
+        id,
+        body,
+        'comment',
+        null,
+        undefined,
+        actorThreadId,
+      );
     });
   }
 
@@ -252,6 +334,7 @@ export class IssueService {
     kind: 'comment' | 'message',
     delivery: 'wait' | 'immediate' | null,
     messageId = nanoid(16),
+    actorThreadId?: string,
   ) {
     return this.database.transaction(async (manager) => {
       await manager.query(
@@ -265,6 +348,12 @@ export class IssueService {
         `SELECT ${commentColumns} FROM issue_comments c LEFT JOIN users u ON u.id=c.author_id WHERE c.id=$1`,
         [messageId],
       );
+      await enqueueIssueEvent(manager, id, {
+        type: kind === 'comment' ? 'commented' : 'message',
+        actorId: userId,
+        actorThreadId,
+        body,
+      });
       return commentDto(row!);
     });
   }
@@ -276,6 +365,7 @@ export class IssueService {
     body: string,
     delivery: 'wait' | 'immediate' = 'wait',
     signal?: AbortSignal,
+    actorThreadId?: string,
   ) {
     const data = issueMessageSchema.parse({ body, delivery });
     return this.locked(id, async () => {
@@ -303,25 +393,37 @@ export class IssueService {
         'message',
         data.delivery,
         messageId,
+        actorThreadId,
       );
       return this.get(userId, id, scope);
     });
   }
 
-  stop(userId: string, id: number, scope: IssueScope) {
+  stop(userId: string, id: number, scope: IssueScope, actorThreadId?: string) {
     return this.locked(id, async () => {
       const issue = await this.get(userId, id, scope);
-      await this.threads.stopIssueThread(userId, issue.threadId);
-      await this.database.query(
-        `UPDATE issues SET state='todo',updated_at=now() WHERE id=$1 AND state<>'done'`,
-        [id],
-      );
+      await this.threads.stopIssueThread(userId, issue.threadId, actorThreadId);
+      await this.database.transaction(async (manager) => {
+        await manager.query(
+          `UPDATE issues SET state='todo',updated_at=now() WHERE id=$1 AND state<>'done'`,
+          [id],
+        );
+        await enqueueIssueEvent(manager, id, {
+          type: 'stopped',
+          actorId: userId,
+          actorThreadId,
+        });
+      });
       return this.get(userId, id, scope);
     });
   }
 
   /** Execution alone never proves the task is complete; completion is explicit. */
-  async observeThread(id: number, status: ThreadStatus) {
+  async observeThread(
+    id: number,
+    status: ThreadStatus,
+    execution?: IssueThreadObservation,
+  ) {
     const next =
       status === 'running' || status === 'pending'
         ? 'in_progress'
@@ -331,15 +433,20 @@ export class IssueService {
             status === 'waiting' ||
             status === 'paused' ||
             status === 'tripwire' ||
-            status === 'bailed'
+            status === 'bailed' ||
+            status === 'skipped'
           ? 'decision'
           : status === 'canceled'
             ? 'todo'
             : undefined;
     if (!next) return;
-    await this.database.query(
-      `UPDATE issues SET state=$2,updated_at=now() WHERE id=$1 AND state<>'done' AND state<>$2`,
-      [id, next],
-    );
+    await this.database.transaction(async (manager) => {
+      await manager.query(
+        `UPDATE issues SET state=$2,updated_at=now() WHERE id=$1 AND state<>'done' AND state<>$2`,
+        [id, next],
+      );
+      if (execution)
+        await enqueueIssueEvent(manager, id, { type: 'thread', execution });
+    });
   }
 }

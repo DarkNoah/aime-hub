@@ -24,7 +24,7 @@ export const en = {
   'issues.edit': 'Edit',
   'issues.save': 'Save changes',
   'issues.createHint':
-    'Describe the task and acceptance criteria. Every issue has its own task chat.',
+    'Describe the task and acceptance criteria. Creation links a task chat and notifies the Bot in this scope’s default room to follow up.',
   'issues.created': 'Issue created',
   'issues.saved': 'Issue updated',
   'issues.sent': 'Submitted',

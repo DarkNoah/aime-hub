@@ -14,6 +14,16 @@ import type {
   ToolResponse,
 } from '@aime/shared/threads';
 
+export type IssueThreadObservation = {
+  threadId: string;
+  runId: string;
+  status: ThreadStreamStatus;
+  result: string;
+  error: string | null;
+  /** Present only for a server-originated operation such as a bot stopping its task. */
+  actorThreadId?: string;
+};
+
 export type ChatSessionEvent =
   | { type: 'speech'; event: SpeechEvent }
   | { type: 'commands' }

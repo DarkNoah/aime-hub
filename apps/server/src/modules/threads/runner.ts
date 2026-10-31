@@ -6,6 +6,7 @@ import {
   type GroupChatThreadBinding,
 } from '../group-chats/metadata.js';
 import { groupChatMemoryLocation } from '../group-chats/memory.js';
+import { nonInteractiveTools } from '../tools/non-interactive.js';
 import type { GroupChatService } from '../group-chats/service.js';
 import { SpeechPlayback } from '../audio/playback.js';
 import { runtimeTokenCounts } from '../usage/runtime.js';
@@ -453,6 +454,9 @@ export function createChatRunner(
             workspaceInstructions +
             (typeof thread.metadata?.issueId === 'number'
               ? `\nThis chat belongs to Issue #${thread.metadata.issueId}. Use issue view ${thread.metadata.issueId} to read its current task and comments before working. Continue this issue instead of creating a duplicate. Use issue edit ${thread.metadata.issueId} --state decision when a user decision is needed. Close it with issue close ${thread.metadata.issueId} only after the task is fulfilled and verified. Simple exploration, search, research or direct answers do not need new issues.`
+              : '') +
+            (typeof thread.metadata?.issueSourceThreadId === 'string'
+              ? '\nThis task is coordinated by a room Bot. Keep working on the authorized task until it is fulfilled and verified. Record meaningful progress, results, artifact paths and verification evidence with issue comment. When blocked or needing a human decision, write the exact question/blocker in an Issue comment, set state decision, explain it in your final response and finish this turn. Do not use suspended question/approval tools or wait for a human here; the Bot receives Issue events, asks in the room and sends the answer back to this same thread. On verified completion close this Issue and include a concise result in the final response. A new follow-up means continue this task, not create another Issue.'
               : ''),
           model: resolved.model,
           // Matching native processor IDs suppress Memory's default OM processors.
@@ -553,10 +557,14 @@ export function createChatRunner(
             maxRuns: GOAL_MAX_RUNS,
           },
           browser: browsers.forThread(thread.id, userId),
-          buildTools: (ids, defaults, disabledTools) =>
-            tools
+          buildTools: async (ids, defaults, disabledTools) => {
+            const built = await (tools
               ? tools.buildTools(ids, defaults, disabledTools)
-              : buildTools(ids, defaults, { disabledTools }),
+              : buildTools(ids, defaults, { disabledTools }));
+            return typeof thread.metadata?.issueSourceThreadId === 'string'
+              ? nonInteractiveTools(built)
+              : built;
+          },
           memory,
           workspace: async ({ requestContext }) => {
             const selected =
@@ -686,7 +694,11 @@ export function createChatRunner(
           const selection = await sessionModel(next);
           const abortSignal = runAbort.signal;
           const requestContext = new RequestContext();
-          if (roomBinding) requestContext.set('nonInteractiveTools', true);
+          if (
+            roomBinding ||
+            typeof thread.metadata?.issueSourceThreadId === 'string'
+          )
+            requestContext.set('nonInteractiveTools', true);
           requestContext.set('chatRetry', retry);
           requestContext.set('speechPlayback', speechPlayback);
           requestContext.set('userId', createdBy ?? userId);
@@ -699,6 +711,7 @@ export function createChatRunner(
           );
           requestContext.set('projectId', projectId);
           requestContext.set('issueId', thread.metadata?.issueId);
+          requestContext.set('issueActorThreadId', thread.id);
           requestContext.set(
             'issueSourceThreadId',
             roomBinding ? thread.id : undefined,

@@ -16,6 +16,7 @@ import type {
   ChatSession,
   ChatSessionContext,
   ChatSessionEvent,
+  IssueThreadObservation,
 } from './session.js';
 import { threadMessages } from './message-conversion.js';
 import type {
@@ -100,7 +101,13 @@ type ThreadData = {
   toolInteractions: (ToolInteraction & { settings: ChatSettings })[];
 };
 type Runtime = {
-  issueStatus?: ThreadStatus;
+  issueStatus?: string;
+  issueExecution?: Pick<
+    IssueThreadObservation,
+    'runId' | 'result' | 'actorThreadId'
+  >;
+  issueEvents: IssueThreadObservation[];
+  issueRetry?: ReturnType<typeof setTimeout>;
   thread: StorageThreadType;
   data: ThreadData;
   goal: ThreadGoal | null;
@@ -244,7 +251,11 @@ export class ThreadService {
   private runtimes = new Map<string, Runtime>();
   private locks = new Map<string, Promise<unknown>>();
   private closing = false;
-  private issueObserver?: (id: number, status: ThreadStatus) => Promise<void>;
+  private issueObserver?: (
+    id: number,
+    status: ThreadStatus,
+    execution?: IssueThreadObservation,
+  ) => Promise<void>;
 
   setIssueObserver(observer: NonNullable<ThreadService['issueObserver']>) {
     this.issueObserver = observer;
@@ -781,6 +792,7 @@ export class ThreadService {
     clearTimeout(runtime.expiry);
     if (
       this.closing ||
+      runtime.issueRetry ||
       this.busy(runtime) ||
       this.hasRunningCommands(runtime) ||
       runtime.session?.speech?.active ||
@@ -806,6 +818,26 @@ export class ThreadService {
   }
 
   private async save(runtime: Runtime) {
+    const issueId = runtime.thread.metadata?.issueId;
+    const issueKey = `${runtime.issueExecution?.runId ?? ''}:${runtime.data.status}`;
+    if (
+      typeof issueId === 'number' &&
+      runtime.issueExecution &&
+      runtime.data.status !== 'idle' &&
+      runtime.data.status !== 'running' &&
+      runtime.data.status !== 'pending' &&
+      runtime.issueStatus !== issueKey &&
+      !runtime.issueEvents.some(
+        (event) => `${event.runId}:${event.status}` === issueKey,
+      )
+    ) {
+      runtime.issueEvents.push({
+        threadId: runtime.thread.id,
+        ...runtime.issueExecution,
+        status: runtime.data.status,
+        error: runtime.data.error,
+      });
+    }
     runtime.thread = await this.memory.updateThread({
       id: runtime.thread.id,
       title: runtime.thread.title,
@@ -822,6 +854,12 @@ export class ThreadService {
             }
           : {}),
         ...structuredClone(runtime.data),
+        ...(typeof issueId === 'number'
+          ? {
+              issueExecution: runtime.issueExecution,
+              issueEvents: structuredClone(runtime.issueEvents),
+            }
+          : {}),
         // The Postgres adapter shallow-merges, then JSON-serializes metadata.
         // An undefined legacy key is omitted from the persisted JSON.
         ...(runtime.thread.metadata?.aime !== undefined
@@ -829,17 +867,39 @@ export class ThreadService {
           : {}),
       },
     });
-    const issueId = runtime.thread.metadata?.issueId;
     if (
       typeof issueId === 'number' &&
       this.issueObserver &&
-      runtime.issueStatus !== runtime.data.status
+      (runtime.issueStatus !== issueKey || runtime.issueEvents.length)
     ) {
       try {
-        await this.issueObserver(issueId, runtime.data.status);
-        runtime.issueStatus = runtime.data.status;
+        // The persisted outbox survives a failed database write or process restart.
+        // Report current state even when retrying an older completion event.
+        if (runtime.issueEvents.length) {
+          for (const event of runtime.issueEvents)
+            await this.issueObserver(issueId, runtime.data.status, event);
+        } else await this.issueObserver(issueId, runtime.data.status);
+        runtime.thread = await this.memory.updateThread({
+          id: runtime.thread.id,
+          title: runtime.thread.title,
+          metadata: { issueEvents: [], issueStatus: issueKey },
+        });
+        runtime.issueEvents = [];
+        runtime.issueStatus = issueKey;
+        clearTimeout(runtime.issueRetry);
+        runtime.issueRetry = undefined;
       } catch {
         console.error('Could not persist issue status', runtime.thread.id);
+        if (!this.closing && !runtime.issueRetry) {
+          runtime.issueRetry = setTimeout(() => {
+            runtime.issueRetry = undefined;
+            void this.locked(runtime.thread.id, () => this.save(runtime)).catch(
+              () =>
+                console.error('Could not retry issue event', runtime.thread.id),
+            );
+          }, 1000);
+          runtime.issueRetry.unref();
+        }
       }
     }
     const binding = groupChatThreadBinding(runtime.thread.metadata);
@@ -964,6 +1024,17 @@ export class ThreadService {
       }
       if (event.type === 'message') {
         this.upsert(runtime, event.message);
+        if (
+          event.active &&
+          runtime.issueExecution &&
+          event.message.role === 'assistant'
+        ) {
+          const text = event.message.parts
+            .filter((part) => part.type === 'text')
+            .map((part) => part.text)
+            .join('\n');
+          if (text.trim()) runtime.issueExecution.result = text.slice(-12000);
+        }
         if (event.active && runtime.data.activeId)
           runtime.activeMessageId =
             runtime.messages.find((message) =>
@@ -1000,12 +1071,23 @@ export class ThreadService {
             event.runId !== runtime.data.activeId)
         )
           return;
+        if (
+          typeof runtime.thread.metadata?.issueId === 'number' &&
+          event.runId &&
+          runtime.issueExecution?.runId !== event.runId
+        )
+          runtime.issueExecution = { runId: event.runId, result: '' };
         runtime.data.error = threadErrorMessage(event.error);
         runtime.data.status = 'failed';
         runtime.data.activeId = null;
         runtime.activeMessageId = null;
       } else if (event.type === 'status') {
         if (event.status === 'running' || event.status === 'pending') {
+          if (
+            typeof runtime.thread.metadata?.issueId === 'number' &&
+            runtime.issueExecution?.runId !== event.runId
+          )
+            runtime.issueExecution = { runId: event.runId, result: '' };
           runtime.data.activeId = event.runId;
           runtime.data.error = null;
         } else if (
@@ -1123,7 +1205,11 @@ export class ThreadService {
     if (cached) return cached;
     const data = dataOf(thread);
     if (data.usage) data.usage = await this.withConsumedTokens(id, data.usage);
-    if (data.activeId) {
+    if (
+      data.activeId ||
+      (typeof thread.metadata?.issueId === 'number' &&
+        (data.status === 'pending' || data.status === 'running'))
+    ) {
       data.activeId = null;
       data.error = 'RUN_INTERRUPTED';
       data.status = 'failed';
@@ -1135,6 +1221,12 @@ export class ThreadService {
     const runtime: Runtime = {
       thread,
       data,
+      issueStatus: thread.metadata?.issueStatus as string | undefined,
+      issueExecution: thread.metadata
+        ?.issueExecution as Runtime['issueExecution'],
+      issueEvents: structuredClone(
+        (thread.metadata?.issueEvents ?? []) as IssueThreadObservation[],
+      ),
       goal: (await this.runner.getGoal?.(id)) ?? null,
       messages: history.messages,
       turnLocators: history.locators,
@@ -1149,7 +1241,14 @@ export class ThreadService {
       backgroundTasks: [],
       backgroundTasksError: null,
     };
-    if (dataOf(thread).activeId || thread.metadata?.aime !== undefined)
+    if (
+      dataOf(thread).activeId ||
+      thread.metadata?.aime !== undefined ||
+      runtime.issueEvents.length ||
+      (runtime.issueExecution &&
+        runtime.issueStatus !==
+          `${runtime.issueExecution.runId}:${data.status}`)
+    )
       await this.save(runtime);
     this.runtimes.set(id, runtime);
     if (this.backgroundTaskManager) {
@@ -1177,6 +1276,24 @@ export class ThreadService {
     return runtime;
   }
 
+  /** Replay only persisted Issue outboxes/interrupted runs, without opening a model session. */
+  async recoverIssueThread(userId: string, id: string) {
+    const thread = await this.accessible(userId, id);
+    if (typeof thread.metadata?.issueId !== 'number') return;
+    const data = dataOf(thread);
+    const execution = thread.metadata
+      ?.issueExecution as Runtime['issueExecution'];
+    if (
+      data.activeId ||
+      data.status === 'pending' ||
+      data.status === 'running' ||
+      (thread.metadata?.issueEvents as unknown[] | undefined)?.length ||
+      (execution &&
+        thread.metadata?.issueStatus !== `${execution.runId}:${data.status}`)
+    )
+      await this.scopeLocked(userId, id, () => this.runtime(userId, id));
+  }
+
   createThread(userId: string, input: CreateThreadInput) {
     const create = () => this.create(userId, input);
     return input.projectId
@@ -1184,8 +1301,14 @@ export class ThreadService {
       : create();
   }
 
-  createIssueThread(userId: string, input: CreateThreadInput, issueId: number) {
-    const create = () => this.create(userId, input, issueId);
+  createIssueThread(
+    userId: string,
+    input: CreateThreadInput,
+    issueId: number,
+    issueSourceThreadId?: string,
+  ) {
+    const create = () =>
+      this.create(userId, input, issueId, issueSourceThreadId);
     return input.projectId
       ? this.locked(`project:${input.projectId}`, create)
       : create();
@@ -1211,6 +1334,7 @@ export class ThreadService {
     userId: string,
     input: CreateThreadInput,
     issueId?: number,
+    issueSourceThreadId?: string,
   ) {
     if (input.plugin)
       await this.runner.assertPluginAccess?.(input.plugin, userId);
@@ -1245,6 +1369,7 @@ export class ThreadService {
         reasoningEffort: input.reasoningEffort,
         autoTitle: !input.title,
         ...(issueId ? { issueId } : {}),
+        ...(issueId && issueSourceThreadId ? { issueSourceThreadId } : {}),
       },
     });
     const summary = this.summary(thread);
@@ -1733,12 +1858,18 @@ export class ThreadService {
       );
       const session = await this.session(runtime, input, true, userId);
       const previous = structuredClone(runtime.data);
-      if (!this.busy(runtime)) runtime.data.status = 'pending';
+      const previousIssueExecution = runtime.issueExecution;
+      if (!this.busy(runtime)) {
+        runtime.data.status = 'pending';
+        if (typeof runtime.thread.metadata?.issueId === 'number')
+          runtime.issueExecution = { runId: input.id, result: '' };
+      }
       runtime.data.error = null;
       try {
         await session.send(input);
       } catch (error) {
         runtime.data = previous;
+        runtime.issueExecution = previousIssueExecution;
         throw error;
       }
       runtime.data.acceptedIds = [...runtime.data.acceptedIds, input.id].slice(
@@ -1939,11 +2070,13 @@ export class ThreadService {
     });
   }
 
-  stopIssueThread(userId: string, id: string) {
+  stopIssueThread(userId: string, id: string, actorThreadId?: string) {
     return this.scopeLocked(userId, id, async () => {
       const runtime = await this.runtime(userId, id);
       if (typeof runtime.thread.metadata?.issueId !== 'number')
         throw new ThreadError('FORBIDDEN', 403);
+      if (runtime.issueExecution)
+        runtime.issueExecution.actorThreadId = actorThreadId;
       runtime.session?.clearQueue();
       runtime.session?.abort();
       if (runtime.session) await runtime.session.clearGoal();
@@ -2334,6 +2467,7 @@ export class ThreadService {
     for (const runtime of this.runtimes.values()) {
       clearTimeout(runtime.expiry);
       clearTimeout(runtime.broadcast);
+      clearTimeout(runtime.issueRetry);
     }
     await Promise.allSettled(
       [...this.runtimes.values()].flatMap((runtime) => [

@@ -15,7 +15,7 @@ export function issueRouter(service?: IssueService) {
       issues().view(context.userId, input.id, input, input.cursor),
     ),
     create: p.create.handler(({ context, input }) =>
-      issues().create(context.userId, input, input.data),
+      issues().createManual(context.userId, input, input.data),
     ),
     edit: p.edit.handler(({ context, input }) =>
       issues().edit(context.userId, input.id, input, input.data),

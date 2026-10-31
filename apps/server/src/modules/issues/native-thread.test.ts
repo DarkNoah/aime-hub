@@ -10,6 +10,7 @@ import { ThreadService } from '../threads/service.js';
 import { createChatRunner } from '../threads/runner.js';
 import type { LanguageModelService } from '../models/language-model.js';
 import type { ThreadStatus } from '@aime/shared/threads';
+import type { IssueThreadObservation } from '../threads/session.js';
 
 async function until(check: () => Promise<boolean>) {
   for (let i = 0; i < 500; i++) {
@@ -95,9 +96,11 @@ test('native issue thread stops active and queued work, preserves binding and ca
     await rm(directory, { recursive: true, force: true });
   });
   const observed: ThreadStatus[] = [];
-  threads.setIssueObserver(async (id, status) => {
+  const completions: IssueThreadObservation[] = [];
+  threads.setIssueObserver(async (id, status, execution) => {
     assert.equal(id, 123);
     observed.push(status);
+    if (execution) completions.push(execution);
   });
   const settings = { model: null, reasoningEffort: 'auto' } as const;
   const thread = await threads.createIssueThread(
@@ -142,4 +145,11 @@ test('native issue thread stops active and queued work, preserves binding and ca
   assert.ok(observed.includes('running'));
   assert.ok(observed.includes('canceled'));
   assert.ok(observed.includes('success'));
+  assert.deepEqual(
+    completions.map((event) => event.status),
+    ['canceled', 'success'],
+  );
+  assert.equal(completions.at(-1)?.threadId, thread.id);
+  assert.equal(completions.at(-1)?.result, 'Task result');
+  assert.ok(completions.every((event) => event.runId));
 });

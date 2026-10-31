@@ -258,8 +258,10 @@ const threads = new ThreadService(
     return !!rows[0] && !rows[0].banned && hasAdminRole(rows[0].role);
   },
 );
-const issues = new IssueService(database, projects, threads);
-threads.setIssueObserver((id, status) => issues.observeThread(id, status));
+const issues = new IssueService(database, projects, threads, groupChats);
+threads.setIssueObserver((id, status, execution) =>
+  issues.observeThread(id, status, execution),
+);
 const groupChatRuntime = createGroupChatRuntime(
   groupChats,
   threads,
@@ -394,6 +396,8 @@ const startup = (async () => {
   await plugins.start();
   if (stopping) return;
   await automations.initialize();
+  if (stopping) return;
+  await issues.recoverThreadEvents();
   if (stopping) return;
   // Restore plugin resources before schedules can execute plugin tools.
   await mastra.startWorkers();

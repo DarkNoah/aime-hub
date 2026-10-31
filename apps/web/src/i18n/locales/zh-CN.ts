@@ -26,7 +26,7 @@ export const zhCN = {
   'issues.edit': '编辑',
   'issues.save': '保存修改',
   'issues.createHint':
-    '记录任务与验收标准。每个 Issue 都有一个独立的任务线程。',
+    '记录任务与验收标准。新建后会关联独立任务线程，并通知当前范围默认聊天室的 Bot 跟进。',
   'issues.created': 'Issue 已创建',
   'issues.saved': 'Issue 已更新',
   'issues.sent': '已提交',

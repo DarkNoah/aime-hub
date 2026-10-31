@@ -233,7 +233,7 @@ export type GroupChatEvent = {
   roomId: string;
   agentId: string;
   actorId: string;
-  kind: 'messages' | 'task' | 'plan' | 'idle';
+  kind: 'messages' | 'task' | 'plan' | 'idle' | 'issue';
   text: string;
   dueAt: string;
   status: 'pending' | 'completed' | 'failed' | 'cancelled';

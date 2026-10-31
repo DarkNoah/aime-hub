@@ -15,6 +15,7 @@ import { issueHelp, parseIssueCommand } from '../../modules/issues/command.js';
 import { ThreadError } from '../../modules/threads/errors.js';
 import { AgentError } from '../../modules/agents/errors.js';
 import { getCodeAgent } from '../agents/index.js';
+import { botAgent } from '../agents/bot-agent.js';
 
 export type ResolveIssues = () => Pick<
   IssueService,
@@ -24,7 +25,7 @@ export type ResolveIssues = () => Pick<
 export function createIssueTool(resolve?: ResolveIssues) {
   return createTool({
     id: 'issue',
-    description: `Manage persistent tasks with GitHub-style issue commands in the current personal/project scope. Create an issue only for substantial, long-running tasks or work strongly related to an existing task. Reuse related issues. Simple exploration, research, search and direct answers do not need issues. Creation binds a new chat thread; list/view first to avoid duplicates. Do not create a replacement issue from inside its own task thread. Completion must be verified before close.\n${issueHelp}`,
+    description: `Manage persistent tasks with GitHub-style issue commands in the current personal/project scope. Create an issue only for substantial, long-running tasks or work strongly related to an existing task. Reuse related issues. Simple exploration, research, search and direct answers do not need issues. Creation binds a new chat thread; list/view first to avoid duplicates. Room Bot creation starts the task by default, including its Issue ID and details; use --no-start for an explicitly deferred task. Other chats use --start to execute on creation. The associated room Bot receives external Issue changes and task-thread results/errors as asynchronous events. Send follow-ups to the existing task with edit --message; comments alone do not execute work. Do not create a replacement issue from inside its own task thread. Completion must be verified before close.\n${issueHelp}`,
     inputSchema: z.object({
       command: z
         .string()
@@ -44,6 +45,10 @@ export function createIssueTool(resolve?: ResolveIssues) {
         const { action, id, values } = parseIssueCommand(command);
         const userId = context?.requestContext?.get('userId');
         const projectId = context?.requestContext?.get('projectId');
+        const actor =
+          context?.requestContext?.get('issueActorThreadId') ??
+          context?.requestContext?.get('issueSourceThreadId');
+        const actorThreadId = typeof actor === 'string' ? actor : undefined;
         if (typeof userId !== 'string' || !userId)
           throw new Error('Issue 工具需要已认证用户');
         if (action === 'help') return { help: issueHelp };
@@ -71,6 +76,12 @@ export function createIssueTool(resolve?: ResolveIssues) {
           const settings = chatSettingsSchema.parse(
             context?.requestContext?.get('chatSettings') ?? {},
           );
+          const start =
+            !!values.start ||
+            (!!sourceThreadId &&
+              settings.agentId === botAgent.id &&
+              !values['no-start'] &&
+              (!values.state || values.state === 'todo'));
           // The room leader is valid only with a trusted room binding. An issue
           // gets an ordinary chat, so resolve its default Agent while retaining
           // the current model and reasoning settings. Normal worker Agents stay.
@@ -87,8 +98,9 @@ export function createIssueTool(resolve?: ResolveIssues) {
             }),
             signal,
             typeof sourceThreadId === 'string' ? sourceThreadId : undefined,
+            actorThreadId,
           );
-          if (values.start) {
+          if (start) {
             signal?.throwIfAborted();
             try {
               return {
@@ -96,31 +108,46 @@ export function createIssueTool(resolve?: ResolveIssues) {
                   userId,
                   issue.id,
                   scope,
-                  `${issue.title}\n\n${issue.body || '请完成此任务，并验证结果。'}`,
+                  `Issue #${issue.id}: ${issue.title}\n\n${issue.body || '请完成此任务，并验证结果。'}\n\n请在此线程中执行任务，使用 issue view ${issue.id} 读取最新要求。记录关键进展、结果和验证证据；遇到阻碍时说明原因并更新为 decision；完成并验证后执行 issue close ${issue.id}。`,
                   'wait',
                   signal,
+                  actorThreadId,
                 ),
+                taskSubmitted: true,
               };
             } catch (error) {
               if (signal?.aborted) throw error;
               return {
                 issue,
+                taskSubmitted: false,
                 error:
                   'Issue 已创建，但任务未成功提交。请打开线程检查模型配置或待处理交互后重试。',
               };
             }
           }
-          return { issue };
+          return { issue, taskSubmitted: false };
         }
         if (action === 'close' || action === 'reopen')
           return {
-            issue: await service.edit(userId, id!, scope, {
-              state: action === 'close' ? 'done' : 'todo',
-            }),
+            issue: await service.edit(
+              userId,
+              id!,
+              scope,
+              {
+                state: action === 'close' ? 'done' : 'todo',
+              },
+              actorThreadId,
+            ),
           };
         if (action === 'comment')
           return {
-            comment: await service.comment(userId, id!, scope, values.body!),
+            comment: await service.comment(
+              userId,
+              id!,
+              scope,
+              values.body!,
+              actorThreadId,
+            ),
           };
         const patch = issuePatchSchema.parse({
           title: values.title,
@@ -135,9 +162,10 @@ export function createIssueTool(resolve?: ResolveIssues) {
         // Validate the entire command before making any changes.
         let issue;
         if (Object.values(patch).some((value) => value !== undefined))
-          issue = await service.edit(userId, id!, scope, patch);
+          issue = await service.edit(userId, id!, scope, patch, actorThreadId);
         signal?.throwIfAborted();
-        if (values.stop) issue = await service.stop(userId, id!, scope);
+        if (values.stop)
+          issue = await service.stop(userId, id!, scope, actorThreadId);
         if (values.message)
           issue = await service.message(
             userId,
@@ -146,6 +174,7 @@ export function createIssueTool(resolve?: ResolveIssues) {
             values.message,
             values.delivery === 'immediate' ? 'immediate' : 'wait',
             signal,
+            actorThreadId,
           );
         return { issue };
       };
