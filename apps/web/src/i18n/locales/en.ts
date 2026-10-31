@@ -64,6 +64,7 @@ export const en = {
   'issues.accessError':
     'The issue is unavailable or you no longer have access.',
   'issues.detailsFor': 'View details for {{title}}',
+  'issues.openThreadFor': 'Open chat for {{title}}',
   'issues.more': 'Load more',
   'issues.empty.decision': 'Tasks needing your decision appear here.',
   'issues.empty.todo': 'Tasks ready to start appear here.',

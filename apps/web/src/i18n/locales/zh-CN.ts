@@ -61,6 +61,7 @@ export const zhCN = {
   'issues.responseRequired': '任务线程正在等待答复，请打开线程处理后继续。',
   'issues.accessError': 'Issue 不存在或你已无权访问。',
   'issues.detailsFor': '查看 {{title}} 的详情',
+  'issues.openThreadFor': '打开 {{title}} 的线程',
   'issues.more': '加载更多',
   'issues.empty.decision': '需要你做决定的任务会出现在这里。',
   'issues.empty.todo': '准备执行的任务会出现在这里。',
