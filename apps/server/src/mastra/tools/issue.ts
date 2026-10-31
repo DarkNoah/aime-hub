@@ -13,6 +13,8 @@ import type { ToolDependencies } from '../../modules/tools/types.js';
 import type { IssueService } from '../../modules/issues/service.js';
 import { issueHelp, parseIssueCommand } from '../../modules/issues/command.js';
 import { ThreadError } from '../../modules/threads/errors.js';
+import { AgentError } from '../../modules/agents/errors.js';
+import { getCodeAgent } from '../agents/index.js';
 
 export type ResolveIssues = () => Pick<
   IssueService,
@@ -63,6 +65,14 @@ export function createIssueTool(resolve?: ResolveIssues) {
         if (action === 'view')
           return service.view(userId, id!, scope, values.cursor);
         if (action === 'create') {
+          const settings = chatSettingsSchema.parse(
+            context?.requestContext?.get('chatSettings') ?? {},
+          );
+          // The room leader is valid only with a trusted room binding. An issue
+          // gets an ordinary chat, so resolve its default Agent while retaining
+          // the current model and reasoning settings. Normal worker Agents stay.
+          if (settings.agentId && getCodeAgent(settings.agentId)?.hidden)
+            settings.agentId = null;
           const issue = await service.create(
             userId,
             scope,
@@ -70,9 +80,7 @@ export function createIssueTool(resolve?: ResolveIssues) {
               title: values.title,
               body: values.body,
               state: values.state,
-              settings: chatSettingsSchema.parse(
-                context?.requestContext?.get('chatSettings') ?? {},
-              ),
+              settings,
             }),
             signal,
           );
@@ -141,7 +149,11 @@ export function createIssueTool(resolve?: ResolveIssues) {
         return await Promise.race([
           operation().catch((error: unknown) => {
             if (signal?.aborted) return '用户中止了操作';
-            if (error instanceof ORPCError || error instanceof ThreadError)
+            if (
+              error instanceof ORPCError ||
+              error instanceof ThreadError ||
+              error instanceof AgentError
+            )
               return { error: error.code };
             if (error instanceof z.ZodError)
               return {

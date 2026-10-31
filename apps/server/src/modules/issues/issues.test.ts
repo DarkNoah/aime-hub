@@ -4,9 +4,16 @@ import { randomBytes } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { RequestContext } from '@mastra/core/request-context';
 import { noopObserve } from '@mastra/core/tools';
+import { Mastra } from '@mastra/core/mastra';
+import { InMemoryStore } from '@mastra/core/storage';
 import { Project, ProjectMember } from '@aime/db';
 import type { Auth } from '@aime/auth';
-import { issueCreateSchema, issueListSchema } from '@aime/shared/issues';
+import {
+  issueCreateSchema,
+  issueListSchema,
+  issuePatchSchema,
+  type Issue,
+} from '@aime/shared/issues';
 import type { RunInput } from '@aime/shared/threads';
 import { CreateIssues1780000035000 } from '../../../../../packages/db/src/migrations/1780000035000-create-issues.js';
 import { fakeMemory } from '../../../../../scripts/fixtures/thread-memory.js';
@@ -27,6 +34,9 @@ import {
 } from '../tools/registry.js';
 import { createApp } from '../../app.js';
 import type { LanguageModelService } from '../models/language-model.js';
+import { createChatRunner } from '../threads/runner.js';
+import { botAgent } from '../../mastra/agents/bot-agent.js';
+import { fallbackAgentId } from '../../mastra/agents/index.js';
 
 const settings = { model: null, reasoningEffort: 'auto' } as const;
 const code = (expected: string) => (error: unknown) =>
@@ -34,6 +44,17 @@ const code = (expected: string) => (error: unknown) =>
   error !== null &&
   'code' in error &&
   error.code === expected;
+
+test('issue patches change only supplied fields and allow explicitly clearing the body', () => {
+  assert.deepEqual(issuePatchSchema.parse({ state: 'in_progress' }), {
+    state: 'in_progress',
+  });
+  assert.deepEqual(issuePatchSchema.parse({ title: 'renamed' }), {
+    title: 'renamed',
+  });
+  assert.deepEqual(issuePatchSchema.parse({ body: '' }), { body: '' });
+  assert.deepEqual(issuePatchSchema.parse({}), {});
+});
 
 test('issue command parser handles quoted Markdown, literal shell text, aliases and rejects ambiguous mutations', () => {
   const parsed = parseIssueCommand(
@@ -150,10 +171,17 @@ test(
       extra: { options: `-c search_path=${schema}` },
     });
     await db.initialize();
+    const mastra = new Mastra({ storage: new InMemoryStore(), logger: false });
+    const resolver = createChatRunner(
+      mastra,
+      {} as LanguageModelService,
+      '/tmp/issue-fixture',
+    );
     const { memory, threads: stored } = fakeMemory();
     const cleanup: { threads?: ThreadService } = {};
     t.after(async () => {
       await cleanup.threads?.shutdown();
+      await mastra.shutdown();
       await db.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
       await db.destroy();
     });
@@ -175,6 +203,8 @@ test(
     const threads = new ThreadService(
       memory,
       {
+        // Use the real Agent resolver: room-only Agents are unavailable to normal chats.
+        resolveSettings: resolver.resolveSettings,
         async createWorkspace() {
           return '/tmp/issue-fixture';
         },
@@ -386,6 +416,72 @@ test(
       (await request('alice', { id: personal.id }, 'http://untrusted.test'))
         .status,
       403,
+    );
+
+    await t.test(
+      'room Bot creates personal/project issues with a normal Agent and edits preserve other fields',
+      async () => {
+        const ctx = new RequestContext();
+        ctx.set('userId', 'alice');
+        ctx.set('chatSettings', {
+          ...settings,
+          agentId: botAgent.id,
+          reasoningEffort: 'high',
+        });
+        const tool = createIssueTool(() => issues);
+        const execute = async (command: string) => {
+          const result = (await tool.execute!(
+            { command },
+            { requestContext: ctx, observe: noopObserve },
+          )) as { issue?: Issue; error?: string };
+          assert.equal(
+            result.error,
+            undefined,
+            JSON.stringify({ command, result }),
+          );
+          assert.ok(result.issue, command);
+          return result.issue;
+        };
+        for (const projectId of [undefined, scope.projectId]) {
+          ctx.set('projectId', projectId);
+          const created = await execute(
+            'create --title "Bot task" --body "Keep this acceptance criterion"',
+          );
+          assert.equal(created.projectId, projectId ?? null);
+          const target = stored.get(created.threadId)!;
+          assert.equal(target.metadata?.agentId, fallbackAgentId);
+          assert.equal(target.metadata?.reasoningEffort, 'high');
+          assert.equal(target.metadata?.groupChat, undefined);
+          assert.equal(target.metadata?.issueId, created.id);
+          const changed = await execute(
+            `edit ${created.id} --state in_progress`,
+          );
+          assert.equal(changed.body, created.body);
+          const renamed = await execute(
+            `edit ${created.id} --title "Renamed Bot task"`,
+          );
+          assert.equal(renamed.state, 'in_progress');
+          assert.equal(renamed.body, created.body);
+          const closed = await execute(`close ${created.id}`);
+          assert.equal(closed.state, 'done');
+          assert.equal(closed.body, created.body);
+          const reopened = await execute(`reopen ${created.id}`);
+          assert.equal(reopened.state, 'todo');
+          assert.equal(reopened.body, created.body);
+          const cleared = await execute(`edit ${created.id} --body ""`);
+          assert.equal(cleared.body, '');
+          assert.equal(cleared.state, 'todo');
+        }
+        ctx.set('projectId', undefined);
+        ctx.set('chatSettings', { ...settings, agentId: 'default' });
+        const workerIssue = await execute(
+          'create --title "Keep ordinary Agent"',
+        );
+        assert.equal(
+          stored.get(workerIssue.threadId)?.metadata?.agentId,
+          'default',
+        );
+      },
     );
   },
 );
