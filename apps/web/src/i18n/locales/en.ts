@@ -1953,6 +1953,8 @@ export const en = {
     'This member will lose access to all project conversations.',
   'projects.removeMember': 'Remove member',
   'projects.settings': 'Project settings',
+  'projects.environmentVariablesDescription':
+    'Shared by commands in this project, overriding global and personal variables with the same name. Only project owners and admins can manage them. Changes apply to new commands; restart existing terminals to use them.',
   'projects.settingsHint':
     'Shared defaults for project chats. Personal chat defaults are independent.',
   'projects.dashboard': 'Project dashboard',
@@ -2636,7 +2638,7 @@ export const en = {
   'errors.avatarTooLarge': 'Avatar images must be 10 MB or smaller.',
   'errors.profileUpdate': 'Could not save your profile. Please try again.',
   'personalSettings.environmentVariablesDescription':
-    'Used by commands you start, overriding global variables with the same name. Changes apply to new commands; restart existing terminals to use them.',
+    'Used by commands you start, overriding global variables with the same name. Project variables take precedence within a project. Changes apply to new commands; restart existing terminals to use them.',
   'personalSettings.failed':
     'Could not complete this operation. Please try again.',
   'personalSettings.archivedChats': 'Archived chats',

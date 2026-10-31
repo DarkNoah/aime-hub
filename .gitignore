@@ -64,6 +64,8 @@ plugins/vibe-quant/**/__pycache__/
 !scripts/local-api.test.ts
 !apps/server/src/modules/threads/workspace-env.test.ts
 !scripts/environment-variables.test.ts
+!scripts/project-environment-variables.test.ts
+!scripts/project-environment-variables-browser.test.mjs
 !scripts/realtime-http-browser.test.mjs
 
 !apps/server/src/modules/issues/*.test.ts

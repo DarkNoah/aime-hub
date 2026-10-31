@@ -206,6 +206,17 @@ export class ProjectService implements ProjectThreadAccess {
     });
   }
 
+  withManagementAccess<T>(
+    userId: string,
+    id: string,
+    action: (manager: EntityManager) => Promise<T>,
+  ) {
+    return this.mutate(userId, id, async (manager, _project, role) => {
+      requireProjectManager(role);
+      return action(manager);
+    });
+  }
+
   update(userId: string, id: string, input: ProjectUpdateInput) {
     return this.mutate(userId, id, async (manager, project, role, member) => {
       requireProjectManager(role);

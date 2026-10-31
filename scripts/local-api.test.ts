@@ -308,7 +308,8 @@ test('skill scripts use existing APIs with scoped identity, ownership, paging an
   );
   const client = createAppApi({ env, fetchImpl });
   const catalog = await client.list();
-  assert.equal(catalog.length, 14);
+  assert.equal(catalog.length, 19);
+  assert.equal((await client.list('projectEnvironmentVariables')).length, 5);
   assert.equal((await client.list('personalEnvironmentVariables')).length, 5);
   assert.ok(
     catalog.some(
@@ -322,7 +323,7 @@ test('skill scripts use existing APIs with scoped identity, ownership, paging an
         operation.operationId === 'threads.remove',
     ),
   );
-  assert.equal((await client.list('项目')).length, 4);
+  assert.equal((await client.list('项目')).length, 9);
   const description = await client.describe('projects.create');
   assert.deepEqual(
     description.requestBody.content['application/json'].schema.required,

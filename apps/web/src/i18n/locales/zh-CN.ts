@@ -1783,6 +1783,8 @@ export const zhCN = {
   'projects.removeHint': '该成员将无法继续访问此项目的所有聊天。',
   'projects.removeMember': '移除成员',
   'projects.settings': '项目设置',
+  'projects.environmentVariablesDescription':
+    '供本项目成员的命令共享使用，覆盖同名全局和个人变量。仅项目所有者和管理员可管理；保存后对新启动的命令生效，已有终端需重新启动。',
   'projects.settingsHint':
     '项目聊天使用的共享默认配置，与个人聊天默认配置相互独立。',
   'projects.dashboard': '项目仪表盘',
@@ -2409,7 +2411,7 @@ export const zhCN = {
   'errors.avatarTooLarge': '头像图片不能超过 10 MB。',
   'errors.profileUpdate': '个人资料保存失败，请稍后重试。',
   'personalSettings.environmentVariablesDescription':
-    '仅用于你发起的命令，覆盖同名全局变量。保存后对新启动的命令生效，已有终端需重新启动。',
+    '用于你发起的命令，覆盖同名全局变量；项目内的同名项目变量优先。保存后对新启动的命令生效，已有终端需重新启动。',
   'personalSettings.failed': '操作未完成，请稍后重试。',
   'personalSettings.archivedChats': '归档聊天',
   'personalSettings.archiveHint':

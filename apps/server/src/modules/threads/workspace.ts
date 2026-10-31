@@ -165,6 +165,7 @@ export function getWorkspace(
     async (authorId) => ({
       ...(await environmentVariables?.getEnv(
         authorId === 'system' ? undefined : authorId,
+        projectId,
       )),
       SKILL_HOME: skillHome,
       SKILLS_ROOT: skillsRoot,

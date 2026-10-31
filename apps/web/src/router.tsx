@@ -55,6 +55,11 @@ const PersonalAgentsPage = lazy(() =>
     default: m.PersonalAgentsPage,
   })),
 );
+const ProjectEnvironmentVariablesPage = lazy(() =>
+  import('@/pages/projects/environment-variables-page').then((m) => ({
+    default: m.ProjectEnvironmentVariablesPage,
+  })),
+);
 const ProjectAgentsPage = lazy(() =>
   import('@/pages/projects/agents-page').then((m) => ({
     default: m.ProjectAgentsPage,
@@ -297,6 +302,11 @@ const routeTree = rootRoute.addChildren([
         }),
         projectRoute.addChildren([
           projectGroupChatRoute,
+          createRoute({
+            getParentRoute: () => projectRoute,
+            path: 'environment-variables',
+            component: ProjectEnvironmentVariablesPage,
+          }),
           createRoute({
             getParentRoute: () => projectRoute,
             path: 'agents',

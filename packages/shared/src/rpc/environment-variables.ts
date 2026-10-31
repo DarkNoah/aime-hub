@@ -97,3 +97,65 @@ export const personalEnvironmentVariablesContract = {
     .input(z.object({ params }))
     .output(type<void>()),
 };
+
+const project = procedure.meta({ localApi: true });
+const projectParams = z.object({ projectId: z.string().min(1) });
+const projectItemParams = projectParams.extend(params.shape);
+const projectPath = '/projects/{projectId}/environment-variables';
+
+export const projectEnvironmentVariablesContract = {
+  list: project
+    .route({
+      method: 'GET',
+      path: projectPath,
+      inputStructure: 'detailed',
+      summary: '列出项目环境变量（项目管理员）',
+    })
+    .input(z.object({ params: projectParams }))
+    .output(type<EnvironmentVariable[]>()),
+  get: project
+    .route({
+      method: 'GET',
+      path: `${projectPath}/{id}`,
+      inputStructure: 'detailed',
+      summary: '读取项目环境变量（项目管理员）',
+    })
+    .input(z.object({ params: projectItemParams }))
+    .output(type<EnvironmentVariable>()),
+  create: project
+    .route({
+      method: 'POST',
+      path: projectPath,
+      inputStructure: 'detailed',
+      successStatus: 201,
+      summary: '创建项目环境变量（项目管理员）',
+    })
+    .input(
+      z.object({ params: projectParams, body: environmentVariableInputSchema }),
+    )
+    .output(type<EnvironmentVariable>()),
+  update: project
+    .route({
+      method: 'PATCH',
+      path: `${projectPath}/{id}`,
+      inputStructure: 'detailed',
+      summary: '修改项目环境变量（项目管理员）',
+    })
+    .input(
+      z.object({
+        params: projectItemParams,
+        body: environmentVariableUpdateSchema,
+      }),
+    )
+    .output(type<EnvironmentVariable>()),
+  remove: project
+    .route({
+      method: 'DELETE',
+      path: `${projectPath}/{id}`,
+      inputStructure: 'detailed',
+      successStatus: 204,
+      summary: '删除项目环境变量（项目管理员）',
+    })
+    .input(z.object({ params: projectItemParams }))
+    .output(type<void>()),
+};

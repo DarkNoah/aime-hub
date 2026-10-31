@@ -11,6 +11,7 @@ import { filesContract } from './files.js';
 import {
   environmentVariablesContract,
   personalEnvironmentVariablesContract,
+  projectEnvironmentVariablesContract,
 } from './environment-variables.js';
 import { requestLogsContract } from './request-logs.js';
 import { toolsContract } from './tools.js';
@@ -36,6 +37,7 @@ export const apiContract = {
   files: filesContract,
   environmentVariables: environmentVariablesContract,
   personalEnvironmentVariables: personalEnvironmentVariablesContract,
+  projectEnvironmentVariables: projectEnvironmentVariablesContract,
   requestLogs: requestLogsContract,
   tools: toolsContract,
   agents: agentsContract,

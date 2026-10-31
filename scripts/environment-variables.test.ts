@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { Pool } from 'pg';
-import { createDataSource, EnvironmentVariable } from '@aime/db';
+import {
+  createDataSource,
+  EnvironmentVariable,
+  CreateProjectTables1780000002000,
+} from '@aime/db';
+import { ProjectListState1780000003000 } from '../packages/db/src/migrations/1780000003000-project-list-state.js';
+import { ProjectEnvironmentVariables1780000037000 } from '../packages/db/src/migrations/1780000037000-project-environment-variables.js';
 import {
   environmentVariableInputSchema,
   environmentVariableUpdateSchema,
@@ -409,8 +415,11 @@ test(
       schema,
       extra: { options: `-c search_path=${schema}` },
       migrations: [
+        CreateProjectTables1780000002000,
+        ProjectListState1780000003000,
         CreateEnvironmentVariables1780000004000,
         UserEnvironmentVariables1780000028000,
+        ProjectEnvironmentVariables1780000037000,
       ],
     });
     t.after(async () => {
@@ -522,6 +531,8 @@ test(
     try {
       const migration = new CreateEnvironmentVariables1780000004000();
       const scoped = new UserEnvironmentVariables1780000028000();
+      const projectScoped = new ProjectEnvironmentVariables1780000037000();
+      await projectScoped.down(runner);
       await scoped.down(runner);
       await migration.down(runner);
       await migration.up(runner);
@@ -530,7 +541,16 @@ test(
         [randomUUID()],
       );
       await scoped.up(runner);
+      await runner.query(
+        "INSERT INTO environment_variables (id, name, value, user_id) VALUES ($1, 'LEGACY', 'personal-preserved', 'alice')",
+        [randomUUID()],
+      );
+      await projectScoped.up(runner);
       assert.deepEqual(await reloaded.getEnv(), { LEGACY: 'preserved' });
+      assert.deepEqual(await reloaded.getEnv('alice'), {
+        LEGACY: 'personal-preserved',
+      });
+      await reloaded.remove((await reloaded.list('alice'))[0].id, 'alice');
       await reloaded.remove((await reloaded.list())[0].id);
     } finally {
       await runner.release();
