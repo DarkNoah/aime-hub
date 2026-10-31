@@ -7,6 +7,7 @@ const errorKeys = {
   VALIDATION_ERROR: 'environmentVariables.invalid',
   UNAUTHORIZED: 'errors.sessionExpired',
   FORBIDDEN: 'errors.forbidden',
+  PROJECT_NOT_FOUND: 'projects.errors.notFound',
 } as const satisfies Record<string, TranslationKey>;
 
 export function environmentVariableErrorKey(error: unknown): TranslationKey {

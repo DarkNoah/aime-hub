@@ -70,7 +70,8 @@ for (const projectId of [undefined, 'project000000001']) {
       [],
       undefined,
       {
-        async getEnv() {
+        async getEnv(_author, currentProjectId) {
+          assert.equal(currentProjectId, projectId);
           if (unavailable)
             throw new Error('Environment configuration unavailable');
           return { ...env };
@@ -217,6 +218,7 @@ test('commands isolate credentials by current author, including concurrent pipe 
     alice: 'alice-value',
     bob: 'bob-value',
   };
+  let projectValue: string | undefined;
   const workspace = getWorkspace(
     root,
     'creator',
@@ -225,10 +227,14 @@ test('commands isolate credentials by current author, including concurrent pipe 
     [],
     undefined,
     {
-      getEnv: async (author) => ({
-        APP_API_TOKEN: 'must-not-use-saved-token',
-        COMMAND_ENV_TEST: (author && userValues[author]) ?? 'global-value',
-      }),
+      getEnv: async (author, currentProjectId) => {
+        assert.equal(currentProjectId, projectId);
+        return {
+          APP_API_TOKEN: 'must-not-use-saved-token',
+          COMMAND_ENV_TEST:
+            projectValue ?? (author && userValues[author]) ?? 'global-value',
+        };
+      },
     },
     (author) => localApi.environment(author),
   );
@@ -258,6 +264,21 @@ test('commands isolate credentials by current author, including concurrent pipe 
   assert.equal(alice.url, 'http://127.0.0.1:3000/api');
   assert.equal(alice.value, 'alice-value');
   assert.equal(bob.value, 'bob-value');
+  projectValue = 'project-shared';
+  const shared = await Promise.all([run('alice'), run('bob', true)]);
+  assert.deepEqual(
+    shared.map(({ value }) => value),
+    ['project-shared', 'project-shared'],
+  );
+  assert.equal(
+    await localApi.authenticate(`Bearer ${shared[0].token}`),
+    'alice',
+  );
+  assert.equal(await localApi.authenticate(`Bearer ${shared[1].token}`), 'bob');
+  projectValue = '';
+  assert.equal((await run('alice')).value, '');
+  projectValue = undefined;
+  assert.equal((await run('alice')).value, 'alice-value');
   userValues.alice = '';
   assert.equal((await run('alice')).value, '');
   delete userValues.alice;

@@ -40,6 +40,7 @@ import type { LanguageModelService } from './modules/models/language-model.js';
 import type { ProjectService } from './modules/projects/service.js';
 import type { SkillService } from './modules/skills/service.js';
 import type { EnvironmentVariableService } from './modules/environment-variables/service.js';
+import { projectEnvironmentVariableRouter } from './modules/environment-variables/project-rpc.js';
 import {
   environmentVariableRouter,
   personalEnvironmentVariableRouter,
@@ -173,6 +174,9 @@ export function createApp(
     ),
     personalEnvironmentVariables: personalEnvironmentVariableRouter(
       environmentVariables?.service,
+    ),
+    projectEnvironmentVariables: projectEnvironmentVariableRouter(
+      chat?.projects,
     ),
   });
   if (notifications)

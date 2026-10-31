@@ -1,3 +1,4 @@
+import { ProjectEnvironmentVariables1780000037000 } from './migrations/1780000037000-project-environment-variables.js';
 import { IssueSourceThread1780000036000 } from './migrations/1780000036000-issue-source-thread.js';
 import { CreateIssues1780000035000 } from './migrations/1780000035000-create-issues.js';
 import { GroupChatChoices1780000034000 } from './migrations/1780000034000-group-chat-choices.js';
@@ -92,6 +93,7 @@ export function createDataSource(
       GeneratedAsset,
     ],
     migrations: [
+      ProjectEnvironmentVariables1780000037000,
       IssueSourceThread1780000036000,
       CreateIssues1780000035000,
       GroupChatChoices1780000034000,

@@ -19,6 +19,7 @@ import {
   MoreHorizontal,
   Plus,
   Settings2,
+  KeyRound,
   Users,
 } from 'lucide-react';
 import type { ProjectDetail } from '@aime/shared/projects';
@@ -64,6 +65,7 @@ export function ProjectPage() {
   if (
     location.pathname.endsWith('/automations') ||
     location.pathname.endsWith('/agents') ||
+    location.pathname.endsWith('/environment-variables') ||
     location.pathname.endsWith('/knowledge') ||
     location.pathname.includes('/group-chats')
   )
@@ -235,6 +237,17 @@ function ProjectSession({
               <Users />
               {t('projects.members')}
             </Button>
+            {project.role !== 'member' && (
+              <Button asChild variant="outline">
+                <Link
+                  to="/projects/$projectId/environment-variables"
+                  params={{ projectId }}
+                >
+                  <KeyRound />
+                  {t('nav.environmentVariables')}
+                </Link>
+              </Button>
+            )}
             {project.role !== 'member' && (
               <Button variant="outline" onClick={() => setSheet('settings')}>
                 <Settings2 />
