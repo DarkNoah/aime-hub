@@ -46,11 +46,6 @@ export function createSpeechModel(
     'content-type': 'application/json',
     ...(provider.apiKey ? { authorization: `Bearer ${provider.apiKey}` } : {}),
   };
-  const signalFor = (signal?: AbortSignal) =>
-    AbortSignal.any([
-      AbortSignal.timeout(provider.timeoutMs ?? 300000),
-      ...(signal ? [signal] : []),
-    ]);
   const voiceBody = (
     voice?: string,
     providerOptions?: SpeechProviderOptions,
@@ -77,12 +72,13 @@ export function createSpeechModel(
       abortSignal,
       providerOptions,
     }) => {
-      const signal = signalFor(abortSignal);
+      const signal = abortSignal ?? new AbortController().signal;
       const format = z.enum(speechFormats).parse(outputFormat ?? 'wav');
       const response = await request(endpoint, {
         method: 'POST',
         headers,
         signal,
+        timeoutMs: 0,
         maxBytes: 50_000_000,
         body: JSON.stringify({
           model: modelId,
@@ -117,13 +113,14 @@ export function createSpeechModel(
       { text, voice, instructions, speed, abortSignal, providerOptions },
       onChunk,
     ) => {
-      const signal = signalFor(abortSignal);
+      const signal = abortSignal;
       await streamRequest(
         endpoint,
         {
           method: 'POST',
           headers,
           signal,
+          timeoutMs: 0,
           maxBytes: 50_000_000,
           body: JSON.stringify({
             model: modelId,

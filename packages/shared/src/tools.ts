@@ -37,10 +37,14 @@ export const imageGenConfigSchema = z.strictObject({
     .default(null),
   timeoutMs: z.number().int().min(1000).max(600000).default(180000),
 });
-export const speechConfigSchema = imageGenConfigSchema.extend({
+export const speechConfigSchema = imageGenConfigSchema
+  .omit({ timeoutMs: true })
+  // Accept persisted legacy settings, but never expose or apply their timeout.
+  .extend({ timeoutMs: z.unknown().optional() })
+  .transform(({ enabled, model }) => ({ enabled, model }));
+export const transcriptionsConfigSchema = imageGenConfigSchema.extend({
   timeoutMs: z.number().int().min(1000).max(600000).default(300000),
 });
-export const transcriptionsConfigSchema = speechConfigSchema;
 export const readFileConfigSchema = imageGenConfigSchema.extend({
   timeoutMs: z.number().int().min(1000).max(600000).default(600000),
 });

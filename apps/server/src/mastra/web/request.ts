@@ -63,6 +63,8 @@ export type WebResource = {
 };
 export type WebRequestOptions = {
   signal: AbortSignal;
+  /** Connection and response inactivity timeout; 0 disables transport timers. */
+  timeoutMs?: number;
   maxBytes?: number;
   method?: 'GET' | 'POST' | 'PUT';
   headers?: Record<string, string>;
@@ -80,7 +82,10 @@ export async function streamWebResource(
 ) {
   const address = await publicWebAddress(url, options.signal);
   const dispatcher = new Agent({
+    headersTimeout: options.timeoutMs,
+    bodyTimeout: options.timeoutMs,
     connect: {
+      timeout: options.timeoutMs,
       lookup: (_hostname, lookupOptions, callback) => {
         if (lookupOptions.all) callback(null, [address]);
         else callback(null, address.address, address.family);
@@ -127,7 +132,10 @@ export async function requestWebResource(
 ): Promise<WebResource> {
   const address = await publicWebAddress(url, options.signal);
   const dispatcher = new Agent({
+    headersTimeout: options.timeoutMs,
+    bodyTimeout: options.timeoutMs,
     connect: {
+      timeout: options.timeoutMs,
       lookup: (_hostname, lookupOptions, callback) => {
         if (lookupOptions.all) callback(null, [address]);
         else callback(null, address.address, address.family);

@@ -57,7 +57,6 @@ const speechOptions = z
       .enum(['audio/wav', 'audio/mpeg', 'audio/flac', 'audio/ogg'])
       .default('audio/wav'),
     kwargs: z.record(z.string(), z.json()).default({}),
-    timeoutMs: z.number().int().min(1000).max(600000).optional(),
   })
   .strict();
 
@@ -351,7 +350,7 @@ export class XinferenceProvider extends BaseProvider {
           body,
           contentType,
           maxBytes: 50_000_000,
-          timeoutMs: extra.timeoutMs ?? 300_000,
+          timeoutMs: 0,
         });
         const responseType = response.headers['content-type']
           ?.split(';')[0]
@@ -424,12 +423,15 @@ export class XinferenceProvider extends BaseProvider {
       timeoutMs?: number;
     } = {},
   ) {
-    const signal = AbortSignal.any([
-      AbortSignal.timeout(
-        this.provider.timeoutMs ?? options.timeoutMs ?? 60_000,
-      ),
-      ...(options.abortSignal ? [options.abortSignal] : []),
-    ]);
+    const signal =
+      options.timeoutMs === 0
+        ? (options.abortSignal ?? new AbortController().signal)
+        : AbortSignal.any([
+            AbortSignal.timeout(
+              this.provider.timeoutMs ?? options.timeoutMs ?? 60_000,
+            ),
+            ...(options.abortSignal ? [options.abortSignal] : []),
+          ]);
     signal.throwIfAborted();
     const headers = new Headers();
     for (const [key, value] of Object.entries(options.headers ?? {}))
@@ -441,6 +443,7 @@ export class XinferenceProvider extends BaseProvider {
     const response = await this.request(`${this.baseUrl}/${path}`, {
       method: options.body === undefined ? 'GET' : 'POST',
       signal,
+      ...(options.timeoutMs === 0 ? { timeoutMs: 0 } : {}),
       headers: Object.fromEntries(headers),
       body: options.body,
       maxBytes: options.maxBytes ?? 20_000_000,

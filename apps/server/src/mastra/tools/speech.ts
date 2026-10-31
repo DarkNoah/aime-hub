@@ -218,7 +218,6 @@ export function createSpeechTool(
         const providerOptions: SpeechProviderOptions = {};
         if (provider === 'xinference') {
           providerOptions.xinference = {
-            timeoutMs: config.timeoutMs,
             ...(savedReference
               ? {
                   promptSpeech: savedReference.audio.toString('base64'),
@@ -254,7 +253,6 @@ export function createSpeechTool(
         const playback_id = playback.start({
           text: input,
           toolCallId: context?.agent?.toolCallId,
-          timeoutMs: config.timeoutMs,
           generate: async (signal, emit) => {
             const resolved = await prepare(signal);
             if (supportsSpeechStreaming(resolved.model)) {
@@ -281,10 +279,7 @@ export function createSpeechTool(
         });
         return { status: 'queued' as const, playback_id, text: input };
       }
-      const signal = AbortSignal.any([
-        AbortSignal.timeout(config.timeoutMs),
-        ...(context?.abortSignal ? [context.abortSignal] : []),
-      ]);
+      const signal = context?.abortSignal ?? new AbortController().signal;
       try {
         signal.throwIfAborted();
         const filesystem = context?.workspace?.filesystem;
@@ -353,9 +348,8 @@ export function createSpeechTool(
         };
       } catch (error) {
         if (context?.abortSignal?.aborted) return cancellationMessage;
-        const message = signal.aborted
-          ? 'Speech generation timed out. Try again or increase the tool timeout.'
-          : error instanceof SpeechGenerationError
+        const message =
+          error instanceof SpeechGenerationError
             ? error.message
             : 'Speech generation failed. Check the selected speech model, its supported options and workspace write access.';
         throw new SpeechGenerationError(message);

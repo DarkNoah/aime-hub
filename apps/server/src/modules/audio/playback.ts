@@ -5,7 +5,6 @@ import type { SpeechAudioChunk } from '../../mastra/providers/speech-model.js';
 type SpeechJob = {
   text: string;
   toolCallId?: string;
-  timeoutMs: number;
   generate: (
     signal: AbortSignal,
     emit: (chunk: SpeechAudioChunk) => Promise<void>,
@@ -46,10 +45,7 @@ export class SpeechPlayback {
             toolCallId: job.toolCallId,
             sequence: sequence++,
           } as SpeechEvent);
-        const signal = AbortSignal.any([
-          controller.signal,
-          AbortSignal.timeout(job.timeoutMs),
-        ]);
+        const signal = controller.signal;
         try {
           signal.throwIfAborted();
           await send({ phase: 'start' });
@@ -96,9 +92,7 @@ export class SpeechPlayback {
               ? { phase: 'cancelled' as const }
               : {
                   phase: 'error' as const,
-                  error: signal.aborted
-                    ? ('TIMED_OUT' as const)
-                    : ('GENERATION_FAILED' as const),
+                  error: 'GENERATION_FAILED' as const,
                 }),
           });
         } finally {

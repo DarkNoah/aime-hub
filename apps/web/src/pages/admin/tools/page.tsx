@@ -224,11 +224,16 @@ export function AdminToolsPage() {
                                 : tool.kind === 'speech'
                                   ? 'tools.defaultSpeechModel'
                                   : 'tools.defaultImageModel',
-                        )}{' '}
-                      ·{' '}
-                      {t('tools.imageSummary', {
-                        seconds: tool.config.timeoutMs / 1000,
-                      })}
+                        )}
+                      {tool.kind !== 'speech' && (
+                        <>
+                          {' '}
+                          ·{' '}
+                          {t('tools.imageSummary', {
+                            seconds: tool.config.timeoutMs / 1000,
+                          })}
+                        </>
+                      )}
                     </p>
                   ) : tool.kind === 'web_search' ||
                     tool.kind === 'web_fetch' ? (

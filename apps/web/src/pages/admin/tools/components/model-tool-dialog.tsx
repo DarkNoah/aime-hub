@@ -111,7 +111,9 @@ export function ModelToolDialog({
   const [mode, setMode] = useState<'fast' | 'accurate'>(
     tool.kind === 'extract' ? tool.config.mode : 'accurate',
   );
-  const [timeout, setTimeout] = useState(String(tool.config.timeoutMs / 1000));
+  const [timeout, setTimeout] = useState(
+    tool.kind === 'speech' ? '' : String(tool.config.timeoutMs / 1000),
+  );
   const [pending, setPending] = useState(false);
   const [errors, setErrors] = useState<
     Partial<Record<'model' | 'timeout' | 'form', TranslationKey>>
@@ -123,7 +125,7 @@ export function ModelToolDialog({
     const parsed = toolConfigSchemas[tool.kind].safeParse({
       enabled,
       model,
-      timeoutMs: Number(timeout) * 1000,
+      ...(!speech ? { timeoutMs: Number(timeout) * 1000 } : {}),
       ...(extraction ? { mode } : {}),
     });
     if (!parsed.success) {
@@ -260,34 +262,38 @@ export function ModelToolDialog({
                   </p>
                 </div>
               )}
-              <div className="space-y-2">
-                <Label htmlFor="generation-timeout">{t('tools.timeout')}</Label>
-                <Input
-                  id="generation-timeout"
-                  type="number"
-                  min={1}
-                  max={600}
-                  step={1}
-                  value={timeout}
-                  onChange={(event) => setTimeout(event.target.value)}
-                  aria-invalid={!!errors.timeout}
-                  aria-describedby="generation-timeout-hint"
-                />
-                <p
-                  id="generation-timeout-hint"
-                  className={
-                    errors.timeout
-                      ? 'text-xs text-destructive'
-                      : 'text-xs text-muted-foreground'
-                  }
-                >
-                  {t(
-                    extraction
-                      ? 'tools.extractTimeoutHint'
-                      : 'tools.imageTimeoutHint',
-                  )}
-                </p>
-              </div>
+              {!speech && (
+                <div className="space-y-2">
+                  <Label htmlFor="generation-timeout">
+                    {t('tools.timeout')}
+                  </Label>
+                  <Input
+                    id="generation-timeout"
+                    type="number"
+                    min={1}
+                    max={600}
+                    step={1}
+                    value={timeout}
+                    onChange={(event) => setTimeout(event.target.value)}
+                    aria-invalid={!!errors.timeout}
+                    aria-describedby="generation-timeout-hint"
+                  />
+                  <p
+                    id="generation-timeout-hint"
+                    className={
+                      errors.timeout
+                        ? 'text-xs text-destructive'
+                        : 'text-xs text-muted-foreground'
+                    }
+                  >
+                    {t(
+                      extraction
+                        ? 'tools.extractTimeoutHint'
+                        : 'tools.imageTimeoutHint',
+                    )}
+                  </p>
+                </div>
+              )}
               <p className="rounded-lg bg-muted/50 p-3 text-xs leading-5 text-muted-foreground">
                 {t(labels.providerHint)}
               </p>
