@@ -12,9 +12,12 @@ export const issueCreateSchema = z.object({
   state: issueStateSchema.default('todo'),
   settings: chatSettingsSchema.optional(),
 });
-export const issuePatchSchema = issueCreateSchema
-  .pick({ title: true, body: true, state: true })
-  .partial();
+export const issuePatchSchema = z.object({
+  title: issueCreateSchema.shape.title.optional(),
+  // Creation defaults must not be applied to omitted fields in a partial update.
+  body: issueCreateSchema.shape.body.removeDefault().optional(),
+  state: issueStateSchema.optional(),
+});
 export type IssueCreate = z.infer<typeof issueCreateSchema>;
 export type IssuePatch = z.infer<typeof issuePatchSchema>;
 export const issueListSchema = issueScopeSchema.extend({
