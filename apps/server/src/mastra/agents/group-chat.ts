@@ -4,6 +4,10 @@ import { botAgent } from './bot-agent.js';
 import { buildTools, toToolsInput } from '../../modules/tools/service.js';
 import { nonInteractiveTools } from '../../modules/tools/non-interactive.js';
 import {
+  createGroupChatRetryProcessor,
+  GROUP_CHAT_MAX_RETRIES,
+} from '../../modules/group-chats/retry.js';
+import {
   BotAgentTools,
   type GroupChatAgentContext,
 } from '../tools/bot-agent.js';
@@ -65,6 +69,16 @@ export async function createGroupChatAgent(
   const runtime: AgentRuntimeOptions = {
     ...options,
     instructions,
+    // Retry the failed model step inside Mastra; never replay the room event
+    // or completed tools. Use one retry layer to keep provider attempts bounded.
+    maxRetries: 0,
+    maxProcessorRetries: GROUP_CHAT_MAX_RETRIES,
+    errorProcessors: async (args) => [
+      ...(typeof options.errorProcessors === 'function'
+        ? await options.errorProcessors(args)
+        : (options.errorProcessors ?? [])),
+      createGroupChatRetryProcessor(),
+    ],
     allowSubagents: false,
     localSubagents: undefined,
     buildTools: async (ids, defaults, disabledTools) => ({

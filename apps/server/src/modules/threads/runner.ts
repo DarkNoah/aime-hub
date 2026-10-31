@@ -766,7 +766,7 @@ export function createChatRunner(
                 // Preserve per-step settings and request headers after selection.
                 modelSettings: {
                   maxOutputTokens: resolved.maxOutputTokens,
-                  maxRetries: 1,
+                  maxRetries: roomBinding ? 0 : 1,
                   headers,
                 },
               };
@@ -782,7 +782,7 @@ export function createChatRunner(
             providerOptions: selection.providerOptions,
             modelSettings: {
               maxOutputTokens: selection.maxOutputTokens,
-              maxRetries: 1,
+              maxRetries: roomBinding ? 0 : 1,
               headers,
             },
             savePerStep: true,
