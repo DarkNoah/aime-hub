@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, type ReactNode } from 'react';
 import type { MessageResponseProps } from './ai-elements/message';
 
 const Response = lazy(() =>
@@ -8,13 +8,20 @@ const Response = lazy(() =>
 );
 
 /** Keep the host Markdown renderer out of plugins that only use basic controls. */
-export function MarkdownContent(props: MessageResponseProps) {
+export function MarkdownContent({
+  fallback,
+  ...props
+}: MessageResponseProps & { fallback?: ReactNode }) {
   return (
     <Suspense
       fallback={
-        <div className="whitespace-pre-wrap text-sm leading-7">
-          {props.children}
-        </div>
+        fallback === undefined ? (
+          <div className="whitespace-pre-wrap text-sm leading-7">
+            {props.children}
+          </div>
+        ) : (
+          fallback
+        )
       }
     >
       <Response {...props} />

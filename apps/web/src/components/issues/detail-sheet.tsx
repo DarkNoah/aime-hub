@@ -191,11 +191,17 @@ export function IssueDetailSheet({
                   </>
                 )}
               </div>
-              <div className="min-w-0 text-sm">
-                <MarkdownContent mode="static">
+              <article
+                className="min-w-0 text-sm leading-7 [overflow-wrap:anywhere]"
+                aria-label={t('issues.body')}
+              >
+                <MarkdownContent
+                  mode="static"
+                  fallback={<Skeleton className="h-20 w-full" />}
+                >
                   {issue.body || t('issues.noBody')}
                 </MarkdownContent>
-              </div>
+              </article>
               <div className="border-t pt-5">
                 <h3 className="mb-4 text-sm font-semibold">
                   {t('issues.discussion')}
@@ -275,8 +281,11 @@ export function IssueDetailSheet({
                               </Badge>
                             )}
                           </div>
-                          <div className="text-sm">
-                            <MarkdownContent mode="static">
+                          <div className="min-w-0 text-sm leading-7 [overflow-wrap:anywhere]">
+                            <MarkdownContent
+                              mode="static"
+                              fallback={<Skeleton className="h-12 w-full" />}
+                            >
                               {comment.body}
                             </MarkdownContent>
                           </div>

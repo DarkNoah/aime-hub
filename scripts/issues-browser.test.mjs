@@ -121,6 +121,18 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       reducedMotion: 'reduce',
     });
     page.setDefaultTimeout(15000);
+    let releaseRenderer;
+    const rendererReady = new Promise((resolve) => {
+      releaseRenderer = resolve;
+    });
+    t.after(() => releaseRenderer());
+    await page.route(
+      '**/src/components/ai-elements/message.tsx*',
+      async (route) => {
+        await rendererReady;
+        await route.continue();
+      },
+    );
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
     const states = ['decision', 'todo', 'in_progress', 'done'];
@@ -259,7 +271,22 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
         .waitFor();
       assert.equal(page.url(), before, 'card details must not navigate');
     };
-    for (const key of [undefined, 'Enter', 'Space']) {
+    await openDetails('确认验收范围');
+    const loadingBody = page
+      .getByRole('dialog')
+      .getByRole('article', { name: '任务描述' });
+    assert.equal(
+      await loadingBody.innerText(),
+      '',
+      'do not flash Markdown source while the renderer loads',
+    );
+    releaseRenderer();
+    await loadingBody
+      .getByText('任务描述和验收标准', { exact: true })
+      .waitFor();
+    await page.keyboard.press('Escape');
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    for (const key of ['Enter', 'Space']) {
       await openDetails('确认验收范围', key);
       await page.keyboard.press('Escape');
       await page.getByRole('dialog').waitFor({ state: 'detached' });
@@ -323,9 +350,27 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     const create = page.getByRole('dialog');
     assert.equal(await create.getByRole('combobox').textContent(), '进行中');
     await create.getByLabel('标题', { exact: true }).fill('验证跨页任务');
-    await create
-      .getByLabel('任务描述', { exact: true })
-      .fill('## 验收\n保留描述和评论');
+    const markdownBody = [
+      '## 验收',
+      '',
+      '**保留描述和评论**，支持 `issue` 命令。',
+      '',
+      '- [x] 创建成功',
+      '- [ ] 完成验证',
+      '',
+      '> 保留引用说明',
+      '',
+      '| 项目 | 结果 |',
+      '| --- | --- |',
+      '| Markdown | 正常 |',
+      '',
+      '```ts',
+      'const status = "done";',
+      '```',
+      '',
+      '[文档链接](https://example.com/issues)',
+    ].join('\n');
+    await create.getByLabel('任务描述', { exact: true }).fill(markdownBody);
     await create
       .getByRole('button', { name: '创建 Issue', exact: true })
       .click();
@@ -333,21 +378,54 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     await detail
       .getByRole('heading', { name: '验证跨页任务', exact: true })
       .waitFor();
+    const body = detail.getByRole('article', { name: '任务描述' });
+    await body.getByRole('heading', { name: '验收', level: 2 }).waitFor();
+    assert.ok(
+      await body
+        .getByText('保留描述和评论', { exact: true })
+        .evaluate(
+          (element) => Number(getComputedStyle(element).fontWeight) >= 600,
+        ),
+    );
+    assert.equal(await body.getByRole('checkbox').count(), 2);
+    assert.equal(await body.getByRole('table').count(), 1);
+    assert.equal(await body.locator('blockquote').innerText(), '保留引用说明');
+    await body.locator('code').filter({ hasText: 'const status' }).waitFor();
+    assert.equal(
+      await body
+        .getByRole('link', { name: '文档链接', exact: true })
+        .getAttribute('href'),
+      'https://example.com/issues',
+    );
+    await page.screenshot({ path: '/tmp/issue-markdown-desktop.png' });
     assert.equal(
       calls.find((call) => call.endpoint === 'issues/create').input.data.state,
       'in_progress',
     );
     await detail
       .getByLabel('添加评论或执行消息', { exact: true })
-      .fill('补充背景');
+      .fill('### 讨论\n\n**补充背景**\n\n- 检查 Markdown 评论');
     await detail.getByRole('button', { name: '提交消息', exact: true }).click();
     await detail.getByText('补充背景', { exact: true }).waitFor();
+    await detail.getByRole('heading', { name: '讨论', level: 3 }).waitFor();
+    assert.equal(
+      await detail
+        .getByText('补充背景', { exact: true })
+        .evaluate(
+          (element) => Number(getComputedStyle(element).fontWeight) >= 600,
+        ),
+      true,
+    );
     assert.equal(
       calls.filter((call) => call.endpoint === 'issues/message').length,
       0,
     );
     await detail.getByRole('button', { name: '编辑', exact: true }).click();
     const editor = page.getByRole('dialog').last();
+    assert.equal(
+      await editor.getByLabel('任务描述', { exact: true }).inputValue(),
+      markdownBody,
+    );
     await editor.getByLabel('标题', { exact: true }).fill('更新后的任务');
     await editor.getByRole('button', { name: '保存修改', exact: true }).click();
     await detail
@@ -355,11 +433,12 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       .waitFor();
     await detail
       .getByLabel('添加评论或执行消息', { exact: true })
-      .fill('现在执行');
+      .fill('### 执行计划\n\n现在执行\n\n1. 验证渲染结果');
     await detail.getByRole('combobox', { name: '消息处理方式' }).click();
     await page.getByRole('option', { name: '立即处理', exact: true }).click();
     await detail.getByRole('button', { name: '提交消息', exact: true }).click();
     await detail.getByText('现在执行', { exact: true }).waitFor();
+    await detail.getByRole('heading', { name: '执行计划', level: 3 }).waitFor();
     assert.equal(
       calls.find((call) => call.endpoint === 'issues/message').input.data
         .delivery,
@@ -420,6 +499,20 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       true,
     );
     await page.screenshot({ path: '/tmp/issues-mobile.png', fullPage: true });
+    await openDetails('更新后的任务');
+    const mobileBody = page
+      .getByRole('dialog')
+      .getByRole('article', { name: '任务描述' });
+    await mobileBody.getByRole('heading', { name: '验收', level: 2 }).waitFor();
+    assert.equal(
+      await page
+        .getByRole('dialog')
+        .evaluate((element) => element.scrollWidth <= element.clientWidth),
+      true,
+    );
+    await page.screenshot({ path: '/tmp/issue-markdown-mobile.png' });
+    await page.keyboard.press('Escape');
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
     await openDetails('完成登录修复');
     await page.keyboard.press('Escape');
     await page.getByRole('dialog').waitFor({ state: 'detached' });
