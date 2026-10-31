@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { ArrowUpRight, MoreHorizontal } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import type { Issue } from '@aime/shared/issues';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -26,10 +26,7 @@ export function IssueCard({
         active && 'border-primary/50 bg-primary/5',
       )}
     >
-      <IssueThreadLink
-        issue={issue}
-        className="block space-y-1.5 rounded-lg p-3"
-      >
+      <div className="space-y-1.5 p-3">
         <span className="block pr-7 font-mono text-[11px] text-muted-foreground">
           #{issue.id}
         </span>
@@ -49,18 +46,27 @@ export function IssueCard({
                 day: 'numeric',
               })}
             </time>
-            <ArrowUpRight className="size-3.5" aria-hidden />
           </div>
         )}
-      </IssueThreadLink>
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        className="absolute top-1.5 right-1.5 text-muted-foreground"
+      </div>
+      <button
+        type="button"
+        className="absolute inset-0 cursor-pointer rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
         aria-label={t('issues.detailsFor', { title: issue.title })}
         onClick={onDetails}
+      />
+      <Button
+        asChild
+        variant="ghost"
+        size="icon-xs"
+        className="absolute top-1.5 right-1.5 z-10 text-muted-foreground"
       >
-        <MoreHorizontal className="size-4" />
+        <IssueThreadLink issue={issue}>
+          <ArrowUpRight className="size-4" aria-hidden />
+          <span className="sr-only">
+            {t('issues.openThreadFor', { title: issue.title })}
+          </span>
+        </IssueThreadLink>
       </Button>
     </li>
   );

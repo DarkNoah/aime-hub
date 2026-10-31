@@ -243,6 +243,27 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     const origin = 'http://127.0.0.1:' + vite.httpServer.address().port;
     await page.goto(origin + '/issues');
     await page.getByRole('link', { name: /确认验收范围/ }).waitFor();
+    const openDetails = async (title, key) => {
+      const before = page.url();
+      const card = page.getByRole('button', {
+        name: `查看 ${title} 的详情`,
+        exact: true,
+      });
+      if (key) {
+        await card.focus();
+        await card.press(key);
+      } else await card.click();
+      await page
+        .getByRole('dialog')
+        .getByRole('heading', { name: title, exact: true })
+        .waitFor();
+      assert.equal(page.url(), before, 'card details must not navigate');
+    };
+    for (const key of [undefined, 'Enter', 'Space']) {
+      await openDetails('确认验收范围', key);
+      await page.keyboard.press('Escape');
+      await page.getByRole('dialog').waitFor({ state: 'detached' });
+    }
     assert.equal(
       await page.getByRole('region', { name: '待办', exact: true }).count(),
       1,
@@ -283,7 +304,9 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     await page
       .getByRole('menuitemcheckbox', { name: '更新日期', exact: true })
       .click();
-    const firstCard = page.getByRole('link', { name: /确认验收范围/ });
+    const firstCard = page
+      .getByRole('button', { name: '查看 确认验收范围 的详情', exact: true })
+      .locator('..');
     await firstCard.locator('p').waitFor({ state: 'detached' });
     await firstCard.locator('time').waitFor({ state: 'detached' });
     assert.equal(await firstCard.locator('p, time').count(), 0);
@@ -354,6 +377,9 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     await page.getByTestId('thread-id').waitFor();
     assert.match(page.url(), /\/threads\/thread/);
     await page.getByText('当前线程的 Issue', { exact: true }).waitFor();
+    await openDetails('更新后的任务');
+    await page.keyboard.press('Escape');
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
     assert.equal(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
@@ -373,6 +399,9 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     await page.getByRole('link', { name: /确认验收范围/ }).click();
     assert.match(page.url(), /\/threads\/thread0000000001$/);
     await page.goto(origin + '/projects/project000000001');
+    await openDetails('项目中的任务');
+    await page.keyboard.press('Escape');
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
     await page.getByRole('link', { name: /项目中的任务/ }).click();
     assert.match(
       page.url(),
@@ -391,6 +420,9 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       true,
     );
     await page.screenshot({ path: '/tmp/issues-mobile.png', fullPage: true });
+    await openDetails('完成登录修复');
+    await page.keyboard.press('Escape');
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
     await page.getByRole('link', { name: /完成登录修复/ }).click();
     assert.match(page.url(), /\/threads\/thread0000000076$/);
     await page.goto(origin + '/issues');
@@ -429,14 +461,25 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       await page.goto(
         origin + (projectId ? `/projects/${projectId}` : '/issues'),
       );
+      await openDetails(item.title);
+      await page.keyboard.press('Escape');
+      await page.getByRole('dialog').waitFor({ state: 'detached' });
       const card = page.getByRole('link', { name: new RegExp(item.title) });
       const href = await card.getAttribute('href');
       assert.equal(
         new URL(href, origin).searchParams.get('agentId'),
         source.agentId,
       );
+      const viewsBefore = calls.filter(
+        (call) => call.endpoint === 'issues/view',
+      ).length;
       await card.click();
       await page.getByText('群聊线程目标', { exact: true }).waitFor();
+      assert.equal(
+        calls.filter((call) => call.endpoint === 'issues/view').length,
+        viewsBefore,
+        'thread button must not also open details',
+      );
       assert.equal(
         new URL(page.url()).pathname,
         projectId ? `/projects/${projectId}/group-chats` : '/group-chats',
