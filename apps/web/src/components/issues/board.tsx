@@ -1,19 +1,57 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowUpRight, CircleDot, MoreHorizontal, Plus, X } from 'lucide-react';
-import { issueStates, type Issue } from '@aime/shared/issues';
+import {
+  CheckCircle2,
+  Circle,
+  CircleDashed,
+  CircleDot,
+  MoreHorizontal,
+  Plus,
+} from 'lucide-react';
+import { issueStates, type Issue, type IssueState } from '@aime/shared/issues';
 import type { ChatSettings } from '@aime/shared/threads';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { usePersonalChatSettings } from '@/components/chat/use-personal-chat-settings';
 import { cn } from '@/lib/utils';
 import { useIssues } from './use-issues';
-import { IssueStateBadge, IssueThreadLink } from './presentation';
+import { IssueStateBadge } from './presentation';
+import { IssueBoardToolbar } from './board-toolbar';
+import { IssueCard } from './card';
 import { IssueFormDialog } from './form-dialog';
 import { IssueDetailSheet } from './detail-sheet';
 import { issueApi } from './api';
+
+const columnStyles = {
+  decision: {
+    background: 'bg-muted/40',
+    badge: 'border-transparent bg-background text-muted-foreground',
+    icon: CircleDashed,
+  },
+  todo: {
+    background: 'bg-muted/40',
+    badge: 'border-transparent bg-background text-muted-foreground',
+    icon: Circle,
+  },
+  in_progress: {
+    background: 'bg-amber-50/60 dark:bg-amber-950/20',
+    badge: 'border-transparent bg-amber-500 text-black dark:bg-amber-400',
+    icon: CircleDot,
+  },
+  done: {
+    background: 'bg-blue-50/70 dark:bg-blue-950/20',
+    badge: 'border-transparent bg-blue-600 text-white dark:bg-blue-500',
+    icon: CheckCircle2,
+  },
+} as const;
 
 export function IssueBoard(props: {
   projectId?: string;
@@ -39,13 +77,18 @@ function ScopedIssueBoard({
   threadId?: string;
   onClose?: () => void;
 }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const personal = usePersonalChatSettings(projectId);
   const { board, loading, error, more, loadMore, refresh } = useIssues(
     projectId,
     compact,
   );
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState<IssueState | null>(null);
+  const [visibleStates, setVisibleStates] = useState<IssueState[]>([
+    ...issueStates,
+  ]);
+  const [showDescription, setShowDescription] = useState(true);
+  const [showUpdatedAt, setShowUpdatedAt] = useState(true);
   const [selected, setSelected] = useState<Issue | null>(null);
   const [current, setCurrent] = useState<Issue | null>(null);
   useEffect(() => {
@@ -61,99 +104,150 @@ function ScopedIssueBoard({
         });
     return () => controller.abort();
   }, [threadId, projectId, board]);
-  const row = (issue: Issue) => (
-    <li
-      key={issue.id}
+  const states = issueStates.filter((state) => visibleStates.includes(state));
+  const count = states.reduce((total, state) => total + board[state].count, 0);
+  const columns = (
+    <ScrollArea
       className={cn(
-        'group flex items-center gap-1 border-b last:border-b-0',
-        issue.threadId === threadId && 'bg-primary/5',
+        'min-w-0',
+        compact ? 'min-h-0 flex-1' : 'h-[min(36rem,70dvh)] min-h-80',
       )}
+      viewportProps={{ className: '[&>div]:!block [&>div]:h-full' }}
     >
-      <IssueThreadLink
-        issue={issue}
-        className={cn(
-          'flex min-w-0 flex-1 flex-col gap-1.5 px-3 py-3 transition-colors hover:bg-accent/70',
-          !compact && 'sm:flex-row sm:items-center sm:gap-4',
-        )}
-      >
-        <div className="flex min-w-0 flex-1 items-baseline gap-2">
-          <span className="shrink-0 font-mono text-xs text-muted-foreground">
-            #{issue.id}
-          </span>
-          <span className="line-clamp-2 min-w-0 break-words text-sm font-medium leading-6">
-            {issue.title}
-          </span>
-        </div>
-        <div className="flex shrink-0 items-center justify-between gap-3 text-xs text-muted-foreground">
-          <time dateTime={issue.updatedAt}>
-            {new Date(issue.updatedAt).toLocaleDateString(i18n.language, {
-              month: 'short',
-              day: 'numeric',
-            })}
-          </time>
-          <ArrowUpRight className="size-3.5" aria-hidden />
-        </div>
-      </IssueThreadLink>
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        className="mr-1 shrink-0"
-        aria-label={t('issues.detailsFor', { title: issue.title })}
-        onClick={() => setSelected(issue)}
-      >
-        <MoreHorizontal className="size-4" />
-      </Button>
-    </li>
-  );
-  const groups = (
-    <div className="flex flex-col gap-4">
-      {issueStates.map((state) => {
-        const column = board[state];
-        const content = (
-          <>
-            <ul>{column.items.map(row)}</ul>
-            {!loading && !column.items.length && (
-              <p className="px-4 py-4 text-sm leading-6 text-muted-foreground">
-                {t(`issues.empty.${state}`)}
-              </p>
-            )}
-            {column.cursor && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="my-2 w-full"
-                disabled={!!more}
-                onClick={() => loadMore(state)}
+      <div className="flex h-full gap-3 pb-3">
+        {states.map((state) => {
+          const column = board[state];
+          const style = columnStyles[state];
+          const Icon = style.icon;
+          return (
+            <section
+              key={state}
+              aria-label={t(`issues.state.${state}`)}
+              className={cn(
+                'flex min-h-0 min-w-60 flex-1 flex-col rounded-xl',
+                style.background,
+              )}
+            >
+              <header className="flex shrink-0 items-center gap-2 px-3 py-2.5">
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    'gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium',
+                    style.badge,
+                  )}
+                >
+                  <Icon className="size-3" aria-hidden />
+                  {t(`issues.state.${state}`)}
+                </Badge>
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {column.count}
+                </span>
+                <div className="ml-auto flex items-center gap-0.5">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        className="text-muted-foreground"
+                        aria-label={t('issues.columnActions', {
+                          state: t(`issues.state.${state}`),
+                        })}
+                      >
+                        <MoreHorizontal />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        onSelect={() => setVisibleStates([state])}
+                      >
+                        {t('issues.onlyState')}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          setVisibleStates((current) =>
+                            current.filter((item) => item !== state),
+                          )
+                        }
+                      >
+                        {t('issues.hideState')}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className="text-muted-foreground"
+                    aria-label={t('issues.createIn', {
+                      state: t(`issues.state.${state}`),
+                    })}
+                    onClick={() => setCreating(state)}
+                  >
+                    <Plus />
+                  </Button>
+                </div>
+              </header>
+              <ScrollArea
+                className="min-h-0 flex-1"
+                viewportProps={{ className: '[&>div]:!block' }}
               >
-                {t(more === state ? 'chat.loading' : 'issues.more')}
-              </Button>
-            )}
-          </>
-        );
-        return (
-          <section
-            key={state}
-            aria-label={t(`issues.state.${state}`)}
-            className="min-w-0 rounded-lg border bg-card"
-          >
-            <header className="flex items-center justify-between gap-2 border-b bg-muted/30 px-3 py-3">
-              <IssueStateBadge state={state} />
-              <Badge variant="secondary" className="tabular-nums">
-                {column.count}
-              </Badge>
-            </header>
-            {loading ? (
-              <div className="space-y-3 p-4">
-                <Skeleton className="h-4 w-4/5" />
-                <Skeleton className="h-4 w-3/5" />
-              </div>
-            ) : (
-              content
-            )}
-          </section>
-        );
-      })}
-    </div>
+                <div className="px-2 pb-2">
+                  {loading ? (
+                    <div className="space-y-2">
+                      <Skeleton className="h-28 w-full rounded-lg" />
+                      <Skeleton className="h-24 w-full rounded-lg" />
+                    </div>
+                  ) : (
+                    <>
+                      <ul className="space-y-2">
+                        {column.items.map((issue) => (
+                          <IssueCard
+                            key={issue.id}
+                            issue={issue}
+                            active={issue.threadId === threadId}
+                            showDescription={showDescription}
+                            showUpdatedAt={showUpdatedAt}
+                            onDetails={() => setSelected(issue)}
+                          />
+                        ))}
+                      </ul>
+                      {!column.items.length && (
+                        <p className="px-3 py-8 text-center text-xs leading-6 text-muted-foreground">
+                          {t(`issues.empty.${state}`)}
+                        </p>
+                      )}
+                      {column.cursor && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="mt-2 w-full"
+                          disabled={!!more}
+                          onClick={() => loadMore(state)}
+                        >
+                          {t(more === state ? 'chat.loading' : 'issues.more')}
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </ScrollArea>
+            </section>
+          );
+        })}
+        {!states.length && (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg bg-muted/30 text-sm text-muted-foreground">
+            <p>{t('issues.noResults')}</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setVisibleStates([...issueStates])}
+            >
+              {t('issues.resetFilters')}
+            </Button>
+          </div>
+        )}
+      </div>
+      <ScrollBar orientation="horizontal" />
+    </ScrollArea>
   );
   return (
     <section
@@ -161,34 +255,21 @@ function ScopedIssueBoard({
       aria-label={t('issues.heading')}
     >
       <header
-        className={cn(
-          'flex flex-wrap items-center justify-between gap-3',
-          compact ? 'shrink-0 border-b px-4 py-3' : 'mb-4',
-        )}
+        className={cn('shrink-0', compact ? 'border-b px-3 py-3' : 'mb-4')}
       >
-        <div className="flex items-center gap-2">
-          <CircleDot className="size-4 text-primary" aria-hidden />
-          <h2 className="text-base font-semibold">{t('issues.heading')}</h2>
-          <Badge variant="outline">
-            {t(projectId ? 'issues.project' : 'issues.personal')}
-          </Badge>
-        </div>
-        <div className="flex items-center gap-1">
-          <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
-            <Plus />
-            {t('issues.create')}
-          </Button>
-          {onClose && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={onClose}
-              aria-label={t('nav.close')}
-            >
-              <X />
-            </Button>
-          )}
-        </div>
+        <IssueBoardToolbar
+          projectId={projectId}
+          states={visibleStates}
+          onStatesChange={setVisibleStates}
+          showDescription={showDescription}
+          onDescriptionChange={setShowDescription}
+          showUpdatedAt={showUpdatedAt}
+          onUpdatedAtChange={setShowUpdatedAt}
+          count={count}
+          loading={loading}
+          onCreate={() => setCreating('todo')}
+          onClose={onClose}
+        />
       </header>
       {error && (
         <div
@@ -201,34 +282,31 @@ function ScopedIssueBoard({
           </Button>
         </div>
       )}
-      {compact ? (
-        <ScrollArea className="min-h-0 flex-1">
-          <div className="space-y-4 p-4">
-            {current && current.threadId === threadId && (
-              <div className="space-y-2 border-b pb-4">
-                <p className="text-xs font-medium text-muted-foreground">
-                  {t('issues.current')}
-                </p>
-                <button
-                  className="block w-full rounded text-left text-sm font-medium break-words outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring"
-                  onClick={() => setSelected(current)}
-                >
-                  #{current.id} {current.title}
-                </button>
-                <IssueStateBadge state={current.state} />
-              </div>
-            )}
-            {groups}
-          </div>
-        </ScrollArea>
-      ) : (
-        groups
+      {compact && current && current.threadId === threadId && (
+        <div className="shrink-0 space-y-2 border-b px-3 py-3">
+          <p className="text-xs font-medium text-muted-foreground">
+            {t('issues.current')}
+          </p>
+          <button
+            className="block w-full rounded text-left text-sm font-medium break-words outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => setSelected(current)}
+          >
+            #{current.id} {current.title}
+          </button>
+          <IssueStateBadge state={current.state} />
+        </div>
       )}
+      <div
+        className={cn('min-w-0', compact && 'flex min-h-0 flex-1 flex-col p-3')}
+      >
+        {columns}
+      </div>
       {creating && (
         <IssueFormDialog
           projectId={projectId}
+          initialState={creating}
           settings={settings ?? (projectId ? undefined : personal.settings)}
-          onClose={() => setCreating(false)}
+          onClose={() => setCreating(null)}
           onSaved={setSelected}
         />
       )}

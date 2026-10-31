@@ -32,6 +32,11 @@ test(
     const fixture = await mkdtemp(path.join(webRoot, '.issue-test-'));
     let vite, browser;
     t.after(async () => {
+      await browser
+        ?.contexts()[0]
+        ?.pages()[0]
+        ?.screenshot({ path: '/tmp/issues-browser-last.png', fullPage: true })
+        .catch(() => {});
       await browser?.close();
       await vite?.close();
       await rm(fixture, { recursive: true, force: true });
@@ -49,7 +54,7 @@ import '/src/index.css';
 const snapshot={settings:{model:null,reasoningEffort:'auto'},loading:false,saving:false,error:null};
 const preferences={getSnapshot:()=>snapshot,subscribe:()=>()=>{},save:async()=>false,load:async()=>{}};
 const root=createRootRoute({component:()=> <PersonalChatSettingsContext.Provider value={preferences}><main className="mx-auto max-w-7xl p-4"><Outlet/></main><Toaster/></PersonalChatSettingsContext.Provider>});
-function Chat(){const {projectId,threadId}=useParams({strict:false});return <div className="h-[85dvh]"><p data-testid="thread-id">{threadId}</p><IssueBoard compact projectId={projectId} threadId={threadId}/></div>;}
+function Chat(){const {projectId,threadId}=useParams({strict:false});return <div className="h-[85dvh] w-full max-w-sm"><p data-testid="thread-id">{threadId}</p><IssueBoard compact projectId={projectId} threadId={threadId}/></div>;}
 const tree=root.addChildren([
  createRoute({getParentRoute:()=>root,path:'/issues',component:()=> <IssueBoard/>}),
  createRoute({getParentRoute:()=>root,path:'/projects/$projectId',component:()=>{const {projectId}=useParams({strict:false});return <IssueBoard projectId={projectId}/>;}}),
@@ -115,12 +120,6 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     page.setDefaultTimeout(15000);
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
-    t.after(async () => {
-      if (!page.isClosed())
-        await page
-          .screenshot({ path: '/tmp/issues-browser-last.png', fullPage: true })
-          .catch(() => {});
-    });
     const states = ['decision', 'todo', 'in_progress', 'done'];
     let nextId = 100;
     const now = '2026-10-31T04:00:00Z';
@@ -245,8 +244,58 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       await page.getByRole('region', { name: '待办', exact: true }).count(),
       1,
     );
-    await page.getByRole('button', { name: '创建 Issue', exact: true }).click();
+    const stateLabels = ['待决策', '待办', '进行中', '已完成'];
+    const columns = await Promise.all(
+      stateLabels.map((name) =>
+        page.getByRole('region', { name, exact: true }).boundingBox(),
+      ),
+    );
+    for (let i = 1; i < columns.length; i++) {
+      assert.equal(columns[i].y, columns[0].y);
+      assert.ok(columns[i].x >= columns[i - 1].x + columns[i - 1].width);
+    }
+    await page.getByRole('button', { name: '筛选', exact: true }).click();
+    await page
+      .getByRole('menuitemcheckbox', { name: '已完成', exact: true })
+      .click();
+    await page
+      .getByRole('region', { name: '已完成', exact: true })
+      .waitFor({ state: 'detached' });
+    assert.equal(
+      await page.getByRole('region', { name: '已完成', exact: true }).count(),
+      0,
+    );
+    await page
+      .getByRole('menuitem', { name: '显示全部状态', exact: true })
+      .click();
+    await page.getByRole('region', { name: '已完成', exact: true }).waitFor();
+    assert.equal(
+      await page.getByRole('region', { name: '已完成', exact: true }).count(),
+      1,
+    );
+    await page.getByRole('button', { name: '显示', exact: true }).click();
+    await page
+      .getByRole('menuitemcheckbox', { name: '描述摘要', exact: true })
+      .click();
+    await page
+      .getByRole('menuitemcheckbox', { name: '更新日期', exact: true })
+      .click();
+    const firstCard = page.getByRole('link', { name: /确认验收范围/ });
+    await firstCard.locator('p').waitFor({ state: 'detached' });
+    await firstCard.locator('time').waitFor({ state: 'detached' });
+    assert.equal(await firstCard.locator('p, time').count(), 0);
+    await page
+      .getByRole('menuitemcheckbox', { name: '描述摘要', exact: true })
+      .click();
+    await page
+      .getByRole('menuitemcheckbox', { name: '更新日期', exact: true })
+      .click();
+    await page.keyboard.press('Escape');
+    await page
+      .getByRole('button', { name: '在「进行中」中创建 Issue', exact: true })
+      .click();
     const create = page.getByRole('dialog');
+    assert.equal(await create.getByRole('combobox').textContent(), '进行中');
     await create.getByLabel('标题', { exact: true }).fill('验证跨页任务');
     await create
       .getByLabel('任务描述', { exact: true })
@@ -258,6 +307,10 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     await detail
       .getByRole('heading', { name: '验证跨页任务', exact: true })
       .waitFor();
+    assert.equal(
+      calls.find((call) => call.endpoint === 'issues/create').input.data.state,
+      'in_progress',
+    );
     await detail
       .getByLabel('添加评论或执行消息', { exact: true })
       .fill('补充背景');
@@ -298,9 +351,22 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     await page.getByTestId('thread-id').waitFor();
     assert.match(page.url(), /\/threads\/thread/);
     await page.getByText('当前线程的 Issue', { exact: true }).waitFor();
+    assert.equal(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      true,
+    );
+    await page.screenshot({ path: '/tmp/issues-compact.png', fullPage: true });
     await page.goto(origin + '/issues');
     await page.getByRole('link', { name: /更新后的任务/ }).waitFor();
     await page.screenshot({ path: '/tmp/issues-desktop.png', fullPage: true });
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.waitForFunction(() =>
+      document.documentElement.classList.contains('dark'),
+    );
+    await page.screenshot({ path: '/tmp/issues-dark.png', fullPage: true });
+    await page.emulateMedia({ colorScheme: 'light' });
     await page.getByRole('link', { name: /确认验收范围/ }).click();
     assert.match(page.url(), /\/threads\/thread0000000001$/);
     await page.goto(origin + '/projects/project000000001');
@@ -322,6 +388,10 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       true,
     );
     await page.screenshot({ path: '/tmp/issues-mobile.png', fullPage: true });
+    await page.getByRole('link', { name: /完成登录修复/ }).click();
+    assert.match(page.url(), /\/threads\/thread0000000076$/);
+    await page.goto(origin + '/issues');
+    await page.getByRole('link', { name: /确认验收范围/ }).waitFor();
     await page.getByRole('button', { name: '创建 Issue', exact: true }).click();
     await page
       .getByRole('dialog')
