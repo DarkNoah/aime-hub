@@ -55,19 +55,21 @@ export function IssueCard({
         aria-label={t('issues.detailsFor', { title: issue.title })}
         onClick={onDetails}
       />
-      <Button
-        asChild
-        variant="ghost"
-        size="icon-xs"
-        className="absolute top-1.5 right-1.5 z-10 text-muted-foreground"
-      >
-        <IssueThreadLink issue={issue}>
-          <ArrowUpRight className="size-4" aria-hidden />
-          <span className="sr-only">
-            {t('issues.openThreadFor', { title: issue.title })}
-          </span>
-        </IssueThreadLink>
-      </Button>
+      {(issue.source || issue.threadId) && (
+        <Button
+          asChild
+          variant="ghost"
+          size="icon-xs"
+          className="absolute top-1.5 right-1.5 z-10 text-muted-foreground"
+        >
+          <IssueThreadLink issue={issue}>
+            <ArrowUpRight className="size-4" aria-hidden />
+            <span className="sr-only">
+              {t('issues.openThreadFor', { title: issue.title })}
+            </span>
+          </IssueThreadLink>
+        </Button>
+      )}
     </li>
   );
 }

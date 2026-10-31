@@ -15,6 +15,7 @@ import { GroupChatIdleWake1780000029000 } from '../../../../../packages/db/src/m
 import { CreateIssues1780000035000 } from '../../../../../packages/db/src/migrations/1780000035000-create-issues.js';
 import { IssueSourceThread1780000036000 } from '../../../../../packages/db/src/migrations/1780000036000-issue-source-thread.js';
 import { IssueEvents1780000038000 } from '../../../../../packages/db/src/migrations/1780000038000-issue-events.js';
+import { IssueOptionalThread1780000039000 } from '../../../../../packages/db/src/migrations/1780000039000-issue-optional-thread.js';
 import { botAgent } from '../../mastra/agents/bot-agent.js';
 import { createIssueTool } from '../../mastra/tools/issue.js';
 import { ThreadService } from '../threads/service.js';
@@ -61,11 +62,13 @@ function response(text: string, tool?: { name: string; input: unknown }) {
   };
 }
 
-for (const manual of [false, true])
+for (const mode of ['create', 'manual', 'existing'] as const)
   test(
-    `native ${manual ? 'manual creation wakes the Bot' : 'Bot creates an Issue'}; task updates/finishes it; durable events return results and errors`,
+    `native ${mode === 'manual' ? 'manual creation wakes the Bot' : mode === 'existing' ? 'Bot activates an existing record-only Issue' : 'Bot creates an Issue'}; task updates/finishes it; durable events return results and errors`,
     { skip: !process.env.TEST_DATABASE_URL },
     async (t) => {
+      const manual = mode === 'manual';
+      const existing = mode === 'existing';
       const schema = `issue_handoff_${randomBytes(6).toString('hex')}`;
       const directory = await mkdtemp('/tmp/issue-handoff-');
       const db = new DataSource({
@@ -102,6 +105,7 @@ for (const manual of [false, true])
         new CreateIssues1780000035000(),
         new IssueSourceThread1780000036000(),
         new IssueEvents1780000038000(),
+        new IssueOptionalThread1780000039000(),
       ])
         await migration.up(migrations);
       await migrations.release();
@@ -213,8 +217,9 @@ for (const manual of [false, true])
             return response('', {
               name: 'issue',
               input: {
-                command:
-                  'create --title "Tracked task" --body "Complete the acceptance checks and report the artifact"',
+                command: existing
+                  ? 'edit 1 --run-in-thread'
+                  : 'create --title "Tracked task" --body "Complete the acceptance checks and report the artifact" --run-in-thread',
               },
             });
           const startSteps = manual ? 3 : 2;
@@ -303,9 +308,11 @@ for (const manual of [false, true])
             title: 'Tracked task',
             body: 'Complete the acceptance checks and report the artifact',
             state: 'todo',
+            runInThread: true,
           },
         );
         assert.equal(created.source?.threadId, member.threadId);
+        assert.ok(created.threadId);
         assert.equal(
           (await threads.getThread('alice', created.threadId)).thread.status,
           'idle',
@@ -317,18 +324,38 @@ for (const manual of [false, true])
           undefined,
         );
         await runtime.tick();
-      } else
+      } else {
+        if (existing) {
+          const record = await issues.create(
+            'alice',
+            {},
+            {
+              title: 'Tracked task',
+              body: 'Complete the acceptance checks and report the artifact',
+              state: 'todo',
+              runInThread: false,
+            },
+            undefined,
+            member.threadId,
+            member.threadId,
+          );
+          assert.equal(record.threadId, null);
+          assert.equal((await events.dueEvents()).length, 0);
+        }
         await threads.runGroupChat('alice', member.threadId, {
           ...member.settings,
           id: 'human00000000001',
           parts: [
             {
               type: 'text',
-              text: 'Carry out this substantial task and verify the result.',
+              text: existing
+                ? 'Run the existing Issue #1 in its task thread and verify the result.'
+                : 'Carry out this substantial task and verify the result.',
             },
           ],
           isImmediate: true,
         });
+      }
       await until(async () => {
         const [issue] = await db.query('SELECT state,thread_id FROM issues');
         return (

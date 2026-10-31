@@ -10,6 +10,7 @@ export const issueCreateSchema = z.object({
   title: z.string().trim().min(1).max(240),
   body: z.string().max(50000).default(''),
   state: issueStateSchema.default('todo'),
+  runInThread: z.boolean().default(false),
   settings: chatSettingsSchema.optional(),
 });
 export const issuePatchSchema = z.object({
@@ -33,7 +34,7 @@ export type Issue = {
   state: IssueState;
   projectId: string | null;
   createdBy: string;
-  threadId: string;
+  threadId: string | null;
   /** Room Agent that created this issue; absent on older stored tool results. */
   source?: { roomId: string; agentId: string; threadId: string } | null;
   createdAt: string;

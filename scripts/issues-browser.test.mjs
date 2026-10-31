@@ -204,7 +204,10 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
         result = {
           ...input.data,
           id: nextId++,
-          threadId: 'thread' + String(nextId).padStart(10, '0'),
+          threadId:
+            input.data.runInThread === false
+              ? null
+              : 'thread' + String(nextId).padStart(10, '0'),
           projectId: input.projectId ?? null,
           createdBy: 'alice',
           createdAt: now,
@@ -349,6 +352,11 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       .click();
     const create = page.getByRole('dialog');
     assert.equal(await create.getByRole('combobox').textContent(), '进行中');
+    assert.equal(
+      await create.getByRole('switch', { name: '启用新线程' }).isChecked(),
+      false,
+    );
+    await create.getByRole('switch', { name: '启用新线程' }).check();
     await create.getByLabel('标题', { exact: true }).fill('验证跨页任务');
     const markdownBody = [
       '## 验收',
@@ -537,6 +545,61 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     assert.equal(await submit.isVisible(), true);
     await page.screenshot({
       path: '/tmp/issues-mobile-dialog.png',
+      fullPage: true,
+    });
+    await page
+      .getByRole('dialog')
+      .getByRole('switch', { name: '启用新线程' })
+      .uncheck();
+    await submit.click();
+    const recordSheet = page.getByRole('dialog');
+    await recordSheet
+      .getByRole('heading', { name: '窄屏表单', exact: true })
+      .waitFor();
+    const recordCreate = calls
+      .filter((call) => call.endpoint === 'issues/create')
+      .at(-1);
+    assert.equal(recordCreate.input.data.runInThread, false);
+    assert.equal(
+      await recordSheet
+        .getByRole('button', { name: '执行任务', exact: true })
+        .count(),
+      0,
+    );
+    assert.equal(
+      await recordSheet
+        .getByRole('button', { name: '终止执行', exact: true })
+        .count(),
+      0,
+    );
+    assert.equal(
+      await recordSheet.getByRole('link', { name: /打开.*线程/ }).count(),
+      0,
+    );
+    await recordSheet.getByText('仅记录', { exact: true }).waitFor();
+    await recordSheet.getByRole('combobox').click();
+    assert.equal(
+      await page
+        .getByRole('option', { name: '排队执行', exact: true })
+        .getAttribute('aria-disabled'),
+      'true',
+    );
+    await page.keyboard.press('Escape');
+    await recordSheet
+      .getByLabel('添加评论或执行消息', { exact: true })
+      .fill('记录进展');
+    await recordSheet
+      .getByRole('button', { name: '提交消息', exact: true })
+      .click();
+    await recordSheet.getByText('记录进展', { exact: true }).waitFor();
+    await recordSheet
+      .getByRole('button', { name: '标记完成', exact: true })
+      .click();
+    await recordSheet
+      .getByRole('button', { name: '重新打开', exact: true })
+      .waitFor();
+    await page.screenshot({
+      path: '/tmp/issues-record-only.png',
       fullPage: true,
     });
     // Current cards and legacy stored tool results both resolve room sources.

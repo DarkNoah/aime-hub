@@ -59,6 +59,7 @@ export function IssueThreadLink({
       <Link {...props} to="/group-chats" search={search} />
     );
   }
+  if (!issue.threadId) return <span {...props} />;
   return issue.projectId ? (
     <Link
       {...props}

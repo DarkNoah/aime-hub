@@ -105,6 +105,9 @@ export function IssueDetailSheet({
                 #{issue.id}
               </span>
               <IssueStateBadge state={issue.state} />
+              {!issue.threadId && (
+                <Badge variant="outline">{t('issues.recordOnly')}</Badge>
+              )}
             </div>
             <SheetTitle className="text-lg leading-6 break-words">
               {issue.title}
@@ -116,17 +119,19 @@ export function IssueDetailSheet({
           <ScrollArea className="min-h-0 flex-1">
             <div className="space-y-6 p-5">
               <div className="flex flex-wrap gap-2">
-                <Button asChild size="sm">
-                  <IssueThreadLink issue={issue} onClick={onClose}>
-                    {t(
-                      issue.source
-                        ? 'issues.openSourceThread'
-                        : 'issues.openThread',
-                    )}
-                    <ArrowUpRight />
-                  </IssueThreadLink>
-                </Button>
-                {issue.source && (
+                {(issue.source || issue.threadId) && (
+                  <Button asChild size="sm">
+                    <IssueThreadLink issue={issue} onClick={onClose}>
+                      {t(
+                        issue.source
+                          ? 'issues.openSourceThread'
+                          : 'issues.openThread',
+                      )}
+                      <ArrowUpRight />
+                    </IssueThreadLink>
+                  </Button>
+                )}
+                {issue.source && issue.threadId && (
                   <Button asChild size="sm" variant="outline">
                     <IssueThreadLink issue={issue} task onClick={onClose}>
                       {t('issues.openTaskThread')}
@@ -158,7 +163,7 @@ export function IssueDetailSheet({
                   {issue.state === 'done' ? <RotateCcw /> : <Check />}
                   {t(issue.state === 'done' ? 'issues.reopen' : 'issues.close')}
                 </Button>
-                {issue.state !== 'done' && (
+                {issue.threadId && issue.state !== 'done' && (
                   <>
                     <Button
                       size="sm"
@@ -343,13 +348,13 @@ export function IssueDetailSheet({
                       </SelectItem>
                       <SelectItem
                         value="wait"
-                        disabled={issue.state === 'done'}
+                        disabled={!issue.threadId || issue.state === 'done'}
                       >
                         {t('issues.wait')}
                       </SelectItem>
                       <SelectItem
                         value="immediate"
-                        disabled={issue.state === 'done'}
+                        disabled={!issue.threadId || issue.state === 'done'}
                       >
                         {t('issues.immediate')}
                       </SelectItem>
@@ -360,14 +365,19 @@ export function IssueDetailSheet({
                     disabled={
                       busy ||
                       !text.trim() ||
-                      (mode !== 'comment' && issue.state === 'done')
+                      (mode !== 'comment' &&
+                        (!issue.threadId || issue.state === 'done'))
                     }
                   >
                     {t('issues.send')}
                   </Button>
                 </div>
                 <p className="text-xs leading-5 text-muted-foreground">
-                  {t('issues.deliveryHint')}
+                  {t(
+                    issue.threadId
+                      ? 'issues.deliveryHint'
+                      : 'issues.noThreadHint',
+                  )}
                 </p>
               </form>
             </div>

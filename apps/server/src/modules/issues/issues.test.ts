@@ -21,6 +21,7 @@ import { CreateGroupChats1780000024000 } from '../../../../../packages/db/src/mi
 import { GroupChatAgents1780000026000 } from '../../../../../packages/db/src/migrations/1780000026000-group-chat-agents.js';
 import { GroupChatIdleWake1780000029000 } from '../../../../../packages/db/src/migrations/1780000029000-group-chat-idle-wake.js';
 import { IssueEvents1780000038000 } from '../../../../../packages/db/src/migrations/1780000038000-issue-events.js';
+import { IssueOptionalThread1780000039000 } from '../../../../../packages/db/src/migrations/1780000039000-issue-optional-thread.js';
 import { fakeMemory } from '../../../../../scripts/fixtures/thread-memory.js';
 import { sessionStub } from '../../../../../scripts/fixtures/thread-session.js';
 import { ThreadService } from '../threads/service.js';
@@ -75,6 +76,20 @@ test('issue command parser handles quoted Markdown, literal shell text, aliases 
     '--stop 是文本',
   );
   assert.equal(parseIssueCommand('list --state closed').values.state, 'done');
+  assert.equal(
+    parseIssueCommand('create --title record').values['run-in-thread'],
+    undefined,
+  );
+  assert.equal(
+    parseIssueCommand('create --title task --run-in-thread').values[
+      'run-in-thread'
+    ],
+    'true',
+  );
+  assert.equal(
+    parseIssueCommand('edit 123 --run-in-thread').values['run-in-thread'],
+    'true',
+  );
   for (const command of [
     'create --title "oops',
     'view -1',
@@ -83,6 +98,19 @@ test('issue command parser handles quoted Markdown, literal shell text, aliases 
     'edit 1 --state done --message go',
     'create --title x --state done --start',
     'create --title x --start --no-start',
+    'create --title x --run-in-thread false --start',
+    'create --title x --run-in-thread yes',
+    'create --title x --run-in-thread false',
+    'create --title x --run-in-thread true',
+    'create --title x --run-in-thread=true',
+    'create --title x --run-in-thread --no-start',
+    'create --title x --run-in-thread --state done',
+    'edit 1 --run-in-thread false',
+    'edit 1 --run-in-thread=true',
+    'edit 1 --run-in-thread --message go',
+    'edit 1 --run-in-thread --stop',
+    'edit 1 --run-in-thread --state done',
+    'edit 1 --run-in-thread --delivery immediate',
     'edit 1 --delivery immediate',
     'edit 1 --state invalid',
     'create --title x --title y',
@@ -121,6 +149,7 @@ test('issue tool inherits authenticated scope/settings, registers admin controls
   assert.equal(calls[0]![0], 'alice');
   assert.deepEqual(calls[0]![1], { projectId: 'project000000001' });
   assert.equal(calls[0]![4], 'roomthread000001');
+  assert.equal((calls[0]![2] as { runInThread: boolean }).runInThread, false);
   assert.equal(
     (calls[0]![2] as { settings: { reasoningEffort: string } }).settings
       .reasoningEffort,
@@ -168,13 +197,14 @@ test('issue tool inherits authenticated scope/settings, registers admin controls
   release();
 });
 
-test('Bot auto-starts tasks, supports deferred creation, and preserves the Issue on submission failure', async () => {
+test('Issue creation only runs in a thread when requested, supports legacy flags, and preserves the Issue on submission failure', async () => {
   const ctx = new RequestContext();
   ctx.set('userId', 'alice');
   ctx.set('issueSourceThreadId', 'bot-source');
   ctx.set('issueActorThreadId', 'bot-source');
   ctx.set('chatSettings', { ...settings, agentId: botAgent.id });
   const submissions: unknown[][] = [];
+  const edits: unknown[][] = [];
   let fail = false;
   const issue = {
     id: 42,
@@ -186,7 +216,22 @@ test('Bot auto-starts tasks, supports deferred creation, and preserves the Issue
   const tool = createIssueTool(
     () =>
       ({
-        create: async () => issue,
+        create: async (
+          _userId: string,
+          _scope: unknown,
+          data: { runInThread: boolean },
+        ) => (data.runInThread ? issue : { ...issue, threadId: null }),
+        edit: async (...args: unknown[]) => {
+          edits.push(args);
+          return {
+            ...issue,
+            ...Object.fromEntries(
+              Object.entries(args[3] as object).filter(
+                ([, value]) => value !== undefined,
+              ),
+            ),
+          };
+        },
         message: async (...args: unknown[]) => {
           submissions.push(args);
           if (fail) throw new Error('Model unavailable');
@@ -196,7 +241,7 @@ test('Bot auto-starts tasks, supports deferred creation, and preserves the Issue
   );
   const execute = (command: string) =>
     tool.execute!({ command }, { requestContext: ctx, observe: noopObserve });
-  assert.deepEqual(await execute('create --title task'), {
+  assert.deepEqual(await execute('create --title task --run-in-thread'), {
     issue,
     taskSubmitted: true,
   });
@@ -207,16 +252,49 @@ test('Bot auto-starts tasks, supports deferred creation, and preserves the Issue
   assert.equal(submissions[0]![6], 'bot-source');
   for (const command of [
     'create --title backlog --no-start',
-    'create --title decision --state decision',
+    'create --title decision --state decision --no-start',
   ])
     assert.deepEqual(await execute(command), { issue, taskSubmitted: false });
   assert.equal(submissions.length, 1);
+  assert.deepEqual(await execute('create --title record'), {
+    issue: { ...issue, threadId: null },
+    taskSubmitted: false,
+  });
+  assert.equal(
+    submissions.length,
+    1,
+    'Bot creates only a record without an execution flag',
+  );
   ctx.set('chatSettings', settings);
   assert.deepEqual(await execute('create --title ordinary'), {
-    issue,
+    issue: { ...issue, threadId: null },
     taskSubmitted: false,
   });
   assert.equal(submissions.length, 1);
+  assert.deepEqual(
+    await execute('create --title ordinary-task --run-in-thread'),
+    { issue, taskSubmitted: true },
+  );
+  assert.equal(submissions.length, 2);
+  const edited = {
+    ...issue,
+    title: 'Updated task',
+    body: 'Updated acceptance',
+  };
+  await execute(
+    'edit 42 --title "Updated task" --body "Updated acceptance" --run-in-thread',
+  );
+  assert.deepEqual(edits[0]!.slice(0, 5), [
+    'alice',
+    42,
+    {},
+    { title: edited.title, body: edited.body, state: undefined },
+    'bot-source',
+  ]);
+  assert.match(
+    String(submissions.at(-1)![3]),
+    /Issue #42: Updated task\n\nUpdated acceptance/,
+  );
   fail = true;
   const failure = (await execute('create --title retry --start')) as {
     issue: unknown;
@@ -226,6 +304,12 @@ test('Bot auto-starts tasks, supports deferred creation, and preserves the Issue
   assert.equal(failure.issue, issue);
   assert.equal(failure.taskSubmitted, false);
   assert.match(failure.error, /已创建/);
+  const editFailure = (await execute(
+    'edit 42 --run-in-thread',
+  )) as typeof failure;
+  assert.deepEqual(editFailure.issue, issue);
+  assert.equal(editFailure.taskSubmitted, false);
+  assert.match(editFailure.error, /任务线程已保留/);
 });
 
 test(
@@ -268,6 +352,7 @@ test(
     await new CreateIssues1780000035000().up(migration);
     await new IssueSourceThread1780000036000().up(migration);
     await new IssueEvents1780000038000().up(migration);
+    await new IssueOptionalThread1780000039000().up(migration);
     await migration.release();
     const projects = new ProjectService(db);
     const sends: RunInput[] = [];
@@ -308,14 +393,20 @@ test(
     const personal = await issues.create(
       'alice',
       {},
-      issueCreateSchema.parse({ title: '私有任务', body: '验收目标' }),
+      issueCreateSchema.parse({
+        runInThread: true,
+        title: '私有任务',
+        body: '验收目标',
+      }),
     );
     const project = await issues.create(
       'alice',
       { projectId: 'project000000001' },
-      issueCreateSchema.parse({ title: '共同任务' }),
+      issueCreateSchema.parse({ runInThread: true, title: '共同任务' }),
     );
     const scope = { projectId: 'project000000001' };
+    assert.ok(personal.threadId);
+    assert.ok(project.threadId);
     assert.equal(stored.get(personal.threadId)?.metadata?.issueId, personal.id);
     assert.equal(
       stored.get(project.threadId)?.resourceId,
@@ -395,7 +486,7 @@ test(
     const another = await issues.create(
       'alice',
       {},
-      issueCreateSchema.parse({ title: '第二项' }),
+      issueCreateSchema.parse({ runInThread: true, title: '第二项' }),
     );
     const page = await issues.list(
       'alice',
@@ -435,7 +526,11 @@ test(
     await db.query(`CREATE FUNCTION reject_issue_fixture() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.title='reject' THEN RAISE EXCEPTION 'fixture rejection'; END IF; RETURN NEW; END $$;
     CREATE TRIGGER reject_issue BEFORE INSERT ON issues FOR EACH ROW EXECUTE FUNCTION reject_issue_fixture()`);
     await assert.rejects(
-      issues.create('alice', {}, issueCreateSchema.parse({ title: 'reject' })),
+      issues.create(
+        'alice',
+        {},
+        issueCreateSchema.parse({ runInThread: true, title: 'reject' }),
+      ),
     );
     assert.equal(stored.size, beforeFailure);
     assert.equal(
@@ -448,11 +543,235 @@ test(
       issues.create(
         'alice',
         {},
-        issueCreateSchema.parse({ title: '取消' }),
+        issueCreateSchema.parse({ runInThread: true, title: '取消' }),
         aborted.signal,
       ),
     );
     assert.equal(stored.size, beforeFailure);
+
+    await t.test(
+      'record-only Issues retain normal tracking without creating or running a thread',
+      async () => {
+        const before = { threads: stored.size, sends: sends.length, stopped };
+        for (const recordScope of [{}, scope]) {
+          const record = await issues.create(
+            'alice',
+            recordScope,
+            issueCreateSchema.parse({
+              title: 'Record only',
+              runInThread: false,
+            }),
+          );
+          assert.equal(record.threadId, null);
+          await issues.comment(
+            'alice',
+            record.id,
+            recordScope,
+            'Progress without execution',
+          );
+          assert.equal(
+            (await issues.view('alice', record.id, recordScope)).comments
+              .length,
+            1,
+          );
+          await assert.rejects(
+            issues.message('alice', record.id, recordScope, 'Do not execute'),
+            code('ISSUE_NO_THREAD'),
+          );
+          await assert.rejects(
+            issues.stop('alice', record.id, recordScope),
+            code('ISSUE_NO_THREAD'),
+          );
+          assert.equal(
+            (
+              await issues.edit('alice', record.id, recordScope, {
+                state: 'done',
+              })
+            ).state,
+            'done',
+          );
+          assert.equal(
+            (
+              await issues.edit('alice', record.id, recordScope, {
+                state: 'todo',
+              })
+            ).threadId,
+            null,
+          );
+          await assert.rejects(
+            issues.get('bob', record.id, recordScope),
+            code(
+              'projectId' in recordScope ? 'PROJECT_NOT_FOUND' : 'NOT_FOUND',
+            ),
+          );
+        }
+        assert.deepEqual(
+          { threads: stored.size, sends: sends.length, stopped },
+          before,
+        );
+      },
+    );
+
+    await t.test(
+      'edit --run-in-thread binds once, sends updated details, reuses settings, and protects closed or inaccessible Issues',
+      async () => {
+        const ctx = new RequestContext();
+        ctx.set('userId', 'alice');
+        const tool = createIssueTool(() => issues);
+        const execute = async (command: string) =>
+          tool.execute!(
+            { command },
+            { requestContext: ctx, observe: noopObserve },
+          ) as Promise<{
+            issue?: Issue;
+            taskSubmitted?: boolean;
+            error?: string;
+          }>;
+        for (const recordScope of [{}, scope]) {
+          ctx.set(
+            'projectId',
+            'projectId' in recordScope ? recordScope.projectId : undefined,
+          );
+          ctx.set('chatSettings', {
+            ...settings,
+            agentId: botAgent.id,
+            reasoningEffort: 'high',
+          });
+          const record = await issues.create(
+            'alice',
+            recordScope,
+            issueCreateSchema.parse({
+              title: 'Saved task',
+              body: 'Old acceptance',
+            }),
+          );
+          const before = stored.size;
+          const first = await execute(
+            `edit ${record.id} --title "Updated task" --body "Latest acceptance" --run-in-thread`,
+          );
+          assert.equal(first.error, undefined);
+          assert.equal(first.taskSubmitted, true);
+          assert.equal(first.issue?.id, record.id);
+          assert.ok(first.issue?.threadId);
+          assert.equal(stored.size, before + 1);
+          assert.equal(
+            stored.get(first.issue.threadId)?.metadata?.issueId,
+            record.id,
+          );
+          assert.equal(
+            stored.get(first.issue.threadId)?.metadata?.agentId,
+            fallbackAgentId,
+          );
+          assert.match(
+            JSON.stringify(sends.at(-1)?.parts),
+            new RegExp(`Issue #${record.id}: Updated task`),
+          );
+          assert.match(
+            JSON.stringify(sends.at(-1)?.parts),
+            /Latest acceptance/,
+          );
+          ctx.set('chatSettings', {
+            ...settings,
+            agentId: 'default',
+            reasoningEffort: 'low',
+          });
+          const again = await execute(`edit ${record.id} --run-in-thread`);
+          assert.equal(again.taskSubmitted, true);
+          assert.equal(again.issue?.threadId, first.issue.threadId);
+          assert.equal(stored.size, before + 1);
+          assert.equal(sends.at(-1)?.reasoningEffort, 'high');
+          assert.equal(
+            (
+              await issues.view('alice', record.id, recordScope)
+            ).comments.filter((c) => c.kind === 'message').length,
+            2,
+          );
+          await issues.edit('alice', record.id, recordScope, { state: 'done' });
+          const sentBefore = sends.length;
+          assert.deepEqual(
+            await execute(
+              `edit ${record.id} --title "Must not change" --run-in-thread`,
+            ),
+            { error: 'ISSUE_CLOSED' },
+          );
+          assert.equal(
+            (await issues.get('alice', record.id, recordScope)).title,
+            'Updated task',
+          );
+          assert.equal(sends.length, sentBefore);
+          const reopened = await execute(
+            `edit ${record.id} --state todo --run-in-thread`,
+          );
+          assert.equal(reopened.taskSubmitted, true);
+          assert.equal(reopened.issue?.threadId, first.issue.threadId);
+          await assert.rejects(
+            issues.edit('bob', record.id, recordScope, {}, undefined, {
+              settings,
+            }),
+            code(
+              'projectId' in recordScope ? 'PROJECT_NOT_FOUND' : 'NOT_FOUND',
+            ),
+          );
+        }
+      },
+    );
+
+    await t.test(
+      'concurrent binding uses one thread and failed binding rolls back fields and the newly provisioned thread',
+      async () => {
+        const record = await issues.create(
+          'alice',
+          {},
+          issueCreateSchema.parse({ title: 'Concurrent task' }),
+        );
+        const other = new IssueService(db, projects, threads);
+        const before = stored.size;
+        const [first, second] = await Promise.all([
+          issues.edit('alice', record.id, {}, {}, undefined, { settings }),
+          other.edit('alice', record.id, {}, {}, undefined, { settings }),
+        ]);
+        assert.ok(first.threadId);
+        assert.equal(second.threadId, first.threadId);
+        assert.equal(stored.size, before + 1);
+
+        const rejected = await issues.create(
+          'alice',
+          {},
+          issueCreateSchema.parse({
+            title: 'Before binding',
+            body: 'Keep acceptance',
+          }),
+        );
+        const beforeRejected = stored.size;
+        await db.query(`CREATE FUNCTION reject_issue_binding_fixture() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.title='Reject binding' AND NEW.thread_id IS NOT NULL THEN RAISE EXCEPTION 'fixture binding rejection'; END IF; RETURN NEW; END $$;
+      CREATE TRIGGER reject_binding BEFORE UPDATE ON issues FOR EACH ROW EXECUTE FUNCTION reject_issue_binding_fixture()`);
+        await assert.rejects(
+          issues.edit(
+            'alice',
+            rejected.id,
+            {},
+            { title: 'Reject binding', body: 'Rollback' },
+            undefined,
+            { settings },
+          ),
+        );
+        assert.equal(stored.size, beforeRejected);
+        assert.deepEqual(await issues.get('alice', rejected.id, {}), rejected);
+        const abort = new AbortController();
+        abort.abort();
+        await assert.rejects(
+          issues.edit('alice', rejected.id, {}, {}, undefined, {
+            settings,
+            signal: abort.signal,
+          }),
+        );
+        assert.equal(stored.size, beforeRejected);
+        assert.equal(
+          (await issues.get('alice', rejected.id, {})).threadId,
+          null,
+        );
+      },
+    );
 
     const auth = {
       api: {
@@ -549,9 +868,10 @@ test(
           });
           ctx.set('issueSourceThreadId', source.threadId);
           const created = await execute(
-            'create --title "Bot task" --body "Keep this acceptance criterion"',
+            'create --title "Bot task" --body "Keep this acceptance criterion" --run-in-thread',
           );
           assert.equal(created.projectId, projectId ?? null);
+          assert.ok(created.threadId);
           assert.deepEqual(created.source, source);
           assert.notEqual(created.threadId, source.threadId);
           assert.equal(lastSession?.thread.id, created.threadId);
@@ -691,7 +1011,10 @@ test(
           const external = await issues.create(
             'alice',
             { projectId },
-            issueCreateSchema.parse({ title: 'Worker-created task' }),
+            issueCreateSchema.parse({
+              runInThread: true,
+              title: 'Worker-created task',
+            }),
             undefined,
             workerThreadId,
             workerThreadId,
@@ -739,6 +1062,7 @@ test(
                   title: 'Manually created',
                   body: 'Manual requirements',
                   state: 'todo',
+                  runInThread: true,
                 },
                 actorThreadId: source.threadId,
                 sourceThreadId: 'untrusted',
@@ -747,6 +1071,7 @@ test(
           });
           assert.equal(response.status, 200);
           const manual = (await response.json()).json as Issue;
+          assert.ok(manual.threadId);
           assert.deepEqual(defaultCalls, [['alice', projectId]]);
           assert.deepEqual(manual.source, source);
           assert.equal(
@@ -770,7 +1095,10 @@ test(
               manualIssues.createManual(
                 'bob',
                 { projectId },
-                issueCreateSchema.parse({ title: 'No membership' }),
+                issueCreateSchema.parse({
+                  runInThread: true,
+                  title: 'No membership',
+                }),
               ),
               code('PROJECT_NOT_FOUND'),
             );
@@ -780,6 +1108,73 @@ test(
               'Check project membership before opening a room',
             );
           }
+          const beforeRecord = { threads: stored.size, sends: sends.length };
+          const recordResponse = await manualApp.request(
+            '/api/rpc/issues/create',
+            {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json',
+                origin: 'http://issues.test',
+                cookie: 'alice',
+              },
+              body: JSON.stringify({
+                json: {
+                  projectId,
+                  data: { title: 'Manual record only' },
+                },
+              }),
+            },
+          );
+          assert.equal(recordResponse.status, 200);
+          const manualRecord = (await recordResponse.json()).json as Issue;
+          assert.equal(manualRecord.threadId, null);
+          assert.deepEqual(manualRecord.source, source);
+          const [recordEvent] = await db.query(
+            "SELECT agent_id,text FROM group_chat_events WHERE kind='issue' AND (text::jsonb->>'issueId')::int=$1",
+            [manualRecord.id],
+          );
+          assert.equal(recordEvent.agent_id, source.agentId);
+          assert.equal(JSON.parse(recordEvent.text).threadId, null);
+          assert.equal(JSON.parse(recordEvent.text).event.type, 'created');
+          const botRecord = await execute('create --title "Bot record only"');
+          assert.equal(botRecord.threadId, null);
+          assert.deepEqual(botRecord.source, source);
+          const [recordCount] = await db.query(
+            "SELECT count(*)::int AS count FROM group_chat_events WHERE kind='issue' AND (text::jsonb->>'issueId')::int=$1",
+            [botRecord.id],
+          );
+          assert.equal(
+            recordCount.count,
+            0,
+            'Record-only Bot operations still do not echo',
+          );
+          assert.deepEqual(
+            { threads: stored.size, sends: sends.length },
+            beforeRecord,
+          );
+          const activated = await execute(
+            `edit ${botRecord.id} --run-in-thread`,
+          );
+          assert.ok(activated.threadId);
+          assert.deepEqual(activated.source, source);
+          assert.equal(
+            stored.get(activated.threadId)?.metadata?.issueId,
+            botRecord.id,
+          );
+          assert.equal(
+            stored.get(activated.threadId)?.metadata?.issueSourceThreadId,
+            source.threadId,
+          );
+          const [activationEvents] = await db.query(
+            "SELECT count(*)::int AS count FROM group_chat_events WHERE kind='issue' AND (text::jsonb->>'issueId')::int=$1",
+            [botRecord.id],
+          );
+          assert.equal(
+            activationEvents.count,
+            0,
+            'Binding and submission retain Bot echo suppression',
+          );
           const changed = await execute(
             `edit ${created.id} --state in_progress`,
           );
@@ -825,8 +1220,9 @@ test(
         ctx.set('issueSourceThreadId', undefined);
         ctx.set('chatSettings', { ...settings, agentId: 'default' });
         const workerIssue = await execute(
-          'create --title "Keep ordinary Agent"',
+          'create --title "Keep ordinary Agent" --no-start',
         );
+        assert.ok(workerIssue.threadId);
         assert.equal(
           stored.get(workerIssue.threadId)?.metadata?.agentId,
           'default',

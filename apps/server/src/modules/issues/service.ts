@@ -1,7 +1,11 @@
 import { nanoid } from 'nanoid';
 import { ORPCError } from '@orpc/server';
 import type { DataSource } from 'typeorm';
-import { chatSettingsSchema, type ThreadStatus } from '@aime/shared/threads';
+import {
+  chatSettingsSchema,
+  type ChatSettings,
+  type ThreadStatus,
+} from '@aime/shared/threads';
 import {
   issueCreateSchema,
   issuePatchSchema,
@@ -92,7 +96,7 @@ export class IssueService {
     for (;;) {
       const rows: { id: number; userId: string; threadId: string }[] =
         await this.database.query(
-          `SELECT id,created_by AS "userId",thread_id AS "threadId" FROM issues WHERE source_thread_id IS NOT NULL AND id>$1 ORDER BY id LIMIT 100`,
+          `SELECT id,created_by AS "userId",thread_id AS "threadId" FROM issues WHERE source_thread_id IS NOT NULL AND thread_id IS NOT NULL AND id>$1 ORDER BY id LIMIT 100`,
           [cursor],
         );
       if (!rows.length) return;
@@ -216,11 +220,6 @@ export class IssueService {
           scope.projectId,
         )
       : null;
-    const settings =
-      data.settings ??
-      (scope.projectId
-        ? (await this.projects.get(userId, scope.projectId)).settings
-        : chatSettingsSchema.parse({}));
     let threadId: string | undefined;
     let issueId: number | undefined;
     try {
@@ -230,17 +229,17 @@ export class IssueService {
           `SELECT nextval(pg_get_serial_sequence('issues','id'))::int AS id`,
         );
         issueId = id;
-        const thread = await this.threads.createIssueThread(
-          userId,
-          {
-            ...settings,
-            title: `#${id} ${data.title}`.slice(0, 120),
-            projectId: scope.projectId,
-          },
-          id,
-          source ?? undefined,
-        );
-        threadId = thread.id;
+        if (data.runInThread) {
+          const thread = await this.createTaskThread(
+            userId,
+            scope,
+            id,
+            data.title,
+            data.settings,
+            source ?? undefined,
+          );
+          threadId = thread.id;
+        }
         signal?.throwIfAborted();
         await this.authorize(userId, scope);
         const [row]: Row[] = await manager.query(
@@ -249,7 +248,7 @@ export class IssueService {
             id,
             scope.projectId ?? null,
             userId,
-            thread.id,
+            threadId ?? null,
             data.title,
             data.body,
             data.state,
@@ -272,36 +271,102 @@ export class IssueService {
     }
   }
 
+  private async createTaskThread(
+    userId: string,
+    scope: IssueScope,
+    id: number,
+    title: string,
+    settings?: ChatSettings,
+    sourceThreadId?: string,
+  ) {
+    const resolved =
+      settings ??
+      (scope.projectId
+        ? (await this.projects.get(userId, scope.projectId)).settings
+        : chatSettingsSchema.parse({}));
+    return this.threads.createIssueThread(
+      userId,
+      {
+        ...resolved,
+        title: `#${id} ${title}`.slice(0, 120),
+        projectId: scope.projectId,
+      },
+      id,
+      sourceThreadId,
+    );
+  }
+
   edit(
     userId: string,
     id: number,
     scope: IssueScope,
     raw: IssuePatch,
     actorThreadId?: string,
+    task?: { settings: ChatSettings; signal?: AbortSignal },
   ) {
     const patch = issuePatchSchema.parse(raw);
     return this.locked(id, async () => {
-      const previous = await this.get(userId, id, scope);
-      const changes = Object.fromEntries(
-        Object.entries(patch).filter(
-          ([key, value]) =>
-            value !== undefined && value !== previous[key as keyof IssuePatch],
-        ),
-      );
-      if (!Object.keys(changes).length) return previous;
-      return this.database.transaction(async (manager) => {
-        const [row]: Row[] = await manager.query(
-          `WITH updated AS (UPDATE issues SET title=COALESCE($2,title),body=COALESCE($3,body),state=COALESCE($4,state),closed_at=CASE WHEN $4='done' THEN COALESCE(closed_at,now()) WHEN $4 IS NOT NULL THEN NULL ELSE closed_at END,updated_at=now() WHERE id=$1 RETURNING ${columns}) SELECT * FROM updated`,
-          [id, patch.title ?? null, patch.body ?? null, patch.state ?? null],
-        );
-        await enqueueIssueEvent(manager, id, {
-          type: 'updated',
-          actorId: userId,
-          actorThreadId,
-          changes,
+      await this.get(userId, id, scope);
+      let createdThreadId: string | undefined;
+      try {
+        return await this.database.transaction(async (manager) => {
+          task?.signal?.throwIfAborted();
+          // Serialize provisioning across service instances as well as local callers.
+          const [previous]: Row[] = await manager.query(
+            `SELECT ${columns} FROM issues WHERE id=$1 FOR UPDATE`,
+            [id],
+          );
+          task?.signal?.throwIfAborted();
+          if (!previous) throw new ORPCError('NOT_FOUND');
+          if (task && (patch.state ?? previous.state) === 'done')
+            throw new ORPCError('ISSUE_CLOSED', { status: 409 });
+          const changes: Record<string, unknown> = Object.fromEntries(
+            Object.entries(patch).filter(
+              ([key, value]) =>
+                value !== undefined &&
+                value !== previous[key as keyof IssuePatch],
+            ),
+          );
+          if (task && !previous.threadId) {
+            const thread = await this.createTaskThread(
+              userId,
+              scope,
+              id,
+              patch.title ?? previous.title,
+              task.settings,
+              previous.source?.threadId,
+            );
+            createdThreadId = thread.id;
+            changes.threadId = thread.id;
+          }
+          task?.signal?.throwIfAborted();
+          await this.authorize(userId, scope);
+          if (!Object.keys(changes).length) return dto(previous);
+          const [row]: Row[] = await manager.query(
+            `WITH updated AS (UPDATE issues SET title=COALESCE($2,title),body=COALESCE($3,body),state=COALESCE($4,state),thread_id=COALESCE($5,thread_id),closed_at=CASE WHEN $4='done' THEN COALESCE(closed_at,now()) WHEN $4 IS NOT NULL THEN NULL ELSE closed_at END,updated_at=now() WHERE id=$1 RETURNING ${columns}) SELECT * FROM updated`,
+            [
+              id,
+              patch.title ?? null,
+              patch.body ?? null,
+              patch.state ?? null,
+              createdThreadId ?? null,
+            ],
+          );
+          await enqueueIssueEvent(manager, id, {
+            type: 'updated',
+            actorId: userId,
+            actorThreadId,
+            changes,
+          });
+          return dto(row!);
         });
-        return dto(row!);
-      });
+      } catch (error) {
+        if (createdThreadId)
+          await this.threads
+            .discardIssueThread(createdThreadId, id)
+            .catch(() => undefined);
+        throw error;
+      }
     });
   }
 
@@ -372,6 +437,8 @@ export class IssueService {
       const issue = await this.get(userId, id, scope);
       if (issue.state === 'done')
         throw new ORPCError('ISSUE_CLOSED', { status: 409 });
+      if (!issue.threadId)
+        throw new ORPCError('ISSUE_NO_THREAD', { status: 409 });
       signal?.throwIfAborted();
       const { thread } = await this.threads.getThread(userId, issue.threadId);
       signal?.throwIfAborted();
@@ -402,6 +469,8 @@ export class IssueService {
   stop(userId: string, id: number, scope: IssueScope, actorThreadId?: string) {
     return this.locked(id, async () => {
       const issue = await this.get(userId, id, scope);
+      if (!issue.threadId)
+        throw new ORPCError('ISSUE_NO_THREAD', { status: 409 });
       await this.threads.stopIssueThread(userId, issue.threadId, actorThreadId);
       await this.database.transaction(async (manager) => {
         await manager.query(

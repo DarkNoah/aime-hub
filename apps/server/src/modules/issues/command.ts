@@ -1,22 +1,30 @@
 import type { IssueState } from '@aime/shared/issues';
 
 export const issueHelp = `issue list [--state open|all|decision|todo|in_progress|done] [--cursor 123] [--limit 30]
-issue create --title "任务标题" --body "任务与验收标准" [--state todo|decision] [--start|--no-start]
+issue create --title "任务标题" [--body "任务与验收标准"] [--state todo|decision|in_progress|done] [--run-in-thread]
 issue view 123 [--cursor 评论游标]
-issue edit 123 [--title "新标题"] [--body "新描述"] [--state decision|todo|in_progress|done] [--message "继续执行的指令" --delivery wait|immediate] [--stop]
+issue edit 123 [--title "新标题"] [--body "新描述"] [--state decision|todo|in_progress|done] [--run-in-thread | --message "继续执行的指令" --delivery wait|immediate | --stop]
 issue close 123
 issue reopen 123
 issue comment 123 --body "评论"
 issue help
-范围自动绑定当前个人/项目聊天，不能通过命令跨范围访问。群聊 Bot create 待办任务默认创建并启动线程，--no-start 仅建单，decision 状态默认不启动；其他聊天用 --start 提交任务。任务输入含 Issue ID、描述和执行要求。关联 Bot 会收到外部变更及线程结束事件；自己的操作不会触发回声。评论不执行任务。edit --message 加入原生消息队列，wait 等待当前执行结束，immediate 立即处理。--stop 中止执行、清空队列并回到待办。close 标记完成并保留线程，不中断当前回复。`;
+范围自动绑定当前个人/项目聊天，不能通过命令跨范围访问。create 默认只保存 Issue，不创建或绑定任务线程；添加无值开关 --run-in-thread 才创建独立线程并提交任务，不能传 true/false。edit --run-in-thread 会在没有任务线程时创建并绑定线程，有线程则复用，然后发送最新 Issue ID、标题和完整描述；可同时更新标题、描述或非 done 状态，与 --message/--stop 互斥。无任务线程时不能直接 --message 或 --stop。兼容旧参数：--start 等同于 --run-in-thread，--no-start 只创建空闲线程，与 --run-in-thread/--start 互斥。任务输入含 Issue ID、描述和执行要求。关联 Bot 会收到外部变更及线程结束事件；自己的操作不会触发回声。评论不直接执行任务线程。edit --message 加入原生消息队列，wait 等待当前执行结束，immediate 立即处理。--stop 中止执行、清空队列并回到待办。close 标记完成并保留线程，不中断当前回复。`;
 
 type Action =
   'list' | 'create' | 'view' | 'edit' | 'close' | 'reopen' | 'comment' | 'help';
 const options: Record<Action, string[]> = {
   list: ['state', 'cursor', 'limit'],
-  create: ['title', 'body', 'state', 'start', 'no-start'],
+  create: ['title', 'body', 'state', 'run-in-thread', 'start', 'no-start'],
   view: ['cursor'],
-  edit: ['title', 'body', 'state', 'message', 'delivery', 'stop'],
+  edit: [
+    'title',
+    'body',
+    'state',
+    'run-in-thread',
+    'message',
+    'delivery',
+    'stop',
+  ],
   close: [],
   reopen: [],
   comment: ['body'],
@@ -100,7 +108,12 @@ export function parseIssueCommand(command: string) {
       throw new Error(`不支持的参数：${token.value}`);
     const key = match[1]!;
     if (Object.hasOwn(values, key)) throw new Error(`重复参数：--${key}`);
-    if (key === 'stop' || key === 'start' || key === 'no-start') {
+    if (
+      key === 'stop' ||
+      key === 'start' ||
+      key === 'no-start' ||
+      key === 'run-in-thread'
+    ) {
       if (match[2] !== undefined) throw new Error(`--${key} 不接受参数值`);
       values[key] = 'true';
       continue;
@@ -116,8 +129,10 @@ export function parseIssueCommand(command: string) {
   }
   if (action === 'create' && !values.title?.trim())
     throw new Error('create 需要 --title');
-  if (values.start && values['no-start'])
-    throw new Error('--start 不能与 --no-start 同时使用');
+  if ((values.start || values['run-in-thread']) && values['no-start'])
+    throw new Error('--run-in-thread/--start 不能与 --no-start 同时使用');
+  if (values['run-in-thread'] && (values.message || values.stop))
+    throw new Error('--run-in-thread 不能与 --message 或 --stop 同时使用');
   if (action === 'comment' && !values.body?.trim())
     throw new Error('comment 需要 --body');
   if (action === 'edit' && !Object.keys(values).length)
@@ -135,7 +150,10 @@ export function parseIssueCommand(command: string) {
     throw new Error('--stop 不能与 --message 同时使用');
   if (values.stop && values.state && values.state !== 'todo')
     throw new Error('--stop 会回到待办，请不要同时指定其他状态');
-  if (values.state === 'done' && (values.message || values.start))
+  if (
+    values.state === 'done' &&
+    (values.message || values.start || values['run-in-thread'])
+  )
     throw new Error('已完成的 Issue 需要 reopen 后才能执行');
   if (values.message !== undefined && !values.message.trim())
     throw new Error('--message 不能为空');

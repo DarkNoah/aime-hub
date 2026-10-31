@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Dialog,
@@ -45,6 +46,7 @@ export function IssueFormDialog({
   const [title, setTitle] = useState(issue?.title ?? '');
   const [body, setBody] = useState(issue?.body ?? '');
   const [state, setState] = useState<IssueState>(issue?.state ?? initialState);
+  const [runInThread, setRunInThread] = useState(false);
   const [busy, setBusy] = useState(false);
   return (
     <Dialog
@@ -70,7 +72,10 @@ export function IssueFormDialog({
             void (
               issue
                 ? issueApi.edit({ id: issue.id, projectId, data })
-                : issueApi.create({ projectId, data: { ...data, settings } })
+                : issueApi.create({
+                    projectId,
+                    data: { ...data, settings, runInThread },
+                  })
             )
               .then((result) => {
                 issueChanged();
@@ -130,6 +135,28 @@ export function IssueFormDialog({
                   </SelectContent>
                 </Select>
               </div>
+              {!issue && (
+                <div className="flex items-center justify-between gap-4 rounded-lg border p-3">
+                  <div className="space-y-1">
+                    <Label htmlFor={`${id}-run-in-thread`}>
+                      {t('issues.runInThread')}
+                    </Label>
+                    <p
+                      id={`${id}-run-in-thread-hint`}
+                      className="text-xs leading-5 text-muted-foreground"
+                    >
+                      {t('issues.runInThreadHint')}
+                    </p>
+                  </div>
+                  <Switch
+                    id={`${id}-run-in-thread`}
+                    checked={runInThread}
+                    onCheckedChange={setRunInThread}
+                    disabled={busy}
+                    aria-describedby={`${id}-run-in-thread-hint`}
+                  />
+                </div>
+              )}
             </div>
           </ScrollArea>
           <DialogFooter>

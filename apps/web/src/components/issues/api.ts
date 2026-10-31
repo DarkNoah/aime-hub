@@ -7,11 +7,13 @@ export function issueErrorKey(
   error: unknown,
 ):
   | 'issues.closedError'
+  | 'issues.noThreadHint'
   | 'issues.responseRequired'
   | 'issues.accessError'
   | 'issues.error' {
   const code = apiErrorCode(error);
   if (code === 'ISSUE_CLOSED') return 'issues.closedError';
+  if (code === 'ISSUE_NO_THREAD') return 'issues.noThreadHint';
   if (code === 'TOOL_RESPONSE_REQUIRED') return 'issues.responseRequired';
   if (
     code === 'NOT_FOUND' ||

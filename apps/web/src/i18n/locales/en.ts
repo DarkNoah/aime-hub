@@ -24,7 +24,13 @@ export const en = {
   'issues.edit': 'Edit',
   'issues.save': 'Save changes',
   'issues.createHint':
-    'Describe the task and acceptance criteria. Creation links a task chat and notifies the Bot in this scope’s default room to follow up.',
+    'Describe the task and acceptance criteria. Creation notifies the Bot in this scope’s default room; enable a new chat to delegate execution.',
+  'issues.runInThread': 'Enable new chat',
+  'issues.runInThreadHint':
+    'Enable a separate task chat for the Bot to coordinate execution. By default, only record the Issue.',
+  'issues.recordOnly': 'Record only',
+  'issues.noThreadHint':
+    'This Issue has no task chat. You can comment and update its status, but cannot send task instructions or stop a chat.',
   'issues.created': 'Issue created',
   'issues.saved': 'Issue updated',
   'issues.sent': 'Submitted',

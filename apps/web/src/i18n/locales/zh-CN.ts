@@ -26,7 +26,13 @@ export const zhCN = {
   'issues.edit': '编辑',
   'issues.save': '保存修改',
   'issues.createHint':
-    '记录任务与验收标准。新建后会关联独立任务线程，并通知当前范围默认聊天室的 Bot 跟进。',
+    '记录任务与验收标准。新建后会通知当前范围默认聊天室的 Bot；启用新线程时可交给独立线程执行。',
+  'issues.runInThread': '启用新线程',
+  'issues.runInThreadHint':
+    '开启后创建独立任务线程，由 Bot 跟进执行；默认仅记录 Issue。',
+  'issues.recordOnly': '仅记录',
+  'issues.noThreadHint':
+    '此 Issue 未启用任务线程，可以评论和更新状态，无法发送执行指令或终止线程。',
   'issues.created': 'Issue 已创建',
   'issues.saved': 'Issue 已更新',
   'issues.sent': '已提交',

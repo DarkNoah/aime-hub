@@ -1,3 +1,4 @@
+import { IssueOptionalThread1780000039000 } from './migrations/1780000039000-issue-optional-thread.js';
 import { IssueEvents1780000038000 } from './migrations/1780000038000-issue-events.js';
 import { ProjectEnvironmentVariables1780000037000 } from './migrations/1780000037000-project-environment-variables.js';
 import { IssueSourceThread1780000036000 } from './migrations/1780000036000-issue-source-thread.js';
@@ -94,6 +95,7 @@ export function createDataSource(
       GeneratedAsset,
     ],
     migrations: [
+      IssueOptionalThread1780000039000,
       IssueEvents1780000038000,
       ProjectEnvironmentVariables1780000037000,
       IssueSourceThread1780000036000,

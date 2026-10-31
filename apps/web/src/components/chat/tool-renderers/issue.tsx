@@ -13,7 +13,7 @@ import type { ToolInteractionProps } from '../chat-tool-interaction';
 const summary = z.object({
   id: z.number(),
   title: z.string(),
-  threadId: z.string(),
+  threadId: z.string().nullable(),
   source: z
     .object({ roomId: z.string(), agentId: z.string(), threadId: z.string() })
     .nullish(),

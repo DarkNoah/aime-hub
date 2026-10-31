@@ -7,6 +7,7 @@ import {
   issuePatchSchema,
   issueListSchema,
   issueMessageSchema,
+  type Issue,
 } from '@aime/shared/issues';
 import { BuiltinTool, type ToolSettings } from '../../modules/tools/base.js';
 import type { ToolDependencies } from '../../modules/tools/types.js';
@@ -15,7 +16,6 @@ import { issueHelp, parseIssueCommand } from '../../modules/issues/command.js';
 import { ThreadError } from '../../modules/threads/errors.js';
 import { AgentError } from '../../modules/agents/errors.js';
 import { getCodeAgent } from '../agents/index.js';
-import { botAgent } from '../agents/bot-agent.js';
 
 export type ResolveIssues = () => Pick<
   IssueService,
@@ -25,12 +25,12 @@ export type ResolveIssues = () => Pick<
 export function createIssueTool(resolve?: ResolveIssues) {
   return createTool({
     id: 'issue',
-    description: `Manage persistent tasks with GitHub-style issue commands in the current personal/project scope. Create an issue only for substantial, long-running tasks or work strongly related to an existing task. Reuse related issues. Simple exploration, research, search and direct answers do not need issues. Creation binds a new chat thread; list/view first to avoid duplicates. Room Bot creation starts the task by default, including its Issue ID and details; use --no-start for an explicitly deferred task. Other chats use --start to execute on creation. The associated room Bot receives external Issue changes and task-thread results/errors as asynchronous events. Send follow-ups to the existing task with edit --message; comments alone do not execute work. Do not create a replacement issue from inside its own task thread. Completion must be verified before close.\n${issueHelp}`,
+    description: `Manage persistent tasks with GitHub-style issue commands in the current personal/project scope. Create an issue only for substantial, long-running tasks or work strongly related to an existing task. Reuse related issues. Simple exploration, research, search and direct answers do not need issues. Creation only records the Issue by default (threadId null). Add the valueless --run-in-thread flag to create a separate task thread and submit its Issue ID and details immediately; never pass true/false. Use edit <id> --run-in-thread to start an existing Issue: create and bind a task thread if absent, otherwise reuse it, then submit the latest Issue ID, title and description. Record-only Issues cannot receive --message or --stop until they have a task thread. Legacy --start also creates and runs a task; --no-start creates an idle thread. List/view first to avoid duplicates. The associated room Bot receives external Issue changes and task-thread results/errors as asynchronous events. Send follow-ups to the existing task with edit --message; comments alone do not execute work. Do not create a replacement issue from inside its own task thread. Completion must be verified before close.\n${issueHelp}`,
     inputSchema: z.object({
       command: z
         .string()
         .describe(
-          'One issue command, e.g. create --title "修复登录" --body "任务和验收标准", list --state open, view 123, edit 123 --message "继续" --delivery wait, close 123. Quote values containing spaces or flags.',
+          'One issue command, e.g. create --title "修复登录" --body "任务和验收标准", list --state open, view 123, edit 123 --run-in-thread, edit 123 --message "继续" --delivery wait, close 123. Quote values containing spaces or flags.',
         ),
     }),
     execute: async ({ command }, context) => {
@@ -56,6 +56,39 @@ export function createIssueTool(resolve?: ResolveIssues) {
         const service = resolve();
         const scope =
           typeof projectId === 'string' && projectId ? { projectId } : {};
+        const taskSettings = () => {
+          const settings = chatSettingsSchema.parse(
+            context?.requestContext?.get('chatSettings') ?? {},
+          );
+          // Room-only Agents cannot run in ordinary task threads.
+          if (settings.agentId && getCodeAgent(settings.agentId)?.hidden)
+            settings.agentId = null;
+          return settings;
+        };
+        const submitTask = async (issue: Issue, created: boolean) => {
+          signal?.throwIfAborted();
+          try {
+            return {
+              issue: await service.message(
+                userId,
+                issue.id,
+                scope,
+                `Issue #${issue.id}: ${issue.title}\n\n${issue.body || '请完成此任务，并验证结果。'}\n\n请在此线程中执行任务，使用 issue view ${issue.id} 读取最新要求。记录关键进展、结果和验证证据；遇到阻碍时说明原因并更新为 decision；完成并验证后执行 issue close ${issue.id}。`,
+                'wait',
+                signal,
+                actorThreadId,
+              ),
+              taskSubmitted: true,
+            };
+          } catch (error) {
+            if (signal?.aborted) throw error;
+            return {
+              issue,
+              taskSubmitted: false,
+              error: `${created ? 'Issue 已创建' : 'Issue 和任务线程已保留'}，但任务未成功提交。请打开线程检查模型配置或待处理交互后重试。`,
+            };
+          }
+        };
         signal?.throwIfAborted();
         if (action === 'list')
           return service.list(
@@ -73,20 +106,8 @@ export function createIssueTool(resolve?: ResolveIssues) {
           const sourceThreadId = context?.requestContext?.get(
             'issueSourceThreadId',
           );
-          const settings = chatSettingsSchema.parse(
-            context?.requestContext?.get('chatSettings') ?? {},
-          );
-          const start =
-            !!values.start ||
-            (!!sourceThreadId &&
-              settings.agentId === botAgent.id &&
-              !values['no-start'] &&
-              (!values.state || values.state === 'todo'));
-          // The room leader is valid only with a trusted room binding. An issue
-          // gets an ordinary chat, so resolve its default Agent while retaining
-          // the current model and reasoning settings. Normal worker Agents stay.
-          if (settings.agentId && getCodeAgent(settings.agentId)?.hidden)
-            settings.agentId = null;
+          const start = !!(values['run-in-thread'] || values.start);
+          const runInThread = start || !!values['no-start'];
           const issue = await service.create(
             userId,
             scope,
@@ -94,37 +115,14 @@ export function createIssueTool(resolve?: ResolveIssues) {
               title: values.title,
               body: values.body,
               state: values.state,
-              settings,
+              runInThread,
+              settings: taskSettings(),
             }),
             signal,
             typeof sourceThreadId === 'string' ? sourceThreadId : undefined,
             actorThreadId,
           );
-          if (start) {
-            signal?.throwIfAborted();
-            try {
-              return {
-                issue: await service.message(
-                  userId,
-                  issue.id,
-                  scope,
-                  `Issue #${issue.id}: ${issue.title}\n\n${issue.body || '请完成此任务，并验证结果。'}\n\n请在此线程中执行任务，使用 issue view ${issue.id} 读取最新要求。记录关键进展、结果和验证证据；遇到阻碍时说明原因并更新为 decision；完成并验证后执行 issue close ${issue.id}。`,
-                  'wait',
-                  signal,
-                  actorThreadId,
-                ),
-                taskSubmitted: true,
-              };
-            } catch (error) {
-              if (signal?.aborted) throw error;
-              return {
-                issue,
-                taskSubmitted: false,
-                error:
-                  'Issue 已创建，但任务未成功提交。请打开线程检查模型配置或待处理交互后重试。',
-              };
-            }
-          }
+          if (start) return submitTask(issue, true);
           return { issue, taskSubmitted: false };
         }
         if (action === 'close' || action === 'reopen')
@@ -159,6 +157,20 @@ export function createIssueTool(resolve?: ResolveIssues) {
             body: values.message,
             delivery: values.delivery,
           });
+        if (values['run-in-thread']) {
+          const issue = await service.edit(
+            userId,
+            id!,
+            scope,
+            patch,
+            actorThreadId,
+            {
+              settings: taskSettings(),
+              signal,
+            },
+          );
+          return submitTask(issue, false);
+        }
         // Validate the entire command before making any changes.
         let issue;
         if (Object.values(patch).some((value) => value !== undefined))
