@@ -118,10 +118,22 @@ export function IssueDetailSheet({
               <div className="flex flex-wrap gap-2">
                 <Button asChild size="sm">
                   <IssueThreadLink issue={issue} onClick={onClose}>
-                    {t('issues.openThread')}
+                    {t(
+                      issue.source
+                        ? 'issues.openSourceThread'
+                        : 'issues.openThread',
+                    )}
                     <ArrowUpRight />
                   </IssueThreadLink>
                 </Button>
+                {issue.source && (
+                  <Button asChild size="sm" variant="outline">
+                    <IssueThreadLink issue={issue} task onClick={onClose}>
+                      {t('issues.openTaskThread')}
+                      <ArrowUpRight />
+                    </IssueThreadLink>
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="outline"

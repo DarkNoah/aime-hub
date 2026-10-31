@@ -46,6 +46,7 @@ import {createRoot} from 'react-dom/client';
 import {createRootRoute,createRoute,createRouter,RouterProvider,Outlet,useParams} from '@tanstack/react-router';
 import {IssueBoard} from '/src/components/issues/board';
 import {IssueToolResult} from '/src/components/chat/tool-renderers/issue';
+import {validateGroupChatSearch} from '/src/pages/group-chats/search';
 import {PersonalChatSettingsContext} from '/src/components/chat/use-personal-chat-settings';
 import {initializeI18n} from '/src/i18n';
 import {ThemeProvider} from '/src/components/theme/theme-provider';
@@ -60,6 +61,8 @@ const tree=root.addChildren([
  createRoute({getParentRoute:()=>root,path:'/projects/$projectId',component:()=>{const {projectId}=useParams({strict:false});return <IssueBoard projectId={projectId}/>;}}),
  createRoute({getParentRoute:()=>root,path:'/threads/$threadId',component:Chat}),
  createRoute({getParentRoute:()=>root,path:'/projects/$projectId/threads/$threadId',component:Chat}),
+ createRoute({getParentRoute:()=>root,path:'/group-chats',validateSearch:validateGroupChatSearch,component:()=> <p>群聊线程目标</p>}),
+ createRoute({getParentRoute:()=>root,path:'/projects/$projectId/group-chats',validateSearch:validateGroupChatSearch,component:()=> <p>群聊线程目标</p>}),
  createRoute({getParentRoute:()=>root,path:'/tool',component:()=> <IssueToolResult tool={{type:'tool-issue',toolCallId:'fixture',state:'output-available',input:{command:'view 1'},output:{issue:{id:1,title:'工具任务',threadId:'thread0000000001',projectId:null,state:'todo'}}}}/>})
 ]);
 const router=createRouter({routeTree:tree});
@@ -85,7 +88,7 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
           configureServer(server) {
             server.middlewares.use(async (req, res, next) => {
               if (
-                !/^\/(issues|projects|threads|tool)(\/|$)/.test(
+                !/^\/(issues|projects|threads|tool|group-chats)(\/|$)/.test(
                   new URL(req.url ?? '/', 'http://fixture').pathname,
                 )
               )
@@ -411,6 +414,56 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       path: '/tmp/issues-mobile-dialog.png',
       fullPage: true,
     });
+    // Current cards and legacy stored tool results both resolve room sources.
+    const source = {
+      roomId: 'room000000000001',
+      agentId: 'bot0000000000001',
+      threadId: 'botthread0000001',
+    };
+    issues[0].source = source;
+    for (const projectId of [null, 'project000000001']) {
+      const item = projectId
+        ? issues.find((item) => item.id === 99)
+        : issues[0];
+      item.source = source;
+      await page.goto(
+        origin + (projectId ? `/projects/${projectId}` : '/issues'),
+      );
+      const card = page.getByRole('link', { name: new RegExp(item.title) });
+      const href = await card.getAttribute('href');
+      assert.equal(
+        new URL(href, origin).searchParams.get('agentId'),
+        source.agentId,
+      );
+      await card.click();
+      await page.getByText('群聊线程目标', { exact: true }).waitFor();
+      assert.equal(
+        new URL(page.url()).pathname,
+        projectId ? `/projects/${projectId}/group-chats` : '/group-chats',
+      );
+      await page.goBack();
+      await page
+        .getByRole('button', { name: `查看 ${item.title} 的详情` })
+        .click();
+      const sheet = page.getByRole('dialog');
+      assert.match(
+        await sheet
+          .getByRole('link', { name: '打开群聊 Agent 线程' })
+          .getAttribute('href'),
+        /agentId=/,
+      );
+      await sheet.getByRole('link', { name: '打开任务线程' }).click();
+      assert.match(page.url(), new RegExp(`/threads/${item.threadId}$`));
+    }
+    await page.goto(origin + '/tool');
+    await page.waitForFunction(() =>
+      document.querySelector('a')?.getAttribute('href')?.includes('agentId='),
+    );
+    await page.getByRole('link', { name: /工具任务/ }).click();
+    assert.equal(
+      new URL(page.url()).searchParams.get('agentId'),
+      source.agentId,
+    );
     assert.deepEqual(errors, []);
   },
 );

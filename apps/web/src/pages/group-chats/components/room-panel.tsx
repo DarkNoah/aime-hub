@@ -10,7 +10,7 @@ import {
 import type { UIMessage } from 'ai';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, MessageSquare, Users } from 'lucide-react';
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import type {
   GroupChatAgent,
   GroupChatA2AMember,
@@ -53,6 +53,21 @@ export function RoomPanel({
   roomSwitcher?: ReactNode;
 }) {
   const { t } = useTranslation();
+  const { agentId } = useSearch({ strict: false });
+  const navigate = useNavigate();
+  const clearThreadRequest = () => {
+    if (!agentId) return;
+    void navigate(
+      projectId
+        ? {
+            to: '/projects/$projectId/group-chats',
+            params: { projectId },
+            search: { roomId },
+            replace: true,
+          }
+        : { to: '/group-chats', search: { roomId }, replace: true },
+    );
+  };
   const state = useRoom(roomId, projectId);
   const composer = useRef<RoomComposerHandle>(null);
   const [editor, setEditor] = useState<GroupChatAgent | 'new' | null>(null);
@@ -115,11 +130,17 @@ export function RoomPanel({
       extraPanel={{
         title: t('groupChat.participants'),
         icon: Users,
+        requestId:
+          agentId && state.room.agents.some((agent) => agent.id === agentId)
+            ? `${roomId}:${agentId}`
+            : undefined,
         render: (onClose) => (
           <RoomMembersPanel
             room={state.room!}
             profiles={state.profiles}
             userId={userId}
+            requestedAgentId={agentId}
+            onThreadAgentChange={clearThreadRequest}
             onEdit={setEditor}
             onAddMember={() => setMemberEditor(true)}
             onEditA2a={setA2aEditor}
@@ -130,7 +151,10 @@ export function RoomPanel({
             onMention={(agent) => {
               onClose(() => composer.current?.mention(agent));
             }}
-            onClose={() => onClose()}
+            onClose={() => {
+              clearThreadRequest();
+              onClose();
+            }}
           />
         ),
       }}

@@ -215,6 +215,7 @@ const personalGroupChatRoute = createRoute({
 const projectGroupChatRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: 'group-chats',
+  validateSearch: validateGroupChatSearch,
   component: GroupChatsPage,
 });
 const routeTree = rootRoute.addChildren([

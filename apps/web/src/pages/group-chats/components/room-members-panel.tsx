@@ -42,6 +42,8 @@ export function RoomMembersPanel({
   onAgentRemoved,
   onMention,
   onClose,
+  requestedAgentId,
+  onThreadAgentChange,
 }: {
   room: GroupChatDetail;
   profiles: Map<string, MemberProfile>;
@@ -55,10 +57,23 @@ export function RoomMembersPanel({
   onAgentRemoved: (agentId: string) => void;
   onMention: (agent: GroupChatAgent | GroupChatA2AMember) => void;
   onClose: () => void;
+  requestedAgentId?: string;
+  onThreadAgentChange: (agentId?: string) => void;
 }) {
   const { t } = useTranslation();
   const [container, setContainer] = useState<HTMLElement | null>(null);
-  const [threadAgentId, setThreadAgentId] = useState<string | null>(null);
+  const [lastRequest, setLastRequest] = useState(requestedAgentId);
+  const [threadAgentId, setThreadAgentId] = useState<string | null>(
+    requestedAgentId ?? null,
+  );
+  if (lastRequest !== requestedAgentId) {
+    setLastRequest(requestedAgentId);
+    setThreadAgentId(requestedAgentId ?? null);
+  }
+  const closeThread = () => {
+    setThreadAgentId(null);
+    if (requestedAgentId) onThreadAgentChange();
+  };
   const [opener, setOpener] = useState<HTMLElement | null>(null);
   const threadAgent = room.agents.find((agent) => agent.id === threadAgentId);
   const [changingAgent, setChangingAgent] = useState<string | null>(null);
@@ -335,7 +350,7 @@ export function RoomMembersPanel({
         open={!!threadAgent}
         modal={false}
         onOpenChange={(open) => {
-          if (!open) setThreadAgentId(null);
+          if (!open) closeThread();
         }}
       >
         {threadAgent && container && (
@@ -345,7 +360,7 @@ export function RoomMembersPanel({
             projectId={room.projectId ?? undefined}
             container={container}
             opener={opener}
-            onBack={() => setThreadAgentId(null)}
+            onBack={closeThread}
           />
         )}
       </Sheet>

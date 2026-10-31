@@ -16,6 +16,7 @@ import {
 } from '@aime/shared/issues';
 import type { RunInput } from '@aime/shared/threads';
 import { CreateIssues1780000035000 } from '../../../../../packages/db/src/migrations/1780000035000-create-issues.js';
+import { IssueSourceThread1780000036000 } from '../../../../../packages/db/src/migrations/1780000036000-issue-source-thread.js';
 import { fakeMemory } from '../../../../../scripts/fixtures/thread-memory.js';
 import { sessionStub } from '../../../../../scripts/fixtures/thread-session.js';
 import { ThreadService } from '../threads/service.js';
@@ -90,6 +91,7 @@ test('issue tool inherits authenticated scope/settings, registers admin controls
   const ctx = new RequestContext();
   ctx.set('userId', 'alice');
   ctx.set('projectId', 'project000000001');
+  ctx.set('issueSourceThreadId', 'roomthread000001');
   ctx.set('chatSettings', {
     ...settings,
     model: 'fixture/model',
@@ -112,6 +114,7 @@ test('issue tool inherits authenticated scope/settings, registers admin controls
   );
   assert.equal(calls[0]![0], 'alice');
   assert.deepEqual(calls[0]![1], { projectId: 'project000000001' });
+  assert.equal(calls[0]![4], 'roomthread000001');
   assert.equal(
     (calls[0]![2] as { settings: { reasoningEffort: string } }).settings
       .reasoningEffort,
@@ -193,7 +196,10 @@ test(
     INSERT INTO projects(id) VALUES ('project000000001'),('project000000002');
     INSERT INTO project_members(project_id,user_id,role) VALUES ('project000000001','alice','owner'),('project000000001','bob','member'),('project000000002','alice','owner');`);
     const migration = db.createQueryRunner();
+    await db.query(`CREATE TABLE group_chats(id text PRIMARY KEY,project_id text,deleting boolean NOT NULL DEFAULT false);
+      CREATE TABLE group_chat_agents(id text PRIMARY KEY,room_id text REFERENCES group_chats(id),thread_id text UNIQUE NOT NULL,deleting boolean NOT NULL DEFAULT false)`);
     await new CreateIssues1780000035000().up(migration);
+    await new IssueSourceThread1780000036000().up(migration);
     await migration.release();
     const projects = new ProjectService(db);
     const sends: RunInput[] = [];
@@ -444,10 +450,57 @@ test(
         };
         for (const projectId of [undefined, scope.projectId]) {
           ctx.set('projectId', projectId);
+          const source = {
+            roomId: projectId ? 'projectroom00001' : 'personalroom0001',
+            agentId: projectId ? 'projectbot000001' : 'personalbot00001',
+            threadId: projectId ? 'projectbotchat01' : 'personalbotchat1',
+          };
+          await db.query(
+            'INSERT INTO group_chats(id,project_id) VALUES ($1,$2)',
+            [source.roomId, projectId ?? null],
+          );
+          await db.query(
+            'INSERT INTO group_chat_agents(id,room_id,thread_id) VALUES ($1,$2,$3)',
+            [source.agentId, source.roomId, source.threadId],
+          );
+          await memory.createThread({
+            threadId: source.threadId,
+            resourceId: projectId ? `project:${projectId}` : 'user:alice',
+            title: 'Room Bot',
+            metadata: {
+              ...settings,
+              createdBy: 'alice',
+              groupChat: {
+                roomId: source.roomId,
+                memberId: source.agentId,
+                role: 'bot',
+              },
+            },
+          });
+          ctx.set('issueSourceThreadId', source.threadId);
           const created = await execute(
             'create --title "Bot task" --body "Keep this acceptance criterion"',
           );
           assert.equal(created.projectId, projectId ?? null);
+          assert.deepEqual(created.source, source);
+          assert.notEqual(created.threadId, source.threadId);
+          assert.deepEqual(
+            (await issues.get('alice', created.id, { projectId })).source,
+            source,
+          );
+          await assert.rejects(
+            threads.getIssueSourceThread(
+              'alice',
+              source.threadId,
+              projectId ? undefined : scope.projectId,
+            ),
+            code('FORBIDDEN'),
+          );
+          if (!projectId)
+            await assert.rejects(
+              threads.getIssueSourceThread('bob', source.threadId),
+              code('THREAD_NOT_FOUND'),
+            );
           const target = stored.get(created.threadId)!;
           assert.equal(target.metadata?.agentId, fallbackAgentId);
           assert.equal(target.metadata?.reasoningEffort, 'high');
@@ -471,8 +524,20 @@ test(
           const cleared = await execute(`edit ${created.id} --body ""`);
           assert.equal(cleared.body, '');
           assert.equal(cleared.state, 'todo');
+          await db.query('DELETE FROM group_chat_agents WHERE id=$1', [
+            source.agentId,
+          ]);
+          assert.equal(
+            (await issues.get('alice', created.id, { projectId })).source,
+            null,
+          );
+          assert.equal(
+            (await issues.get('alice', created.id, { projectId })).threadId,
+            created.threadId,
+          );
         }
         ctx.set('projectId', undefined);
+        ctx.set('issueSourceThreadId', undefined);
         ctx.set('chatSettings', { ...settings, agentId: 'default' });
         const workerIssue = await execute(
           'create --title "Keep ordinary Agent"',

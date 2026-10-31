@@ -21,7 +21,10 @@ import {
 import type { ProjectService } from '../projects/service.js';
 import type { ThreadService } from '../threads/service.js';
 
-const columns = `id,title,body,state,project_id AS "projectId",created_by AS "createdBy",thread_id AS "threadId",created_at AS "createdAt",updated_at AS "updatedAt",closed_at AS "closedAt"`;
+const columns = `id,title,body,state,project_id AS "projectId",created_by AS "createdBy",thread_id AS "threadId",created_at AS "createdAt",updated_at AS "updatedAt",closed_at AS "closedAt",
+  (SELECT json_build_object('roomId',a.room_id,'agentId',a.id,'threadId',a.thread_id)
+   FROM group_chat_agents a JOIN group_chats r ON r.id=a.room_id
+   WHERE a.thread_id=source_thread_id AND NOT a.deleting AND NOT r.deleting) AS source`;
 type Row = Omit<Issue, 'createdAt' | 'updatedAt' | 'closedAt'> & {
   createdAt: Date;
   updatedAt: Date;
@@ -59,6 +62,7 @@ export class IssueService {
       | 'createIssueThread'
       | 'discardIssueThread'
       | 'getThread'
+      | 'getIssueSourceThread'
       | 'run'
       | 'stopIssueThread'
     >,
@@ -160,9 +164,17 @@ export class IssueService {
     scope: IssueScope,
     raw: IssueCreate,
     signal?: AbortSignal,
+    sourceThreadId?: string,
   ): Promise<Issue> {
     const data = issueCreateSchema.parse(raw);
     await this.authorize(userId, scope);
+    const source = sourceThreadId
+      ? await this.threads.getIssueSourceThread(
+          userId,
+          sourceThreadId,
+          scope.projectId,
+        )
+      : null;
     const settings =
       data.settings ??
       (scope.projectId
@@ -190,7 +202,7 @@ export class IssueService {
         signal?.throwIfAborted();
         await this.authorize(userId, scope);
         const [row]: Row[] = await manager.query(
-          `INSERT INTO issues(id,project_id,created_by,thread_id,title,body,state,closed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,CASE WHEN $7='done' THEN now() END) RETURNING ${columns}`,
+          `INSERT INTO issues(id,project_id,created_by,thread_id,title,body,state,closed_at,source_thread_id) VALUES ($1,$2,$3,$4,$5,$6,$7,CASE WHEN $7='done' THEN now() END,$8) RETURNING ${columns}`,
           [
             id,
             scope.projectId ?? null,
@@ -199,6 +211,7 @@ export class IssueService {
             data.title,
             data.body,
             data.state,
+            source,
           ],
         );
         return dto(row!);

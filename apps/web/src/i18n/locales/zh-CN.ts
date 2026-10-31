@@ -35,6 +35,8 @@ export const zhCN = {
   'issues.status': '状态',
   'issues.bodyPlaceholder': '需要完成什么？如何判断任务已完成？支持 Markdown。',
   'issues.openThread': '打开线程',
+  'issues.openSourceThread': '打开群聊 Agent 线程',
+  'issues.openTaskThread': '打开任务线程',
   'issues.close': '标记完成',
   'issues.reopen': '重新打开',
   'issues.start': '执行任务',

@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { issueChanged } from '@/components/issues/api';
+import { useEffect, useState } from 'react';
+import { issueApi, issueChanged } from '@/components/issues/api';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
 import { issueStateSchema } from '@aime/shared/issues';
@@ -14,6 +14,9 @@ const summary = z.object({
   id: z.number(),
   title: z.string(),
   threadId: z.string(),
+  source: z
+    .object({ roomId: z.string(), agentId: z.string(), threadId: z.string() })
+    .nullish(),
   projectId: z.string().nullable(),
   state: issueStateSchema,
 });
@@ -24,6 +27,40 @@ const outputSchema = z.object({
   help: z.string().optional(),
   comment: z.object({ body: z.string() }).optional(),
 });
+
+function IssueResultLink({ issue }: { issue: z.infer<typeof summary> }) {
+  const [source, setSource] = useState<z.infer<typeof summary>['source']>();
+  useEffect(() => {
+    if (issue.source !== undefined) return;
+    const controller = new AbortController();
+    // Stored results predate source tracking. Resolve their current association
+    // through the authenticated API without rewriting conversation history.
+    void issueApi
+      .view(
+        { id: issue.id, projectId: issue.projectId ?? undefined },
+        { signal: controller.signal },
+      )
+      .then(({ issue }) => {
+        if (!controller.signal.aborted) setSource(issue.source);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [issue.id, issue.projectId, issue.source]);
+  return (
+    <IssueThreadLink
+      issue={{
+        ...issue,
+        source: issue.source === undefined ? source : issue.source,
+      }}
+      className="flex items-center justify-between gap-3 px-3 py-3 hover:bg-accent"
+    >
+      <span className="min-w-0 break-words">
+        #{issue.id} {issue.title}
+      </span>
+      <IssueStateBadge state={issue.state} />
+    </IssueThreadLink>
+  );
+}
 
 export function IssueToolResult({ tool }: ToolInteractionProps) {
   const { t } = useTranslation();
@@ -49,16 +86,7 @@ export function IssueToolResult({ tool }: ToolInteractionProps) {
       >
         <div className="divide-y">
           {items.map((issue) => (
-            <IssueThreadLink
-              key={issue.id}
-              issue={issue}
-              className="flex items-center justify-between gap-3 px-3 py-3 hover:bg-accent"
-            >
-              <span className="min-w-0 break-words">
-                #{issue.id} {issue.title}
-              </span>
-              <IssueStateBadge state={issue.state} />
-            </IssueThreadLink>
+            <IssueResultLink key={issue.id} issue={issue} />
           ))}
         </div>
         {!items.length && (

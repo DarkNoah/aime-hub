@@ -16,10 +16,10 @@ export function GroupChatsPage() {
   if (!data) return null;
   return (
     <DefaultRoom
-      key={`${data.user.id}:${projectId ?? 'personal'}:${projectId ? 'default' : (roomId ?? 'default')}`}
+      key={`${data.user.id}:${projectId ?? 'personal'}:${roomId ?? 'default'}`}
       projectId={projectId}
       userId={data.user.id}
-      requestedRoomId={projectId ? undefined : roomId}
+      requestedRoomId={roomId}
     />
   );
 }
@@ -45,6 +45,8 @@ function DefaultRoom({
         : groupChatApi.openDefault(projectId, controller.signal)
     )
       .then((room) => {
+        if ((room.projectId ?? undefined) !== projectId)
+          throw new Error('ROOM_SCOPE_MISMATCH');
         if (!controller.signal.aborted) setRoom(room);
       })
       .catch((cause) => {

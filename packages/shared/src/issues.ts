@@ -34,6 +34,8 @@ export type Issue = {
   projectId: string | null;
   createdBy: string;
   threadId: string;
+  /** Room Agent that created this issue; absent on older stored tool results. */
+  source?: { roomId: string; agentId: string; threadId: string } | null;
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
