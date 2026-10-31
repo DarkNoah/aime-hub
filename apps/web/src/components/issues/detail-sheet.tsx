@@ -99,15 +99,19 @@ export function IssueDetailSheet({
           className="w-full gap-0 sm:max-w-xl"
           closeLabel={t('nav.close')}
         >
-          <SheetHeader className="border-b pr-12">
-            <div className="flex items-center gap-2">
+          <SheetHeader className="shrink-0 gap-2 border-b p-5 pr-14">
+            <div className="flex min-h-8 flex-wrap items-center gap-2">
               <span className="font-mono text-sm text-muted-foreground">
                 #{issue.id}
               </span>
               <IssueStateBadge state={issue.state} />
             </div>
-            <SheetTitle className="break-words">{issue.title}</SheetTitle>
-            <SheetDescription>{t('issues.detailHint')}</SheetDescription>
+            <SheetTitle className="text-lg leading-6 break-words">
+              {issue.title}
+            </SheetTitle>
+            <SheetDescription className="leading-5">
+              {t('issues.detailHint')}
+            </SheetDescription>
           </SheetHeader>
           <ScrollArea className="min-h-0 flex-1">
             <div className="space-y-6 p-5">
