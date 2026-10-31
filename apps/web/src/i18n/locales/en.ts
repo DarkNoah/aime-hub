@@ -34,6 +34,8 @@ export const en = {
   'issues.bodyPlaceholder':
     'What needs to be done? How will completion be verified? Markdown is supported.',
   'issues.openThread': 'Open chat',
+  'issues.openSourceThread': 'Open room Agent chat',
+  'issues.openTaskThread': 'Open task chat',
   'issues.close': 'Mark done',
   'issues.reopen': 'Reopen',
   'issues.start': 'Run task',

@@ -5,6 +5,7 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -130,6 +131,7 @@ export function ChatWorkspace({
   extraPanel?: {
     title: string;
     icon: LucideIcon;
+    requestId?: string;
     render: (onClose: CloseExtraPanel) => ReactNode;
   };
 }) {
@@ -145,9 +147,19 @@ export function ChatWorkspace({
   const [expanded, setExpanded] = useState(layout.mode !== 'collapsed');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [view, setView] = useState<WorkspaceView>('files');
-  const requestedPanel = useLocation({
+  const navigationPanel = useLocation({
     select: (location) => location.state.chatWorkspace,
   });
+  const extraRequestId = extraPanel?.requestId;
+  const requestedPanel = useMemo(
+    () =>
+      navigationPanel?.threadId === threadId
+        ? navigationPanel
+        : extraRequestId
+          ? { threadId, view: 'extra' as const, requestId: extraRequestId }
+          : undefined,
+    [navigationPanel, threadId, extraRequestId],
+  );
   const handledPanelRequest = useRef<string | null>(null);
   const pluginSidebars = usePluginRightSidebar();
   const activePlugin = pluginSidebars.find((entry) => entry.view === view);
@@ -189,6 +201,7 @@ export function ChatWorkspace({
     else expandInspector();
   }, [compact, expandInspector]);
   useEffect(() => {
+    if (!requestedPanel) handledPanelRequest.current = null;
     if (
       !requestedPanel ||
       requestedPanel.threadId !== threadId ||

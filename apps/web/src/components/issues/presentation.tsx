@@ -27,30 +27,49 @@ export function IssueThreadLink({
   children,
   className,
   onClick,
+  task = false,
 }: {
-  issue: Pick<Issue, 'threadId' | 'projectId'>;
+  issue: Pick<Issue, 'threadId' | 'projectId' | 'source'>;
   children: ReactNode;
   className?: string;
   onClick?: () => void;
+  task?: boolean;
 }) {
   const props = {
     className: cn(
       'rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring',
       className,
     ),
-    state: issueWorkspaceState(issue.threadId),
     children,
     onClick,
   };
+  if (issue.source && !task) {
+    const search = {
+      roomId: issue.source.roomId,
+      agentId: issue.source.agentId,
+    };
+    return issue.projectId ? (
+      <Link
+        {...props}
+        to="/projects/$projectId/group-chats"
+        params={{ projectId: issue.projectId }}
+        search={search}
+      />
+    ) : (
+      <Link {...props} to="/group-chats" search={search} />
+    );
+  }
   return issue.projectId ? (
     <Link
       {...props}
+      state={issueWorkspaceState(issue.threadId)}
       to="/projects/$projectId/threads/$threadId"
       params={{ projectId: issue.projectId, threadId: issue.threadId }}
     />
   ) : (
     <Link
       {...props}
+      state={issueWorkspaceState(issue.threadId)}
       to="/threads/$threadId"
       params={{ threadId: issue.threadId }}
     />

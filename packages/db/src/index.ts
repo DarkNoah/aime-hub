@@ -1,3 +1,4 @@
+import { IssueSourceThread1780000036000 } from './migrations/1780000036000-issue-source-thread.js';
 import { CreateIssues1780000035000 } from './migrations/1780000035000-create-issues.js';
 import { GroupChatA2aCard1780000033000 } from './migrations/1780000033000-group-chat-a2a-card.js';
 import { GroupChatReads1780000032000 } from './migrations/1780000032000-group-chat-reads.js';
@@ -90,6 +91,7 @@ export function createDataSource(
       GeneratedAsset,
     ],
     migrations: [
+      IssueSourceThread1780000036000,
       CreateIssues1780000035000,
       GroupChatA2aCard1780000033000,
       GroupChatReads1780000032000,

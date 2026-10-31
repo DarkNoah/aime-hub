@@ -1296,6 +1296,17 @@ export class ThreadService {
     );
   }
 
+  /** Validate provenance without opening a session or accepting public metadata. */
+  async getIssueSourceThread(userId: string, id: string, projectId?: string) {
+    const thread = await this.accessible(userId, id);
+    if (
+      !groupChatThreadBinding(thread.metadata) ||
+      threadScope(thread.resourceId).projectId !== projectId
+    )
+      throw new ThreadError('FORBIDDEN', 403);
+    return thread.id;
+  }
+
   private browserBusy(id: string) {
     const runtime = this.runtimes.get(id);
     return (

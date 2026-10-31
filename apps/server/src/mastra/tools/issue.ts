@@ -65,6 +65,9 @@ export function createIssueTool(resolve?: ResolveIssues) {
         if (action === 'view')
           return service.view(userId, id!, scope, values.cursor);
         if (action === 'create') {
+          const sourceThreadId = context?.requestContext?.get(
+            'issueSourceThreadId',
+          );
           const settings = chatSettingsSchema.parse(
             context?.requestContext?.get('chatSettings') ?? {},
           );
@@ -83,6 +86,7 @@ export function createIssueTool(resolve?: ResolveIssues) {
               settings,
             }),
             signal,
+            typeof sourceThreadId === 'string' ? sourceThreadId : undefined,
           );
           if (values.start) {
             signal?.throwIfAborted();

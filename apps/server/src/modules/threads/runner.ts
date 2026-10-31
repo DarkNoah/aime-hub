@@ -695,6 +695,10 @@ export function createChatRunner(
           );
           requestContext.set('projectId', projectId);
           requestContext.set('issueId', thread.metadata?.issueId);
+          requestContext.set(
+            'issueSourceThreadId',
+            roomBinding ? thread.id : undefined,
+          );
           requestContext.set('chatSettings', {
             agentId: config.id,
             model: next.model,

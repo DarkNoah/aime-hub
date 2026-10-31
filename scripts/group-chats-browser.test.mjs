@@ -110,7 +110,8 @@ test(
     });
     const entry = `import React from 'react';
 import {createRoot} from 'react-dom/client';
-import {createRootRoute,createRoute,createRouter,RouterProvider,Outlet} from '@tanstack/react-router';
+import {createRootRoute,createRoute,createRouter,RouterProvider,Outlet,useParams} from '@tanstack/react-router';
+import {IssueThreadLink} from '/src/components/issues/presentation';
 import {GroupChatsPage} from '/src/pages/group-chats/page';
 import {validateGroupChatSearch} from '/src/pages/group-chats/search';
 import {SessionContext} from '/src/features/auth/session-context';
@@ -122,8 +123,9 @@ import {AvailableModelsProvider} from '/src/features/models/available-models-pro
 import '/src/index.css';
 const root=createRootRoute({component:()=> <SessionContext.Provider value={{data:{user:{id:'alice'},session:{id:'test'}},isPending:false}}><PluginContext.Provider value={{plugins:[],loading:false,error:false,refresh:async()=>{},setEnabled:async()=>{},saveConfig:async()=>({})}}><AvailableModelsProvider><main style={{height:'100dvh',display:'flex',flexDirection:'column'}}><Outlet/></main></AvailableModelsProvider></PluginContext.Provider><Toaster/></SessionContext.Provider>});
 const personal=createRoute({getParentRoute:()=>root,path:'/group-chats',validateSearch:validateGroupChatSearch,component:GroupChatsPage});
-const project=createRoute({getParentRoute:()=>root,path:'/projects/$projectId/group-chats',component:GroupChatsPage});
-const tree=root.addChildren([personal,project,createRoute({getParentRoute:()=>root,path:'/projects/$projectId',component:()=>null})]);
+const project=createRoute({getParentRoute:()=>root,path:'/projects/$projectId/group-chats',validateSearch:validateGroupChatSearch,component:GroupChatsPage});
+function SourceIssue(){const {projectId}=useParams({strict:false});return <IssueThreadLink issue={{threadId:'taskthread000001',projectId:projectId??null,source:{roomId:projectId?'room000000000099':'joined0000000001',agentId:'bot0000000000001',threadId:'thread0000000001'}}}>来源 Issue</IssueThreadLink>;}
+const tree=root.addChildren([personal,project,createRoute({getParentRoute:()=>root,path:'/group-chats/issue-source',component:SourceIssue}),createRoute({getParentRoute:()=>root,path:'/projects/$projectId/issue-source',component:SourceIssue}),createRoute({getParentRoute:()=>root,path:'/projects/$projectId',component:()=>null})]);
 const router=createRouter({routeTree:tree});
 await initializeI18n();createRoot(document.getElementById('root')).render(<ThemeProvider><RouterProvider router={router}/></ThemeProvider>);`;
     await writeFile(path.join(fixture, 'entry.tsx'), entry);
@@ -731,6 +733,49 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       });
     });
     const url = `${origin}/projects/${projectId}/group-chats`;
+    // A source Issue opens the exact room and its Bot drawer, including on a
+    // narrow screen and after reloading a copied link.
+    for (const scoped of [false, true]) {
+      await page.setViewportSize(
+        scoped ? { width: 1440, height: 1000 } : { width: 390, height: 844 },
+      );
+      await page.goto(
+        origin +
+          (scoped
+            ? `/projects/${projectId}/issue-source`
+            : '/group-chats/issue-source'),
+      );
+      await page.getByRole('link', { name: '来源 Issue', exact: true }).click();
+      const sourceUrl = new URL(page.url());
+      assert.equal(
+        sourceUrl.searchParams.get('roomId'),
+        scoped ? 'room000000000099' : 'joined0000000001',
+      );
+      assert.equal(sourceUrl.searchParams.get('agentId'), 'bot0000000000001');
+      const botDrawer = page.locator('[data-agent-thread-drawer]');
+      await botDrawer
+        .getByText('执行记录 30 · thread0000000001', { exact: true })
+        .waitFor();
+      assert.equal(
+        await botDrawer.locator('textarea, [contenteditable=true]').count(),
+        0,
+      );
+      await page.reload();
+      await botDrawer
+        .getByText('执行记录 30 · thread0000000001', { exact: true })
+        .waitFor();
+      await page.screenshot({
+        path: scoped
+          ? '/tmp/issue-source-project.png'
+          : '/tmp/issue-source-personal-mobile.png',
+      });
+      await botDrawer
+        .getByRole('button', { name: '返回成员', exact: true })
+        .click();
+      await botDrawer.waitFor({ state: 'detached' });
+      assert.equal(new URL(page.url()).searchParams.get('agentId'), null);
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto(url);
     await page.getByText('消息 80', { exact: true }).waitFor();
     assert.equal(await page.locator('aside').count(), 1);
