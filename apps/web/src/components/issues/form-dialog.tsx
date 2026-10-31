@@ -29,12 +29,14 @@ export function IssueFormDialog({
   issue,
   projectId,
   settings,
+  initialState = 'todo',
   onClose,
   onSaved,
 }: {
   issue?: Issue;
   projectId?: string;
   settings?: ChatSettings;
+  initialState?: IssueState;
   onClose: () => void;
   onSaved?: (issue: Issue) => void;
 }) {
@@ -42,7 +44,7 @@ export function IssueFormDialog({
   const id = useId();
   const [title, setTitle] = useState(issue?.title ?? '');
   const [body, setBody] = useState(issue?.body ?? '');
-  const [state, setState] = useState<IssueState>(issue?.state ?? 'todo');
+  const [state, setState] = useState<IssueState>(issue?.state ?? initialState);
   const [busy, setBusy] = useState(false);
   return (
     <Dialog
