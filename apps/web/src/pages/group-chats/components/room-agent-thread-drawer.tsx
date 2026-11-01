@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { ArrowLeft, ExternalLink } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -40,7 +40,15 @@ export function RoomAgentThreadDrawer({
     receiveSpeech: false,
   });
   const preview = useMessagePreviewController(chat.messages);
-  const [filePath, setFilePath] = useState<string | null>(null);
+  const [file, setFile] = useState<{ path: string; line?: number } | null>(
+    null,
+  );
+  const filePath = file?.path;
+  const openFile = useCallback(
+    (path: string, _kind?: 'file' | 'directory', line?: number) =>
+      setFile({ path, line }),
+    [],
+  );
   const toolPreview = useRef<HTMLDivElement>(null);
   const filePreview = useRef<HTMLDivElement>(null);
   const previewOpen = !!filePath || !!preview.selection;
@@ -77,7 +85,7 @@ export function RoomAgentThreadDrawer({
       onEscapeKeyDown={(event) => {
         if (!previewOpen) return;
         event.preventDefault();
-        if (filePath) setFilePath(null);
+        if (filePath) setFile(null);
         else preview.close();
       }}
     >
@@ -123,7 +131,7 @@ export function RoomAgentThreadDrawer({
         </SheetDescription>
       </header>
       <AssetAttachmentContext.Provider value={null}>
-        <WorkspaceFileContext.Provider value={setFilePath}>
+        <WorkspaceFileContext.Provider value={openFile}>
           <MessagePreviewContext.Provider value={preview.open}>
             <FloatingChatContext.Provider value>
               <div className="relative min-h-0 flex-1">
@@ -186,7 +194,7 @@ export function RoomAgentThreadDrawer({
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setFilePath(null)}
+                        onClick={() => setFile(null)}
                       >
                         <ArrowLeft className="size-4" aria-hidden="true" />
                         {t(
@@ -207,6 +215,7 @@ export function RoomAgentThreadDrawer({
                         key={filePath}
                         threadId={agent.threadId}
                         path={filePath}
+                        line={file?.line}
                       />
                     </div>
                   </div>

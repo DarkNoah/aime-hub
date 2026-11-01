@@ -80,11 +80,18 @@ export function useFileManager(
 
   const openFile = useCallback((path: string, line?: number) => {
     setCurrentDirectory(parentPath(path));
-    setTabs((previous) =>
-      previous.some((tab) => tab.path === path)
-        ? previous.map((tab) => (tab.path === path ? { path, line } : tab))
-        : [...previous, { path, line }],
-    );
+    setTabs((previous) => {
+      const existing = previous.find((tab) => tab.path === path);
+      // Each explicit line request must reveal again, even for the same line.
+      const next = {
+        path,
+        line,
+        navigation: (existing?.navigation ?? 0) + 1,
+      };
+      return existing
+        ? previous.map((tab) => (tab.path === path ? next : tab))
+        : [...previous, next];
+    });
     setSelected(path);
   }, []);
   const uploaded = useCallback(
@@ -98,10 +105,10 @@ export function useFileManager(
   );
   const uploads = useFileUploads(client, uploaded);
   const revealFile = useCallback(
-    (path: string) => {
+    (path: string, line?: number) => {
       // Tool paths may be relative to '.', while the file API uses root-relative paths.
       const relativePath = path.replace(/^(\.\/)+/, '');
-      openFile(relativePath);
+      openFile(relativePath, line);
       const parents: string[] = [];
       let parent = parentPath(relativePath);
       while (parent) {

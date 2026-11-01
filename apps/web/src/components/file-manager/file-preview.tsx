@@ -30,12 +30,14 @@ export function FilePreview({
   client,
   path,
   line,
+  navigation = 0,
   revision,
   edits,
 }: {
   client: WorkspaceFileClient;
   path: string;
   line?: number;
+  navigation?: number;
   revision: number;
   edits: FileEdits;
 }) {
@@ -44,9 +46,14 @@ export function FilePreview({
   const [loaded, setData] = useState<Preview | null>(null);
   const edit = edits.get(path);
   const hasEdit = !!edit;
-  const [view, setView] = useState<{ mode: PreviewMode; line?: number }>({
+  const [view, setView] = useState<{
+    mode: PreviewMode;
+    line?: number;
+    navigation: number;
+  }>({
     mode: hasEdit ? 'edit' : line ? 'source' : 'rendered',
     line,
+    navigation,
   });
   const [resetting, setResetting] = useState(false);
   const dirty = !!edit && edit.text !== edit.base.text;
@@ -73,7 +80,7 @@ export function FilePreview({
   }, [client, path, revision, retry, hasEdit]);
   function reload() {
     edits.discard(path);
-    setView({ mode: line ? 'source' : 'rendered', line });
+    setView({ mode: line ? 'source' : 'rendered', line, navigation });
     setData(null);
     setError(null);
     setResetting(false);
@@ -95,8 +102,11 @@ export function FilePreview({
   if (!data) return <PreviewLoading />;
   const editable = data.kind === 'text' && !data.truncated && !!data.version;
   const markdown = getPreviewKind(data) === 'markdown';
-  // A newly selected search result should reveal its source line.
-  const mode = markdown && line && line !== view.line ? 'source' : view.mode;
+  // A search result or message link should reveal its source on every click.
+  const mode =
+    markdown && line && (line !== view.line || navigation !== view.navigation)
+      ? 'source'
+      : view.mode;
   const editing = mode === 'edit';
   const url = `${client.raw(path)}&v=${encodeURIComponent(data.modifiedAt)}&retry=${retry}`;
   const content =
@@ -105,6 +115,7 @@ export function FilePreview({
         <TextEditor
           text={edit.text}
           line={line}
+          navigation={navigation}
           disabled={edit.saving}
           wrap={wrap}
           onChange={(text) => edits.change(path, text)}
@@ -117,6 +128,7 @@ export function FilePreview({
         url={url}
         downloadUrl={client.raw(path, true)}
         line={line}
+        navigation={navigation}
         wrap={wrap}
         source={markdown && mode === 'source'}
       />
@@ -175,7 +187,11 @@ export function FilePreview({
                 title={t(editing ? 'files.renderedPreview' : 'files.edit')}
                 onClick={() => {
                   if (!editing) edits.start(data);
-                  setView({ mode: editing ? 'rendered' : 'edit', line });
+                  setView({
+                    mode: editing ? 'rendered' : 'edit',
+                    line,
+                    navigation,
+                  });
                 }}
               >
                 {editing ? (
@@ -264,7 +280,7 @@ export function FilePreview({
                 if (!editable) return;
                 edits.start(data);
               }
-              setView({ mode: value, line });
+              setView({ mode: value, line, navigation });
             }}
             className="h-full min-h-0 min-w-0 gap-0"
           >

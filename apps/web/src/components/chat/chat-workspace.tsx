@@ -259,7 +259,7 @@ export function ChatWorkspace({
   const fileNavigation = useRef<AbortController | null>(null);
   useEffect(() => () => fileNavigation.current?.abort(), [threadId]);
   const openWorkspaceFile = useCallback(
-    (path: string) => {
+    (path: string, _kind?: 'file' | 'directory', line?: number) => {
       if (!threadId) return;
       fileNavigation.current?.abort();
       const controller = new AbortController();
@@ -280,7 +280,7 @@ export function ChatWorkspace({
               : target.kind === 'directory'
                 ? revealDirectory
                 : revealFile;
-          reveal(target.path);
+          reveal(target.path, target.kind === 'file' ? line : undefined);
         })
         .catch((error: unknown) => {
           if (!controller.signal.aborted) toast.error(t(fileErrorKey(error)));

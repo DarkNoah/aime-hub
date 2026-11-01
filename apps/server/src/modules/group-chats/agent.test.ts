@@ -198,6 +198,7 @@ test('send_message publishes single and multiple choices without suspending', as
     assert.equal(result, `Send message success Id: ${message.id}`);
     assert.deepEqual(calls.at(-1)?.args[3], {
       id: (calls.at(-1)?.args[3] as { id: string }).id,
+      toolCallId: 'native-call-1',
       text: '先处理哪一项？',
       choices,
     });
@@ -520,6 +521,10 @@ test('tool calls use the current event actor and a stable publication id', async
   assert.equal(calls[0].args[0], 'current-project-member');
   assert.deepEqual(sends[0].args, sends[1].args);
   assert.match((sends[0].args[3] as { id: string }).id, /^[a-f0-9]{32}$/);
+  assert.equal(
+    (sends[0].args[3] as { toolCallId: string }).toolCallId,
+    runtime.agent!.toolCallId,
+  );
 });
 
 test('file delivery supplies a caption and room delegation uses a normal visible mention', async () => {

@@ -48,20 +48,16 @@ function normalizeWorkspacePath(path: string): string | undefined {
     : undefined;
 }
 
-export function getWorkspaceFilePath(href?: string): string | undefined {
+export type WorkspaceFileTarget = { path: string; line?: number };
+
+export function getWorkspaceFileTarget(
+  href?: string,
+): WorkspaceFileTarget | undefined {
   if (!href || hasControlCharacters(href)) return undefined;
 
   if (href.toLowerCase().startsWith(WORKSPACE_FILE_LINK_PREFIX)) {
-    try {
-      return normalizeWorkspacePath(
-        decodeURIComponent(href.slice(WORKSPACE_FILE_LINK_PREFIX.length)),
-      );
-    } catch {
-      return undefined;
-    }
-  }
-
-  if (
+    href = href.slice(WORKSPACE_FILE_LINK_PREFIX.length);
+  } else if (
     URI_SCHEME.test(href) ||
     href.startsWith('//') ||
     href.startsWith('\\') ||
@@ -72,10 +68,22 @@ export function getWorkspaceFilePath(href?: string): string | undefined {
   }
 
   try {
-    return normalizeWorkspacePath(decodeURIComponent(href));
+    const decoded = decodeURIComponent(href);
+    const suffix = /:(\d+)$/.exec(decoded);
+    const line = suffix ? Number(suffix[1]) : undefined;
+    if (line !== undefined && (!Number.isSafeInteger(line) || line < 1))
+      return undefined;
+    const rawPath = suffix ? decoded.slice(0, suffix.index) : decoded;
+    if (line !== undefined && /[/\\]$/.test(rawPath)) return undefined;
+    const path = normalizeWorkspacePath(rawPath);
+    return path ? { path, ...(line !== undefined ? { line } : {}) } : undefined;
   } catch {
     return undefined;
   }
+}
+
+export function getWorkspaceFilePath(href?: string): string | undefined {
+  return getWorkspaceFileTarget(href)?.path;
 }
 
 export function isWorkspaceDirectoryLink(href?: string): boolean {
@@ -91,8 +99,12 @@ export function isWorkspaceDirectoryLink(href?: string): boolean {
   }
 }
 
-export function toWorkspaceFileLink(path: string, directory = false): string {
-  return `${WORKSPACE_FILE_LINK_PREFIX}${encodeURIComponent(`${path}${directory ? '/' : ''}`)}`;
+export function toWorkspaceFileLink(
+  path: string,
+  directory = false,
+  line?: number,
+): string {
+  return `${WORKSPACE_FILE_LINK_PREFIX}${encodeURIComponent(`${path}${directory ? '/' : line !== undefined ? `:${line}` : ''}`)}`;
 }
 
 type HastNode = {
@@ -108,11 +120,12 @@ export function rehypeWorkspaceFileLinks() {
       if (node.type === 'element' && node.tagName === 'a') {
         const href = node.properties?.href;
         if (typeof href === 'string') {
-          const path = getWorkspaceFilePath(href);
-          if (path && node.properties) {
+          const target = getWorkspaceFileTarget(href);
+          if (target && node.properties) {
             node.properties.href = toWorkspaceFileLink(
-              path,
+              target.path,
               isWorkspaceDirectoryLink(href),
+              target.line,
             );
           }
         }

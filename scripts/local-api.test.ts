@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { LocalApiAccess } from '../apps/server/src/modules/auth/local-api.js';
 import { createApp } from '../apps/server/src/app.js';
 import { createNodeServer } from '../apps/server/src/server.js';
@@ -17,7 +18,12 @@ import { sessionStub } from './fixtures/thread-session.js';
 import { generateLocalApiSpec } from '../apps/server/src/modules/local-api/catalog.js';
 import { procedure } from '../packages/shared/src/rpc/base.js';
 import { z } from 'zod';
+import { AgentService } from '../apps/server/src/modules/agents/service.js';
+import { LocalAgentService } from '../apps/server/src/modules/agents/local-service.js';
 
+const { InMemoryStore } = createRequire(
+  new URL('../apps/server/package.json', import.meta.url),
+)('@mastra/core/storage');
 const script = new URL(
   '../apps/server/src/mastra/skills/docs/scripts/app-api.mjs',
   import.meta.url,
@@ -269,6 +275,27 @@ test('skill scripts use existing APIs with scoped identity, ownership, paging an
     'http://127.0.0.1:3000/api',
     async () => active,
   );
+  const localAgents = new LocalAgentService(root, projects);
+  const agents = new AgentService(
+    (await new InMemoryStore().getStore('agents'))!,
+    { list: async () => ({ root, skills: [] }) },
+    { list: async () => [] },
+    { listAvailableModels: async () => ({ providers: [] }) },
+    undefined,
+    undefined,
+    localAgents,
+  );
+  for (const scope of ['personal', 'project'] as const) {
+    const created = await localAgents.create(
+      { userId: 'alice', isAdmin: false },
+      scope === 'project' ? { scope, projectId } : { scope },
+      {
+        format: 'md',
+        content: `---\nname: Reviewer\ndisplayName: Reviewer\ndescription: ${scope} reviewer\nenabled: true\n---\nPRIVATE_AGENT_INSTRUCTIONS`,
+      },
+    );
+    assert.ok(created.ok);
+  }
   const auth = {
     api: {
       getSession: async ({ headers }: { headers: Headers }) =>
@@ -280,12 +307,21 @@ test('skill scripts use existing APIs with scoped identity, ownership, paging an
           : null,
     },
   } as unknown as Parameters<typeof createApp>[0];
-  const app = createApp(auth, undefined, {
-    threads,
-    projects,
-    localApi,
-    webOrigin: origin,
-  } as unknown as NonNullable<Parameters<typeof createApp>[2]>);
+  const app = createApp(
+    auth,
+    undefined,
+    {
+      threads,
+      projects,
+      localApi,
+      webOrigin: origin,
+    } as unknown as NonNullable<Parameters<typeof createApp>[2]>,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { service: agents, local: localAgents, webOrigin: origin },
+  );
   const env = localApi.environment('alice');
   const fetchImpl = (url: URL, options: RequestInit) =>
     app.request(url.href, options);
@@ -308,7 +344,13 @@ test('skill scripts use existing APIs with scoped identity, ownership, paging an
   );
   const client = createAppApi({ env, fetchImpl });
   const catalog = await client.list();
-  assert.equal(catalog.length, 19);
+  assert.equal(catalog.length, 20);
+  assert.deepEqual(
+    (await client.list('agents.')).map(
+      (operation: { operationId: string }) => operation.operationId,
+    ),
+    ['agents.available'],
+  );
   assert.equal((await client.list('projectEnvironmentVariables')).length, 5);
   assert.equal((await client.list('personalEnvironmentVariables')).length, 5);
   assert.ok(
@@ -323,7 +365,42 @@ test('skill scripts use existing APIs with scoped identity, ownership, paging an
         operation.operationId === 'threads.remove',
     ),
   );
-  assert.equal((await client.list('项目')).length, 9);
+  assert.equal((await client.list('项目')).length, 10);
+  const agentDescription = await client.describe('agents.available');
+  assert.deepEqual(
+    agentDescription.parameters
+      .map((parameter: { name: string }) => parameter.name)
+      .sort(),
+    ['includeLocal', 'projectId'],
+  );
+  const personalAgents = await call('agents.available');
+  assert.deepEqual(personalAgents, await agents.available({ userId: 'alice' }));
+  assert.deepEqual(
+    await call('agents.available', { query: { includeLocal: true } }),
+    personalAgents,
+  );
+  assert.ok(
+    personalAgents.agents.some(
+      (agent: { id: string }) => agent.id === 'local:personal:Reviewer',
+    ),
+  );
+  assert.ok(
+    !JSON.stringify(personalAgents).includes('PRIVATE_AGENT_INSTRUCTIONS'),
+  );
+  const projectAgents = await call('agents.available', {
+    query: { projectId },
+  });
+  assert.deepEqual(
+    projectAgents.agents
+      .filter((agent: { source: string }) => agent.source === 'local')
+      .map((agent: { id: string }) => agent.id),
+    [`local:project:${projectId}:Reviewer`],
+  );
+  assert.ok(
+    (
+      await call('agents.available', { query: { includeLocal: false } })
+    ).agents.every((agent: { source: string }) => agent.source !== 'local'),
+  );
   const description = await client.describe('projects.create');
   assert.deepEqual(
     description.requestBody.content['application/json'].schema.required,
@@ -410,6 +487,15 @@ test('skill scripts use existing APIs with scoped identity, ownership, paging an
     assert.ok(detail);
   }
   const bobEnv = localApi.environment('bob');
+  assert.ok(
+    (await call('agents.available', {}, bobEnv)).agents.every(
+      (agent: { source: string }) => agent.source !== 'local',
+    ),
+  );
+  await assert.rejects(
+    call('agents.available', { query: { projectId } }, bobEnv),
+    /404/,
+  );
   assert.deepEqual((await call('threads.list', {}, bobEnv)).threads, []);
   for (const command of ['threads.get', 'threads.history'])
     await assert.rejects(
@@ -445,6 +531,8 @@ test('skill scripts use existing APIs with scoped identity, ownership, paging an
   for (const [path, method] of [
     ['/api/threads/' + thread.id, 'DELETE'],
     ['/api/admin/providers', 'GET'],
+    ['/api/admin/agents', 'GET'],
+    ['/api/rpc/agents/list', 'POST'],
     ['/api/rpc/notifications/config', 'POST'],
     ['/api/rpc/environmentVariables/list', 'POST'],
   ]) {
@@ -543,6 +631,24 @@ test('skill scripts use existing APIs with scoped identity, ownership, paging an
   assert.equal(JSON.parse(output.stdout).id, thread.id);
   assert.equal(output.stderr, '');
   assert.ok(!output.stdout.includes(env.APP_API_TOKEN));
+  const agentOutput = await promisify(execFile)(
+    process.execPath,
+    [
+      fileURLToPath(script),
+      'call',
+      'agents.available',
+      JSON.stringify({ query: { projectId } }),
+    ],
+    {
+      env: {
+        PATH: process.env.PATH,
+        ...env,
+        APP_API_URL: `http://127.0.0.1:${address.port}/api`,
+      },
+    },
+  );
+  assert.deepEqual(JSON.parse(agentOutput.stdout), projectAgents);
+  assert.equal(agentOutput.stderr, '');
 });
 
 test('script rejects credential destinations and redirects, sanitizes errors and honors abort', async () => {

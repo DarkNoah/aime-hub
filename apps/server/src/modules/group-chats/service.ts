@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { ORPCError } from '@orpc/server';
 import type { DataSource, EntityManager } from 'typeorm';
 import type { ChatSettings } from '@aime/shared/threads';
+import type { GeneratedAssetInput } from '@aime/shared/assets';
 import type {
   GroupChat,
   GroupChatDetail,
@@ -38,6 +39,12 @@ import {
 import { messageSearchTerms } from './search.js';
 import { GroupChatA2aKeys } from './a2a-keys.js';
 import type { ProjectService } from '../projects/service.js';
+import { AssetService } from '../assets/service.js';
+
+export type RoomMediaAsset = Pick<
+  GeneratedAssetInput,
+  'path' | 'mimeType' | 'size'
+>;
 
 export type GroupChatLifecycle = {
   ensureAgent(room: GroupChat, agent: GroupChatAgent): Promise<void>;
@@ -53,11 +60,12 @@ export type GroupChatLifecycle = {
     settings: ChatSettings,
     role: GroupChatAgent['role'],
   ): Promise<void>;
+  /** Validate all attachments and return normalized metadata for media files. */
   validateFiles?(
     userId: string,
     agent: GroupChatAgent,
     files: GroupChatFile[],
-  ): Promise<void>;
+  ): Promise<RoomMediaAsset[] | void>;
 };
 export type AgentRoomMessageInput = {
   id: string;
@@ -67,6 +75,7 @@ export type AgentRoomMessageInput = {
   ui?: GroupChatUi;
   choices?: GroupChatChoices;
   targetAgentId?: string;
+  toolCallId?: string;
 };
 type RoomRow = Omit<GroupChat, 'createdAt' | 'updatedAt'> & {
   createdAt: Date;
@@ -846,15 +855,20 @@ export class GroupChatService {
         message:
           'Shorten the question or options so its answer fits in a room message',
       });
+    let mediaAssets: RoomMediaAsset[] | void;
     if (input.files?.length) {
       if (!this.lifecycle?.validateFiles)
         throw new ORPCError('CONFLICT', {
           message: 'Room file delivery is unavailable',
         });
-      await this.lifecycle.validateFiles(userId, agent, input.files);
+      mediaAssets = await this.lifecycle.validateFiles(
+        userId,
+        agent,
+        input.files,
+      );
     }
     return this.database.transaction(async (manager) => {
-      await this.access(userId, roomId, manager, true);
+      const { room } = await this.access(userId, roomId, manager, true);
       await this.agentInRoom(manager, roomId, memberId, true);
       if (input.targetAgentId === memberId)
         throw new ORPCError('BAD_REQUEST', {
@@ -867,6 +881,20 @@ export class GroupChatService {
         'agent',
         input,
       );
+      // Commit media before the message is visible to the room's gallery refresh.
+      // Replayed sends also repair missing records; the asset source key deduplicates.
+      const assets = new AssetService(manager);
+      for (const asset of mediaAssets ?? [])
+        await assets.record({
+          ...asset,
+          threadId: agent.threadId,
+          resourceId: room.projectId
+            ? `project:${room.projectId}`
+            : `user:${room.createdBy}`,
+          createdBy: userId,
+          toolName: 'send_message',
+          toolCallId: input.toolCallId,
+        });
       if (result.created)
         await this.wakeMentionedAgents(
           manager,

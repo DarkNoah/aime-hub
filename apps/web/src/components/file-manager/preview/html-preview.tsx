@@ -7,11 +7,11 @@ import type { PreviewRendererProps } from './types';
 const TextPreview = lazy(() => import('./text-preview'));
 
 export default function HtmlPreview(props: PreviewRendererProps) {
-  const { data, line } = props;
+  const { data, line, navigation } = props;
   const { t } = useTranslation();
   return (
     <Tabs
-      key={`${data.path}:${line ?? ''}`}
+      key={`${data.path}:${line ?? ''}:${navigation ?? ''}`}
       defaultValue={line ? 'source' : 'rendered'}
       className="h-full min-h-0 min-w-0 gap-0"
     >

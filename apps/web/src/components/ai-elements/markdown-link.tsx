@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { useWorkspaceFile } from '@/components/file-manager/context';
 import { cn } from '@/lib/utils';
 import {
-  getWorkspaceFilePath,
+  getWorkspaceFileTarget,
   isWorkspaceDirectoryLink,
 } from './markdown-file-link';
 
@@ -36,17 +36,19 @@ export const MarkdownLink = memo(
     children,
     className,
     href,
+    // Discard the Markdown AST node instead of passing it to the DOM anchor.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     node: _node,
     onAuxClick,
     onClick,
     ...props
   }: MarkdownLinkProps) => {
     const openFile = useWorkspaceFile();
-    const filePath = getWorkspaceFilePath(href);
+    const file = getWorkspaceFileTarget(href);
     const webUrl = getWebUrl(href);
 
     if (href?.toLowerCase().startsWith('streamdown:workspace-file/')) {
-      if (!filePath || !openFile) return <span>{children}</span>;
+      if (!file || !openFile) return <span>{children}</span>;
       const directory = isWorkspaceDirectoryLink(href);
 
       return (
@@ -58,7 +60,9 @@ export const MarkdownLink = memo(
           <a
             {...props}
             href="#"
-            title={props.title ?? filePath}
+            title={
+              props.title ?? `${file.path}${file.line ? `:${file.line}` : ''}`
+            }
             onAuxClick={(event) => {
               onAuxClick?.(event);
               if (!event.defaultPrevented && event.button === 1)
@@ -68,7 +72,11 @@ export const MarkdownLink = memo(
               onClick?.(event);
               if (!event.defaultPrevented) {
                 event.preventDefault();
-                openFile(filePath, directory ? 'directory' : 'file');
+                openFile(
+                  file.path,
+                  directory ? 'directory' : 'file',
+                  file.line,
+                );
               }
             }}
           >

@@ -5,5 +5,6 @@ export type PreviewRendererProps = {
   url: string;
   downloadUrl: string;
   line?: number;
+  navigation?: number;
   wrap?: boolean;
 };

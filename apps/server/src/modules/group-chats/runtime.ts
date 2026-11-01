@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
-import type { GroupChatService } from './service.js';
+import { extname } from 'node:path';
+import { fileMediaTypes } from '@aime/shared/files';
+import type { GroupChatService, RoomMediaAsset } from './service.js';
 import type { ThreadService } from '../threads/service.js';
 import { ThreadError, threadErrorMessage } from '../threads/errors.js';
+import { previewWorkspaceFile } from '../files/workspace-files.js';
 
 type RoomRuntimeThreads = Pick<
   ThreadService,
@@ -12,6 +15,7 @@ type RoomRuntimeThreads = Pick<
   | 'runGroupChat'
   | 'setGroupChatObserver'
   | 'resolveWorkspaceFile'
+  | 'withWorkspaceFiles'
 >;
 type RoomRuntimeStore = Pick<
   GroupChatService,
@@ -74,6 +78,7 @@ export function createGroupChatRuntime(
       }
     },
     validateFiles: async (userId, agent, files) => {
+      const assets: RoomMediaAsset[] = [];
       for (const file of files) {
         const resolved = await threads.resolveWorkspaceFile(
           userId,
@@ -82,7 +87,21 @@ export function createGroupChatRuntime(
         );
         if (resolved.kind !== 'file')
           throw new ThreadError('FILE_INVALID_PATH');
+        const format = fileMediaTypes[extname(resolved.path).toLowerCase()];
+        if (!format || !['image', 'video', 'audio'].includes(format[0]))
+          continue;
+        const info = await threads.withWorkspaceFiles(
+          userId,
+          agent.threadId,
+          (root) => previewWorkspaceFile(root, resolved.path),
+        );
+        assets.push({
+          path: resolved.path,
+          mimeType: info.mime,
+          size: info.size,
+        });
       }
+      return assets;
     },
     removeAgents: async (room, agents) => {
       for (const agent of agents)

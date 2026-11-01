@@ -28,9 +28,9 @@ const order = {
 } as const;
 
 export class AssetService {
-  constructor(private database: DataSource) {}
+  constructor(private database: Pick<DataSource, 'getRepository'>) {}
 
-  /** Idempotent onOutput sink shared by image, video and audio generation tools. */
+  /** Idempotent sink shared by media generation and room file delivery. */
   async record(input: GeneratedAssetInput): Promise<void> {
     validatePath(input.path);
     if (

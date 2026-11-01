@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomBytes } from 'node:crypto';
+import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { DataSource } from 'typeorm';
-import { Project, ProjectMember } from '@aime/db';
+import { GeneratedAsset, Project, ProjectMember } from '@aime/db';
 import type { Auth } from '@aime/auth';
 import {
   groupChatCreateSchema,
@@ -17,16 +19,23 @@ import { GroupChatA2aMembers1780000030000 } from '../packages/db/src/migrations/
 import { GroupChatA2aMemberDeletion1780000031000 } from '../packages/db/src/migrations/1780000031000-group-chat-a2a-member-deletion.js';
 import { GroupChatA2aCard1780000033000 } from '../packages/db/src/migrations/1780000033000-group-chat-a2a-card.js';
 import { GroupChatChoices1780000034000 } from '../packages/db/src/migrations/1780000034000-group-chat-choices.js';
+import { CreateGeneratedAssets1780000009000 } from '../packages/db/src/migrations/1780000009000-create-generated-assets.js';
+import { AddGeneratedAssetCreator1780000010000 } from '../packages/db/src/migrations/1780000010000-add-generated-asset-creator.js';
+import { AddGeneratedAssetMetadata1780000011000 } from '../packages/db/src/migrations/1780000011000-add-generated-asset-metadata.js';
 import { GroupChatIdleWake1780000029000 } from '../packages/db/src/migrations/1780000029000-group-chat-idle-wake.js';
 import { GroupChatAgents1780000026000 } from '../packages/db/src/migrations/1780000026000-group-chat-agents.js';
 import { GroupChatMembers1780000027000 } from '../packages/db/src/migrations/1780000027000-group-chat-members.js';
 import { GroupChatReads1780000032000 } from '../packages/db/src/migrations/1780000032000-group-chat-reads.js';
 import { CreateGroupChats1780000024000 } from '../packages/db/src/migrations/1780000024000-create-group-chats.js';
 import { GroupChatService } from '../apps/server/src/modules/group-chats/service.js';
+import { createGroupChatRuntime } from '../apps/server/src/modules/group-chats/runtime.js';
+import { AssetService } from '../apps/server/src/modules/assets/service.js';
 import { UserService } from '../apps/server/src/modules/users/service.js';
 import { ProjectService } from '../apps/server/src/modules/projects/service.js';
 import { createApp } from '../apps/server/src/app.js';
-import type { ThreadService } from '../apps/server/src/modules/threads/service.js';
+import { ThreadService } from '../apps/server/src/modules/threads/service.js';
+import { fakeMemory } from './fixtures/thread-memory.js';
+import { assetQuerySchema } from '@aime/shared/assets';
 import type { LanguageModelService } from '../apps/server/src/modules/models/language-model.js';
 import { chatDraftKey } from '../apps/web/src/components/chat/draft-storage.js';
 
@@ -104,7 +113,7 @@ test(
     const database = new DataSource({
       type: 'postgres',
       url: process.env.TEST_DATABASE_URL,
-      entities: [Project, ProjectMember],
+      entities: [Project, ProjectMember, GeneratedAsset],
       extra: { options: `-c search_path=${schema}` },
     });
     await database.initialize();
@@ -135,6 +144,9 @@ test(
     await new GroupChatA2aCard1780000033000().up(runner);
     await new GroupChatReads1780000032000().up(runner);
     await new GroupChatChoices1780000034000().up(runner);
+    await new CreateGeneratedAssets1780000009000().up(runner);
+    await new AddGeneratedAssetCreator1780000010000().up(runner);
+    await new AddGeneratedAssetMetadata1780000011000().up(runner);
     assert.equal(
       (
         await runner.query(
@@ -1083,6 +1095,176 @@ test(
           code('CONFLICT'),
         );
         await fileRooms.remove('alice', room.id);
+      },
+    );
+
+    await t.test(
+      'agent media delivery is atomic, deduplicated and visible in personal and project room galleries',
+      async (t) => {
+        const root = await realpath(await mkdtemp('/tmp/room-media-'));
+        t.after(() => rm(root, { recursive: true, force: true }));
+        const { memory } = fakeMemory();
+        const threads = new ThreadService(
+          memory,
+          {
+            createWorkspace: async () => root,
+            personalSharedDirectory: async () => root,
+          } as never,
+          projects,
+        );
+        const fileRooms = new GroupChatService(database, projects);
+        const runtime = createGroupChatRuntime(fileRooms, threads);
+        t.after(() => runtime.shutdown());
+        const assets = new AssetService(database);
+        const repository = database.getRepository(GeneratedAsset);
+        const files = [
+          { path: './image.PNG', name: 'Image' },
+          { path: join(root, 'video.mp4'), name: 'Video' },
+          { path: 'audio.mp3', name: 'Audio' },
+          { path: 'report.pdf', name: 'Report' },
+        ];
+        for (const name of [
+          'image.PNG',
+          'video.mp4',
+          'audio.mp3',
+          'report.pdf',
+        ])
+          await writeFile(join(root, name), 'media fixture');
+        await symlink(join(root, 'image.PNG'), join(root, 'unsafe.png'));
+
+        for (const projectId of [undefined, project.projectId!]) {
+          const room = await fileRooms.create('alice', {
+            title: 'Media gallery',
+            ...(projectId ? { projectId } : {}),
+          });
+          const bot = room.agents[0];
+          const actor = projectId ? 'bob' : 'alice';
+          const resourceId = projectId ? `project:${projectId}` : 'user:alice';
+          const input = {
+            id: `media${randomBytes(8).toString('hex')}`,
+            text: 'Media delivery',
+            files,
+            toolCallId: 'send-media-call',
+          };
+          // An image already registered by its generator keeps its provenance.
+          await assets.record({
+            threadId: bot.threadId,
+            resourceId,
+            createdBy: 'alice',
+            path: 'image.PNG',
+            mimeType: 'image/png',
+            size: 13,
+            toolName: 'image_gen',
+          });
+          const sent = await fileRooms.sendAgent(actor, room.id, bot.id, input);
+          const replay = await fileRooms.sendAgent(
+            actor,
+            room.id,
+            bot.id,
+            input,
+          );
+          assert.equal(replay.sequence, sent.sequence);
+          assert.equal(await repository.countBy({ threadId: bot.threadId }), 3);
+          const gallery = await assets.list(
+            threads,
+            actor,
+            bot.threadId,
+            assetQuerySchema.parse({}),
+          );
+          assert.deepEqual(
+            new Set(gallery.items.map((item) => item.kind)),
+            new Set(['image', 'video', 'audio']),
+          );
+          const video = gallery.items.find((item) => item.kind === 'video')!;
+          assert.equal(video.path, 'video.mp4');
+          assert.equal(video.mimeType, 'video/mp4');
+          assert.equal(video.size, 13);
+          assert.equal(video.resourceId, resourceId);
+          assert.equal(video.createdBy, actor);
+          assert.equal(video.toolName, 'send_message');
+          assert.equal(video.toolCallId, input.toolCallId);
+          assert.equal(
+            gallery.items.find((item) => item.kind === 'image')!.toolName,
+            'image_gen',
+          );
+
+          const worker = await fileRooms.addAgent('alice', room.id, {
+            name: 'Media worker',
+            settings: { model: null, reasoningEffort: 'auto' },
+          });
+          await fileRooms.sendAgent(actor, room.id, worker.id, {
+            ...input,
+            id: `worker${randomBytes(8).toString('hex')}`,
+            replyToId: sent.id,
+            files: [files[2]],
+          });
+          const updated = await assets.list(
+            threads,
+            actor,
+            bot.threadId,
+            assetQuerySchema.parse({}),
+          );
+          assert.equal(updated.items.length, 4);
+          assert.ok(
+            updated.items.some((item) => item.threadId === worker.threadId),
+          );
+
+          await assert.rejects(
+            fileRooms.sendAgent(actor, room.id, bot.id, {
+              ...input,
+              text: 'Conflicting retry',
+            }),
+            code('CONFLICT'),
+          );
+          await assert.rejects(
+            fileRooms.sendAgent(actor, room.id, bot.id, {
+              ...input,
+              id: `unsafe${randomBytes(8).toString('hex')}`,
+              files: [{ path: 'unsafe.png', name: 'Unsafe' }],
+            }),
+            { code: 'FILE_SYMLINK' },
+          );
+          await assert.rejects(
+            fileRooms.sendAgent('outsider', room.id, bot.id, input),
+            code('NOT_FOUND'),
+          );
+          // Uploads from humans remain attachments, without generated-asset records.
+          await writeFile(join(root, 'human.png'), 'human upload');
+          await fileRooms.send(actor, room.id, {
+            id: `human${randomBytes(8).toString('hex')}`,
+            text: 'Human upload',
+            files: [{ path: 'human.png', name: 'Human' }],
+          });
+          assert.equal(await repository.countBy({ threadId: bot.threadId }), 3);
+        }
+
+        // A failure while recording media rolls back the message as well.
+        const room = await fileRooms.create('alice', {
+          title: 'Atomic delivery',
+        });
+        const bot = room.agents[0];
+        const record = t.mock.method(
+          AssetService.prototype,
+          'record',
+          async () => {
+            throw new Error('Asset storage unavailable');
+          },
+        );
+        await assert.rejects(
+          fileRooms.sendAgent('alice', room.id, bot.id, {
+            id: 'atomicmedia000001',
+            text: 'Media',
+            files: [files[0]],
+          }),
+          /Asset storage unavailable/,
+        );
+        record.mock.restore();
+        assert.equal(
+          (await fileRooms.messages('alice', room.id, { limit: 50 })).messages
+            .length,
+          0,
+        );
+        assert.equal(await repository.countBy({ threadId: bot.threadId }), 0);
       },
     );
 

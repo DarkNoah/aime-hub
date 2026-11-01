@@ -16,6 +16,7 @@ import {
   type ChatRunner,
 } from '../apps/server/src/modules/threads/service.js';
 import { fakeMemory } from './fixtures/thread-memory.js';
+import { ThreadError } from '../apps/server/src/modules/threads/errors.js';
 import type { ChatSessionContext } from '../apps/server/src/modules/threads/session.js';
 import { sessionStub } from './fixtures/thread-session.js';
 
@@ -131,6 +132,9 @@ function fixture(events = [event()], activeUser = true) {
       setGroupChatObserver() {},
       async resolveWorkspaceFile() {
         return { path: 'report.pdf', scope: 'thread', kind: 'file' };
+      },
+      async withWorkspaceFiles() {
+        throw new Error('Unexpected media inspection');
       },
     },
     async () => activeUser,
@@ -593,4 +597,58 @@ test('room polling reconciles interrupted runs and unexpected suspension fails w
   assert.equal(aborted, 1);
   assert.equal(closed, 1);
   await service.shutdown();
+});
+
+test('room galleries include sibling agents without exposing other rooms or archived threads', async () => {
+  for (const project of [false, true]) {
+    const { memory } = fakeMemory();
+    const resourceId = project ? 'project:project000000001' : 'user:owner';
+    for (const [id, roomId, archived] of [
+      ['bot', 'room', false],
+      ['worker', 'room', false],
+      ['archived-worker', 'room', true],
+      ['other-room', 'other', false],
+      ['ordinary', undefined, false],
+    ] as const) {
+      await memory.createThread({
+        threadId: id,
+        resourceId,
+        title: id,
+        metadata: {
+          ...(roomId
+            ? {
+                groupChat: {
+                  roomId,
+                  memberId: id,
+                  role: id === 'bot' ? 'bot' : 'worker',
+                },
+              }
+            : {}),
+          ...(archived ? { archivedAt: new Date().toISOString() } : {}),
+        },
+      });
+    }
+    const threads = new ThreadService(
+      memory,
+      {} as never,
+      {
+        assertMember: async (userId: string) => {
+          if (userId !== 'owner')
+            throw new ThreadError('PROJECT_NOT_FOUND', 404);
+          return { role: 'owner' };
+        },
+      } as never,
+    );
+    const scope = await threads.assetScope('owner', 'bot');
+    assert.equal(scope.resourceId, resourceId);
+    assert.deepEqual(
+      new Set(scope.threadIds),
+      new Set(project ? ['bot', 'worker', 'ordinary'] : ['bot', 'worker']),
+    );
+    assert.deepEqual(
+      (await threads.assetScope('owner', 'ordinary')).threadIds,
+      ['ordinary'],
+    );
+    await assert.rejects(threads.assetScope('stranger', 'bot'));
+  }
 });

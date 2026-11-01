@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react';
 
 export const WorkspaceFileContext = createContext<
-  ((path: string, kind?: 'file' | 'directory') => void) | null
+  ((path: string, kind?: 'file' | 'directory', line?: number) => void) | null
 >(null);
 
 export function useWorkspaceFile() {

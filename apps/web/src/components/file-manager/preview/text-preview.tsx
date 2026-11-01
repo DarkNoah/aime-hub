@@ -43,6 +43,7 @@ const languages: Record<string, BundledLanguage> = {
 export default function TextPreview({
   data,
   line,
+  navigation,
   wrap = false,
 }: PreviewRendererProps) {
   const { text = '', path } = data;
@@ -75,7 +76,7 @@ export default function TextPreview({
   }, [language, text]);
   useEffect(() => {
     target.current?.scrollIntoView({ block: 'center' });
-  }, [line, path, text]);
+  }, [line, path, text, navigation]);
   const tokens = highlighted?.source === text ? highlighted.tokens : undefined;
   return (
     <ScrollArea

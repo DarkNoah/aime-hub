@@ -78,3 +78,6 @@ plugins/vibe-quant/**/__pycache__/
 
 !apps/server/src/modules/issues/*.test.ts
 !scripts/issues-browser.test.mjs
+
+!scripts/workspace-file-links.test.ts
+!scripts/workspace-links-browser.test.mjs

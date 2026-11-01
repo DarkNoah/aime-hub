@@ -9,9 +9,11 @@ import { PreviewLoading } from '@/components/file-manager/preview/preview-loadin
 export function ThreadFilePreview({
   threadId,
   path,
+  line,
 }: {
   threadId: string;
   path: string;
+  line?: number;
 }) {
   const { t } = useTranslation();
   const [result, setResult] = useState<{
@@ -60,6 +62,8 @@ export function ThreadFilePreview({
   return (
     <FilePreviewContent
       data={result.data}
+      line={line}
+      source={line !== undefined}
       url={filesApi.raw(threadId, result.data.path, false, result.scope)}
       downloadUrl={filesApi.raw(threadId, result.data.path, true, result.scope)}
     />

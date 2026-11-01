@@ -43,6 +43,8 @@ Bot 善用独立的 `reaction` 工具做简洁反馈，输入为 `{ reactions: [
 
 所有工具在 AbortSignal 触发时立即返回“用户中止了操作”。文件交付验证当前成员权限及文件所属工作区，文件必须真实存在。
 
+`send_message` 的 `files` 中包含图片、视频或音频时，使用校验后的工作区相对路径、MIME 和实际大小自动写入生成资源记录；记录所属发送 Agent 的专属线程，创建者为当前事件用户。消息与资源记录在同一事务提交，同一线程内同一路径重复发送或工具重试不会新增重复资源，也不覆盖原生成工具的记录。右侧资源浏览收到文件消息后自动刷新，可查看同一房间 Bot 和协作 Agent 的资源；项目房间继续包含原有项目对话资源。用户上传附件和普通文档不登记为生成媒体，无需新增后台配置或数据库迁移。
+
 领导 Bot 额外挂载 `room_management({ action, args })`，协作 Agent、普通线程及公共工具目录不可使用。`list_agents`（`args: {}`）返回当前成员和当前用户在房间所属个人／项目范围内可用的 Agent 配置；`add_agent` 接收 `{ name, settings: { agentId, model?, reasoningEffort? }, enabled? }`；`update_agent` 接收 `{ memberId, name?, settings?, enabled?, idleWakeHours? }`；`remove_agent` 接收 `{ memberId }`。配置 ID 与房间成员 ID 分开使用，更新 settings 仅修改提交的字段，删除成员会清理其专属线程但保留 Agent 配置。所有修改复用现有服务的当前用户权限、唯一 Bot 保护和线程生命周期；修改 Bot 自己的模型或思考等级会中止当前执行。工具记录沿用通用预览，成员面板通过既有轮询同步，无需新增后台配置或数据库迁移。
 
 ## 调度和恢复

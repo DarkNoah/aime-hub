@@ -21,6 +21,22 @@ node "$APP_API_SCRIPT" call threads.list '{"query":{"page":0}}'
 
 脚本处理 JSON API，不处理文件上传、二进制下载或 SSE。参数和业务规则最终由后端校验。部分接口响应仅定义了 TypeScript 类型，OpenAPI 不包含完整响应字段；不要把空 schema 当作空响应。
 
+## 可用 Agent
+
+查询当前可选的 Agent 配置使用 `agents.available`。先发现并查看接口，再按当前会话范围调用：
+
+```sh
+node "$APP_API_SCRIPT" list Agent
+node "$APP_API_SCRIPT" describe agents.available
+# 当前会话：有 APP_PROJECT_ID 时查询该项目，否则查询个人范围
+node "$APP_API_SCRIPT" call agents.available "$(node -e 'console.log(JSON.stringify({query: process.env.APP_PROJECT_ID ? {projectId: process.env.APP_PROJECT_ID} : {}}))')"
+```
+
+- 用户明确查询个人范围时，使用 `node "$APP_API_SCRIPT" call agents.available`；查询其他项目时，先用 `projects.list` 确认真实项目 ID，再传 `query.projectId`。脚本不会自动把 `APP_PROJECT_ID` 加到请求里，项目范围需显式传入。
+- 默认包含可见的代码／插件 Agent、已发布的数据库 Agent，以及全局与当前个人或项目范围内启用的本地 Agent。项目查询会校验当前用户的成员权限，不混入个人 Agent；草稿、归档、隐藏或停用的配置不作为可用项返回。只需非本地配置时传 `query.includeLocal: false`。
+- 响应中的 `agents` 是配置列表，包含 `id`、`name`、`description`、`model`、`source`；`defaultAgentId` 是系统默认配置 ID，不代表当前线程选中的 Agent。按需展示名称、用途、ID 并标记默认项，选择时保留完整 `id`，不要把名称或本地文件名当作配置 ID。
+- 该列表不是正在运行的 Agent 实例或群聊成员列表；群聊成员的 `memberId` 与 Agent 配置 `id` 不同。接口仅查询配置，不会启动 Agent 或修改当前线程。
+
 ## 线程、消息与项目的业务约定
 
 - 查找已有线程，使用 `threads.list`；默认是当前用户个人线程。查询项目线程时指定项目，插件专属线程按插件筛选。先查真实 ID，再操作；分页从 0 开始，按 `hasMore` 翻页。

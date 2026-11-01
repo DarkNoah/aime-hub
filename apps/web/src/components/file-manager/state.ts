@@ -1,7 +1,7 @@
 import type { FileEntry } from '@aime/shared/files';
 
 export const rootEntry: FileEntry = { path: '', name: '', kind: 'directory' };
-export type FileTab = { path: string; line?: number };
+export type FileTab = { path: string; line?: number; navigation?: number };
 export const withinPath = (path: string, parent: string) =>
   path === parent || path.startsWith(`${parent}/`);
 export const parentPath = (path: string) =>

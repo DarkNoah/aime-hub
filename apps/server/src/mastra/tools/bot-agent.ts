@@ -236,7 +236,7 @@ export function createGroupChatTools(context: GroupChatAgentContext) {
     send_message: createTool({
       id: 'send_message',
       description:
-        'Publish a visible room message, reply or file. For a simple question, put the question in text and add choices: { options: ["Option A", "Option B"], multiple: false }. Single choice sends on click; multiple: true lets the user select several options then send. Returns immediately without waiting for an answer; a human selection becomes a new user message delivered immediately to the bot thread. Returns plain text: Send message success Id: <id>. To delegate, include the exact @mention from get_room_info in text; each mentioned room agent wakes in its own existing thread. Use action send for delegation too. Your final assistant response stays private. Use messageId for replies and the separate reaction tool for reactions. File paths must belong to this room workspace.',
+        'Publish a visible room message, reply or file. For a simple question, put the question in text and add choices: { options: ["Option A", "Option B"], multiple: false }. Single choice sends on click; multiple: true lets the user select several options then send. Returns immediately without waiting for an answer; a human selection becomes a new user message delivered immediately to the bot thread. Returns plain text: Send message success Id: <id>. To delegate, include the exact @mention from get_room_info in text; each mentioned room agent wakes in its own existing thread. Use action send for delegation too. Your final assistant response stays private. Use messageId for replies and the separate reaction tool for reactions. File paths must belong to this room workspace. Images, videos and audio delivered through files are automatically added to the resource gallery.',
       inputSchema: z.object({
         action: z.enum(['send', 'reply', 'file']).default('send'),
         text: z.string().optional(),
@@ -258,6 +258,9 @@ export function createGroupChatTools(context: GroupChatAgentContext) {
             throw new Error('Provide message text or a workspace file.');
           const message = await service.sendAgent(userId, roomId, memberId, {
             id: operationId(context, execution, 'message'),
+            ...(execution.agent?.toolCallId
+              ? { toolCallId: execution.agent.toolCallId }
+              : {}),
             text:
               input.text?.trim() ||
               input.files!.map((file) => file.name).join(', '),

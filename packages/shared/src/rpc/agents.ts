@@ -18,10 +18,14 @@ const path = '/admin/agents';
 const params = z.object({ id: agentIdSchema });
 export const agentsContract = {
   available: procedure
+    .meta({ localApi: true })
     .route({
       method: 'GET',
       path: '/agents/available',
       inputStructure: 'detailed',
+      summary: '列出当前用户可用的 Agent 和默认 Agent',
+      description:
+        '返回可见的代码及插件 Agent、已发布的数据库 Agent，默认包含全局和当前个人范围的本地 Agent；传 projectId 时改为全局和该项目范围，并校验项目成员权限。includeLocal=false 可排除本地 Agent。',
     })
     .input(
       z
@@ -32,7 +36,14 @@ export const agentsContract = {
                 .string()
                 .regex(/^[a-zA-Z0-9_-]{16}$/)
                 .optional(),
-              includeLocal: z.boolean().optional(),
+              includeLocal: z
+                .union([
+                  z.boolean(),
+                  z
+                    .enum(['true', 'false'])
+                    .transform((value) => value === 'true'),
+                ])
+                .optional(),
             })
             .optional(),
         })

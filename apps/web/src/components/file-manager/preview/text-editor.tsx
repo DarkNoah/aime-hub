@@ -7,12 +7,14 @@ import { cn } from '@/lib/utils';
 export default function TextEditor({
   text,
   line,
+  navigation,
   disabled,
   wrap,
   onChange,
 }: {
   text: string;
   line?: number;
+  navigation?: number;
   disabled: boolean;
   wrap: boolean;
   onChange: (text: string) => void;
@@ -47,7 +49,7 @@ export default function TextEditor({
       input.setSelectionRange(offset, offset);
       viewport.current?.scrollTo({ top: Math.max(0, (line - 3) * 24) });
     }
-  }, [line]);
+  }, [line, navigation]);
   return (
     <ScrollArea
       className="h-full min-h-0 bg-card"

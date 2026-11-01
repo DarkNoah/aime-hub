@@ -526,6 +526,7 @@ function FileManagerPane({
                     client={client}
                     path={activeTab.path}
                     line={activeTab.line}
+                    navigation={activeTab.navigation}
                     revision={revision}
                     edits={state.edits}
                   />

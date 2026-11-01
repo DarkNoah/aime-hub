@@ -1624,9 +1624,23 @@ export class ThreadService {
   async assetScope(userId: string, id: string) {
     const thread = await this.accessible(userId, id);
     const { projectId } = threadScope(thread.resourceId);
-    const threads = projectId
-      ? await this.listChatThreads(thread.resourceId)
-      : [thread];
+    const room = groupChatThreadBinding(thread.metadata);
+    let threads = [thread];
+    if (projectId || room) {
+      const result = await this.memory.listThreads({
+        filter: { resourceId: thread.resourceId },
+        page: 0,
+        perPage: false,
+        orderBy: { field: 'updatedAt', direction: 'DESC' },
+      });
+      threads = result.threads.filter(
+        (item) =>
+          !isArchived(item) &&
+          ((projectId && isChatThread(item)) ||
+            (room &&
+              groupChatThreadBinding(item.metadata)?.roomId === room.roomId)),
+      );
+    }
     return {
       resourceId: thread.resourceId,
       threadIds: threads.map((item) => item.id),

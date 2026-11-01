@@ -1,5 +1,6 @@
 import type { BaseAgent } from '@aime/shared/agents';
 import { INTELLIGENT_UI_TOOL } from '@aime/shared/intelligent-ui';
+import { formattingRules } from './formatting-rules.js';
 
 export const defaultAgent: BaseAgent = {
   id: 'default',
@@ -78,6 +79,8 @@ export const defaultAgent: BaseAgent = {
 - Reference relevant files with paths and line numbers when available. Link to actual artifacts and sources rather than inventing download links or inaccessible locations.
 - In the final response, summarize what changed or what you found, what was verified, and any remaining limitation. Keep explanations proportional to the task and do not repeat the full work log.
 - Use emojis only when the user requests them.
+
+${formattingRules}
 `,
   model: null,
   tools: [],
