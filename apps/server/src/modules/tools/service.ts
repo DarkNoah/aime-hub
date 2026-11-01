@@ -1,3 +1,4 @@
+import { createProviderInstance } from '../../mastra/providers/registry.js';
 import type { ResolveIssues } from '../../mastra/tools/issue.js';
 import type { KnowledgeService } from '../knowledge/service.js';
 import type { AudioService } from '../audio/service.js';
@@ -22,9 +23,6 @@ import type { ProviderService } from '../providers/service.js';
 import type { ResolvedExtractionModel } from '../../mastra/tools/extract.js';
 import { ExtractionError } from './extract/source.js';
 import { ProviderError } from '../providers/network.js';
-import { SerpApiProvider } from '../../mastra/providers/serpapi.js';
-import { JinaAIProvider } from '../../mastra/providers/jina-ai.js';
-import { DeepSeekProvider } from '../../mastra/providers/deepseek.js';
 import {
   SpeechGenerationError,
   type ResolvedSpeechModel,
@@ -323,13 +321,7 @@ export class ToolService {
       selected ?? (await this.providers.getDefaults()).webSearchProviderId;
     if (!id) throw new ProviderError('INVALID_TOOL_PROVIDER');
     const provider = await this.configuredProvider(id, 'web_search');
-    if (provider.type === 'deepseek')
-      return new DeepSeekProvider({ ...provider, timeoutMs });
-    return new SerpApiProvider({
-      baseUrl: provider.baseUrl,
-      apiKey: provider.apiKey,
-      timeoutMs,
-    });
+    return createProviderInstance({ ...provider, timeoutMs });
   }
 
   private async fetchProvider(selected: string | null, timeoutMs: number) {
@@ -337,13 +329,7 @@ export class ToolService {
       selected ?? (await this.providers.getDefaults()).webFetchProviderId;
     if (!id) throw new ProviderError('INVALID_TOOL_PROVIDER');
     const provider = await this.configuredProvider(id, 'web_fetch');
-    if (provider.type === 'deepseek')
-      return new DeepSeekProvider({ ...provider, timeoutMs });
-    return new JinaAIProvider({
-      baseUrl: provider.baseUrl,
-      apiKey: provider.apiKey!,
-      timeoutMs,
-    });
+    return createProviderInstance({ ...provider, timeoutMs });
   }
 
   /** Bind application services to the shared array-returning registry. */

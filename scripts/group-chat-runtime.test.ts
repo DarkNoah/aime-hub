@@ -215,6 +215,35 @@ test('scheduled work waits for the busy thread; stale event versions cannot disp
   await f.runtime.shutdown();
 });
 
+test('automation results queue on the original Bot thread even while busy, with reporting rather than rerun instructions', async () => {
+  const f = fixture([
+    event({
+      kind: 'automation',
+      text: JSON.stringify({
+        taskId: 'task-1',
+        status: 'failed',
+        error: 'AUTOMATION_RUN_FAILED',
+      }),
+    }),
+  ]);
+  f.setStatus('running');
+  f.setQueueCount(1);
+  await f.runtime.tick();
+  assert.equal(f.defers.length, 0);
+  assert.equal(f.runs.length, 1);
+  assert.equal(f.runs[0].threadId, member.threadId);
+  assert.equal(f.runs[0].input.isImmediate, false);
+  assert.match(JSON.stringify(f.runs[0].input.parts), /task-1/);
+  assert.match(JSON.stringify(f.runs[0].input.parts), /AUTOMATION_RUN_FAILED/);
+  assert.match(JSON.stringify(f.runs[0].input.parts), /send_message/);
+  assert.match(
+    JSON.stringify(f.runs[0].input.parts),
+    /Do not automatically rerun/,
+  );
+  assert.equal(f.acks.length, 1);
+  await f.runtime.shutdown();
+});
+
 test('debounced message events use the immediate queue even while a thread is busy', async () => {
   for (const status of ['idle', 'pending', 'running']) {
     const f = fixture();

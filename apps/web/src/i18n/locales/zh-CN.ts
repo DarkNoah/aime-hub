@@ -1257,10 +1257,6 @@ export const zhCN = {
   'tools.maxChars': '最大输出字符数',
   'tools.maxCharsHint': '1,000–200,000 字符，超出部分会截断并标记。',
   'providers.webFetch': '网页读取',
-  'providers.fetchHint':
-    'Jina AI 用于读取网页，保存后可在“工具 → 网页读取”中选择。',
-  'providers.fetchUrlHint':
-    '填写 Reader API 根地址 https://r.jina.ai，不要附加要读取的网页地址。',
   'nav.tools': '工具配置',
   'tools.description':
     '管理 Agent 默认继承的内置工具，配置启用状态和运行参数。每个 Agent 可单独关闭工具。',
@@ -1298,14 +1294,6 @@ export const zhCN = {
   'tools.refresh': '刷新工具配置',
   'tools.retry': '重试',
   'providers.webSearch': '网页搜索',
-  'providers.searchHint':
-    'SerpAPI 提供网页搜索能力，保存后可在「工具配置 → 网页搜索」中选择。',
-  'providers.searchUrlHint':
-    'API 根地址填写 https://serpapi.com，不要附加 /search.json 或查询参数。',
-  'providers.deepseekHint':
-    'DeepSeek 支持模型调用、网页搜索和网页读取；保存后可在工具配置中选择同一供应商。',
-  'providers.deepseekUrlHint':
-    '填写 https://api.deepseek.com 或 https://api.deepseek.com/v1，搜索和读取会自动使用 /v1/tools 接口。',
   'theme.title': '外观',
   'theme.change': '切换主题（{{theme}}）',
   'theme.light': '浅色',
@@ -2639,14 +2627,6 @@ export const zhCN = {
   'providers.searchTypes': '搜索供应商 key 或名称',
   'providers.typeHint':
     '类型取自 models.dev；当前模型调用和同步仍需 OpenAI 兼容地址。',
-  'providers.mineruHint':
-    '专用于 OCR 文档解析，点击同步模型可添加 MinerU VLM 和 Pipeline。',
-  'providers.mineruUrlHint':
-    '填写 https://mineru.net（也支持以 /api/v4 结尾的地址），下方填写 MinerU API Token。',
-  'providers.paddleocrHint':
-    '支持 PaddleOCR 云端任务 API 和部署服务的 /layout-parsing 接口。同步可添加对应的 OCR 模型。',
-  'providers.paddleocrUrlHint':
-    '云端填写 https://paddleocr.aistudio-app.com 和 AI Studio Access Token；自部署填写完整的 /layout-parsing 地址，无鉴权时 API Key 留空。支持图片和 PDF。',
   'providers.configOnly': '仅配置',
   'providers.configOnlyHint': '此供应商仅保存连接配置。',
   'providers.otherUrlHint': '填写服务的 HTTP(S) API 基础地址。',
@@ -2657,10 +2637,6 @@ export const zhCN = {
     '请先删除该供应商下的模型，再切换到此供应商类型。',
   'providers.type': '供应商类型',
   'providers.baseUrl': 'API 基础地址',
-  'providers.xinferenceHint':
-    '支持聊天、向量、重排和语音合成，同步时自动识别 Xinference 返回的模型类型。',
-  'providers.xinferenceUrlHint':
-    '填写 Xinference 的 HTTP(S) 服务地址，未包含 /v1 时会自动补齐。',
   'providers.urlHint':
     '填写 HTTP(S) API 基础地址，不包含账号密码、查询参数或片段；同步时会追加 /models。',
   'providers.apiKey': 'API 密钥',
@@ -2695,6 +2671,13 @@ export const zhCN = {
   'providers.empty': '尚未配置供应商',
   'providers.emptyHint': '新增供应商后，可同步或手动创建其模型。',
   'providers.selectHint': '点击供应商的“模型”按钮，在本页管理该供应商的模型。',
+  'models.type.model3d': '3D 模型生成',
+  'models.modality.model3d': '3D 模型',
+  'defaults.model3dModel': '3D 生成模型',
+  'providers.additionalSettings': '额外参数',
+  'providers.retrySettings': '重新加载配置',
+  'providers.selectSetting': '选择值',
+  'providers.loadingSettings': '正在加载供应商配置…',
   'providers.formHint':
     '选择供应商类型并配置连接。停用正在使用的供应商前，请先修改默认模型引用。',
   'providers.deleteHint':

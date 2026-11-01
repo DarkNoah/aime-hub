@@ -1366,10 +1366,6 @@ export const en = {
   'tools.maxCharsHint':
     '1,000–200,000 characters; longer content is marked as truncated.',
   'providers.webFetch': 'Web fetch',
-  'providers.fetchHint':
-    'Jina AI reads web pages. Select it in Tools → Web fetch after saving.',
-  'providers.fetchUrlHint':
-    'Use https://r.jina.ai as the Reader API root. Do not include a target page URL.',
   'nav.tools': 'Tools',
   'tools.description':
     'Manage built-in tools inherited by agents, including availability and runtime settings. Individual agents can turn off tools.',
@@ -1409,14 +1405,6 @@ export const en = {
   'tools.refresh': 'Refresh tools',
   'tools.retry': 'Retry',
   'providers.webSearch': 'Web search',
-  'providers.searchHint':
-    'SerpAPI provides web search. Select it in Tools → Web search after saving.',
-  'providers.searchUrlHint':
-    'Use https://serpapi.com as the API root. Do not include /search.json or query parameters.',
-  'providers.deepseekHint':
-    'DeepSeek supports model calls, web search and web fetch. Select the same provider in tool settings after saving.',
-  'providers.deepseekUrlHint':
-    'Use https://api.deepseek.com or https://api.deepseek.com/v1. Search and fetch automatically use the /v1/tools endpoints.',
   'theme.title': 'Appearance',
   'theme.change': 'Change theme ({{theme}})',
   'theme.light': 'Light',
@@ -2889,14 +2877,6 @@ export const en = {
   'providers.searchTypes': 'Search provider key or name',
   'providers.typeHint':
     'Types come from models.dev. Model calls and synchronization currently require an OpenAI-compatible URL.',
-  'providers.mineruHint':
-    'OCR document parsing only. Sync models to add MinerU VLM and Pipeline.',
-  'providers.mineruUrlHint':
-    'Use https://mineru.net (or a base URL ending in /api/v4). Enter your MinerU API token below.',
-  'providers.paddleocrHint':
-    'Supports the PaddleOCR cloud jobs API and deployed /layout-parsing services. Sync to add the corresponding OCR models.',
-  'providers.paddleocrUrlHint':
-    'For cloud use https://paddleocr.aistudio-app.com with an AI Studio Access Token. For self-hosting enter the full /layout-parsing URL; leave API Key empty if authentication is not required. Supports images and PDFs.',
   'providers.configOnly': 'Configuration only',
   'providers.configOnlyHint': 'This provider saves connection settings only.',
   'providers.otherUrlHint': 'Enter the HTTP(S) API base URL for this service.',
@@ -2907,10 +2887,6 @@ export const en = {
     'Delete this provider’s models before changing to this provider type.',
   'providers.type': 'Provider type',
   'providers.baseUrl': 'Base URL',
-  'providers.xinferenceHint':
-    'Supports chat, embeddings, reranking and speech synthesis. Sync imports model types from Xinference.',
-  'providers.xinferenceUrlHint':
-    'Enter the Xinference HTTP(S) service URL. /v1 is added automatically when omitted.',
   'providers.urlHint':
     'Use an HTTP(S) API base URL without credentials, query parameters or fragments. Synchronization appends /models.',
   'providers.apiKey': 'API key',
@@ -2948,6 +2924,13 @@ export const en = {
     'Add a provider, then synchronize or manually create its models.',
   'providers.selectHint':
     'Select Models on a provider to manage its models on this page.',
+  'models.type.model3d': '3D generation',
+  'models.modality.model3d': '3D model',
+  'defaults.model3dModel': '3D generation model',
+  'providers.additionalSettings': 'Additional settings',
+  'providers.retrySettings': 'Retry loading settings',
+  'providers.selectSetting': 'Select a value',
+  'providers.loadingSettings': 'Loading provider settings…',
   'providers.formHint':
     'Choose a provider type and configure its connection. Change default model references before disabling an in-use provider.',
   'providers.deleteHint':

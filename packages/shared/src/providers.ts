@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isAlibabaProvider } from './alibaba.js';
 import { thinkingLevels } from './threads.js';
 import { languageModelProviders as catalogProviders } from './provider-catalog.js';
 
@@ -94,14 +95,20 @@ export const modelTypes = [
   'asr',
   'image',
   'ocr',
+  'model3d',
 ] as const;
 export const modelTypeSchema = z.enum(modelTypes);
 export type ModelType = z.infer<typeof modelTypeSchema>;
 export function providerModelTypes(type: string): readonly ModelType[] {
   if (isOcrProvider(type)) return ['ocr'];
-  if (type === 'xinference') return modelTypes;
+  if (type === 'xinference')
+    return modelTypes.filter((modelType) => modelType !== 'model3d');
   return providerSupportsModels(type)
-    ? modelTypes.filter((modelType) => modelType !== 'ocr')
+    ? modelTypes.filter(
+        (modelType) =>
+          modelType !== 'ocr' &&
+          (modelType !== 'model3d' || isAlibabaProvider(type)),
+      )
     : [];
 }
 export const defaultModelTypes = {
@@ -112,6 +119,7 @@ export const defaultModelTypes = {
   rerankModel: 'rerank',
   speechModel: 'speech',
   asrModel: 'asr',
+  model3dModel: 'model3d',
   ocrModel: 'ocr',
 } as const;
 export const defaultModelKeys = Object.keys(defaultModelTypes) as Array<
@@ -157,8 +165,8 @@ export const modelInputSchema = z
       .max(5)
       .default(['text']),
     modalitiesOutput: z
-      .array(z.enum(['text', 'image', 'audio', 'video', 'pdf']))
-      .max(5)
+      .array(z.enum(['text', 'image', 'audio', 'video', 'pdf', 'model3d']))
+      .max(6)
       .default(['text']),
     reasoning: z.boolean().default(false),
     toolCall: z.boolean().default(false),
@@ -207,6 +215,7 @@ export const modelDefaultsSchema = z
     rerankModel: z.string().min(3).max(512).nullable().default(null),
     speechModel: z.string().min(3).max(512).nullable().default(null),
     asrModel: z.string().min(3).max(512).nullable().default(null),
+    model3dModel: z.string().min(3).max(512).nullable().default(null),
     ocrModel: z.string().min(3).max(512).nullable().default(null),
     webSearchProviderId: z.string().min(1).max(128).nullable().default(null),
     webFetchProviderId: z.string().min(1).max(128).nullable().default(null),
@@ -271,6 +280,7 @@ export const emptyModelDefaults: ModelDefaults = {
   rerankModel: null,
   speechModel: null,
   asrModel: null,
+  model3dModel: null,
   ocrModel: null,
   webSearchProviderId: null,
   webFetchProviderId: null,

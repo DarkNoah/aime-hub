@@ -6,6 +6,8 @@
     ".": "./src/index.ts",
     "./env": "./src/env.ts",
     "./providers": "./src/providers.ts",
+    "./provider-configuration": "./src/provider-configuration.ts",
+    "./alibaba": "./src/alibaba.ts",
     "./knowledge": "./src/knowledge.ts",
     "./tools": "./src/tools.ts",
     "./intelligent-ui": "./src/intelligent-ui.ts",

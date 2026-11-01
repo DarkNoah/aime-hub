@@ -16,6 +16,7 @@ import type { ResolvedChatModel } from '../models/language-model.js';
 import { createAutomationRuntime } from './runtime.js';
 import type { NotificationService } from '../notifications/service.js';
 import type { ResolveMemoryConfig } from '../../mastra/memory.js';
+import type { AutomationBotEvents } from './bot-events.js';
 
 export const input = {
   name: 'Daily summary',
@@ -53,6 +54,7 @@ export async function fixture(
     model?: ReturnType<typeof createMockModel>;
     workspaceRoot?: string;
     notifications?: Pick<NotificationService, 'publish'>;
+    botEvents?: Pick<AutomationBotEvents, 'validateSource' | 'publish'>;
     disabledTools?: string[];
     tools?: ToolsInput;
     getMemoryConfig?: ResolveMemoryConfig;
@@ -143,6 +145,7 @@ export async function fixture(
     scheduleHooks,
     threads,
     notifications: options.notifications,
+    botEvents: options.botEvents,
     getMemoryConfig: options.getMemoryConfig,
     pool: {
       query: async (_sql: string, params: string[]) => ({

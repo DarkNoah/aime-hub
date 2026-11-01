@@ -45,6 +45,7 @@ import { McpService } from './modules/mcp/service.js';
 import { initializeMcpAfterListen } from './modules/mcp/startup.js';
 import { agentSettingsStore } from './modules/agents/settings.js';
 import { createAutomationRuntime } from './modules/automations/runtime.js';
+import { AutomationBotEvents } from './modules/automations/bot-events.js';
 import { hasAdminRole } from '@aime/shared';
 import type { ScheduleHooks } from '@mastra/core/schedules';
 import type { Mastra } from '@mastra/core/mastra';
@@ -274,6 +275,7 @@ const groupChatRuntime = createGroupChatRuntime(
   },
 );
 const automations = createAutomationRuntime({
+  botEvents: new AutomationBotEvents(pool, groupChats),
   notifications,
   mastra,
   pool,

@@ -17,6 +17,7 @@ import type { AnySchedule } from '@mastra/core/schedules';
 import { computeNextFireAt } from '@mastra/core/workflows';
 import { ThreadError } from '../threads/errors.js';
 import type { ProjectService } from '../projects/service.js';
+import type { AutomationBotEvents } from './bot-events.js';
 import {
   automationAgentId,
   automationResource,
@@ -51,6 +52,7 @@ export class AutomationService {
       meta: Pick<AutomationMetadata, 'ownerId' | 'scope' | 'data'>,
     ) => Promise<void>,
     private threads: AutomationThreads,
+    private botEvents?: Pick<AutomationBotEvents, 'validateSource'>,
   ) {}
 
   private locked<T>(id: string, action: () => Promise<T>): Promise<T> {
@@ -110,6 +112,7 @@ export class AutomationService {
       resourceId: meta.resourceId,
       scope: meta.scope,
       createdBy: meta.ownerId,
+      ...(meta.sourceRoomId ? { sourceRoomId: meta.sourceRoomId } : {}),
       createdAt: new Date(row.createdAt).toISOString(),
       updatedAt: new Date(row.updatedAt).toISOString(),
       nextFireAt:
@@ -194,8 +197,17 @@ export class AutomationService {
     };
   }
 
-  async create(userId: string, scope: AutomationScope, data: AutomationInput) {
+  async create(
+    userId: string,
+    scope: AutomationScope,
+    data: AutomationInput,
+    sourceRoomId?: string,
+  ) {
     await this.permission(userId, scope, true);
+    if (sourceRoomId) {
+      if (!this.botEvents) throw new ThreadError('FORBIDDEN', 403);
+      await this.botEvents.validateSource(userId, scope, sourceRoomId);
+    }
     const draft = { ownerId: userId, scope, data };
     await this.validate(draft);
     const id = `agent_${randomUUID()}`;
@@ -204,6 +216,7 @@ export class AutomationService {
       managedBy: 'automations',
       version: 2,
       ...draft,
+      ...(sourceRoomId ? { sourceRoomId } : {}),
       threadId: `schedule:${nanoid(16)}`,
       resourceId: automationResource(scope, userId),
       threadCreated: false,

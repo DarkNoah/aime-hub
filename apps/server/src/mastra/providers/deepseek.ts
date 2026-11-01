@@ -1,3 +1,4 @@
+import type { ProviderConfiguration } from '@aime/shared/provider-configuration';
 import { createOpenResponses } from '@ai-sdk/open-responses';
 import {
   resolveModelConfig,
@@ -53,6 +54,21 @@ export async function createDeepSeekResponsesModel(
 }
 
 export class DeepSeekProvider extends OpenAICompatibleProvider {
+  static override readonly configuration: ProviderConfiguration = {
+    fields: [],
+    description: {
+      en: 'DeepSeek supports model calls, web search and web fetch. Select the same provider in tool settings after saving.',
+      'zh-CN':
+        'DeepSeek 支持模型调用、网页搜索和网页读取；保存后可在工具配置中选择同一供应商。',
+    },
+    baseUrlHint: {
+      en: 'Use https://api.deepseek.com or https://api.deepseek.com/v1. Search and fetch automatically use the /v1/tools endpoints.',
+      'zh-CN':
+        '填写 https://api.deepseek.com 或 https://api.deepseek.com/v1，搜索和读取会自动使用 /v1/tools 接口。',
+    },
+    defaultBaseUrl: 'https://api.deepseek.com/v1',
+  };
+
   constructor(
     provider: ProviderConfig,
     requestJson = requestProviderJson,

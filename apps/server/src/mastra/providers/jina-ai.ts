@@ -1,3 +1,4 @@
+import type { ProviderConfiguration } from '@aime/shared/provider-configuration';
 import { requestWebResource, webUrl } from '../web/request.js';
 import { allowAllNetworks } from '../../modules/network/policy.js';
 import {
@@ -7,6 +8,20 @@ import {
 } from './base-provider.js';
 
 export class JinaAIProvider extends BaseProvider {
+  static override readonly configuration: ProviderConfiguration = {
+    fields: [],
+    description: {
+      en: 'Jina AI reads web pages. Select it in Tools → Web fetch after saving.',
+      'zh-CN': 'Jina AI 用于读取网页，保存后可在“工具 → 网页读取”中选择。',
+    },
+    baseUrlHint: {
+      en: 'Use https://r.jina.ai as the Reader API root. Do not include a target page URL.',
+      'zh-CN':
+        '填写 Reader API 根地址 https://r.jina.ai，不要附加要读取的网页地址。',
+    },
+    defaultBaseUrl: 'https://r.jina.ai',
+  };
+
   readonly name = 'jina-ai';
   readonly type = 'jina-ai';
   constructor(

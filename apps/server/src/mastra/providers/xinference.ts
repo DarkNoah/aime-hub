@@ -1,3 +1,4 @@
+import type { ProviderConfiguration } from '@aime/shared/provider-configuration';
 import type { EmbeddingModel, RerankingModel, SpeechModel } from 'ai';
 import type { OpenAICompatibleConfig } from '@mastra/core/llm';
 import { z } from 'zod';
@@ -61,6 +62,19 @@ const speechOptions = z
   .strict();
 
 export class XinferenceProvider extends BaseProvider {
+  static override readonly configuration: ProviderConfiguration = {
+    fields: [],
+    description: {
+      en: 'Supports chat, embeddings, reranking and speech synthesis. Sync imports model types from Xinference.',
+      'zh-CN':
+        '支持聊天、向量、重排和语音合成，同步时自动识别 Xinference 返回的模型类型。',
+    },
+    baseUrlHint: {
+      en: 'Enter the Xinference HTTP(S) service URL. /v1 is added automatically when omitted.',
+      'zh-CN': '填写 Xinference 的 HTTP(S) 服务地址，未包含 /v1 时会自动补齐。',
+    },
+  };
+
   readonly name = 'xinference';
   readonly type = 'xinference';
   private readonly baseUrl: string;

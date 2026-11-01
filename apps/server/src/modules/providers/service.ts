@@ -1,4 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { isAlibabaProvider } from '@aime/shared/alibaba';
+import { parseProviderMetadata } from '@aime/shared/provider-configuration';
+import {
+  createProviderInstance,
+  getProviderConfiguration,
+  getProviderConfigurations,
+} from '../../mastra/providers/registry.js';
 import { z } from 'zod';
 import type { DataSource, EntityManager } from 'typeorm';
 import { Provider, ProviderModel, Setting } from '@aime/db';
@@ -23,12 +30,6 @@ import {
   modelTypeSchema,
 } from '@aime/shared/providers';
 import { ProviderError, requestProviderJson } from './network.js';
-import { NewApiProvider } from '../../mastra/providers/newapi.js';
-import { OpenAICompatibleProvider } from '../../mastra/providers/openai-compatible.js';
-import { DeepSeekProvider } from '../../mastra/providers/deepseek.js';
-import { MinerUProvider } from '../../mastra/providers/mineru.js';
-import { PaddleOCRProvider } from '../../mastra/providers/paddleocr.js';
-import { XinferenceProvider } from '../../mastra/providers/xinference.js';
 import type { requestWebResource } from '../../mastra/web/request.js';
 
 const settingsId = 'models';
@@ -267,27 +268,27 @@ export class ProviderService {
     if (!provider) throw new ProviderError('NOT_FOUND', 404);
     return provider;
   }
+  getConfigurations() {
+    return getProviderConfigurations();
+  }
+
+  private normalizeMetadata(type: string, metadata: Record<string, unknown>) {
+    try {
+      return parseProviderMetadata(
+        getProviderConfiguration(type).fields,
+        metadata,
+      );
+    } catch {
+      throw new ProviderError('VALIDATION_ERROR');
+    }
+  }
+
   private createProviderInstance(provider: Provider) {
     this.assertModelProvider(provider);
-    if (provider.type === 'deepseek')
-      return new DeepSeekProvider(
-        provider,
-        this.requestJson,
-        this.requestResource,
-      );
-    if (provider.type === 'mineru')
-      return new MinerUProvider(provider, this.requestResource);
-    if (provider.type === 'paddleocr')
-      return new PaddleOCRProvider(provider, this.requestResource);
-    if (provider.type === 'xinference')
-      return new XinferenceProvider(provider, this.requestResource);
-    return provider.type === 'newapi'
-      ? new NewApiProvider(provider, this.requestResource)
-      : new OpenAICompatibleProvider(
-          provider,
-          this.requestJson,
-          this.requestResource,
-        );
+    return createProviderInstance(provider, {
+      requestJson: this.requestJson,
+      requestResource: this.requestResource,
+    });
   }
   async getProviderInstance(id: string) {
     const provider = await this.getProviderRecord(id);
@@ -301,6 +302,7 @@ export class ProviderService {
       | 'rerankModel'
       | 'speechModel'
       | 'asrModel'
+      | 'model3dModel'
       | 'ocrModel',
     reference?: string,
   ) {
@@ -362,6 +364,13 @@ export class ProviderService {
     );
     return provider.ocrModel(modelId);
   }
+  async get3DModel(reference?: string) {
+    const { provider, modelId } = await this.resolveDefaultModel(
+      'model3dModel',
+      reference,
+    );
+    return provider.model3d(modelId);
+  }
   // Server-only persisted configuration, including credentials, for model clients.
   async getProvider(id: string) {
     const provider = await this.getProviderRecord(id);
@@ -403,12 +412,14 @@ export class ProviderService {
     };
   }
   async createProvider(input: ProviderInput) {
+    const metadata = this.normalizeMetadata(input.type, input.metadata);
     const id = randomUUID();
     await this.write((manager) =>
       manager.save(
         Provider,
         manager.create(Provider, {
           ...input,
+          metadata,
           id,
           apiKey: input.apiKey || null,
         }),
@@ -419,6 +430,10 @@ export class ProviderService {
   async updateProvider(id: string, input: Partial<ProviderInput>) {
     await this.write(async (manager) => {
       const provider = await this.requireProvider(manager, id);
+      const metadata = this.normalizeMetadata(input.type ?? provider.type, {
+        ...provider.metadata,
+        ...input.metadata,
+      });
       if (input.enabled === false) await this.assertUnused(manager, id);
       const defaults = await this.defaults(manager);
       if (
@@ -447,6 +462,7 @@ export class ProviderService {
       await manager.save(Provider, {
         ...provider,
         ...input,
+        metadata,
         ...(input.apiKey !== undefined ? { apiKey: input.apiKey || null } : {}),
       });
     });
@@ -651,7 +667,10 @@ export class ProviderService {
           id,
           name: id,
           ...catalogFields(id, lookupModel(id)),
-          ...(provider.type === 'xinference' || isOcrProvider(provider.type)
+          ...(provider.type === 'xinference' ||
+          isOcrProvider(provider.type) ||
+          (isAlibabaProvider(provider.type) &&
+            discoveredModels.get(id)?.modelType)
             ? discoveredModels.get(id)
             : {}),
           deprecated: false,

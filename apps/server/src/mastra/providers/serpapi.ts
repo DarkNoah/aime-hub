@@ -1,3 +1,4 @@
+import type { ProviderConfiguration } from '@aime/shared/provider-configuration';
 import { z } from 'zod';
 import { requestProviderJson } from '../../modules/providers/network.js';
 import { searchResultUrl } from '../web/request.js';
@@ -26,6 +27,21 @@ const responseSchema = z.object({
 });
 
 export class SerpApiProvider extends BaseProvider {
+  static override readonly configuration: ProviderConfiguration = {
+    fields: [],
+    description: {
+      en: 'SerpAPI provides web search. Select it in Tools → Web search after saving.',
+      'zh-CN':
+        'SerpAPI 提供网页搜索能力，保存后可在「工具配置 → 网页搜索」中选择。',
+    },
+    baseUrlHint: {
+      en: 'Use https://serpapi.com as the API root. Do not include /search.json or query parameters.',
+      'zh-CN':
+        'API 根地址填写 https://serpapi.com，不要附加 /search.json 或查询参数。',
+    },
+    defaultBaseUrl: 'https://serpapi.com',
+  };
+
   readonly name = 'serpapi';
   readonly type = 'serpapi';
   constructor(

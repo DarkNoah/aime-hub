@@ -1,6 +1,7 @@
 import { type } from '@orpc/contract';
 import { z } from 'zod';
 import { procedure, id } from './base.js';
+import type { ProviderConfigurations } from '../provider-configuration.js';
 import {
   providerInputSchema,
   providerUpdateSchema,
@@ -16,6 +17,13 @@ import {
 } from '../providers.js';
 
 export const providersContract = {
+  configurations: procedure
+    .route({
+      method: 'GET',
+      path: '/admin/provider-configurations',
+      inputStructure: 'detailed',
+    })
+    .output(type<ProviderConfigurations>()),
   available: procedure
     .route({ method: 'GET', path: '/models', inputStructure: 'detailed' })
     .output(type<AvailableModels>()),

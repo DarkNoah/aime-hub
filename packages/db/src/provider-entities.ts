@@ -58,7 +58,7 @@ export class Provider extends ProviderTimestamps {
 @Entity('provider_models')
 @Check(
   'provider_models_model_type_check',
-  "model_type IN ('language', 'embedding', 'rerank', 'speech', 'asr', 'image', 'ocr')",
+  "model_type IN ('language', 'embedding', 'rerank', 'speech', 'asr', 'image', 'ocr', 'model3d')",
 )
 export class ProviderModel extends ProviderTimestamps {
   @Column({ name: 'model_type', type: 'text', default: 'language' })
@@ -116,7 +116,9 @@ export class ProviderModel extends ProviderTimestamps {
     array: true,
     default: ['text'],
   })
-  modalitiesOutput!: Array<'text' | 'image' | 'audio' | 'video' | 'pdf'>;
+  modalitiesOutput!: Array<
+    'text' | 'image' | 'audio' | 'video' | 'pdf' | 'model3d'
+  >;
 
   @Column({ type: 'boolean', default: false })
   reasoning!: boolean;

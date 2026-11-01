@@ -6,6 +6,9 @@ export function providerRouter(service?: ProviderService) {
   const p = rpc.providers;
   const providers = () => required(service);
   return p.router({
+    configurations: p.configurations.handler(() =>
+      providers().getConfigurations(),
+    ),
     available: p.available.handler(() => providers().listAvailableModels()),
     list: p.list.handler(() =>
       providers()

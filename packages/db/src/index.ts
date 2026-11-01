@@ -1,3 +1,4 @@
+import { AutomationBotEvents1780000040000 } from './migrations/1780000040000-automation-bot-events.js';
 import { IssueOptionalThread1780000039000 } from './migrations/1780000039000-issue-optional-thread.js';
 import { IssueEvents1780000038000 } from './migrations/1780000038000-issue-events.js';
 import { ProjectEnvironmentVariables1780000037000 } from './migrations/1780000037000-project-environment-variables.js';
@@ -32,6 +33,7 @@ export {
   KnowledgeDocumentVersion,
 };
 import 'reflect-metadata';
+import { ProviderModel3d1780000041000 } from './migrations/1780000041000-provider-model3d.js';
 import { DataSource, type EntitySchema } from 'typeorm';
 import { CreatePluginTables1780000014000 } from './migrations/1780000014000-create-plugin-tables.js';
 import { PluginConfiguration1780000022000 } from './migrations/1780000022000-plugin-configuration.js';
@@ -95,6 +97,8 @@ export function createDataSource(
       GeneratedAsset,
     ],
     migrations: [
+      ProviderModel3d1780000041000,
+      AutomationBotEvents1780000040000,
       IssueOptionalThread1780000039000,
       IssueEvents1780000038000,
       ProjectEnvironmentVariables1780000037000,

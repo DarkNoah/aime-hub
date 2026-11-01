@@ -13,6 +13,7 @@ import { dateTime, number } from './format';
 import { useMarketBars } from '../use-market-bars';
 import { tradeRiskLevels } from '../trade-risk';
 import { TradeRiskHistory } from './trade-risk-history';
+import { useBacktestResource } from './use-backtest-resource';
 
 const EMPTY_RISK_LEVELS: RiskLevelRecord[] = [];
 
@@ -20,14 +21,12 @@ export default function BacktestMarketChart({
   pluginId,
   run,
   selection,
-  riskLevels = EMPTY_RISK_LEVELS,
   onClearSelection,
 }: {
   pluginId: string;
   run: BacktestRun;
   // A fresh selection also allows replaying the same trade after panning away.
   selection: { trade: TradeRecord } | null;
-  riskLevels?: RiskLevelRecord[];
   onClearSelection: () => void;
 }) {
   const [period, setPeriod] = useState(() =>
@@ -36,13 +35,22 @@ export default function BacktestMarketChart({
   const [retry, setRetry] = useState(0);
   const [showRisk, setShowRisk] = useState(true);
   const trade = selection?.trade;
+  const risk = useBacktestResource<RiskLevelRecord[]>(
+    pluginId,
+    trade
+      ? `/strategies/runs/${run.id}/view/risk?trade=${encodeURIComponent(trade.id)}`
+      : null,
+  );
   const symbol = trade?.symbol ?? run.config.symbol;
   const native = run.config.backtest_engine === 'tqsdk';
   const points = run.config.execution_model === 'points';
   const exitTime = trade ? tradeExitAnchor(trade) : null;
   const levels = useMemo(
-    () => (trade ? tradeRiskLevels(trade, riskLevels) : EMPTY_RISK_LEVELS),
-    [trade, riskLevels],
+    () =>
+      trade
+        ? tradeRiskLevels(trade, risk.data ?? EMPTY_RISK_LEVELS)
+        : EMPTY_RISK_LEVELS,
+    [trade, risk.data],
   );
   const sharedScope = `backtest:${run.id}:${symbol}`;
   const marketPath = `/strategies/runs/${run.id}`;
@@ -155,14 +163,30 @@ export default function BacktestMarketChart({
                 ；平仓沿用触发时的原因和价格依据。
               </p>
             )}
-          <TradeRiskHistory
-            key={trade.id}
-            records={levels}
-            triggeredId={trade.risk_level_id}
-            visible={showRisk}
-            onVisibleChange={setShowRisk}
-            onNavigate={(time) => void view.navigate(Math.floor(time))}
-          />
+          {risk.error ? (
+            <div role="alert" className="space-y-2 border-b px-4 py-3 text-sm">
+              <p className="text-destructive">{risk.error}</p>
+              <Button variant="outline" size="sm" onClick={risk.reload}>
+                重新加载止盈止损
+              </Button>
+            </div>
+          ) : !risk.data ? (
+            <p
+              role="status"
+              className="border-b px-4 py-3 text-xs text-muted-foreground"
+            >
+              正在加载止盈止损记录…
+            </p>
+          ) : (
+            <TradeRiskHistory
+              key={trade.id}
+              records={levels}
+              triggeredId={trade.risk_level_id}
+              visible={showRisk}
+              onVisibleChange={setShowRisk}
+              onNavigate={(time) => void view.navigate(Math.floor(time))}
+            />
+          )}
         </>
       ) : (
         <p className="border-b px-4 py-2 text-xs text-muted-foreground">

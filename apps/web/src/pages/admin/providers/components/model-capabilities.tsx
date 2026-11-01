@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   AudioLines,
   BrainCircuit,
+  Box,
   FileText,
   Image,
   Minus,
@@ -25,6 +26,7 @@ const modalityIcons = {
   audio: AudioLines,
   video: Video,
   pdf: FileText,
+  model3d: Box,
 } as const;
 
 function CapabilityHint({

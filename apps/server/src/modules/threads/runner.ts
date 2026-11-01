@@ -710,6 +710,7 @@ export function createChatRunner(
             ),
           );
           requestContext.set('projectId', projectId);
+          requestContext.set('automationSourceRoomId', roomBinding?.roomId);
           requestContext.set('issueId', thread.metadata?.issueId);
           requestContext.set('issueActorThreadId', thread.id);
           requestContext.set(

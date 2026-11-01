@@ -1,3 +1,4 @@
+import type { ProviderConfiguration } from '@aime/shared/provider-configuration';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { allowAllNetworks } from '../../modules/network/policy.js';
@@ -57,6 +58,21 @@ const documentResultSchema = z.object({
 });
 
 export class PaddleOCRProvider extends BaseProvider {
+  static override readonly configuration: ProviderConfiguration = {
+    fields: [],
+    description: {
+      en: 'Supports the PaddleOCR cloud jobs API and deployed /layout-parsing services. Sync to add the corresponding OCR models.',
+      'zh-CN':
+        '支持 PaddleOCR 云端任务 API 和部署服务的 /layout-parsing 接口。同步可添加对应的 OCR 模型。',
+    },
+    baseUrlHint: {
+      en: 'For cloud use https://paddleocr.aistudio-app.com with an AI Studio Access Token. For self-hosting enter the full /layout-parsing URL; leave API Key empty if authentication is not required. Supports images and PDFs.',
+      'zh-CN':
+        '云端填写 https://paddleocr.aistudio-app.com 和 AI Studio Access Token；自部署填写完整的 /layout-parsing 地址，无鉴权时 API Key 留空。支持图片和 PDF。',
+    },
+    defaultBaseUrl: 'https://paddleocr.aistudio-app.com',
+  };
+
   readonly name = 'paddleocr';
   readonly type = 'paddleocr';
   private readonly jobsUrl: string;

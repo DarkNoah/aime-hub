@@ -1,10 +1,11 @@
 import type { SpeechModelSettings } from './speech-model.js';
+import type { Model3D } from './model3d.js';
+import type { ProviderConfiguration } from '@aime/shared/provider-configuration';
 import type { OpenAICompatibleConfig } from '@mastra/core/llm';
 import { NoSuchModelError } from 'ai';
 import type {
   EmbeddingModel,
   ImageModel,
-  LanguageModel,
   RerankingModel,
   SpeechModel,
   TranscriptionModel,
@@ -38,6 +39,7 @@ export type ProviderConfig = {
   baseUrl: string;
   apiKey?: string | null;
   timeoutMs?: number;
+  metadata?: Record<string, unknown>;
 };
 
 export type ProviderModelInfo = { id: string; name: string } & Partial<
@@ -56,6 +58,13 @@ export interface BaseProviderParams {
 }
 
 export abstract class BaseProvider {
+  static readonly configuration: ProviderConfiguration = { fields: [] };
+
+  static getConfiguration(type: string): ProviderConfiguration {
+    void type;
+    return this.configuration;
+  }
+
   readonly id: string;
   readonly provider: ProviderConfig;
   abstract name: string;
@@ -66,7 +75,7 @@ export abstract class BaseProvider {
     this.id = provider.id;
   }
 
-  languageModel(modelId: string): LanguageModel | OpenAICompatibleConfig {
+  languageModel(modelId: string): OpenAICompatibleConfig {
     throw new Error(`Language model is not supported: ${this.type}/${modelId}`);
   }
 
@@ -100,6 +109,10 @@ export abstract class BaseProvider {
     throw new NoSuchModelError({ modelId, modelType: 'transcriptionModel' });
   }
 
+  model3d(modelId: string): Model3D {
+    throw new Error(`3D model is not supported: ${this.type}/${modelId}`);
+  }
+
   imageModel(modelId: string): ImageModel {
     throw new Error(`Image model is not supported: ${this.type}/${modelId}`);
   }
@@ -117,6 +130,14 @@ export abstract class BaseProvider {
   }
 
   getSpeechModelList(): Promise<ProviderModelInfo[]> {
+    return Promise.resolve([]);
+  }
+
+  getTranscriptionModelList(): Promise<ProviderModelInfo[]> {
+    return Promise.resolve([]);
+  }
+
+  get3DModelList(): Promise<ProviderModelInfo[]> {
     return Promise.resolve([]);
   }
 

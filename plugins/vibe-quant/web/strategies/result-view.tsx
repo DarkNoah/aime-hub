@@ -1,6 +1,5 @@
 import { runVersionName } from '../../strategy-version';
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { pluginRequest } from '@app/plugin-sdk/web';
+import { lazy, Suspense, useRef, useState } from 'react';
 import {
   Badge,
   Button,
@@ -24,20 +23,15 @@ import {
   ChartCandlestick,
   Download,
 } from 'lucide-react';
-import type {
-  BacktestResult,
-  BacktestRun,
-  TradeRecord,
-} from '../../strategy-types';
+import type { BacktestRun, TradeRecord } from '../../strategy-types';
 import { tradeHoldingEnd } from '../../strategy-types';
-import { resultTradeRecords, closedTradeWinRate } from '../../strategy-trades';
-import {
-  dateTime,
-  errorText,
-  holdingDuration,
-  number,
-  percent,
-} from './format';
+import type {
+  BacktestTradePage,
+  BacktestView,
+} from '../../backtest-view-types';
+import { useBacktestResource } from './use-backtest-resource';
+import { ResultLogs } from './result-logs';
+import { dateTime, holdingDuration, number, percent } from './format';
 import { exitReasonLabel } from '../trade-exit';
 import { PeriodReturns } from './period-returns';
 const EquityChart = lazy(() => import('./equity-chart'));
@@ -75,56 +69,40 @@ export function ResultView({
   pluginId: string;
   run: BacktestRun;
 }) {
-  const [data, setData] = useState<{
-    result: BacktestResult | null;
-    manifest: Record<string, unknown> | null;
-  } | null>(null);
-  const [error, setError] = useState('');
-  const [retry, setRetry] = useState(0);
+  const { data, error, reload } = useBacktestResource<BacktestView>(
+    pluginId,
+    `/strategies/runs/${run.id}/view`,
+    run.status,
+  );
   const [page, setPage] = useState(0);
+  const tradePage = useBacktestResource<BacktestTradePage>(
+    pluginId,
+    data?.result && page > 0
+      ? `/strategies/runs/${run.id}/view/trades?page=${page}`
+      : null,
+    run.status,
+  );
   const [selection, setSelection] = useState<{ trade: TradeRecord } | null>(
     null,
   );
   const marketSection = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const abort = new AbortController();
-    pluginRequest<{
-      result: BacktestResult | null;
-      manifest: Record<string, unknown> | null;
-    }>(pluginId, `/strategies/runs/${run.id}/result`, { signal: abort.signal })
-      .then((value) => {
-        setData(value);
-        setError('');
-      })
-      .catch((e) => {
-        if (!abort.signal.aborted) setError(errorText(e));
-      });
-    return () => abort.abort();
-  }, [pluginId, run.id, run.status, retry]);
   const result = data?.result;
   const points = run.config.execution_model === 'points';
   const native = run.config.backtest_engine === 'tqsdk';
   const tqRules = data?.manifest?.tq_rules as
     Record<string, number> | undefined;
-  const winRate = useMemo(
-    () => (!native && result ? closedTradeWinRate(result) : null),
-    [result, native],
-  );
-  const sortedTrades = useMemo(
-    () =>
-      (result ? resultTradeRecords(result) : []).sort(
-        (a, b) =>
-          Number(b.status === 'open') - Number(a.status === 'open') ||
-          (b.exit_time ?? b.entry_time) - (a.exit_time ?? a.entry_time) ||
-          b.entry_time - a.entry_time,
-      ),
-    [result],
-  );
+  const winRate = result?.closed_win_rate;
+  const trades =
+    page === 0
+      ? result?.trades
+      : (tradePage.data ?? tradePage.previousData ?? result?.trades);
+  const tradesLoading = page > 0 && !tradePage.data && !tradePage.error;
+  const tradeCount = result?.trades.total ?? 0;
   if (error)
     return (
       <div role="alert" className="space-y-3 p-6 text-sm">
         <p className="text-destructive">{error}</p>
-        <Button variant="outline" onClick={() => setRetry((n) => n + 1)}>
+        <Button variant="outline" onClick={reload}>
           重试
         </Button>
       </div>
@@ -346,6 +324,11 @@ export function ResultView({
                 暂无净值数据
               </p>
             )}
+            {result.curve_points > result.equity_curve.length && (
+              <p className="text-xs text-muted-foreground">
+                长区间曲线已精简显示并保留区段高低点，统计指标仍基于完整记录；导出可查看逐点数据。
+              </p>
+            )}
           </section>
           <section
             ref={marketSection}
@@ -358,23 +341,20 @@ export function ResultView({
                 pluginId={pluginId}
                 run={run}
                 selection={selection}
-                riskLevels={result.risk_levels}
                 onClearSelection={() => setSelection(null)}
               />
             </Suspense>
           </section>
           <Tabs defaultValue="trades">
             <TabsList>
-              <TabsTrigger value="trades">
-                交易记录 · {sortedTrades.length}
-              </TabsTrigger>
+              <TabsTrigger value="trades">交易记录 · {tradeCount}</TabsTrigger>
               <TabsTrigger value="periods">月度 / 年度</TabsTrigger>
               <TabsTrigger value="logs">订单与日志</TabsTrigger>
             </TabsList>
             <TabsContent value="trades" className="mt-3">
               <div className="rounded-md border">
                 <ScrollArea className="w-full">
-                  <Table aria-label="历史交易记录">
+                  <Table aria-label="历史交易记录" aria-busy={tradesLoading}>
                     <TableHeader>
                       <TableRow>
                         <TableHead>标的 / 方向</TableHead>
@@ -401,122 +381,137 @@ export function ResultView({
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {sortedTrades
-                        .slice(page * 20, (page + 1) * 20)
-                        .map((item) => (
-                          <TableRow
-                            key={item.id}
-                            data-state={
-                              selection?.trade.id === item.id
-                                ? 'selected'
+                      {trades?.items.map((item) => (
+                        <TableRow
+                          key={item.id}
+                          data-state={
+                            selection?.trade.id === item.id
+                              ? 'selected'
+                              : undefined
+                          }
+                        >
+                          <TableCell>
+                            <div className="font-mono text-xs">
+                              {item.symbol}
+                            </div>
+                            <Badge className="mt-1" variant="outline">
+                              {item.side === 'long' ? '多头' : '空头'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={
+                                item.status === 'open' ? 'secondary' : 'outline'
+                              }
+                            >
+                              {item.status === 'open' ? '未平仓' : '已平仓'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-xs tabular-nums">
+                            <div>{number(item.entry_price)}</div>
+                            <span className="whitespace-nowrap text-muted-foreground">
+                              {dateTime(item.entry_time)}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-xs tabular-nums">
+                            <div>{number(item.exit_price)}</div>
+                            <span className="whitespace-nowrap text-muted-foreground">
+                              {dateTime(item.exit_time)}
+                            </span>
+                            {item.exit_time_precision === 'bar' && (
+                              <div
+                                className="text-muted-foreground"
+                                title="该分钟内触发；记录该根 K 线结束时间，不代表精确成交秒数"
+                              >
+                                K 线内成交
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell
+                            className="whitespace-nowrap text-right tabular-nums"
+                            title={
+                              item.status === 'open'
+                                ? `截至 ${dateTime(item.observed_until)}（回测最后观测时间）`
                                 : undefined
                             }
                           >
-                            <TableCell>
-                              <div className="font-mono text-xs">
-                                {item.symbol}
+                            {holdingDuration(
+                              item.entry_time,
+                              tradeHoldingEnd(item),
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {item.status === 'open' ? (
+                              '—'
+                            ) : (
+                              <Badge variant="outline" title={item.exit_reason}>
+                                {exitReasonLabel(item.exit_reason)}
+                              </Badge>
+                            )}
+                            {item.trigger_price != null && (
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                触发价 {number(item.trigger_price)}
                               </div>
-                              <Badge className="mt-1" variant="outline">
-                                {item.side === 'long' ? '多头' : '空头'}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant={
-                                  item.status === 'open'
-                                    ? 'secondary'
-                                    : 'outline'
-                                }
-                              >
-                                {item.status === 'open' ? '未平仓' : '已平仓'}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-xs tabular-nums">
-                              <div>{number(item.entry_price)}</div>
-                              <span className="whitespace-nowrap text-muted-foreground">
-                                {dateTime(item.entry_time)}
-                              </span>
-                            </TableCell>
-                            <TableCell className="text-xs tabular-nums">
-                              <div>{number(item.exit_price)}</div>
-                              <span className="whitespace-nowrap text-muted-foreground">
-                                {dateTime(item.exit_time)}
-                              </span>
-                              {item.exit_time_precision === 'bar' && (
-                                <div
-                                  className="text-muted-foreground"
-                                  title="该分钟内触发；记录该根 K 线结束时间，不代表精确成交秒数"
-                                >
-                                  K 线内成交
-                                </div>
-                              )}
-                            </TableCell>
-                            <TableCell
-                              className="whitespace-nowrap text-right tabular-nums"
-                              title={
-                                item.status === 'open'
-                                  ? `截至 ${dateTime(item.observed_until)}（回测最后观测时间）`
-                                  : undefined
-                              }
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {item.quantity}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {number(item.fees)}
+                          </TableCell>
+                          <TableCell
+                            className={`text-right tabular-nums ${item.net_pnl === null ? 'text-muted-foreground' : item.net_pnl >= 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}
+                          >
+                            {number(item.net_pnl)}
+                          </TableCell>
+                          <TableCell className="sticky right-0 bg-background text-right">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={tradesLoading}
+                              onClick={() => {
+                                setSelection({ trade: item });
+                                marketSection.current?.scrollIntoView({
+                                  block: 'start',
+                                  behavior: window.matchMedia(
+                                    '(prefers-reduced-motion: reduce)',
+                                  ).matches
+                                    ? 'auto'
+                                    : 'smooth',
+                                });
+                              }}
+                              aria-pressed={selection?.trade.id === item.id}
+                              aria-label={`${item.status === 'open' ? '查看入场' : '回放'} ${item.symbol} ${dateTime(item.entry_time)} 的交易`}
                             >
-                              {holdingDuration(
-                                item.entry_time,
-                                tradeHoldingEnd(item),
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              {item.status === 'open' ? (
-                                '—'
-                              ) : (
-                                <Badge
+                              <ChartCandlestick className="size-4" />
+                              {item.status === 'open' ? '查看入场' : '回放'}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {((tradePage.error && page > 0) || !trades) && (
+                        <TableRow>
+                          <TableCell colSpan={10} className="py-8 text-center">
+                            {tradePage.error ? (
+                              <div role="alert" className="space-y-2">
+                                <p className="text-destructive">
+                                  {tradePage.error}
+                                </p>
+                                <Button
                                   variant="outline"
-                                  title={item.exit_reason}
+                                  onClick={tradePage.reload}
                                 >
-                                  {exitReasonLabel(item.exit_reason)}
-                                </Badge>
-                              )}
-                              {item.trigger_price != null && (
-                                <div className="mt-1 text-xs text-muted-foreground">
-                                  触发价 {number(item.trigger_price)}
-                                </div>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right tabular-nums">
-                              {item.quantity}
-                            </TableCell>
-                            <TableCell className="text-right tabular-nums">
-                              {number(item.fees)}
-                            </TableCell>
-                            <TableCell
-                              className={`text-right tabular-nums ${item.net_pnl === null ? 'text-muted-foreground' : item.net_pnl >= 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}
-                            >
-                              {number(item.net_pnl)}
-                            </TableCell>
-                            <TableCell className="sticky right-0 bg-background text-right">
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => {
-                                  setSelection({ trade: item });
-                                  marketSection.current?.scrollIntoView({
-                                    block: 'start',
-                                    behavior: window.matchMedia(
-                                      '(prefers-reduced-motion: reduce)',
-                                    ).matches
-                                      ? 'auto'
-                                      : 'smooth',
-                                  });
-                                }}
-                                aria-pressed={selection?.trade.id === item.id}
-                                aria-label={`${item.status === 'open' ? '查看入场' : '回放'} ${item.symbol} ${dateTime(item.entry_time)} 的交易`}
-                              >
-                                <ChartCandlestick className="size-4" />
-                                {item.status === 'open' ? '查看入场' : '回放'}
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      {!sortedTrades.length && (
+                                  重试
+                                </Button>
+                              </div>
+                            ) : (
+                              <Skeleton className="h-20" />
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {trades && !trades.items.length && (
                         <TableRow>
                           <TableCell
                             colSpan={10}
@@ -531,15 +526,16 @@ export function ResultView({
                   <ScrollBar orientation="horizontal" />
                 </ScrollArea>
               </div>
-              {sortedTrades.length > 20 && (
+              {tradeCount > 20 && (
                 <div className="mt-3 flex items-center justify-end gap-3 text-xs text-muted-foreground">
+                  {tradesLoading && <span role="status">正在加载交易…</span>}
                   <span>
-                    {page + 1} / {Math.ceil(sortedTrades.length / 20)}
+                    {page + 1} / {Math.ceil(tradeCount / 20)}
                   </span>
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={page === 0}
+                    disabled={page === 0 || tradesLoading}
                     onClick={() => setPage((n) => n - 1)}
                     aria-label="上一页交易"
                   >
@@ -548,7 +544,7 @@ export function ResultView({
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={(page + 1) * 20 >= sortedTrades.length}
+                    disabled={(page + 1) * 20 >= tradeCount || tradesLoading}
                     onClick={() => setPage((n) => n + 1)}
                     aria-label="下一页交易"
                   >
@@ -565,36 +561,7 @@ export function ResultView({
               />
             </TabsContent>
             <TabsContent value="logs" className="mt-3 space-y-3">
-              <p className="text-xs text-muted-foreground">
-                订单 {result.orders.length} · 成交 {result.fills.length} · 信号{' '}
-                {result.signals.length} · 日志 {result.logs.length} · 止盈止损{' '}
-                {result.risk_levels?.length ?? 0}
-                。此处展示最近 100 条，导出包含完整记录。
-              </p>
-              {[
-                ['订单', result.orders],
-                ['策略日志', result.logs],
-                ['止盈止损计算记录', result.risk_levels ?? []],
-                ['账户与持仓', result.account],
-              ].map(([title, values]) => (
-                <details
-                  key={title as string}
-                  className="rounded-md border p-3 text-xs"
-                >
-                  <summary className="cursor-pointer">
-                    {title as string}
-                  </summary>
-                  <ScrollArea className="mt-2 h-60">
-                    <pre className="whitespace-pre-wrap break-all font-mono">
-                      {JSON.stringify(
-                        Array.isArray(values) ? values.slice(-100) : values,
-                        null,
-                        2,
-                      )}
-                    </pre>
-                  </ScrollArea>
-                </details>
-              ))}
+              <ResultLogs pluginId={pluginId} runId={run.id} />
             </TabsContent>
           </Tabs>
           <p className="text-xs leading-5 text-muted-foreground">

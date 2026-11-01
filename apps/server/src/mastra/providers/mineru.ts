@@ -1,3 +1,4 @@
+import type { ProviderConfiguration } from '@aime/shared/provider-configuration';
 import { setTimeout as delay } from 'node:timers/promises';
 import { unzipSync } from 'fflate';
 import { z } from 'zod';
@@ -34,6 +35,21 @@ const parseOptionsSchema = z.object({
 });
 
 export class MinerUProvider extends BaseProvider {
+  static override readonly configuration: ProviderConfiguration = {
+    fields: [],
+    description: {
+      en: 'OCR document parsing only. Sync models to add MinerU VLM and Pipeline.',
+      'zh-CN':
+        '专用于 OCR 文档解析，点击同步模型可添加 MinerU VLM 和 Pipeline。',
+    },
+    baseUrlHint: {
+      en: 'Use https://mineru.net (or a base URL ending in /api/v4). Enter your MinerU API token below.',
+      'zh-CN':
+        '填写 https://mineru.net（也支持以 /api/v4 结尾的地址），下方填写 MinerU API Token。',
+    },
+    defaultBaseUrl: 'https://mineru.net',
+  };
+
   readonly name = 'mineru';
   readonly type = 'mineru';
   private readonly baseUrl: string;

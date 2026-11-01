@@ -31,6 +31,7 @@ import {
 } from './service.js';
 import { automationAgentId } from './metadata.js';
 import type { NotificationService } from '../notifications/service.js';
+import type { AutomationBotEvents } from './bot-events.js';
 
 export function createAutomationRuntime({
   mastra,
@@ -43,6 +44,7 @@ export function createAutomationRuntime({
   scheduleHooks,
   threads,
   notifications,
+  botEvents,
   environmentVariables,
   getMemoryConfig,
 }: {
@@ -59,6 +61,7 @@ export function createAutomationRuntime({
     'refreshAutomationThread' | 'refreshNavigation'
   >;
   notifications?: Pick<NotificationService, 'publish'>;
+  botEvents?: Pick<AutomationBotEvents, 'validateSource' | 'publish'>;
   environmentVariables?: Pick<EnvironmentVariableService, 'getEnv'>;
   getMemoryConfig?: ResolveMemoryConfig;
 }) {
@@ -70,13 +73,19 @@ export function createAutomationRuntime({
   const stopping = new AbortController();
   const notify = async (
     task: Automation,
-    status: 'succeeded' | 'failed',
+    result: AutomationResult,
     executionId: string,
   ) => {
+    if (result.status !== 'succeeded' && result.status !== 'failed') return;
     try {
-      await notifications?.publish(task, status, executionId);
+      await notifications?.publish(task, result.status, executionId);
     } catch {
       console.error('Automation notification could not be saved');
+    }
+    try {
+      await botEvents?.publish(task, result, executionId);
+    } catch {
+      console.error('Automation Bot event could not be saved');
     }
   };
   const resolveModel = async (
@@ -172,6 +181,7 @@ export function createAutomationRuntime({
         await assertThread(task);
       },
     },
+    botEvents,
   );
 
   const executions = new Map<string, Promise<Execution>>();
@@ -253,7 +263,7 @@ export function createAutomationRuntime({
           value: result,
         });
         if (result.status === 'succeeded' || result.status === 'failed')
-          await notify(task, result.status, key);
+          await notify(task, result, key);
         await threads?.refreshAutomationThread(
           task.createdBy,
           task.threadId,
@@ -437,7 +447,7 @@ export function createAutomationRuntime({
       // this fallback with the agent's terminal callback.
       await notify(
         run?.task ?? (await service.notificationTask(schedule.id)),
-        'failed',
+        { status: 'failed', text: '', error: 'AUTOMATION_RUN_FAILED' },
         typeof key === 'string'
           ? key
           : `${trigger.kind}:${trigger.firedAt.toISOString()}`,

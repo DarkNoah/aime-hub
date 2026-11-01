@@ -833,7 +833,9 @@ export function StrategyEditor({
                 </div>
               )}
             </div>
-            {run && <ResultView key={run.id} pluginId={pluginId} run={run} />}
+            {tab === 'runs' && run && (
+              <ResultView key={run.id} pluginId={pluginId} run={run} />
+            )}
           </ScrollArea>
         </TabsContent>
       </Tabs>

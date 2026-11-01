@@ -32,7 +32,10 @@ import type { ErrorKey } from '@/i18n/config';
 
 const modelGroups = [
   { id: 'conversation', fields: ['defaultModel', 'fastModel'] },
-  { id: 'media', fields: ['imageModel', 'speechModel', 'asrModel'] },
+  {
+    id: 'media',
+    fields: ['imageModel', 'speechModel', 'asrModel', 'model3dModel'],
+  },
   { id: 'knowledge', fields: ['embeddingModel', 'rerankModel', 'ocrModel'] },
 ] as const;
 

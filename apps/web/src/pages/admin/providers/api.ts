@@ -1,3 +1,7 @@
+import {
+  providerMetadataFromForm,
+  type ProviderConfigField,
+} from '@aime/shared/provider-configuration';
 import { api } from '../../../lib/rpc.js';
 import type { z } from 'zod';
 import { invalidateAvailableModels } from '../../../features/models/resource';
@@ -50,6 +54,8 @@ async function write<T>(request: Promise<T>) {
   return result;
 }
 export const providerApi = {
+  configurations: (signal?: AbortSignal) =>
+    api.providers.configurations(undefined, { signal }),
   list: (signal?: AbortSignal) => api.providers.list(undefined, { signal }),
   get: (providerId: string, signal?: AbortSignal) =>
     api.providers.get({ params: { providerId } }, { signal }),
@@ -87,12 +93,14 @@ export const providerApi = {
     write(api.providers.saveDefaults({ body })),
 };
 
-// Metadata is not editable here; omit it so PATCH preserves its saved value.
+// Preserve metadata on PATCH; each provider declares its editable fields.
 const providerFormSchema = providerInputSchema.omit({ metadata: true });
 
 export function providerFormInput(
   form: FormData,
-): Omit<ProviderInput, 'metadata'> {
+  metadata: Record<string, unknown> = {},
+  fields: readonly ProviderConfigField[] = [],
+): Omit<ProviderInput, 'metadata'> & { metadata?: Record<string, unknown> } {
   const apiKey = String(form.get('apiKey') ?? '').trim();
   const parsed = providerFormSchema.safeParse({
     name: form.get('name'),
@@ -102,6 +110,16 @@ export function providerFormInput(
     ...(apiKey ? { apiKey } : {}),
   });
   if (!parsed.success) throw { code: 'VALIDATION_ERROR' };
+  if (fields.length) {
+    try {
+      return {
+        ...parsed.data,
+        metadata: providerMetadataFromForm(form, fields, metadata),
+      };
+    } catch {
+      throw { code: 'VALIDATION_ERROR' };
+    }
+  }
   return parsed.data;
 }
 

@@ -36,6 +36,8 @@ export const automationSchema = automationInputSchema.extend({
   resourceId: z.string(),
   scope: automationScopeSchema,
   createdBy: z.string(),
+  // Server-owned provenance, never accepted in create/edit input.
+  sourceRoomId: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   nextFireAt: z.string().nullable(),

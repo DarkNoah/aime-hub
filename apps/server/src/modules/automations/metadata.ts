@@ -11,6 +11,7 @@ export const metadataSchema = z.object({
   managedBy: z.literal('automations'),
   version: z.literal(2),
   ownerId: z.string().min(1),
+  sourceRoomId: z.string().optional(),
   scope: automationScopeSchema,
   data: automationInputSchema,
   threadId: z.string().regex(/^schedule:[a-zA-Z0-9_-]{16}$/),
