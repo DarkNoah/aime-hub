@@ -1,13 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Link, useParams, useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
-import {
-  ArrowUpRight,
-  ChevronRight,
-  Folder,
-  MessagesSquare,
-  Plus,
-} from 'lucide-react';
+import { ChevronRight, Folder, MessagesSquare, Plus } from 'lucide-react';
 import type { ProjectSummary } from '@aime/shared/projects';
 import type { ThreadSummary } from '@aime/shared/threads';
 import { Button } from '@/components/ui/button';
@@ -74,15 +68,7 @@ export function ProjectSidebar({ onNavigate }: { onNavigate?: () => void }) {
           </Button>
         </div>
         <CollapsibleContent forceMount hidden={!open}>
-          <div className="mt-1 mb-2 ">
-            <Link
-              to="/projects"
-              onClick={onNavigate}
-              className="mb-1 flex h-8 items-center justify-between rounded-md px-2 text-xs text-muted-foreground outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              {t('projects.all')}
-              <ArrowUpRight className="size-3.5" />
-            </Link>
+          <div className="mt-1 mb-2">
             <SidebarPageList
               {...list}
               label={t('projects.list')}

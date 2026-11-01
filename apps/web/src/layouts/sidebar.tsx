@@ -6,18 +6,15 @@ import { nanoid } from 'nanoid';
 import { Link, useNavigate } from '@tanstack/react-router';
 import {
   ChevronsUpDown,
-  Clock3,
-  BookOpen,
-  Bot,
   Home,
   LoaderCircle,
   LogOut,
   MessagesSquare,
   Settings2,
-  Sparkles,
   SquarePen,
 } from 'lucide-react';
 import { Brand } from '@/components/brand';
+import { Button } from '@/components/ui/button';
 import { UserAvatar } from '@/components/user-avatar';
 import {
   DropdownMenu,
@@ -28,13 +25,19 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Item } from '@/components/ui/item';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { useAuthSession } from '@/features/auth/session-context';
 import { authClient, isAdmin } from '@/features/auth/client';
 import { authErrorKey } from '@/features/auth/errors';
 import { ThreadSidebar } from '@/components/chat/thread-sidebar';
 import { ProjectSidebar } from '@/pages/projects/components/project-sidebar';
 import { RoomUnreadDot } from '@/pages/group-chats/components/room-unread-dot';
-import { adminNavigation } from './navigation';
+import { adminNavigation, workspaceNavigation } from './navigation';
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { t } = useTranslation();
@@ -117,46 +120,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               {t('nav.home')}
             </Link>
             <Link
-              to="/automations"
-              className={linkClass}
-              activeProps={activeProps}
-              inactiveProps={inactiveProps}
-              onClick={onNavigate}
-            >
-              <Clock3 className="size-4" />
-              {t('nav.automations')}
-            </Link>
-            <Link
-              to="/skills"
-              className={linkClass}
-              activeProps={activeProps}
-              inactiveProps={inactiveProps}
-              onClick={onNavigate}
-            >
-              <Sparkles className="size-4" />
-              {t('nav.skills')}
-            </Link>
-            <Link
-              to="/agents"
-              className={linkClass}
-              activeProps={activeProps}
-              inactiveProps={inactiveProps}
-              onClick={onNavigate}
-            >
-              <Bot className="size-4" />
-              {t('localAgents.title.personal')}
-            </Link>
-            <Link
-              to="/knowledge"
-              className={linkClass}
-              activeProps={activeProps}
-              inactiveProps={inactiveProps}
-              onClick={onNavigate}
-            >
-              <BookOpen className="size-4" />
-              {t('nav.knowledge')}
-            </Link>
-            <Link
               to="/group-chats"
               className={linkClass}
               activeProps={activeProps}
@@ -168,8 +131,8 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               <RoomUnreadDot className="ml-auto" />
             </Link>
             <PluginNavigation onNavigate={onNavigate} />
-            <ThreadSidebar onNavigate={onNavigate} />
             <ProjectSidebar onNavigate={onNavigate} />
+            <ThreadSidebar onNavigate={onNavigate} />
           </div>
           {admin && (
             <div className="space-y-1">
@@ -190,22 +153,44 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   {t(label)}
                 </Link>
               ))}
-              <Link
-                to="/knowledge"
-                className={linkClass}
-                activeProps={activeProps}
-                inactiveProps={inactiveProps}
-                onClick={onNavigate}
-              >
-                <BookOpen className="size-4" />
-                {t('nav.knowledge')}
-              </Link>
               <PluginNavigation admin onNavigate={onNavigate} />
             </div>
           )}
         </nav>
       </ScrollArea>
-      <div className="m-3 mt-5 border-t pt-3">
+      <div className="m-3 mt-3 shrink-0 border-t pt-2">
+        <TooltipProvider delayDuration={250}>
+          <nav
+            aria-label={t('common.workspace')}
+            className="mb-2 flex items-center gap-1"
+          >
+            {workspaceNavigation.map(({ to, label, icon: Icon }) => (
+              <Tooltip key={to}>
+                <TooltipTrigger asChild>
+                  <Button
+                    asChild
+                    variant="ghost"
+                    size="icon"
+                    className="h-11 min-w-0 flex-1 rounded-lg md:h-9"
+                  >
+                    <Link
+                      to={to}
+                      aria-label={t(label)}
+                      activeProps={activeProps}
+                      inactiveProps={inactiveProps}
+                      onClick={onNavigate}
+                    >
+                      <Icon aria-hidden="true" className="size-4" />
+                    </Link>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={8}>
+                  {t(label)}
+                </TooltipContent>
+              </Tooltip>
+            ))}
+          </nav>
+        </TooltipProvider>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button

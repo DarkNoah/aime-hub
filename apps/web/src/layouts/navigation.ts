@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  BookOpen,
   Bot,
   Clock3,
   LayoutDashboard,
@@ -12,6 +13,13 @@ import {
   Wrench,
   Users,
 } from 'lucide-react';
+
+export const workspaceNavigation = [
+  { to: '/automations', label: 'nav.automations', icon: Clock3 },
+  { to: '/skills', label: 'nav.skills', icon: Sparkles },
+  { to: '/agents', label: 'localAgents.title.personal', icon: Bot },
+  { to: '/knowledge', label: 'nav.knowledge', icon: BookOpen },
+] as const;
 
 export const adminNavigation = [
   { to: '/admin', label: 'nav.overview', icon: LayoutDashboard },
