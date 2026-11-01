@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import type { BrowserContext, Cookie } from 'playwright-core';
 import { chromium } from '../../../lib/browser.js';
 import { ThreadPageManager } from './page-manager.js';
+import { recoverBrowserProfileLock } from './profile-lock.js';
 
 /** One persistent Chromium context per user; profiles never live in chat workspaces. */
 export class UserBrowser {
@@ -58,6 +59,7 @@ export class UserBrowser {
     const profile = join(this.directory, 'profile');
     await mkdir(profile, { recursive: true, mode: 0o700 });
     await chmod(this.directory, 0o700);
+    await recoverBrowserProfileLock(profile);
     // Discard only session/tab recovery files, including after an unclean server exit.
     // Cookies, localStorage and IndexedDB remain in the persistent profile.
     for (const name of [
