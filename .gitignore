@@ -84,6 +84,7 @@ plugins/vibe-quant/**/__pycache__/
 
 !apps/server/src/modules/automations/bot-events.test.ts
 !apps/server/src/modules/automations/bot-events.integration.test.ts
+!apps/server/src/modules/automations/request-context.test.ts
 
 !apps/server/src/mastra/providers/alibaba*.test.ts
 !apps/server/src/mastra/providers/provider-configuration.test.ts

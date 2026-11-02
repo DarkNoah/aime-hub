@@ -408,6 +408,15 @@ export function createAutomationRuntime({
     },
     defaultOptions: async ({ requestContext }) => {
       const run = await execution(requestContext);
+      // Tool permissions use the creator revalidated by service.prepare(), even
+      // when system tasks use a shared workspace and model resource.
+      requestContext.set('userId', run.task.createdBy);
+      requestContext.set(
+        'projectId',
+        run.task.scope.scope === 'project'
+          ? run.task.scope.projectId
+          : undefined,
+      );
       requestContext.set('chatSettings', run.task.settings);
       return run.options;
     },
