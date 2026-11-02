@@ -16,7 +16,7 @@ import {
   mergeMessages,
 } from './api';
 
-export function useRoom(roomId: string, projectId?: string) {
+export function useRoom(roomId: string, projectId?: string, pluginId?: string) {
   const [room, setRoom] = useState<GroupChatDetail | null>(null);
   const [messages, setMessages] = useState<GroupChatMessage[]>([]);
   const [profiles, setProfiles] = useState<Map<string, MemberProfile>>(
@@ -129,7 +129,10 @@ export function useRoom(roomId: string, projectId?: string) {
           groupChatApi.get(roomId, signal),
           groupChatApi.messages(roomId, {}, signal),
         ]);
-        if (detail.projectId !== (projectId ?? null)) {
+        if (
+          detail.projectId !== (projectId ?? null) ||
+          (detail.pluginId ?? null) !== (pluginId ?? null)
+        ) {
           if (!signal.aborted) setError('groupChat.unavailable');
           return;
         }
@@ -161,7 +164,7 @@ export function useRoom(roomId: string, projectId?: string) {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [roomId, projectId, revision]);
+  }, [roomId, projectId, pluginId, revision]);
 
   const loadEarlier = useCallback(async () => {
     const signal = lifecycle.current?.signal;

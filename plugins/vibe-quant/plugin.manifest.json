@@ -298,6 +298,7 @@
     }
   ],
   "workspace": true,
+
   "chatThreads": {
     "agentId": "plugin:vibe-quant:quant-agent",
     "usePluginWorkspace": true

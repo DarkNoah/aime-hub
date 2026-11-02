@@ -247,6 +247,12 @@ const routeTree = rootRoute.addChildren([
         personalGroupChatRoute,
         createRoute({
           getParentRoute: () => layoutRoute,
+          path: '/group-chats/plugins/$pluginId',
+          validateSearch: validateGroupChatSearch,
+          component: GroupChatsPage,
+        }),
+        createRoute({
+          getParentRoute: () => layoutRoute,
           path: '/knowledge',
           component: KnowledgePage,
         }),

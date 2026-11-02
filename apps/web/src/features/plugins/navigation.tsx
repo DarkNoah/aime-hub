@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router';
-import { ChevronRight, FileText, Puzzle } from 'lucide-react';
+import { ChevronRight, FileText, Puzzle, MessagesSquare } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { RoomUnreadDot } from '@/pages/group-chats/components/room-unread-dot';
 import { ThreadSidebar } from '@/components/chat/thread-sidebar';
 import {
   Collapsible,
@@ -25,7 +26,8 @@ export function PluginNavigation({
         (page) => page.navigation && (page.access === 'admin') === admin,
       );
       const chats = !admin && plugin.chatThreads;
-      if (!pages.length && !chats) return null;
+      const groupChat = !admin && plugin.groupChat && plugin.workspace;
+      if (!pages.length && !chats && !groupChat) return null;
 
       return (
         <Collapsible key={plugin.id} defaultOpen>
@@ -65,6 +67,28 @@ export function PluginNavigation({
                   <span className="truncate">{page.title}</span>
                 </Link>
               ))}
+              {groupChat && (
+                <Link
+                  to="/group-chats/plugins/$pluginId"
+                  params={{ pluginId: plugin.id }}
+                  className="sidebar-link flex h-9 min-w-0 items-center gap-3 rounded-lg px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  activeProps={{
+                    className: 'bg-accent font-semibold text-primary',
+                  }}
+                  inactiveProps={{
+                    className:
+                      'text-muted-foreground hover:bg-accent/70 hover:text-foreground',
+                  }}
+                  onClick={onNavigate}
+                >
+                  <MessagesSquare
+                    aria-hidden="true"
+                    className="size-4 shrink-0"
+                  />
+                  <span className="truncate">{t('groupChat.heading')}</span>
+                  <RoomUnreadDot pluginId={plugin.id} />
+                </Link>
+              )}
               {chats && (
                 <ThreadSidebar
                   plugin={plugin.id}

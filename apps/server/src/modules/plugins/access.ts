@@ -21,22 +21,28 @@ type AccessRow = { id: string; access: PluginAccess; revision: string };
 export class PluginAccessService {
   constructor(private readonly database: DataSource) {}
 
-  private async rows(id?: string): Promise<AccessRow[]> {
-    return this.database.query(
+  private async rows(
+    id?: string,
+    reader: Pick<DataSource, 'query'> = this.database,
+  ): Promise<AccessRow[]> {
+    return reader.query(
       `SELECT id, access, access_revision::text AS revision FROM plugin_installations${id ? ' WHERE id = $1' : ''}`,
       id ? [id] : [],
     );
   }
 
-  async allowedIds(userId?: string): Promise<Set<string>> {
-    const rows = await this.rows();
+  async allowedIds(
+    userId?: string,
+    reader: Pick<DataSource, 'query'> = this.database,
+  ): Promise<Set<string>> {
+    const rows = await this.rows(undefined, reader);
     const policies = rows.map((row) => ({
       id: row.id,
       access: pluginAccessSchema.parse(row.access),
     }));
     let admin = false;
     if (userId && policies.some(({ access }) => access.mode === 'selected')) {
-      const [user] = await this.database.query<
+      const [user] = await reader.query<
         { role: string | null; banned: boolean | null }[]
       >('SELECT role, banned FROM users WHERE id = $1', [userId]);
       admin = !!user && !user.banned && hasAdminRole(user.role);
@@ -58,8 +64,11 @@ export class PluginAccessService {
       throw new PluginAccessError('PLUGIN_FORBIDDEN', 403);
   }
 
-  async get(id: string): Promise<PluginAccessConfiguration> {
-    const [row] = await this.rows(id);
+  async get(
+    id: string,
+    reader: Pick<DataSource, 'query'> = this.database,
+  ): Promise<PluginAccessConfiguration> {
+    const [row] = await this.rows(id, reader);
     if (!row) throw new PluginAccessError('PLUGIN_NOT_FOUND', 404);
     return {
       access: pluginAccessSchema.parse(row.access),

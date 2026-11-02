@@ -39,6 +39,7 @@ plugins/vibe-quant/**/__pycache__/
 !scripts/group-chats-browser.test.mjs
 !scripts/group-chat-choices-browser.test.mjs
 !scripts/group-chats.test.ts
+!scripts/plugin-group-chats.test.ts
 !scripts/group-chat-runtime.test.ts
 !scripts/group-chat-a2a.test.ts
 !apps/server/src/modules/group-chats/*.test.ts

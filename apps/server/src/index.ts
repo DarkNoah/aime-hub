@@ -1,5 +1,6 @@
 import { IssueService } from './modules/issues/service.js';
 import { GroupChatService } from './modules/group-chats/service.js';
+import { PluginRoomAccess } from './modules/group-chats/plugin-access.js';
 import { createGroupChatRuntime } from './modules/group-chats/runtime.js';
 import { UserService } from './modules/users/service.js';
 import { AudioService } from './modules/audio/service.js';
@@ -160,7 +161,11 @@ const disposeChatRequestLogging = installChatRequestLogging(
   () => requestLoggingEnabled,
 );
 const projects = new ProjectService(database, { workspaceRoot });
-const groupChats = new GroupChatService(database, projects);
+const groupChats = new GroupChatService(
+  database,
+  projects,
+  new PluginRoomAccess(database, plugins),
+);
 const users = new UserService(database, groupChats);
 const environmentVariables = new EnvironmentVariableService(database);
 const localApi = new LocalApiAccess(

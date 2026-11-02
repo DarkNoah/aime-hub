@@ -397,6 +397,7 @@ export function createChatRunner(
             APP_PROJECT_ID: projectId ?? '',
           }),
           workspacePlugin,
+          !(roomBinding && workspacePlugin),
         );
         const commands = workspace.sandbox;
         if (!(commands instanceof CommandSandbox))
@@ -411,7 +412,7 @@ export function createChatRunner(
             : '';
         const attachmentMedia = new AttachmentMediaReader(
           workspace.filesystem!,
-          projectId
+          projectId || (roomBinding && workspacePlugin)
             ? undefined
             : await createPersonalSharedDirectory(workspaceRoot, userId),
         );

@@ -153,6 +153,12 @@ export const zhCN = {
   'groupChat.actions': 'Bots 操作',
   'groupChat.emptyRooms': '还没有 Bots',
   'groupChat.emptyMessages': '发送第一条消息',
+  'groupChat.addPluginMemberHint':
+    '只能添加插件授权范围内的用户，添加后可访问聊天室及插件共享工作区。',
+  'groupChat.pluginHint':
+    '聊天室成员共享消息和插件专属工作区，可添加的成员范围由插件授权决定。',
+  'groupChat.plugin': '插件聊天室',
+  'groupChat.pluginMessageHint': '与插件成员交流，共同使用插件专属工作区。',
   'groupChat.projectMessageHint': '在这里与项目成员交流。',
   'groupChat.personalMessageHint': '记录想法，消息会保存在这里。',
   'groupChat.placeholder': '输入消息…',

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { procedure, threadId, page, perPage, id } from './base.js';
 import {
   groupChatCreateSchema,
+  groupChatScopeSchema,
   groupChatSequenceSchema,
   groupChatReadSchema,
   type GroupChatReadState,
@@ -232,14 +233,13 @@ export const groupChatsContract = {
       path: '/group-chats/default',
       inputStructure: 'detailed',
     })
-    .input(z.object({ body: z.object({ projectId: threadId.optional() }) }))
+    .input(z.object({ body: groupChatScopeSchema }))
     .output(type<GroupChatDetail>()),
   list: procedure
     .route({ method: 'GET', path: '/group-chats', inputStructure: 'detailed' })
     .input(
       z.object({
-        query: z.object({
-          projectId: threadId.optional(),
+        query: groupChatScopeSchema.safeExtend({
           page,
           perPage: perPage.default(20),
         }),
@@ -270,7 +270,10 @@ export const groupChatsContract = {
       inputStructure: 'detailed',
     })
     .input(
-      z.object({ params, body: groupChatCreateSchema.pick({ title: true }) }),
+      z.object({
+        params,
+        body: z.object({ title: groupChatCreateSchema.shape.title }),
+      }),
     )
     .output(type<GroupChat>()),
   remove: procedure

@@ -28,7 +28,8 @@ type RoomRuntimeStore = Pick<
   | 'claimEvent'
   | 'acknowledgeEvent'
   | 'deferEvent'
->;
+> &
+  Partial<Pick<GroupChatService, 'suspendUnavailablePlugins'>>;
 
 /** A trigger is durable; the model execution continues in the room's fixed thread. */
 export function roomEventInputId(id: string, version: string) {
@@ -49,7 +50,7 @@ export function createGroupChatRuntime(
   const inFlight = new Set<string>();
 
   rooms.setLifecycle({
-    ensureAgent: async (room, agent) => {
+    ensureAgent: async (room, agent, userId) => {
       await threads.ensureGroupChatThread({
         roomId: room.id,
         memberId: agent.id,
@@ -57,6 +58,8 @@ export function createGroupChatRuntime(
         threadId: agent.threadId,
         userId: room.createdBy,
         projectId: room.projectId ?? undefined,
+        pluginId: room.pluginId ?? undefined,
+        workspaceUserId: userId,
         title: `${room.title} · ${agent.name}`,
         settings: agent.settings,
       });
@@ -102,6 +105,12 @@ export function createGroupChatRuntime(
         });
       }
       return assets;
+    },
+    suspendAgents: async (room, agents) => {
+      for (const agent of agents) {
+        await threads.disposeGroupChatThread(room.id, agent.threadId);
+        await rooms.setAgentStatus(agent.id, 'idle');
+      }
     },
     removeAgents: async (room, agents) => {
       for (const agent of agents)
@@ -214,6 +223,7 @@ export function createGroupChatRuntime(
     if (stopping) return Promise.resolve();
     if (ticking) return ticking;
     ticking = (async () => {
+      await rooms.suspendUnavailablePlugins?.();
       await rooms.scheduleIdleEvents(50);
       const events = await rooms.dueEvents(50);
       // Distinct room agents may run independently; each native thread serializes execution.

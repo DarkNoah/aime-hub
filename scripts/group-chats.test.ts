@@ -1,3 +1,4 @@
+import { PluginGroupChats1780000042000 } from '../packages/db/src/migrations/1780000042000-plugin-group-chats.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomBytes } from 'node:crypto';
@@ -139,6 +140,7 @@ test(
       INSERT INTO group_chat_agents(id,room_id,thread_id,name,role,enabled) VALUES('legacybot0000001','legacybotroom001','legacythread0001','Bot','bot',false)`);
     await new GroupChatMembers1780000027000().up(runner);
     await new GroupChatIdleWake1780000029000().up(runner);
+    await new PluginGroupChats1780000042000().up(runner);
     await new GroupChatA2aMembers1780000030000().up(runner);
     await new GroupChatA2aMemberDeletion1780000031000().up(runner);
     await new GroupChatA2aCard1780000033000().up(runner);

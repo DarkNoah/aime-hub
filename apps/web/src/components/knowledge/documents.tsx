@@ -21,6 +21,7 @@ import type {
 } from '@aime/shared/knowledge';
 import { knowledgeLocked } from '@aime/shared/knowledge';
 import { api } from '@/lib/rpc';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -42,7 +43,13 @@ import { TagsDisplay } from './tags-editor';
 import { KnowledgeSearch } from './search';
 import { knowledgeError } from './errors';
 
-export function KnowledgeDocuments({ base }: { base: KnowledgeBase }) {
+export function KnowledgeDocuments({
+  base,
+  compact = false,
+}: {
+  base: KnowledgeBase;
+  compact?: boolean;
+}) {
   const { t } = useTranslation();
   const locked = knowledgeLocked(base) || !base.canEditDocuments;
   const [docs, setDocs] = useState<KnowledgeDocument[]>([]);
@@ -209,7 +216,14 @@ export function KnowledgeDocuments({ base }: { base: KnowledgeBase }) {
     <div className="min-w-0 space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-2">
-          <h2 className="break-words text-xl font-semibold">{base.name}</h2>
+          <h2
+            className={cn(
+              'break-words font-semibold',
+              compact ? 'text-base' : 'text-xl',
+            )}
+          >
+            {base.name}
+          </h2>
           <p className="text-sm text-muted-foreground">
             {base.description || t('knowledge.documentsHint')}
           </p>
@@ -390,12 +404,18 @@ export function KnowledgeDocuments({ base }: { base: KnowledgeBase }) {
             </div>
           )}
           {(docs.length > 0 || loading || more) && (
-            <ScrollArea className="h-[min(58vh,650px)]">
+            <ScrollArea
+              className={compact ? undefined : 'h-[min(58vh,650px)]'}
+              viewportProps={{ className: '[&>div]:block!' }}
+            >
               <div className="space-y-2 pr-3">
                 {docs.map((d) => (
                   <div
                     key={d.id}
-                    className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3 rounded-lg border p-4 sm:flex"
+                    className={cn(
+                      'grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3 rounded-lg border p-4',
+                      !compact && 'sm:flex',
+                    )}
                   >
                     {d.sourceType === 'url' ? (
                       <Globe className="mt-1 size-4 shrink-0 text-muted-foreground" />

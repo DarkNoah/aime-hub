@@ -19,3 +19,16 @@ export function groupChatThreadBinding(
     return undefined;
   return binding as GroupChatThreadBinding;
 }
+
+/** Shared plugin rooms belong to the plugin, independently of their creator. */
+export function groupChatResourceId(
+  userId: string,
+  projectId?: string | null,
+  pluginId?: string | null,
+) {
+  return pluginId
+    ? `plugin:${pluginId}`
+    : projectId
+      ? `project:${projectId}`
+      : `user:${userId}`;
+}

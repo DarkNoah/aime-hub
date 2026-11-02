@@ -1,6 +1,10 @@
 import type { GroupChatReadState } from '@aime/shared/group-chats';
 
-export type RoomUnreadScope = { roomId?: string; projectId?: string };
+export type RoomUnreadScope = {
+  roomId?: string;
+  projectId?: string;
+  pluginId?: string;
+};
 
 /** Server-backed receipts; an older poll must never undo a successful acknowledgement. */
 export function createRoomUnreadResource(
@@ -31,12 +35,13 @@ export function createRoomUnreadResource(
       }
       emit();
     },
-    hasUnread({ roomId, projectId }: RoomUnreadScope = {}) {
+    hasUnread({ roomId, projectId, pluginId }: RoomUnreadScope = {}) {
       return rooms.some(
         (room) =>
           (roomId
             ? room.roomId === roomId
-            : room.projectId === (projectId ?? null)) &&
+            : room.projectId === (projectId ?? null) &&
+              (room.pluginId ?? null) === (pluginId ?? null)) &&
           BigInt(room.latestSequence) > (confirmed.get(room.roomId) ?? 0n),
       );
     },

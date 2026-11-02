@@ -1,3 +1,4 @@
+import { PluginGroupChats1780000042000 } from '../packages/db/src/migrations/1780000042000-plugin-group-chats.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash, randomBytes } from 'node:crypto';
@@ -52,6 +53,7 @@ test(
       new GroupChatAgents1780000026000(),
       new GroupChatMembers1780000027000(),
       new GroupChatIdleWake1780000029000(),
+      new PluginGroupChats1780000042000(),
       new GroupChatA2aMembers1780000030000(),
       new GroupChatA2aMemberDeletion1780000031000(),
       new GroupChatA2aCard1780000033000(),

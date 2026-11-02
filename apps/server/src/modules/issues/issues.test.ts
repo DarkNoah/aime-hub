@@ -1,3 +1,4 @@
+import { PluginGroupChats1780000042000 } from '../../../../../packages/db/src/migrations/1780000042000-plugin-group-chats.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomBytes } from 'node:crypto';
@@ -349,6 +350,7 @@ test(
     await new CreateGroupChats1780000024000().up(migration);
     await new GroupChatAgents1780000026000().up(migration);
     await new GroupChatIdleWake1780000029000().up(migration);
+    await new PluginGroupChats1780000042000().up(migration);
     await new CreateIssues1780000035000().up(migration);
     await new IssueSourceThread1780000036000().up(migration);
     await new IssueEvents1780000038000().up(migration);

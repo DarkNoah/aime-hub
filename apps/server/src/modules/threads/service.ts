@@ -1,6 +1,7 @@
 import type { SpeechEvent } from '@aime/shared/audio';
 import {
   groupChatThreadBinding,
+  groupChatResourceId,
   type GroupChatThreadBinding,
 } from '../group-chats/metadata.js';
 import { nanoid } from 'nanoid';
@@ -285,6 +286,8 @@ export class ThreadService {
       threadId: string;
       userId: string;
       projectId?: string;
+      pluginId?: string;
+      workspaceUserId?: string;
       title: string;
       settings: ChatSettings;
     },
@@ -326,15 +329,22 @@ export class ThreadService {
         }
         return;
       }
-      const workspace = input.projectId
-        ? await this.runner.createWorkspace(input.userId, input.projectId)
-        : await this.runner.personalSharedDirectory?.(input.userId);
+      const workspace = input.pluginId
+        ? await this.runner.pluginWorkspace?.(
+            input.pluginId,
+            input.workspaceUserId ?? input.userId,
+          )
+        : input.projectId
+          ? await this.runner.createWorkspace(input.userId, input.projectId)
+          : await this.runner.personalSharedDirectory?.(input.userId);
       if (!workspace) throw new ThreadError('WORKSPACE_UNAVAILABLE', 404);
       await this.memory.createThread({
         threadId: input.threadId,
-        resourceId: input.projectId
-          ? `project:${input.projectId}`
-          : `user:${input.userId}`,
+        resourceId: groupChatResourceId(
+          input.userId,
+          input.projectId,
+          input.pluginId,
+        ),
         title: input.title,
         metadata: {
           ...input.settings,
@@ -343,6 +353,9 @@ export class ThreadService {
           createdBy: input.userId,
           workspace,
           autoTitle: false,
+          ...(input.pluginId
+            ? { plugin: input.pluginId, workspacePlugin: input.pluginId }
+            : {}),
           groupChat: {
             roomId: input.roomId,
             memberId: input.memberId,
@@ -1607,6 +1620,10 @@ export class ThreadService {
     if (target) return target;
     if (
       threadScope(thread.resourceId).type === 'user' &&
+      !(
+        thread.metadata?.workspacePlugin &&
+        groupChatThreadBinding(thread.metadata)
+      ) &&
       this.runner.personalSharedDirectory
     ) {
       const shared = await this.withWorkspaceFiles(
@@ -1656,6 +1673,11 @@ export class ThreadService {
     const thread = await this.accessible(userId, id);
     const { type, projectId, userId: ownerId } = threadScope(thread.resourceId);
     if (scope === 'shared') {
+      if (
+        thread.metadata?.workspacePlugin &&
+        groupChatThreadBinding(thread.metadata)
+      )
+        throw new ThreadError('FILE_FORBIDDEN', 403);
       if (type !== 'user' || !ownerId)
         throw new ThreadError('FILE_FORBIDDEN', 403);
       return this.locked(id, async () => {

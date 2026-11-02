@@ -9,6 +9,13 @@ export function threadScope(resourceId: string) {
       userId: resourceId.slice(5),
       projectId: undefined,
     };
+  if (/^plugin:[a-z][a-z0-9-]{0,39}$/.test(resourceId))
+    return {
+      type: 'plugin' as const,
+      pluginId: resourceId.slice(7),
+      projectId: undefined,
+      userId: undefined,
+    };
   if (/^project:[a-zA-Z0-9_-]{16}$/.test(resourceId))
     return {
       type: 'project' as const,

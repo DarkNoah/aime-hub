@@ -8,55 +8,66 @@ export * from './access.js';
 
 /** Increment this when the host breaks the plugin contract. */
 export const PLUGIN_API_VERSION = 2;
-export const pluginManifestSchema = z.strictObject({
-  id: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/),
-  name: z.string().trim().min(1).max(100),
-  description: z.string().max(1000),
-  version: z.string().regex(/^\d+\.\d+\.\d+$/),
-  apiVersion: z.literal(PLUGIN_API_VERSION),
-  /** Build/discovery switch. False excludes all plugin entries; not the admin runtime switch. */
-  enabled: z.boolean().default(true),
-  // Dependencies refer to other installed plugin IDs, not npm packages.
-  dependencies: z.array(z.string().regex(/^[a-z][a-z0-9-]{0,39}$/)).default([]),
-  /** Administrator form; values are stored separately and never included in public manifests. */
-  configFields: pluginConfigFieldsSchema,
-  /** Request persistent storage at <WORKSPACE_ROOT>/plugins/<id>. */
-  workspace: z.boolean().optional(),
-  /** Opt in to a personal chat section beneath the plugin's main navigation. */
-  chatThreads: z
-    .strictObject({
-      /** Default agent for new plugin chats; omitted uses the host default. */
-      agentId: z.string().trim().min(1).optional(),
-      /** Request the plugin's persistent workspace for new chats. */
-      usePluginWorkspace: z.boolean().optional(),
-    })
-    .optional(),
-  pages: z
-    .array(
-      z.strictObject({
-        path: z
-          .string()
-          .regex(
-            /^(?:[a-z][a-z0-9-]*|:[a-zA-Z][a-zA-Z0-9]*)(?:\/(?:[a-z][a-z0-9-]*|:[a-zA-Z][a-zA-Z0-9]*))*$|^$/,
-          ),
-        title: z.string().min(1).max(100),
-        access: z.enum(['session', 'admin']).default('session'),
-        navigation: z.boolean().default(false),
-      }),
-    )
-    .default([]),
-  /** Contributions to the chat workspace's right sidebar. */
-  rightSidebar: z
-    .array(
-      z.strictObject({
-        id: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/),
-        title: z.string().trim().min(1).max(100),
-        access: z.enum(['session', 'admin']).default('session'),
-        icon: z.enum(['puzzle', 'notebook', 'list', 'chart']).default('puzzle'),
-      }),
-    )
-    .default([]),
-});
+export const pluginManifestSchema = z
+  .strictObject({
+    id: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/),
+    name: z.string().trim().min(1).max(100),
+    description: z.string().max(1000),
+    version: z.string().regex(/^\d+\.\d+\.\d+$/),
+    apiVersion: z.literal(PLUGIN_API_VERSION),
+    /** Build/discovery switch. False excludes all plugin entries; not the admin runtime switch. */
+    enabled: z.boolean().default(true),
+    // Dependencies refer to other installed plugin IDs, not npm packages.
+    dependencies: z
+      .array(z.string().regex(/^[a-z][a-z0-9-]{0,39}$/))
+      .default([]),
+    /** Administrator form; values are stored separately and never included in public manifests. */
+    configFields: pluginConfigFieldsSchema,
+    /** Request persistent storage at <WORKSPACE_ROOT>/plugins/<id>. */
+    workspace: z.boolean().optional(),
+    /** Shared host-managed room. Requires the plugin's persistent workspace. */
+    groupChat: z.boolean().optional(),
+    /** Opt in to a personal chat section beneath the plugin's main navigation. */
+    chatThreads: z
+      .strictObject({
+        /** Default agent for new plugin chats; omitted uses the host default. */
+        agentId: z.string().trim().min(1).optional(),
+        /** Request the plugin's persistent workspace for new chats. */
+        usePluginWorkspace: z.boolean().optional(),
+      })
+      .optional(),
+    pages: z
+      .array(
+        z.strictObject({
+          path: z
+            .string()
+            .regex(
+              /^(?:[a-z][a-z0-9-]*|:[a-zA-Z][a-zA-Z0-9]*)(?:\/(?:[a-z][a-z0-9-]*|:[a-zA-Z][a-zA-Z0-9]*))*$|^$/,
+            ),
+          title: z.string().min(1).max(100),
+          access: z.enum(['session', 'admin']).default('session'),
+          navigation: z.boolean().default(false),
+        }),
+      )
+      .default([]),
+    /** Contributions to the chat workspace's right sidebar. */
+    rightSidebar: z
+      .array(
+        z.strictObject({
+          id: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/),
+          title: z.string().trim().min(1).max(100),
+          access: z.enum(['session', 'admin']).default('session'),
+          icon: z
+            .enum(['puzzle', 'notebook', 'list', 'chart'])
+            .default('puzzle'),
+        }),
+      )
+      .default([]),
+  })
+  .refine((manifest) => !manifest.groupChat || manifest.workspace === true, {
+    path: ['groupChat'],
+    message: 'groupChat requires workspace: true',
+  });
 export type PluginManifest = z.infer<typeof pluginManifestSchema>;
 export type PluginStatus = Omit<PluginManifest, 'enabled'> & {
   /** Available in this process only after onEnable succeeds and dependencies are ready. */

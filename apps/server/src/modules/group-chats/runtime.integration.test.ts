@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -17,7 +17,10 @@ import type {
 import { botAgent } from '../../mastra/agents/bot-agent.js';
 import { createChatRunner } from '../threads/runner.js';
 import { ThreadService } from '../threads/service.js';
-import { createPersonalSharedDirectory } from '../threads/workspace.js';
+import {
+  createPersonalSharedDirectory,
+  getWorkspace,
+} from '../threads/workspace.js';
 import type { LanguageModelService } from '../models/language-model.js';
 import type { GroupChatService, AgentRoomMessageInput } from './service.js';
 
@@ -89,7 +92,7 @@ async function settled(threads: ThreadService) {
   assert.fail('Room native execution did not settle within 10 seconds');
 }
 
-test('native room agent publishes only tools, refreshes MEMORY.md and continues the same private thread without suspension', async (t) => {
+async function nativeRoom(t: TestContext, pluginId?: string) {
   const root = await mkdtemp('/tmp/group-chat-native-');
   const storage = new InMemoryStore();
   const memory = new Memory({ storage, options: { generateTitle: false } });
@@ -282,7 +285,17 @@ test('native room agent publishes only tools, refreshes MEMORY.md and continues 
     undefined,
     undefined,
     undefined,
-    undefined,
+    pluginId
+      ? {
+          workspaceDirectory: async (id: string) => {
+            assert.equal(id, pluginId);
+            const directory = join(root, 'plugins', id);
+            await mkdir(directory, { recursive: true });
+            return directory;
+          },
+          access: { assertAllowed: async () => {} } as never,
+        }
+      : undefined,
     rooms,
   );
   const threads = new ThreadService(
@@ -300,11 +313,19 @@ test('native room agent publishes only tools, refreshes MEMORY.md and continues 
     ...member,
     memberId: member.id,
     userId: 'alice',
+    pluginId,
     title: 'Room bot',
   });
   const first = await memory.getThreadById({ threadId: member.threadId });
   assert.ok(first);
-  const shared = await createPersonalSharedDirectory(root, 'alice');
+  const shared = pluginId
+    ? join(root, 'plugins', pluginId)
+    : await createPersonalSharedDirectory(root, 'alice');
+  assert.equal(first.metadata?.workspacePlugin, pluginId);
+  assert.equal(
+    first.resourceId,
+    pluginId ? `plugin:${pluginId}` : 'user:alice',
+  );
   assert.equal(first.metadata?.workspace, shared);
   assert.equal((await threads.listThreads('alice')).threads.length, 0);
   const memoryDirectory = join(
@@ -395,6 +416,7 @@ test('native room agent publishes only tools, refreshes MEMORY.md and continues 
     threadId: 'workerthread0001',
     role: 'worker',
     userId: 'alice',
+    pluginId,
     title: 'Worker',
   });
   assert.equal(
@@ -402,4 +424,43 @@ test('native room agent publishes only tools, refreshes MEMORY.md and continues 
       ?.workspace,
     shared,
   );
+}
+
+test('native room agent publishes only tools, refreshes MEMORY.md and continues the same private thread without suspension', (t) =>
+  nativeRoom(t));
+test('native plugin room agents share the plugin workspace for tools, memory and continued execution', (t) =>
+  nativeRoom(t, 'room-plugin'));
+
+test('plugin room file tools cannot read the creator personal shared directory', async (t) => {
+  const root = await mkdtemp('/tmp/plugin-room-files-');
+  const directory = join(root, 'plugins', 'demo');
+  const personal = await createPersonalSharedDirectory(root, 'alice');
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(personal, 'private.txt'), 'Personal only');
+  await writeFile(join(directory, 'shared.txt'), 'Plugin members');
+  const workspace = getWorkspace(
+    root,
+    'alice',
+    directory,
+    undefined,
+    [],
+    undefined,
+    undefined,
+    undefined,
+    'demo',
+    false,
+  );
+  t.after(async () => {
+    await workspace.destroy();
+    await rm(root, { recursive: true, force: true });
+  });
+  assert.equal(
+    await workspace.filesystem!.readFile('shared.txt', { encoding: 'utf-8' }),
+    'Plugin members',
+  );
+  await assert.rejects(
+    workspace.filesystem!.readFile(join(personal, 'private.txt')),
+  );
+  assert.ok(workspace.filesystem!.getInstructions);
+  assert.ok(!workspace.filesystem!.getInstructions().includes(personal));
 });

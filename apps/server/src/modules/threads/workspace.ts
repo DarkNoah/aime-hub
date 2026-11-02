@@ -109,6 +109,7 @@ export function getWorkspace(
   environmentVariables?: Pick<EnvironmentVariableService, 'getEnv'>,
   commandEnvironment?: (userId?: string) => Record<string, string>,
   workspacePlugin?: string,
+  allowPersonalFiles = true,
 ): Workspace<WorkspaceFilesystem, CommandSandbox> {
   const valid = workspacePlugin
     ? path === pluginWorkspaceDirectory(root, workspacePlugin)
@@ -123,24 +124,31 @@ export function getWorkspace(
     new LocalFilesystem({
       basePath: path,
       contained: true,
-      allowedPaths: projectId ? [] : [userPath, sharedPath],
-      onInit: projectId
-        ? undefined
-        : async () => {
-            // Existing personal threads also need the shared directory.
-            await createPersonalSharedDirectory(root, userId);
-          },
-      instructions: projectId
-        ? undefined
-        : ({ defaultInstructions }) =>
-            `${defaultInstructions}\nThe shared folder at "${sharedPath}" is shared by all personal chat threads belonging to the current user. Use ${workspacePlugin ? 'its absolute path' : '"../shared/" relative to this thread\'s workspace, or its absolute path,'} to read and write files that should be available across the user's personal conversations.`,
+      allowedPaths:
+        projectId || !allowPersonalFiles ? [] : [userPath, sharedPath],
+      onInit:
+        projectId || !allowPersonalFiles
+          ? undefined
+          : async () => {
+              // Existing personal threads also need the shared directory.
+              await createPersonalSharedDirectory(root, userId);
+            },
+      instructions:
+        projectId || !allowPersonalFiles
+          ? undefined
+          : ({ defaultInstructions }) =>
+              `${defaultInstructions}\nThe shared folder at "${sharedPath}" is shared by all personal chat threads belonging to the current user. Use ${workspacePlugin ? 'its absolute path' : '"../shared/" relative to this thread\'s workspace, or its absolute path,'} to read and write files that should be available across the user's personal conversations.`,
     });
   const workingDirectory =
     workspaceFilesystem instanceof LocalFilesystem
       ? workspaceFilesystem.basePath
       : path;
   const skillHome = resolve(
-    projectId ? projectDirectory(root, projectId) : userPath,
+    !allowPersonalFiles
+      ? path
+      : projectId
+        ? projectDirectory(root, projectId)
+        : userPath,
     '.agents',
     'skills',
   );

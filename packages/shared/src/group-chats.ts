@@ -5,12 +5,22 @@ import {
   INTELLIGENT_UI_MAX_RESPONSE,
 } from './intelligent-ui.js';
 
-export const groupChatCreateSchema = z.object({
+export const groupChatScopeSchema = z
+  .object({
+    projectId: z
+      .string()
+      .regex(/^[a-zA-Z0-9_-]{16}$/)
+      .optional(),
+    pluginId: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,39}$/)
+      .optional(),
+  })
+  .refine((scope) => !(scope.projectId && scope.pluginId), {
+    message: 'A room belongs to either a project or a plugin',
+  });
+export const groupChatCreateSchema = groupChatScopeSchema.safeExtend({
   title: z.string().trim().min(1).max(120),
-  projectId: z
-    .string()
-    .regex(/^[a-zA-Z0-9_-]{16}$/)
-    .optional(),
 });
 export const groupChatFileSchema = z.object({
   path: z.string().min(1).max(2048),
@@ -111,6 +121,7 @@ export type GroupChat = {
   id: string;
   title: string;
   projectId: string | null;
+  pluginId?: string | null;
   createdBy: string;
   ownerName?: string;
   createdAt: string;
@@ -186,6 +197,7 @@ export const groupChatReadSchema = z.object({
 export type GroupChatReadState = {
   roomId: string;
   projectId: string | null;
+  pluginId?: string | null;
   /** Latest message from someone other than the current user; reactions do not advance it. */
   latestSequence: string;
   readSequence: string;

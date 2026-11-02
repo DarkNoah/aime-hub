@@ -44,11 +44,13 @@ import { RoomA2aEditor } from './room-a2a-editor';
 export function RoomPanel({
   roomId,
   projectId,
+  pluginId,
   userId,
   roomSwitcher,
 }: {
   roomId: string;
   projectId?: string;
+  pluginId?: string;
   userId: string;
   roomSwitcher?: ReactNode;
 }) {
@@ -58,17 +60,24 @@ export function RoomPanel({
   const clearThreadRequest = () => {
     if (!agentId) return;
     void navigate(
-      projectId
+      pluginId
         ? {
-            to: '/projects/$projectId/group-chats',
-            params: { projectId },
+            to: '/group-chats/plugins/$pluginId',
+            params: { pluginId },
             search: { roomId },
             replace: true,
           }
-        : { to: '/group-chats', search: { roomId }, replace: true },
+        : projectId
+          ? {
+              to: '/projects/$projectId/group-chats',
+              params: { projectId },
+              search: { roomId },
+              replace: true,
+            }
+          : { to: '/group-chats', search: { roomId }, replace: true },
     );
   };
-  const state = useRoom(roomId, projectId);
+  const state = useRoom(roomId, projectId, pluginId);
   const composer = useRef<RoomComposerHandle>(null);
   const [editor, setEditor] = useState<GroupChatAgent | 'new' | null>(null);
   const [memberEditor, setMemberEditor] = useState(false);
@@ -126,7 +135,8 @@ export function RoomPanel({
       threadId={bot?.threadId}
       messages={visibleMessages}
       projectId={projectId}
-      defaultFileScope={projectId ? 'thread' : 'shared'}
+      defaultFileScope={projectId || pluginId ? 'thread' : 'shared'}
+      allowSharedFiles={!pluginId}
       extraPanel={{
         title: t('groupChat.participants'),
         icon: Users,
@@ -195,6 +205,7 @@ export function RoomPanel({
         <RoomMemberEditor
           roomId={roomId}
           projectId={projectId}
+          pluginId={pluginId}
           onAdded={state.addMember}
           onClose={() => setMemberEditor(false)}
         />
@@ -311,7 +322,13 @@ function RoomContent({
               variant="secondary"
               className="hidden text-[10px] sm:inline-flex"
             >
-              {t(room.projectId ? 'groupChat.project' : 'groupChat.personal')}
+              {t(
+                room.pluginId
+                  ? 'groupChat.plugin'
+                  : room.projectId
+                    ? 'groupChat.project'
+                    : 'groupChat.personal',
+              )}
             </Badge>
             {bot && <AgentStatus agent={bot} />}
           </div>
@@ -429,9 +446,11 @@ function RoomContent({
             icon={<MessageSquare className="size-8" />}
             title={t('groupChat.emptyMessages')}
             description={t(
-              room.projectId
-                ? 'groupChat.projectMessageHint'
-                : 'groupChat.personalMessageHint',
+              room.pluginId
+                ? 'groupChat.pluginMessageHint'
+                : room.projectId
+                  ? 'groupChat.projectMessageHint'
+                  : 'groupChat.personalMessageHint',
             )}
           />
         )}

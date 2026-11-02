@@ -100,7 +100,11 @@ export function groupChatRouter(service?: GroupChatService) {
       ),
     ),
     openDefault: p.openDefault.handler(({ context, input }) =>
-      rooms().openDefault(context.userId, input.body.projectId),
+      rooms().openDefault(
+        context.userId,
+        input.body.projectId,
+        input.body.pluginId,
+      ),
     ),
     list: p.list.handler(({ context, input }) =>
       rooms().list(context.userId, input.query),

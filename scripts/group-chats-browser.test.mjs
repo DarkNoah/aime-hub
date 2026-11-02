@@ -125,7 +125,8 @@ const root=createRootRoute({component:()=> <SessionContext.Provider value={{data
 const personal=createRoute({getParentRoute:()=>root,path:'/group-chats',validateSearch:validateGroupChatSearch,component:GroupChatsPage});
 const project=createRoute({getParentRoute:()=>root,path:'/projects/$projectId/group-chats',validateSearch:validateGroupChatSearch,component:GroupChatsPage});
 function SourceIssue(){const {projectId}=useParams({strict:false});return <IssueThreadLink issue={{threadId:'taskthread000001',projectId:projectId??null,source:{roomId:projectId?'room000000000099':'joined0000000001',agentId:'bot0000000000001',threadId:'thread0000000001'}}}>来源 Issue</IssueThreadLink>;}
-const tree=root.addChildren([personal,project,createRoute({getParentRoute:()=>root,path:'/group-chats/issue-source',component:SourceIssue}),createRoute({getParentRoute:()=>root,path:'/projects/$projectId/issue-source',component:SourceIssue}),createRoute({getParentRoute:()=>root,path:'/projects/$projectId',component:()=>null})]);
+const plugin=createRoute({getParentRoute:()=>root,path:'/group-chats/plugins/$pluginId',validateSearch:validateGroupChatSearch,component:GroupChatsPage});
+const tree=root.addChildren([personal,project,plugin,createRoute({getParentRoute:()=>root,path:'/group-chats/issue-source',component:SourceIssue}),createRoute({getParentRoute:()=>root,path:'/projects/$projectId/issue-source',component:SourceIssue}),createRoute({getParentRoute:()=>root,path:'/projects/$projectId',component:()=>null})]);
 const router=createRouter({routeTree:tree});
 await initializeI18n();createRoot(document.getElementById('root')).render(<ThemeProvider><RouterProvider router={router}/></ThemeProvider>);`;
     await writeFile(path.join(fixture, 'entry.tsx'), entry);
@@ -469,6 +470,21 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
           );
           return route.fulfill({ status: 204 });
         case 'groupChats/openDefault': {
+          if (input.body.pluginId) {
+            assert.equal(input.body.pluginId, 'demo');
+            let pluginRoom = rooms.find((room) => room.pluginId === 'demo');
+            if (!pluginRoom) {
+              pluginRoom = {
+                ...rooms[0],
+                id: 'pluginroom000001',
+                projectId: null,
+                pluginId: 'demo',
+              };
+              rooms.push(pluginRoom);
+            }
+            result = detail(pluginRoom);
+            break;
+          }
           const scope = input.body.projectId ?? null;
           let room = rooms.find(
             (room) =>
@@ -572,7 +588,7 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
           );
           break;
         case 'files/list':
-          fileScopes.push(input.query.scope);
+          fileScopes.push(input.query.scope ?? 'thread');
           result = { entries: [], truncated: false };
           break;
         case 'files/mutate':
@@ -1947,6 +1963,40 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     await page.screenshot({
       path: '/tmp/group-chat-reply-navigation-mobile.png',
     });
+    // The plugin entry reuses the production room UI, with a thread-scoped plugin file root.
+    await page.setViewportSize({ width: 1100, height: 820 });
+    fileScopes.length = 0;
+    await page.goto(`${origin}/group-chats/plugins/demo`);
+    await page.locator('textarea').waitFor();
+    await page.getByText('插件聊天室', { exact: true }).waitFor();
+    if (!fileScopes.length)
+      await page.getByRole('button', { name: '文件管理', exact: true }).click();
+    for (let i = 0; i < 50 && !fileScopes.length; i++)
+      await page.waitForTimeout(50);
+    assert.equal(fileScopes[0], 'thread');
+    assert.equal(
+      await page.getByRole('menuitemradio', { name: '个人共享' }).count(),
+      0,
+    );
+    await page.locator('[data-group-chat-members]').click();
+    await page.getByRole('button', { name: '添加成员', exact: true }).click();
+    await page
+      .getByText(
+        '只能添加插件授权范围内的用户，添加后可访问聊天室及插件共享工作区。',
+        { exact: true },
+      )
+      .waitFor();
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: '取消', exact: true })
+      .click();
+    await page
+      .getByText(
+        '聊天室成员共享消息和插件专属工作区，可添加的成员范围由插件授权决定。',
+        { exact: true },
+      )
+      .waitFor();
+    await page.screenshot({ path: '/tmp/plugin-group-chat.png' });
     revoked = true;
     await page
       .getByRole('alert')

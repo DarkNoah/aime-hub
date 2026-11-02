@@ -226,8 +226,10 @@ export class PluginService {
     return result;
   }
 
-  async list(): Promise<PluginStatus[]> {
-    return this.runtimeStates(await this.readStates());
+  async list(
+    reader: Pick<DataSource, 'query'> = this.database,
+  ): Promise<PluginStatus[]> {
+    return this.runtimeStates(await this.readStates(reader));
   }
 
   async listForUser(userId?: string): Promise<PluginStatus[]> {

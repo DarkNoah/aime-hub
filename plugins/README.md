@@ -318,6 +318,27 @@ export default { pages: { '': Page } } satisfies PluginWeb;
 
 每个插件可以在自己的 `package.json` 声明 npm 依赖和组件库。React 与 React DOM 使用 `peerDependencies`，宿主 Vite 对 React、React DOM、Router 去重。参与构建的插件样式通过 `generated.css` 纳入 Tailwind 扫描，其他组件库样式应在插件入口导入并避免全局 reset。Node 原生扩展及系统库仍需在 Docker 构建阶段提供。本版不支持后台上传源码后即时安装依赖。
 
+### 插件共享聊天室
+
+插件清单增加以下配置，即可复用宿主聊天室：
+
+```json
+{
+  "workspace": true,
+  "groupChat": true
+}
+```
+
+`groupChat` 默认关闭；开启时必须同时声明 `workspace: true`，否则清单校验失败。宿主在插件导航下自动展示“聊天室”，地址为 `/group-chats/plugins/<pluginId>`。无需添加插件页面或聊天接口，也可以与 `chatThreads` 同时使用。
+
+每个插件只有一个共享聊天室，首次访问时幂等创建。聊天室初始包含创建者，其他成员由创建者或系统管理员添加。插件开放给全部用户时，可以从全部有效用户中搜索、添加成员；插件仅授权指定用户时，只能搜索、添加这些指定用户。仅有插件访问权限不会自动加入聊天室。聊天室成员共享消息、Bot 和 Agent；创建者及系统管理员可以管理房间、Agent 和成员。每次访问同时校验聊天室成员资格与插件授权；撤销插件授权后，原成员的消息、线程、文件和 A2A 凭据访问也会被阻止。
+
+聊天室线程与生成资源归属插件共享作用域，不挂在创建者的个人作用域下；本功能不创建内部项目，也不自动扩展项目知识库、环境变量等能力。所有房间 Agent 的文件工具、命令和默认文件面板都使用 `<WORKSPACE_ROOT>/plugins/<pluginId>`，不会回退到个人或项目目录，文件接口与面板不开放房主的个人共享目录。各插件消息独立，个人/项目聊天室列表与未读标记不会混入插件聊天室。消息仍保存在宿主数据库，文件保存在插件目录。
+
+停用插件或移除 `groupChat` 后，入口隐藏、接口拒绝访问；宿主运行时在下一次轮询时停止房间中的执行，暂停计划和空闲唤醒，不删除消息、线程或文件。重新启用后复用原房间，待执行事件继续调度。清单变更需要重新生成、构建和重启；首次发布需运行 `pnpm db:migrate`，应用 `PluginGroupChats1780000042000` 迁移。
+
+RPC `groupChats.openDefault` 的 `body` 和 `groupChats.list` 的 `query` 接受 `pluginId`。`projectId` 与 `pluginId` 互斥；所有接口均由宿主校验插件运行状态、聊天室能力及当前用户授权。
+
 ### 插件聊天线程
 
 在清单中设置 `"chatThreads": { "agentId": "plugin:<id>:<agent-id>" }`，宿主会在应用左侧该插件分组下显示可折叠的聊天区域。`agentId` 可省略以使用宿主默认 Agent；未声明 `chatThreads` 的插件不显示此区域。入口随插件启停，管理导航中不重复显示。

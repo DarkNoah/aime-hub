@@ -19,6 +19,7 @@ import type {
   AutomationScope,
 } from '@aime/shared/automations';
 import { api } from '@/lib/rpc';
+import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/page-header';
 import { LoadingState } from '@/components/loading-state';
 import { Button } from '@/components/ui/button';
@@ -49,9 +50,11 @@ import { BrowserPushEnrollment } from './desktop-notification-switch';
 export function AutomationManager({
   scope,
   projectName,
+  compact = false,
 }: {
   scope: AutomationScope;
   projectName?: string;
+  compact?: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const scopeKey =
@@ -66,6 +69,7 @@ export function AutomationManager({
           : t(`automations.title.${scope.scope}`)
       }
       locale={i18n.language}
+      compact={compact}
     />
   );
 }
@@ -74,10 +78,12 @@ function ManagerSession({
   scope,
   title,
   locale,
+  compact,
 }: {
   scope: AutomationScope;
   title: string;
   locale: string;
+  compact: boolean;
 }) {
   const { t } = useTranslation();
   const [data, setData] = useState<AutomationList>();
@@ -198,9 +204,20 @@ function ManagerSession({
           minute: '2-digit',
         })
       : t('automations.noNextRun');
+  const createAction = data?.canManage && (
+    <Button
+      ref={createButton}
+      size={compact ? 'sm' : 'default'}
+      onClick={() => setAction({ kind: 'create' })}
+      disabled={loading}
+    >
+      <Plus />
+      {t('automations.create')}
+    </Button>
+  );
   return (
     <div
-      className="min-w-0 space-y-6"
+      className={cn('min-w-0', compact ? 'space-y-4' : 'space-y-6')}
       onClickCapture={(event) => {
         if (!action && event.target instanceof HTMLElement) {
           const button = event.target.closest('button');
@@ -208,22 +225,18 @@ function ManagerSession({
         }
       }}
     >
-      <PageHeader
-        title={title}
-        description={t(`automations.description.${scope.scope}`)}
-        actions={
-          data?.canManage && (
-            <Button
-              ref={createButton}
-              onClick={() => setAction({ kind: 'create' })}
-              disabled={loading}
-            >
-              <Plus />
-              {t('automations.create')}
-            </Button>
-          )
-        }
-      />
+      {compact ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-sm font-medium">{title}</h3>
+          {createAction}
+        </div>
+      ) : (
+        <PageHeader
+          title={title}
+          description={t(`automations.description.${scope.scope}`)}
+          actions={createAction}
+        />
+      )}
       {data?.items.some((task) => task.desktopNotification) && (
         <BrowserPushEnrollment />
       )}
@@ -278,7 +291,7 @@ function ManagerSession({
           <ScrollArea
             className="rounded-xl border bg-card"
             viewportProps={{
-              className: 'max-h-[68dvh] [&>div]:block!',
+              className: cn('[&>div]:block!', !compact && 'max-h-[68dvh]'),
               'aria-busy': loading,
             }}
           >
@@ -287,7 +300,10 @@ function ManagerSession({
                 <Item
                   key={task.id}
                   role="listitem"
-                  className="flex-col items-stretch gap-4 rounded-none p-5 lg:flex-row lg:items-center"
+                  className={cn(
+                    'flex-col items-stretch gap-4 rounded-none',
+                    compact ? 'p-3' : 'p-5 lg:flex-row lg:items-center',
+                  )}
                 >
                   <ItemContent className="min-w-0 flex-1">
                     <ItemTitle className="w-full">
@@ -319,7 +335,12 @@ function ManagerSession({
                       <code>{task.cron}</code>
                     </div>
                   </ItemContent>
-                  <div className="flex shrink-0 flex-wrap items-center gap-1 self-end lg:self-auto">
+                  <div
+                    className={cn(
+                      'flex shrink-0 flex-wrap items-center gap-1 self-end',
+                      !compact && 'lg:self-auto',
+                    )}
+                  >
                     {task.separateThread && task.threadCreated && (
                       <Button asChild variant="ghost" size="icon-sm">
                         <Link

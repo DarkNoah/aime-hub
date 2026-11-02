@@ -25,11 +25,13 @@ import {
 export function RoomMemberEditor({
   roomId,
   projectId,
+  pluginId,
   onAdded,
   onClose,
 }: {
   roomId: string;
   projectId?: string;
+  pluginId?: string;
   onAdded: (member: MemberProfile) => void;
   onClose: () => void;
 }) {
@@ -95,9 +97,11 @@ export function RoomMemberEditor({
           <DialogTitle>{t('groupChat.addMember')}</DialogTitle>
           <DialogDescription>
             {t(
-              projectId
-                ? 'groupChat.addProjectMemberHint'
-                : 'groupChat.addPersonalMemberHint',
+              pluginId
+                ? 'groupChat.addPluginMemberHint'
+                : projectId
+                  ? 'groupChat.addProjectMemberHint'
+                  : 'groupChat.addPersonalMemberHint',
             )}
           </DialogDescription>
         </DialogHeader>

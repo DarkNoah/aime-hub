@@ -18,8 +18,8 @@ export const groupChatApi = {
     ),
   list: (page = 0, signal?: AbortSignal) =>
     api.groupChats.list({ query: { page, perPage: 50 } }, { signal }),
-  openDefault: (projectId?: string, signal?: AbortSignal) =>
-    api.groupChats.openDefault({ body: { projectId } }, { signal }),
+  openDefault: (projectId?: string, signal?: AbortSignal, pluginId?: string) =>
+    api.groupChats.openDefault({ body: { projectId, pluginId } }, { signal }),
   get: (roomId: string, signal?: AbortSignal) =>
     api.groupChats.get({ params: { roomId } }, { signal }),
   searchUsers: (roomId: string, query: string, signal?: AbortSignal) =>

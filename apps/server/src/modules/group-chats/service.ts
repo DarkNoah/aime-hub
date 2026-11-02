@@ -36,10 +36,12 @@ import {
   groupChatChoiceResponseSchema,
   mentionedRoomAgentIds,
 } from '@aime/shared/group-chats';
+import { groupChatResourceId } from './metadata.js';
 import { messageSearchTerms } from './search.js';
 import { GroupChatA2aKeys } from './a2a-keys.js';
 import type { ProjectService } from '../projects/service.js';
 import { AssetService } from '../assets/service.js';
+import type { PluginRoomAccess } from './plugin-access.js';
 
 export type RoomMediaAsset = Pick<
   GeneratedAssetInput,
@@ -47,7 +49,12 @@ export type RoomMediaAsset = Pick<
 >;
 
 export type GroupChatLifecycle = {
-  ensureAgent(room: GroupChat, agent: GroupChatAgent): Promise<void>;
+  ensureAgent(
+    room: GroupChat,
+    agent: GroupChatAgent,
+    userId?: string,
+  ): Promise<void>;
+  suspendAgents?(room: GroupChat, agents: GroupChatAgent[]): Promise<void>;
   removeAgents?(room: GroupChat, agents: GroupChatAgent[]): Promise<void>;
   updateAgent?(
     room: GroupChat,
@@ -82,7 +89,7 @@ type RoomRow = Omit<GroupChat, 'createdAt' | 'updatedAt'> & {
   updatedAt: Date;
 };
 type MessageRow = Omit<GroupChatMessage, 'createdAt'> & { createdAt: Date };
-const roomColumns = `id, title, project_id AS "projectId", created_by AS "createdBy", created_at AS "createdAt", updated_at AS "updatedAt"`;
+const roomColumns = `id, title, project_id AS "projectId", plugin_id AS "pluginId", created_by AS "createdBy", created_at AS "createdAt", updated_at AS "updatedAt"`;
 const agentColumns = `id,room_id AS "roomId",thread_id AS "threadId",name,role,settings,enabled,status,error,last_read_sequence::text AS "lastReadSequence",idle_wake_hours AS "idleWakeHours"`;
 // A pending plan blocks idle work even when its deadline is far in the future.
 const idleAgentReady = `a.role='bot' AND a.enabled AND NOT a.deleting AND a.status IN ('idle','failed')
@@ -113,6 +120,7 @@ export class GroupChatService {
   private lifecycle?: GroupChatLifecycle;
   private a2aKeys: GroupChatA2aKeys;
   private lifecycleTasks = new Map<string, Promise<unknown>>();
+  private suspendedPlugins = new Set<string>();
   private async lifecycleLocked<T>(
     roomId: string,
     action: () => Promise<T>,
@@ -132,6 +140,7 @@ export class GroupChatService {
   constructor(
     private database: DataSource,
     private projects?: Pick<ProjectService, 'addMember'>,
+    private plugins?: PluginRoomAccess,
   ) {
     this.a2aKeys = new GroupChatA2aKeys(
       database,
@@ -146,31 +155,43 @@ export class GroupChatService {
   async openDefault(
     userId: string,
     projectId?: string,
+    pluginId?: string,
   ): Promise<GroupChatDetail> {
+    if (projectId && pluginId) throw new ORPCError('BAD_REQUEST');
+    if (pluginId) await this.pluginAccess(userId, pluginId);
     const roomId = await this.database.transaction(async (manager) => {
       if (projectId) await this.projectAccess(userId, projectId, manager, true);
       // Concurrent first visits (including different project members) share one room.
       await manager.query(
         'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
         [
-          `group-chat-default:${projectId ? `project:${projectId}` : `user:${userId}`}`,
+          `group-chat-default:${pluginId ? `plugin:${pluginId}` : projectId ? `project:${projectId}` : `user:${userId}`}`,
         ],
       );
       const existing: { id: string }[] = await manager.query(
         `SELECT id FROM group_chats
-         WHERE NOT deleting AND ${projectId ? 'project_id = $1' : 'project_id IS NULL AND created_by = $1'}
+         WHERE NOT deleting AND ${pluginId ? 'plugin_id = $1' : projectId ? 'project_id = $1' : 'plugin_id IS NULL AND project_id IS NULL AND created_by = $1'}
          ORDER BY created_at, id LIMIT 1`,
-        [projectId ?? userId],
+        [pluginId ?? projectId ?? userId],
       );
       if (existing[0]) return existing[0].id;
       const id = nanoid(16);
       await manager.query(
-        `INSERT INTO group_chats (id, title, project_id, created_by) VALUES ($1, $2, $3, $4)`,
-        [id, 'Chat', projectId ?? null, userId],
+        `INSERT INTO group_chats (id, title, project_id, created_by, plugin_id) VALUES ($1, $2, $3, $4, $5)`,
+        [id, 'Chat', projectId ?? null, userId, pluginId ?? null],
       );
       return id;
     });
     return this.get(userId, roomId);
+  }
+
+  private async pluginAccess(
+    userId: string,
+    pluginId: string,
+    manager = this.database.manager,
+  ) {
+    if (!this.plugins) throw new ORPCError('NOT_FOUND');
+    await this.plugins.assertAccess(pluginId, userId, manager);
   }
 
   private async projectAccess(
@@ -203,6 +224,20 @@ export class GroupChatService {
     );
     const room = rows[0];
     if (!room) throw new ORPCError('NOT_FOUND');
+    if (room.pluginId) {
+      await this.pluginAccess(userId, room.pluginId, manager);
+      const canManage =
+        room.createdBy === userId ||
+        (await this.plugins!.isAdmin(userId, manager));
+      if (!canManage) {
+        const members = await manager.query(
+          'SELECT 1 FROM group_chat_members WHERE room_id=$1 AND user_id=$2',
+          [roomId, userId],
+        );
+        if (!members.length) throw new ORPCError('NOT_FOUND');
+      }
+      return { room, canManage, canManageMembers: canManage };
+    }
     const role = room.projectId
       ? await this.projectAccess(userId, room.projectId, manager, lock)
       : null;
@@ -225,18 +260,30 @@ export class GroupChatService {
 
   async list(
     userId: string,
-    query: { projectId?: string; page: number; perPage: number },
+    query: {
+      projectId?: string;
+      pluginId?: string;
+      page: number;
+      perPage: number;
+    },
   ): Promise<GroupChatList> {
+    if (query.projectId && query.pluginId) throw new ORPCError('BAD_REQUEST');
+    if (query.pluginId) await this.pluginAccess(userId, query.pluginId);
+    const pluginAdmin =
+      !!query.pluginId && (await this.plugins!.isAdmin(userId));
     if (query.projectId)
       await this.projectAccess(userId, query.projectId, this.database.manager);
     const rows: RoomRow[] = await this.database.query(
       `SELECT ${roomColumns}, (SELECT name FROM users WHERE id=group_chats.created_by) AS "ownerName" FROM group_chats
-      WHERE NOT deleting AND ${query.projectId ? 'project_id = $1' : 'project_id IS NULL AND (created_by = $1 OR EXISTS (SELECT 1 FROM group_chat_members m WHERE m.room_id=group_chats.id AND m.user_id=$1))'}
+      WHERE NOT deleting AND ${query.pluginId ? 'plugin_id = $1' : query.projectId ? 'project_id = $1' : 'plugin_id IS NULL AND project_id IS NULL AND (created_by = $1 OR EXISTS (SELECT 1 FROM group_chat_members m WHERE m.room_id=group_chats.id AND m.user_id=$1))'}
+      AND (plugin_id IS NULL OR $4::boolean OR created_by=$5 OR EXISTS(SELECT 1 FROM group_chat_members member WHERE member.room_id=group_chats.id AND member.user_id=$5))
       ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`,
       [
-        query.projectId ?? userId,
+        query.pluginId ?? query.projectId ?? userId,
         query.perPage + 1,
         query.page * query.perPage,
+        pluginAdmin,
+        userId,
       ],
     );
     return {
@@ -254,9 +301,10 @@ export class GroupChatService {
 
   /** One lightweight query for every visible sidebar room, independent of message history. */
   async unread(userId: string): Promise<{ rooms: GroupChatReadState[] }> {
+    const pluginIds = (await this.plugins?.enabledIds(userId)) ?? [];
     const rooms = await this.database.query(
       `
-      SELECT r.id AS "roomId", r.project_id AS "projectId",
+      SELECT r.id AS "roomId", r.project_id AS "projectId", r.plugin_id AS "pluginId",
         COALESCE(latest.sequence,0)::text AS "latestSequence",
         COALESCE(seen.last_read_sequence,0)::text AS "readSequence"
       FROM group_chats r
@@ -267,7 +315,9 @@ export class GroupChatService {
         ORDER BY m.sequence DESC LIMIT 1
       ) latest ON true
       WHERE NOT r.deleting AND (
-        (r.project_id IS NULL AND (r.created_by=$1 OR EXISTS (
+        (r.plugin_id=ANY($2::text[]) AND (r.created_by=$1 OR EXISTS (
+          SELECT 1 FROM group_chat_members member WHERE member.room_id=r.id AND member.user_id=$1
+        ))) OR (r.plugin_id IS NULL AND r.project_id IS NULL AND (r.created_by=$1 OR EXISTS (
           SELECT 1 FROM group_chat_members member WHERE member.room_id=r.id AND member.user_id=$1
         ))) OR (
           EXISTS (SELECT 1 FROM projects p JOIN project_members member ON member.project_id=p.id
@@ -276,7 +326,7 @@ export class GroupChatService {
             AND NOT earlier.deleting AND (earlier.created_at,earlier.id)<(r.created_at,r.id))
         )
       ) ORDER BY r.id`,
-      [userId],
+      [userId, pluginIds],
     );
     return { rooms };
   }
@@ -306,10 +356,14 @@ export class GroupChatService {
   ): Promise<MemberProfile[]> {
     const { room, canManageMembers } = await this.access(userId, roomId);
     if (!canManageMembers) throw new ORPCError('FORBIDDEN');
+    const candidateIds = room.pluginId
+      ? await this.plugins!.candidateIds(room.pluginId)
+      : null;
     if (query.trim().length < 2) return [];
     return this.database.query(
       `SELECT u.id,u.name,u.username,u.image FROM users u
        WHERE COALESCE(u.banned,false)=false AND ($2::text IS NULL OR u.id<>$2)
+       AND ($4::text[] IS NULL OR u.id=ANY($4::text[]))
        AND (strpos(lower(u.name),lower($3))>0 OR strpos(lower(COALESCE(u.username,'')),lower($3))>0)
        AND NOT EXISTS (SELECT 1 FROM ${room.projectId ? 'project_members m WHERE m.project_id=$1 AND m.user_id=u.id AND m.deleted_at IS NULL' : 'group_chat_members m WHERE m.room_id=$1 AND m.user_id=u.id'})
        ORDER BY u.name,u.id LIMIT 20`,
@@ -317,6 +371,7 @@ export class GroupChatService {
         room.projectId ?? roomId,
         room.projectId ? null : room.createdBy,
         query.trim(),
+        candidateIds,
       ],
     );
   }
@@ -328,6 +383,8 @@ export class GroupChatService {
   ): Promise<MemberProfile> {
     const { room, canManageMembers } = await this.access(userId, roomId);
     if (!canManageMembers) throw new ORPCError('FORBIDDEN');
+    if (room.pluginId)
+      await this.plugins!.assertCandidate(room.pluginId, targetId);
     const profile = async (manager: EntityManager) => {
       const rows: MemberProfile[] = await manager.query(
         'SELECT id,name,username,image FROM users WHERE id=$1 AND COALESCE(banned,false)=false',
@@ -366,6 +423,8 @@ export class GroupChatService {
     return this.database.transaction(async (manager) => {
       if (!(await this.access(userId, roomId, manager, true)).canManageMembers)
         throw new ORPCError('FORBIDDEN');
+      if (room.pluginId)
+        await this.plugins!.assertCandidate(room.pluginId, targetId, manager);
       const member = await profile(manager);
       if (targetId !== room.createdBy)
         await manager.query(
@@ -385,7 +444,7 @@ export class GroupChatService {
         true,
       );
       await this.ensureBot(manager, roomId);
-      const members: { userId: string }[] = room.projectId
+      let members: { userId: string }[] = room.projectId
         ? await manager.query(
             `SELECT user_id AS "userId" FROM project_members WHERE project_id=$1 AND deleted_at IS NULL ORDER BY created_at,user_id`,
             [room.projectId],
@@ -397,6 +456,12 @@ export class GroupChatService {
               [roomId, room.createdBy],
             )),
           ];
+      if (room.pluginId)
+        members = await this.plugins!.filterMembers(
+          room.pluginId,
+          members,
+          manager,
+        );
       const agents: GroupChatAgent[] = await manager.query(
         `SELECT ${agentColumns} FROM group_chat_agents WHERE room_id=$1 AND NOT deleting ORDER BY role,created_at,id`,
         [roomId],
@@ -419,7 +484,9 @@ export class GroupChatService {
         [roomId],
       );
       await Promise.all(
-        agents.map((agent) => this.lifecycle?.ensureAgent(detail, agent)),
+        agents.map((agent) =>
+          this.lifecycle?.ensureAgent(detail, agent, userId),
+        ),
       );
     });
     return detail;
@@ -427,10 +494,13 @@ export class GroupChatService {
 
   async create(
     userId: string,
-    input: { title: string; projectId?: string },
+    input: { title: string; projectId?: string; pluginId?: string },
   ): Promise<GroupChatDetail> {
     const parsed = groupChatCreateSchema.parse(input),
       id = nanoid(16);
+    // Each plugin has one shared room, including concurrent create/default requests.
+    if (parsed.pluginId)
+      return this.openDefault(userId, undefined, parsed.pluginId);
     await this.database.transaction(async (manager) => {
       if (parsed.projectId)
         await this.projectAccess(userId, parsed.projectId, manager, true);
@@ -888,9 +958,11 @@ export class GroupChatService {
         await assets.record({
           ...asset,
           threadId: agent.threadId,
-          resourceId: room.projectId
-            ? `project:${room.projectId}`
-            : `user:${room.createdBy}`,
+          resourceId: groupChatResourceId(
+            room.createdBy,
+            room.projectId,
+            room.pluginId,
+          ),
           createdBy: userId,
           toolName: 'send_message',
           toolCallId: input.toolCallId,
@@ -1078,7 +1150,7 @@ export class GroupChatService {
     await this.lifecycleLocked(roomId, async () => {
       await this.access(userId, roomId);
       await this.agentInRoom(this.database.manager, roomId, agent.id);
-      await this.lifecycle?.ensureAgent(roomDto(access.room), agent);
+      await this.lifecycle?.ensureAgent(roomDto(access.room), agent, userId);
     });
     return agent;
   }
@@ -1285,6 +1357,7 @@ export class GroupChatService {
   }
 
   async dueEvents(limit = 50): Promise<GroupChatEvent[]> {
+    const pluginIds = (await this.plugins?.enabledIds()) ?? [];
     const rows: (Omit<GroupChatEvent, 'dueAt'> & { dueAt: Date })[] =
       await this.database.query(
         `SELECT ${eventColumns
@@ -1292,18 +1365,20 @@ export class GroupChatService {
           .map((part) => `e.${part}`)
           .join(
             ',',
-          )} FROM group_chat_events e WHERE e.status='pending' AND e.due_at<=now() AND (e.lease_until IS NULL OR e.lease_until<now()) AND EXISTS(SELECT 1 FROM group_chat_agents a WHERE a.id=e.agent_id AND a.enabled AND NOT a.deleting) ORDER BY e.due_at,e.id LIMIT $1`,
-        [boundedLimit(limit)],
+          )} FROM group_chat_events e WHERE e.status='pending' AND e.due_at<=now() AND (e.lease_until IS NULL OR e.lease_until<now()) AND EXISTS(SELECT 1 FROM group_chats r WHERE r.id=e.room_id AND NOT r.deleting AND (r.plugin_id IS NULL OR r.plugin_id=ANY($2::text[]))) AND EXISTS(SELECT 1 FROM group_chat_agents a WHERE a.id=e.agent_id AND a.enabled AND NOT a.deleting) ORDER BY e.due_at,e.id LIMIT $1`,
+        [boundedLimit(limit), pluginIds],
       );
     return rows.map(eventDto);
   }
 
   /** One durable wake-up per idle period, with room locks shared by messages/plans/settings. */
   async scheduleIdleEvents(limit = 50): Promise<void> {
+    const pluginIds = (await this.plugins?.enabledIds()) ?? [];
     await this.database.query(
       `WITH candidates AS (
         SELECT a.id,a.room_id,r.created_by FROM group_chat_agents a JOIN group_chats r ON r.id=a.room_id
         WHERE ${idleAgentReady}
+        AND (r.plugin_id IS NULL OR r.plugin_id=ANY($3::text[]))
         AND NOT EXISTS(SELECT 1 FROM group_chat_events previous WHERE previous.id='idle:'||a.id
           AND (previous.status='pending' OR (previous.status IN ('completed','failed') AND previous.created_at>=a.idle_since)))
         ORDER BY a.idle_since,a.id LIMIT $1 FOR UPDATE OF r,a SKIP LOCKED
@@ -1312,17 +1387,24 @@ export class GroupChatService {
         ON CONFLICT(id) DO UPDATE SET version=EXCLUDED.version,actor_id=EXCLUDED.actor_id,due_at=EXCLUDED.due_at,
           status='pending',error=NULL,lease_until=NULL,completed_at=NULL,attempts=0,created_at=now()
         WHERE group_chat_events.status<>'pending'`,
-      [boundedLimit(limit), nanoid()],
+      [boundedLimit(limit), nanoid(), pluginIds],
     );
   }
 
   async claimEvent(id: string, version: string): Promise<boolean> {
     return this.database.transaction(async (manager) => {
       // Serialize with future_plan creation and configuration changes before claiming.
-      await manager.query(
-        `SELECT r.id FROM group_chats r JOIN group_chat_events e ON e.room_id=r.id WHERE e.id=$1 AND e.version=$2 FOR UPDATE OF r`,
+      const rooms: { pluginId: string | null }[] = await manager.query(
+        `SELECT r.id,r.plugin_id AS "pluginId" FROM group_chats r JOIN group_chat_events e ON e.room_id=r.id WHERE e.id=$1 AND e.version=$2 FOR UPDATE OF r`,
         [id, version],
       );
+      if (
+        rooms[0]?.pluginId &&
+        !((await this.plugins?.enabledIds(undefined, manager)) ?? []).includes(
+          rooms[0].pluginId,
+        )
+      )
+        return false;
       const ready = `EXISTS(SELECT 1 FROM group_chat_agents a WHERE a.id=e.agent_id AND ${idleAgentReady} AND a.idle_since<=e.created_at)`;
       await manager.query(
         `UPDATE group_chat_events e SET status='cancelled',completed_at=now(),lease_until=NULL
@@ -1338,6 +1420,28 @@ export class GroupChatService {
       );
       return rows.length > 0;
     });
+  }
+
+  /** Reconcile plugin changes from this process and other server instances. */
+  async suspendUnavailablePlugins() {
+    if (!this.plugins || !this.lifecycle?.suspendAgents) return;
+    const enabled = new Set(await this.plugins.enabledIds());
+    for (const id of enabled) this.suspendedPlugins.delete(id);
+    const rooms: RoomRow[] = await this.database.query(
+      `SELECT ${roomColumns} FROM group_chats WHERE plugin_id IS NOT NULL AND NOT deleting AND NOT (plugin_id=ANY($1::text[]))`,
+      [[...enabled]],
+    );
+    for (const room of rooms) {
+      if (this.suspendedPlugins.has(room.pluginId!)) continue;
+      await this.lifecycleLocked(room.id, async () => {
+        const agents: GroupChatAgent[] = await this.database.query(
+          `SELECT ${agentColumns} FROM group_chat_agents WHERE room_id=$1 AND NOT deleting`,
+          [room.id],
+        );
+        await this.lifecycle!.suspendAgents!(roomDto(room), agents);
+      });
+      this.suspendedPlugins.add(room.pluginId!);
+    }
   }
 
   async acknowledgeEvent(id: string, version: string): Promise<void> {

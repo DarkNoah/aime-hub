@@ -164,6 +164,13 @@ export const en = {
   'groupChat.actions': 'Bots actions',
   'groupChat.emptyRooms': 'No Bots yet',
   'groupChat.emptyMessages': 'Send the first message',
+  'groupChat.addPluginMemberHint':
+    'Only users allowed by this plugin can be added to the room.',
+  'groupChat.pluginHint':
+    'Room members share messages and the plugin workspace. Invitations are limited to users allowed by the plugin.',
+  'groupChat.plugin': 'Plugin room',
+  'groupChat.pluginMessageHint':
+    'Chat with plugin members and work in the shared plugin workspace.',
   'groupChat.projectMessageHint': 'Talk with your project members here.',
   'groupChat.personalMessageHint':
     'Capture your thoughts. Messages are saved here.',

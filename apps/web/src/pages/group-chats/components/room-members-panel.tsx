@@ -148,9 +148,11 @@ export function RoomMembersPanel({
         <div className="space-y-3 border-b px-4 py-3">
           <p className="text-xs leading-relaxed text-muted-foreground">
             {t(
-              room.projectId
-                ? 'groupChat.projectHint'
-                : 'groupChat.personalHint',
+              room.pluginId
+                ? 'groupChat.pluginHint'
+                : room.projectId
+                  ? 'groupChat.projectHint'
+                  : 'groupChat.personalHint',
             )}
           </p>
           <div className="flex flex-wrap gap-2">

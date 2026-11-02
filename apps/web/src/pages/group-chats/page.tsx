@@ -10,14 +10,15 @@ import { RoomPanel } from './components/room-panel';
 import { RoomSwitcher } from './components/room-switcher';
 
 export function GroupChatsPage() {
-  const { projectId } = useParams({ strict: false });
+  const { projectId, pluginId } = useParams({ strict: false });
   const { roomId } = useSearch({ strict: false });
   const { data } = useAuthSession();
   if (!data) return null;
   return (
     <DefaultRoom
-      key={`${data.user.id}:${projectId ?? 'personal'}:${roomId ?? 'default'}`}
+      key={`${data.user.id}:${pluginId ? `plugin:${pluginId}` : projectId ? `project:${projectId}` : 'personal'}:${roomId ?? 'default'}`}
       projectId={projectId}
+      pluginId={pluginId}
       userId={data.user.id}
       requestedRoomId={roomId}
     />
@@ -26,10 +27,12 @@ export function GroupChatsPage() {
 
 function DefaultRoom({
   projectId,
+  pluginId,
   userId,
   requestedRoomId,
 }: {
   projectId?: string;
+  pluginId?: string;
   userId: string;
   requestedRoomId?: string;
 }) {
@@ -42,10 +45,13 @@ function DefaultRoom({
     void (
       requestedRoomId
         ? groupChatApi.get(requestedRoomId, controller.signal)
-        : groupChatApi.openDefault(projectId, controller.signal)
+        : groupChatApi.openDefault(projectId, controller.signal, pluginId)
     )
       .then((room) => {
-        if ((room.projectId ?? undefined) !== projectId)
+        if (
+          (room.projectId ?? undefined) !== projectId ||
+          (room.pluginId ?? undefined) !== pluginId
+        )
           throw new Error('ROOM_SCOPE_MISMATCH');
         if (!controller.signal.aborted) setRoom(room);
       })
@@ -53,7 +59,7 @@ function DefaultRoom({
         if (!controller.signal.aborted) setError(groupChatErrorKey(cause));
       });
     return () => controller.abort();
-  }, [projectId, requestedRoomId, revision]);
+  }, [projectId, pluginId, requestedRoomId, revision]);
 
   return (
     <div className="flex h-full min-h-0 min-w-0">
@@ -77,9 +83,10 @@ function DefaultRoom({
           key={room.id}
           roomId={room.id}
           projectId={projectId}
+          pluginId={pluginId}
           userId={userId}
           roomSwitcher={
-            !projectId ? (
+            !projectId && !pluginId ? (
               <RoomSwitcher current={room} userId={userId} />
             ) : undefined
           }
