@@ -11,12 +11,9 @@ export const sleep = createTool({
     label: z.string().optional().describe('Label for the test task'),
     durationMs: z
       .number()
-      .int()
-      .min(1)
-      .max(540_000)
       .default(30_000)
       .describe(
-        'Simulated task duration in milliseconds; defaults to 30 seconds',
+        'Simulated task duration in milliseconds; defaults to 30 seconds, capped at 9 minutes',
       ),
   }),
   outputSchema: z.object({
@@ -33,7 +30,11 @@ export const sleep = createTool({
   execute: async ({ durationMs }, context) => {
     const startedAt = performance.now();
     try {
-      await setTimeout(durationMs, undefined, { signal: context?.abortSignal });
+      await setTimeout(
+        Math.max(1, Math.min(540_000, Math.floor(durationMs))),
+        undefined,
+        { signal: context?.abortSignal },
+      );
     } catch {
       /* empty */
     }

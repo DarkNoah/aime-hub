@@ -45,6 +45,19 @@ export function compatiblePrompt(
   scope: string,
   deepseekChat: boolean,
 ): ProcessLLMRequestArgs['prompt'] {
+  const failedCalls = new Set(
+    prompt.flatMap((message) =>
+      message.role === 'tool'
+        ? message.content.flatMap((part) =>
+            part.type === 'tool-result' &&
+            (part.output.type === 'error-text' ||
+              part.output.type === 'error-json')
+              ? [part.toolCallId]
+              : [],
+          )
+        : [],
+    ),
+  );
   return prompt.flatMap((message): ProcessLLMRequestArgs['prompt'] => {
     if (message.role !== 'assistant' && message.role !== 'tool')
       return [message];
@@ -55,6 +68,14 @@ export function compatiblePrompt(
       return [
         {
           ...part,
+          // Mastra discards unparseable arguments but retains the error result.
+          // Keep that failed call valid on the wire so the model can correct it.
+          // This only repairs outbound history; it never executes a placeholder.
+          ...(part.type === 'tool-call' &&
+          part.input === undefined &&
+          failedCalls.has(part.toolCallId)
+            ? { input: {} }
+            : {}),
           providerOptions:
             sameOrigin && !deepseekChat ? part.providerOptions : undefined,
         },

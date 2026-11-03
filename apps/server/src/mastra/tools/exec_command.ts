@@ -1,7 +1,11 @@
 import { BuiltinTool } from '../../modules/tools/base.js';
 import { createTool } from '@mastra/core/tools';
 import { commandSandbox } from './command/sandbox.js';
-import { commandInputSchema, commandOutputSchema } from './command/schema.js';
+import {
+  commandInputSchema,
+  commandOutputSchema,
+  commandLimits,
+} from './command/schema.js';
 
 export const execCommand = createTool({
   id: 'exec_command',
@@ -9,9 +13,18 @@ export const execCommand = createTool({
   inputSchema: commandInputSchema,
   outputSchema: commandOutputSchema,
   execute: async (input, context) => {
+    context.abortSignal?.throwIfAborted();
+    if (!input.cmd.trim()) throw new Error('cmd must not be empty.');
+    if (input.shell !== undefined && !input.shell.trim())
+      throw new Error('shell must not be empty.');
+    if (input.workdir !== undefined && !input.workdir.trim())
+      throw new Error('workdir must not be empty.');
     const userId = context.requestContext?.get('userId');
     return (await commandSandbox(context)).exec(
-      input,
+      {
+        ...input,
+        ...commandLimits(input.yield_time_ms, input.max_output_tokens),
+      },
       context.abortSignal,
       typeof userId === 'string' ? userId : undefined,
     );

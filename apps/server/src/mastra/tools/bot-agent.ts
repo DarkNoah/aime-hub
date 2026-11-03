@@ -241,7 +241,12 @@ export function createGroupChatTools(context: GroupChatAgentContext) {
         action: z.enum(['send', 'reply', 'file']).default('send'),
         text: z.string().optional(),
         messageId: z.string().optional(),
-        choices: groupChatChoicesSchema.optional(),
+        choices: z
+          .object({
+            options: z.array(z.string()),
+            multiple: z.boolean().default(false),
+          })
+          .optional(),
         files: z
           .array(z.object({ path: z.string(), name: z.string() }))
           .optional(),
@@ -266,7 +271,9 @@ export function createGroupChatTools(context: GroupChatAgentContext) {
               input.files!.map((file) => file.name).join(', '),
             ...(input.messageId ? { replyToId: input.messageId } : {}),
             ...(input.files ? { files: input.files } : {}),
-            ...(input.choices ? { choices: input.choices } : {}),
+            ...(input.choices
+              ? { choices: groupChatChoicesSchema.parse(input.choices) }
+              : {}),
           });
           return `Send message success Id: ${message.id}`;
         }),

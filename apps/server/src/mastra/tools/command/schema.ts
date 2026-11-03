@@ -2,35 +2,27 @@ import { z } from 'zod';
 
 export const outputBudget = z
   .number()
-  .int()
-  .min(1)
-  .max(100_000)
   .default(10_000)
   .describe(
     'Maximum returned output tokens, approximated as 4 UTF-8 bytes per token; default 10000, capped at 100000',
   );
 export const yieldTime = z
   .number()
-  .int()
-  .min(250)
-  .max(30_000)
   .default(10_000)
   .describe(
     'Milliseconds to wait before returning (250–30000, default 10000). Does not terminate the process.',
   );
 
 export const commandInputSchema = z.object({
-  cmd: z.string().min(1).describe('Shell command to execute'),
+  cmd: z.string().describe('Shell command to execute'),
   workdir: z
     .string()
-    .min(1)
     .optional()
     .describe(
       'Working directory; defaults to the current conversation workspace. Relative paths resolve from that directory.',
     ),
   shell: z
     .string()
-    .min(1)
     .optional()
     .describe('Shell executable path; defaults to the user shell'),
   login: z
@@ -55,3 +47,11 @@ export const commandOutputSchema = z.object({
 });
 
 export type CommandInput = z.infer<typeof commandInputSchema>;
+
+/** Keep resource limits in execution, not in model-facing schemas. */
+export function commandLimits(yieldMs: number, maxTokens: number) {
+  return {
+    yield_time_ms: Math.max(250, Math.min(30_000, Math.floor(yieldMs))),
+    max_output_tokens: Math.max(1, Math.min(100_000, Math.floor(maxTokens))),
+  };
+}

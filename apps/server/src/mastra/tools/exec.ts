@@ -46,29 +46,32 @@ Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.
     inputSchema: z.object({
       code: z
         .string()
-        .max(100_000)
         .describe(
           'JavaScript source body; use text() or image() to emit results',
         ),
       yield_time_ms: z
         .number()
-        .int()
-        .min(1)
-        .max(3600_000)
         .default(30_000)
         .describe(
-          'Total execution timeout in milliseconds; no background continuation',
+          'Total execution timeout in milliseconds, clamped to 1–3600000; no background continuation',
         ),
       max_output_tokens: z
         .number()
-        .int()
-        .min(1)
-        .max(10_000)
         .default(10_000)
-        .describe('Approximate text output budget; defaults to 10000 tokens'),
+        .describe(
+          'Approximate text output budget; defaults to and is capped at 10000 tokens',
+        ),
     }),
     outputSchema: execOutputSchema,
     execute: async ({ code, yield_time_ms, max_output_tokens }, context) => {
+      yield_time_ms = Math.max(
+        1,
+        Math.min(3_600_000, Math.floor(yield_time_ms)),
+      );
+      max_output_tokens = Math.max(
+        1,
+        Math.min(10_000, Math.floor(max_output_tokens)),
+      );
       const output = new ExecOutput(max_output_tokens);
       const controller = new AbortController();
       const signal = context.abortSignal
@@ -81,6 +84,10 @@ Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.
       );
       try {
         signal.throwIfAborted();
+        if (code.length > 100_000)
+          throw new Error(
+            'JavaScript source exceeds 100000 characters. Split it into smaller calls.',
+          );
         const tools = await abortable(
           getTools({ ...context, abortSignal: signal }),
           signal,

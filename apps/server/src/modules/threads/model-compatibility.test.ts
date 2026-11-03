@@ -38,7 +38,12 @@ const gpt: Selection = {
   providerOptions: { openai: { reasoningEffort: 'none' } },
 };
 
-function deepseekResponse(stream: boolean, tool: boolean, count: number) {
+function deepseekResponse(
+  stream: boolean,
+  tool: boolean,
+  count: number,
+  toolInput = '{}',
+) {
   const reasoningText = `${thought}${count}`;
   const reasoning = {
     type: 'reasoning',
@@ -52,7 +57,7 @@ function deepseekResponse(stream: boolean, tool: boolean, count: number) {
         id: `fc_${count}`,
         call_id: `call_${count}`,
         name: 'lookup',
-        arguments: '{}',
+        arguments: toolInput,
         status: 'completed',
       }
     : {
@@ -118,7 +123,7 @@ function deepseekResponse(stream: boolean, tool: boolean, count: number) {
           type: 'response.function_call_arguments.delta',
           item_id: output.id,
           output_index: 1,
-          delta: '{}',
+          delta: toolInput,
         }
       : {
           type: 'response.output_text.delta',
@@ -347,6 +352,82 @@ test('native Mastra processors preserve reasoning across tool calls, saved turns
       after.find((m) => m.id === original.id),
       original,
     );
+});
+
+test('malformed tool arguments remain paired on Responses replay and the model can correct them', async (t) => {
+  const requests: Wire[] = [];
+  let executed = 0;
+  t.mock.method(
+    globalThis,
+    'fetch',
+    async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Wire;
+      requests.push(body);
+      if (requests.length > 1) {
+        const items = body.input as Wire[];
+        const failed = items.find(
+          (item) => item.type === 'function_call' && item.call_id === 'call_1',
+        );
+        assert.equal(failed?.arguments, '{}');
+        const error = items.find(
+          (item) =>
+            item.type === 'function_call_output' && item.call_id === 'call_1',
+        );
+        assert.match(
+          String(error?.output),
+          /invalid arguments|could not be parsed/i,
+        );
+      }
+      return deepseekResponse(
+        true,
+        requests.length < 3,
+        requests.length,
+        requests.length === 1 ? '{"value":oops}' : '{"value":"corrected"}',
+      );
+    },
+  );
+  const compatibility = new ModelCompatibilityProcessor(() => deepseek);
+  const memory = new Memory({
+    storage: new InMemoryStore(),
+    options: { lastMessages: 30, generateTitle: false },
+  });
+  const agent = new Agent({
+    id: 'invalid-tool-input',
+    name: 'invalid-tool-input',
+    instructions: 'Use lookup.',
+    model: deepseek.model,
+    memory,
+    inputProcessors: [compatibility],
+    outputProcessors: [compatibility],
+    tools: {
+      lookup: createTool({
+        id: 'lookup',
+        description: 'Lookup',
+        inputSchema: z.object({ value: z.string() }),
+        execute: async ({ value }) => {
+          executed++;
+          assert.equal(value, 'corrected');
+          return 'found';
+        },
+      }),
+    },
+  });
+  const options = {
+    memory: { thread: 'invalid-input-thread', resource: 'user' },
+    maxSteps: 3,
+    modelSettings: { maxRetries: 0 },
+  };
+  const result = await agent.stream('Look up a value.', options);
+  await result.consumeStream();
+  assert.equal(await result.text, 'done');
+  assert.equal(executed, 1);
+  assert.equal(requests.length, 3);
+  await memory.settled();
+  const next = await agent.stream('Continue.', options);
+  await next.consumeStream();
+  assert.equal(await next.text, 'done');
+  assert.equal(executed, 1);
+  assert.equal(requests.length, 4);
 });
 
 test('legacy UUID metadata is removed after native history conversion without losing text or tool pairs', () => {

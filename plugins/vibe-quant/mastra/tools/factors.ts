@@ -139,7 +139,13 @@ export function createFactorTools(
           title: '保存 Python 因子',
           description:
             '创建因子或更新已读取的草稿。更新时传 factor_id 和 revision；代码及 parameters 整体替换。',
-          inputSchema: factorSchema.extend({
+          inputSchema: z.object({
+            name: z.string(),
+            description: z.string().default(''),
+            enabled: z.boolean().default(true),
+            source: z.string(),
+            parameters: z.record(z.string(), z.unknown()).default({}),
+            group_id: z.string().optional(),
             factor_id: z.string().optional(),
             revision: z.number().optional(),
           }),
@@ -156,7 +162,7 @@ export function createFactorTools(
                 throw new FactorError('更新前请读取因子的 revision');
               return dependencies(deps).records.save(
                 actor.userId,
-                input,
+                factorSchema.parse(input),
                 input.factor_id,
                 input.revision,
               );
@@ -221,14 +227,23 @@ export function createFactorTools(
           title: '运行期货因子分析',
           description:
             '对已有期货日线运行横截面分析。日期 YYYY-MM-DD，至少 3 个合约且不少于分组数；未传 version_id 使用当前已保存草稿。同步等待结果，中止信号会停止任务。',
-          inputSchema: analysisSchema.safeExtend({ factor_id: z.string() }),
+          inputSchema: z.object({
+            factor_id: z.string(),
+            version_id: z.string().nullable().default(null),
+            symbols: z.array(z.string()),
+            start: z.string().describe('Start date, YYYY-MM-DD'),
+            end: z.string().describe('End date, YYYY-MM-DD'),
+            holding_days: z.number().default(5),
+            groups: z.number().default(5),
+            direction: z.union([z.literal(1), z.literal(-1)]).default(1),
+          }),
           execute: (input, execution) =>
             run(execution, async (deps, actor, signal) => {
               admin(actor);
               const row = await dependencies(deps).service.analyze(
                 actor.userId,
                 input.factor_id,
-                input,
+                analysisSchema.parse(input),
                 signal ?? new AbortController().signal,
               );
               return {

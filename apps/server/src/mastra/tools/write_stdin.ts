@@ -6,17 +6,14 @@ import {
   commandOutputSchema,
   outputBudget,
   yieldTime,
+  commandLimits,
 } from './command/schema.js';
 
 export const writeStdin = createTool({
   id: 'write_stdin',
   description: `Send input to a command session returned by exec_command and read new output. The session retains the environment injected at startup, including SKILL_HOME, SKILLS_ROOT, BUILTIN_SKILLS_ROOT and APP_API_SCRIPT; shell commands sent here can use these variables. Input is forwarded unchanged to the running process. Pass chars="" (or omit it) to poll without sending input. Use a newline to submit an answer, e.g. {session_id:123, chars:"my-app\\n"}. PTY sessions accept terminal control characters such as Ctrl-C (\\u0003) to interrupt or Ctrl-D (\\u0004) for EOF. Returns session_id while running, exit_code when complete; completed sessions are released after their final output is read. Only sessions in the current conversation are accessible.`,
   inputSchema: z.object({
-    session_id: z
-      .number()
-      .int()
-      .positive()
-      .describe('Session ID returned by exec_command'),
+    session_id: z.number().describe('Session ID returned by exec_command'),
     chars: z
       .string()
       .default('')
@@ -28,14 +25,19 @@ export const writeStdin = createTool({
   execute: async (
     { session_id, chars, yield_time_ms, max_output_tokens },
     context,
-  ) =>
-    (await commandSandbox(context)).write(
+  ) => {
+    context.abortSignal?.throwIfAborted();
+    if (!Number.isInteger(session_id) || session_id <= 0)
+      throw new Error('Use a valid session_id returned by exec_command.');
+    const limits = commandLimits(yield_time_ms, max_output_tokens);
+    return (await commandSandbox(context)).write(
       session_id,
       chars,
-      yield_time_ms,
-      max_output_tokens,
+      limits.yield_time_ms,
+      limits.max_output_tokens,
       context.abortSignal,
-    ),
+    );
+  },
 });
 
 export class WriteStdinTool extends BuiltinTool {

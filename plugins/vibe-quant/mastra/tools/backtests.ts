@@ -13,7 +13,7 @@ import {
   StrategyError,
 } from '../../server/strategies/schema.js';
 import { enqueueBacktest } from '../../server/strategies/enqueue.js';
-import { optimizationSchema } from '../../server/strategies/optimization.js';
+import { OPTIMIZATION_METRICS } from '../../optimization-types.js';
 import type { OptimizationReport } from '../../optimization-types.js';
 import { quantToolContext, type QuantDependencies } from './context.js';
 import { BacktestCompareTool } from './backtest-compare.js';
@@ -51,9 +51,15 @@ export const agentBacktestSchema = z.object({
     .describe(
       '默认 builtin；tqsdk 使用 TqBacktest + TqSim，仅支持单个期货实际合约，不支持主连、点数和调优。',
     ),
-  tq_options: backtestSchema.shape.tq_options.describe(
-    '天勤引擎的每手手续费、每手保证金（元）；省略使用 TqSim 默认。rules 与 participation_rate 仅用于内置引擎。',
-  ),
+  tq_options: z
+    .object({
+      commission_per_lot: z.number().optional(),
+      margin_per_lot: z.number().optional(),
+    })
+    .optional()
+    .describe(
+      '天勤引擎的每手手续费、每手保证金（元）；省略使用 TqSim 默认。rules 与 participation_rate 仅用于内置引擎。',
+    ),
   version_id: z
     .string()
     .describe('strategy_publish 或 strategy_versions 返回的版本 ID'),
@@ -112,6 +118,36 @@ export const agentBacktestSchema = z.object({
   calendar: z.record(z.string(), z.boolean()).optional(),
 });
 
+// Cross-field rules and resource limits are validated by parseBacktestConfig at execution.
+const optimizationInput = z.object({
+  search_space: z.record(
+    z.string(),
+    z.object({
+      type: z.enum(['int', 'float', 'categorical']),
+      low: z.number().optional(),
+      high: z.number().optional(),
+      step: z.number().optional(),
+      log: z.boolean().optional(),
+      choices: z
+        .array(z.union([z.string(), z.number(), z.boolean(), z.null()]))
+        .optional(),
+    }),
+  ),
+  metric: z
+    .enum(
+      Object.keys(OPTIMIZATION_METRICS) as [
+        keyof typeof OPTIMIZATION_METRICS,
+        ...Array<keyof typeof OPTIMIZATION_METRICS>,
+      ],
+    )
+    .default('sharpe'),
+  n_trials: z.number().default(30),
+  timeout_seconds: z.number().default(600),
+  seed: z.number().default(42),
+  min_trades: z.number().default(1),
+  validation_start: z.number().optional(),
+});
+
 export class BacktestStartTool extends PluginTool {
   constructor(
     context: PluginContext,
@@ -136,7 +172,7 @@ export class BacktestStartTool extends PluginTool {
         ? '管理员提交独立的 Optuna 参数调优任务，默认由原生后台任务执行，不阻塞对话；后台任务持续到调优结束，成功后以最佳参数在当前策略中创建新版本，命名为原版本名.opt.vN，例如 v6.opt.v1，末尾序号按该原版本递增。只搜索所选版本已有的默认参数，未搜索的参数沿用原默认值。提供 version_id、symbol、start、end、rules 和 optimization.search_space。默认 30 次、600 秒、TPE 种子 42；可设置 validation_start 留出验证。调优不列入普通回测历史。告知用户后台任务已启动，不在本轮持续轮询；收到完成结果后用 backtest_result 读取报告，optimization_version_id 指向新版本。后续按需用 backtest_status/result/cancel 查询或取消回测 run_id。'
         : '管理员提交历史回测，默认由原生后台任务执行，不阻塞对话；后台任务持续到回测结束。默认内置引擎需要 version_id、symbol、start、end、rules。backtest_engine=tqsdk 使用天勤历史行情和 TqSim，仅支持单个期货实际合约；rules 可省略，tq_options 可覆盖每手手续费和保证金。默认资金 100 万、1 分钟 K 线、滑点 1 tick；内置引擎参与率 10%。告知用户后台任务已启动，不在本轮持续轮询；收到完成结果后用 backtest_result 读取指标和日志。后续按需用 backtest_status/result/cancel 查询或取消回测 run_id。',
       inputSchema: optimize
-        ? agentBacktestSchema.extend({ optimization: optimizationSchema })
+        ? agentBacktestSchema.extend({ optimization: optimizationInput })
         : agentBacktestSchema,
       execute: (input, execution) =>
         execute(execution, async (deps, actor, signal) => {
@@ -184,8 +220,8 @@ export class BacktestListTool extends PluginTool {
       description:
         '读取指定共享策略最近 30 条回测；before 为上一页最后一条回测 ID。',
       inputSchema: z.object({
-        strategy_id: z.uuid(),
-        before: z.uuid().optional(),
+        strategy_id: z.string(),
+        before: z.string().optional(),
       }),
       execute: (input, execution) =>
         execute(execution, async ({ records }, actor) => {
@@ -213,7 +249,7 @@ export class BacktestStatusTool extends PluginTool {
       description:
         '按需查询共享回测或调优任务状态，默认立即返回。wait=true 时最多等待 10 秒或直至结束；原生后台任务会跟踪完成，无需持续轮询。中止此等待不会取消后台回测。',
       inputSchema: z.object({
-        run_id: z.uuid(),
+        run_id: z.string(),
         wait: z.boolean().default(false),
       }),
       execute: (input, execution) =>
@@ -243,7 +279,7 @@ export class BacktestResultTool extends PluginTool {
       description:
         '读取回测指标、记录数量和最近日志；section 可读取交易、委托、成交、信号、权益或风险线，每页 50 条，用 next_offset 继续。完成状态仍需检查交易数和日志。',
       inputSchema: z.object({
-        run_id: z.uuid(),
+        run_id: z.string(),
         section: z
           .enum([
             'summary',
@@ -257,10 +293,11 @@ export class BacktestResultTool extends PluginTool {
             'optimization_trials',
           ])
           .default('summary'),
-        offset: z.number().int().nonnegative().default(0),
+        offset: z.number().default(0),
       }),
       execute: (input, execution) =>
         execute(execution, async ({ records }, actor, signal) => {
+          input.offset = Math.max(0, Math.floor(input.offset));
           const run = await records.run(actor.userId, input.run_id);
           signal?.throwIfAborted();
           // Resolve the shared run before reading its artifacts; authentication is checked by tool context.
@@ -346,7 +383,7 @@ export class BacktestCancelTool extends PluginTool {
       title: '取消策略回测',
       description:
         '取消共享策略的回测。排队任务立即取消；运行任务提交取消请求，由后台停止，之后查询 status 确认终态。',
-      inputSchema: z.object({ run_id: z.uuid() }),
+      inputSchema: z.object({ run_id: z.string() }),
       execute: (input, execution) =>
         execute(execution, async ({ records }, actor) => ({
           run: runView(await records.cancel(actor.userId, input.run_id)),

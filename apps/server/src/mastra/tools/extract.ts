@@ -99,7 +99,7 @@ export function createExtractTool(
   return createTool({
     id: 'extract',
     description: `Extract information from a file into validated JSON. source accepts a conversation workspace path (including /.uploads/) or public HTTP(S) file/page URL. Supports UTF-8 text/code/JSON/CSV/Markdown/HTML, images, PDFs, DOCX/XLSX/PPTX/OpenDocument/RTF/EPUB, and audio/video speech via ASR (video visuals are not analyzed). Legacy DOC/XLS/PPT and unknown binary formats must be converted first. Images use OCR and additionally include base64 media when the current model supports images; scanned PDFs require OCR. PDFs always become Markdown. parameters accepts format-specific selections such as pdf_pages, excel_sheet, excel_range, excel_rows, ppt_slides and image_base64. Excel defaults to all rows for extraction; explicitly set excel_rows to request a sample. fields is a JSON Schema string with an object or array root, e.g. {"type":"object","properties":{"name":{"type":["string","null"]}},"required":["name"]}. Use English field keys and nullable fields for missing information. Returns only the JSON string. Source files are limited to 200 MB; parsed text to 1,000,000 characters, with no silent truncation.`,
-    inputSchema: z.strictObject({
+    inputSchema: z.object({
       source: z.string().describe('Workspace file path or public HTTP(S) URL'),
       fields: z
         .string()

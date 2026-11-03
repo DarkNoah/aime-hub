@@ -55,71 +55,60 @@ export function createSpeechTool(
     id: 'speech',
     description:
       'Generate speech using either voice or both reference_audio and reference_text; choose exactly one source, never omit both. The model is selected in tool settings. voice first matches a saved personal or shared voice from list_voices; otherwise it is passed as the provider voice ID. To clone a voice directly, pass reference_audio and its accurate transcript as reference_text without saving it to the voice library. Reference-audio cloning requires a compatible Xinference or OpenAI-compatible model supporting reference_audio and reference_text. With play_immediately=true, enqueue playback and return immediately; audio is sent to the frontend without saving a file. Streaming-capable models emit audio chunks; other models emit completed audio. Otherwise save audio in the conversation workspace and return duration in seconds, file_path and sample_rate in Hz.',
-    inputSchema: z
-      .strictObject({
-        input: z.string().trim().min(1).describe('Text to convert to speech'),
-        voice: z
-          .string()
-          .trim()
-          .optional()
-          .describe(
-            'Saved voice ID from list_voices, or the selected provider’s voice ID. Saved voices take precedence. Required unless reference_audio and reference_text are provided; do not combine with them.',
-          ),
-        reference_audio: z
-          .string()
-          .trim()
-          .optional()
-          .describe(
-            'Reference audio for voice cloning: conversation workspace path, audioPath from list_voices, or public HTTP(S) audio URL. Provide reference_text with it and omit voice.',
-          ),
-        reference_text: z
-          .string()
-          .trim()
-          .optional()
-          .describe(
-            'Accurate transcript of reference_audio, not the new speech input. Required together with reference_audio; omit when using voice.',
-          ),
-        instructions: z
-          .string()
-          .trim()
-          .optional()
-          .describe(
-            'Voice design or delivery instructions, when supported by the model',
-          ),
-        response_format: z
-          .enum(speechFormats)
-          .optional()
-          .describe(
-            'Audio file format, when supported by the model. Defaults to wav. PCM is raw 24 kHz, 16-bit little-endian mono audio.',
-          ),
-        speed: z
-          .number()
-          .min(0.25)
-          .max(4)
-          .optional()
-          .describe(
-            'Speech rate, default 1. Some models ignore this parameter.',
-          ),
-        play_immediately: z
-          .boolean()
-          .optional()
-          .describe(
-            'Start playback in the current chat and return immediately. Uses streaming when supported; otherwise plays the completed audio. No file is saved; save_path and response_format are ignored. Defaults to false.',
-          ),
-        save_path: z
-          .string()
-          .trim()
-          .min(1)
-          .optional()
-          .describe(
-            'New workspace-relative path ending in the response_format extension. Existing files are never overwritten. Defaults to outputs/audio/<random>.<response_format>.',
-          ),
-      })
-      .superRefine((input, context) => {
-        const message = voiceSelectionError(input);
-        if (message)
-          context.addIssue({ code: 'custom', message, path: ['voice'] });
-      }),
+    inputSchema: z.object({
+      input: z.string().trim().describe('Text to convert to speech'),
+      voice: z
+        .string()
+        .trim()
+        .optional()
+        .describe(
+          'Saved voice ID from list_voices, or the selected provider’s voice ID. Saved voices take precedence. Required unless reference_audio and reference_text are provided; do not combine with them.',
+        ),
+      reference_audio: z
+        .string()
+        .trim()
+        .optional()
+        .describe(
+          'Reference audio for voice cloning: conversation workspace path, audioPath from list_voices, or public HTTP(S) audio URL. Provide reference_text with it and omit voice.',
+        ),
+      reference_text: z
+        .string()
+        .trim()
+        .optional()
+        .describe(
+          'Accurate transcript of reference_audio, not the new speech input. Required together with reference_audio; omit when using voice.',
+        ),
+      instructions: z
+        .string()
+        .trim()
+        .optional()
+        .describe(
+          'Voice design or delivery instructions, when supported by the model',
+        ),
+      response_format: z
+        .enum(speechFormats)
+        .optional()
+        .describe(
+          'Audio file format, when supported by the model. Defaults to wav. PCM is raw 24 kHz, 16-bit little-endian mono audio.',
+        ),
+      speed: z
+        .number()
+        .optional()
+        .describe('Speech rate, default 1. Some models ignore this parameter.'),
+      play_immediately: z
+        .boolean()
+        .optional()
+        .describe(
+          'Start playback in the current chat and return immediately. Uses streaming when supported; otherwise plays the completed audio. No file is saved; save_path and response_format are ignored. Defaults to false.',
+        ),
+      save_path: z
+        .string()
+        .trim()
+        .optional()
+        .describe(
+          'New workspace-relative path ending in the response_format extension. Existing files are never overwritten. Defaults to outputs/audio/<random>.<response_format>.',
+        ),
+    }),
     outputSchema: z.union([
       z.literal(cancellationMessage),
       z.object({
@@ -148,6 +137,12 @@ export function createSpeechTool(
       context,
     ) => {
       if (context?.abortSignal?.aborted) return cancellationMessage;
+      if (!input.trim())
+        throw new SpeechGenerationError('Speech input must not be empty.');
+      if (speed !== undefined && (speed < 0.25 || speed > 4))
+        throw new SpeechGenerationError(
+          'Speech speed must be between 0.25 and 4.',
+        );
       const selectionError = voiceSelectionError({
         voice,
         reference_audio,

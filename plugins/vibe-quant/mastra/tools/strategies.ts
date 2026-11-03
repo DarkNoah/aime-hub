@@ -122,7 +122,7 @@ export class StrategyListTool extends PluginTool {
         '查询共享策略摘要（含 ID、revision、启用状态、版本数），可按名称或描述筛选。',
       inputSchema: z.object({
         query: z.string().default(''),
-        offset: z.number().int().nonnegative().default(0),
+        offset: z.number().default(0),
       }),
       execute: (input, execution) =>
         run(execution, async ({ records }, actor) => {
@@ -132,9 +132,10 @@ export class StrategyListTool extends PluginTool {
               .toLocaleLowerCase()
               .includes(query),
           );
-          const next = input.offset + 50;
+          const offset = Math.max(0, Math.floor(input.offset));
+          const next = offset + 50;
           return {
-            strategies: items.slice(input.offset, next),
+            strategies: items.slice(offset, next),
             total: items.length,
             next_offset: next < items.length ? next : null,
           };
@@ -215,7 +216,7 @@ export class StrategyUpdateTool extends PluginTool {
       title: '更新策略草稿',
       description:
         '按读取到的 revision 更新策略，只传要改的字段。source 是完整源码，parameters 整体替换；enabled 控制新回测。冲突时重新读取。',
-      inputSchema: z.strictObject({
+      inputSchema: z.object({
         strategy_id: id,
         revision: z.number(),
         name: z.string().optional(),
@@ -293,18 +294,22 @@ export class StrategyPublishTool extends PluginTool {
         '将给定 revision 的草稿保存为不可变回测版本，返回新 revision 和 version_id。保存版本不会执行脚本或启动实盘。',
       inputSchema: z.object({
         strategy_id: id,
-        revision: z.number().int().positive(),
-        note: z.string().max(2000).default(''),
+        revision: z.number(),
+        note: z.string().default(''),
       }),
       execute: (input, execution) =>
-        run(execution, ({ records }, actor) =>
-          records.publish(
+        run(execution, ({ records }, actor) => {
+          if (!Number.isInteger(input.revision) || input.revision <= 0)
+            throw new StrategyError('请先读取有效的 revision');
+          if (input.note.length > 2000)
+            throw new StrategyError('版本备注最多 2000 字符');
+          return records.publish(
             actor.userId,
             input.strategy_id,
             input.revision,
             input.note,
-          ),
-        ),
+          );
+        }),
     });
     super(tool);
   }

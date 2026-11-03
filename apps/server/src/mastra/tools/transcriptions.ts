@@ -33,7 +33,7 @@ export function createTranscriptionsTool(
     id: 'transcriptions',
     description:
       'Transcribe an audio or video file (including MP4, MOV, WebM, MKV and AVI). Accepts a conversation workspace path, a voice audioPath from list_voices, or a public HTTP(S) media URL. Videos are converted to WAV using their complete first audio track; temporary files are deleted after conversion, including on failure or cancellation. Supports long audio/video without a tool-level file-size cap; provider limits and the configured timeout still apply. Returns the OpenAI transcription response structure: an object for json/verbose_json or a string for text/srt/vtt. Only SRT/VTT subtitles are optimized: merge short continuations, split long cues into single-line entries, and remove trailing commas. Split timings are estimated within original cue boundaries. Model output and message previews exceeding 2000 characters show only the beginning and end, including for serialized JSON. Set save_path to save the complete response in the conversation workspace without overwriting existing files. A truncated excerpt is not a complete JSON or subtitle file. The configured ASR model must support the requested response_format.',
-    inputSchema: z.strictObject({
+    inputSchema: z.object({
       file: z.string().describe('Audio or video file path or public media URL'),
       language: z
         .string()

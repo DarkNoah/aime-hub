@@ -30,18 +30,15 @@ export function createImageGenTool(
     id: 'image_gen',
     description:
       'Generate an image from a detailed prompt or edit reference images. Reference images can be workspace paths, public HTTP(S) URLs, or base64 data URLs (PNG, JPEG, WebP). Set remove_background for transparent output when the selected model supports it. Returns the generated image and its workspace path when available.',
-    inputSchema: z.strictObject({
+    inputSchema: z.object({
       prompt: z
         .string()
         .trim()
-        .min(1)
-        .max(32000)
         .describe(
           'Detailed description of the image to create or the changes to make',
         ),
       ref_images: z
-        .array(z.string().min(1).max(28_000_000))
-        .max(4)
+        .array(z.string())
         .optional()
         .describe(
           'Reference image paths in the conversation workspace, public URLs, or image data URLs',
@@ -85,6 +82,12 @@ export function createImageGenTool(
       ]);
       try {
         signal.throwIfAborted();
+        if (!prompt.trim() || prompt.length > 32_000)
+          throw new ImageGenerationError(
+            'Provide a non-empty prompt of at most 32000 characters.',
+          );
+        if ((ref_images?.length ?? 0) > 4)
+          throw new ImageGenerationError('Use at most 4 reference images.');
         if (!dependencies.resolveModel)
           throw new ImageGenerationError(
             'Image generation model is not configured. Select a model in tool settings or set the default image generation model.',
@@ -96,6 +99,8 @@ export function createImageGenTool(
           let totalBytes = 0;
           for (const reference of ref_images ?? []) {
             signal.throwIfAborted();
+            if (!reference.trim() || reference.length > 28_000_000)
+              throw new Error('Invalid image reference');
             let data: Buffer;
             if (reference.startsWith('data:')) {
               const match = /^data:image\/(?:png|jpeg|webp);base64,(.+)$/.exec(
