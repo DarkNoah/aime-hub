@@ -130,6 +130,40 @@ for (const type of ['openai', 'newapi', 'xinference']) {
     ]);
   });
 
+  test(`${type} returns plain text through the audio service without trimming or JSON wrappers`, async () => {
+    for (const text of [' 你好。😊\n第二行。\n', '']) {
+      const { request, calls } =
+        type === 'xinference'
+          ? fixture({ text })
+          : fixture(null, {
+              headers: { 'content-type': 'text/plain' },
+              body: Buffer.from(text),
+            });
+      const asr = provider(request);
+      const audio = new AudioService('/unused', {
+        getTranscriptionModel: async () => asr.transcriptionModel('asr'),
+        getSpeechModel: async () => asr.speechModel('speech'),
+      });
+      assert.equal(
+        await audio.transcriptions(wav, {
+          response_format: 'text',
+          language: 'zh',
+        }),
+        text,
+      );
+      assert.equal(calls.length, 1);
+      const [, options] = calls[0];
+      const form = await new Response(new Uint8Array(options.body as Buffer), {
+        headers: options.headers,
+      }).formData();
+      assert.equal(
+        form.get('response_format'),
+        type === 'xinference' ? 'json' : 'text',
+      );
+      assert.equal(form.get('language'), 'zh');
+    }
+  });
+
   test(`${type} fails safely on HTTP, invalid JSON and missing transcription text`, async () => {
     for (const overrides of [
       { status: 400, body: Buffer.from('upstream-secret') },
@@ -276,20 +310,21 @@ test('Xinference preserves native SenseVoice JSON through the audio service', as
   }
 });
 
-test('Xinference rejects unsupported formats without silently retrying as JSON', async () => {
-  for (const response_format of ['text', 'srt'] as const) {
+test('Xinference rejects unsupported subtitles without silently retrying as JSON', async () => {
+  for (const response_format of ['srt', 'vtt'] as const) {
     const { request, calls } = fixture(
       { detail: `Unsupported response format: ${response_format}` },
       { status: 500 },
     );
     await assert.rejects(
-      new XinferenceProvider(config, request)
-        .transcriptionModel('SenseVoiceSmall')
-        .doGenerate({
-          audio: wav,
-          mediaType: 'audio/wav',
-          providerOptions: { xinference: { response_format } },
-        }),
+      async () =>
+        new XinferenceProvider(config, request)
+          .transcriptionModel('SenseVoiceSmall')
+          .doGenerate({
+            audio: wav,
+            mediaType: 'audio/wav',
+            providerOptions: { xinference: { response_format } },
+          }),
       /Transcription request failed \(500\)/,
     );
     assert.equal(calls.length, 1);
@@ -301,6 +336,54 @@ test('Xinference rejects unsupported formats without silently retrying as JSON',
   }
 });
 
+test('Xinference text compatibility preserves options and cancellation and rejects invalid JSON', async () => {
+  const { request, calls } = fixture({ text: '你好。' });
+  const model = new XinferenceProvider(config, request).transcriptionModel(
+    'SenseVoiceSmall',
+  );
+  const extra = Object.freeze({
+    response_format: 'text',
+    language: 'zh',
+    prompt: '测试',
+    temperature: 0,
+  });
+  const options = {
+    audio: wav,
+    mediaType: 'audio/wav',
+    providerOptions: { xinference: extra },
+    headers: { 'x-custom': 'forwarded' },
+  };
+  const result = await model.doGenerate(options);
+  assert.equal(result.text, '你好。');
+  assert.equal(result.response?.body, '你好。');
+  assert.equal(extra.response_format, 'text');
+  assert.equal(calls[0][1].headers?.['x-custom'], 'forwarded');
+  const form = await new Response(new Uint8Array(calls[0][1].body as Buffer), {
+    headers: calls[0][1].headers,
+  }).formData();
+  assert.equal(form.get('prompt'), '测试');
+  assert.equal(form.get('temperature'), '0');
+  await assert.rejects(
+    async () =>
+      model.doGenerate({
+        ...options,
+        abortSignal: AbortSignal.abort(new Error('text-cancelled')),
+      }),
+    /text-cancelled/,
+  );
+  assert.equal(calls.length, 1);
+  await assert.rejects(
+    async () =>
+      new XinferenceProvider(
+        config,
+        fixture({ error: 'upstream-secret' }).request,
+      )
+        .transcriptionModel('SenseVoiceSmall')
+        .doGenerate(options),
+    /Invalid transcription response/,
+  );
+});
+
 test('verbose JSON still rejects plain JSON and incomplete verbose metadata', async () => {
   for (const raw of [
     { text: '你好' },
@@ -310,13 +393,16 @@ test('verbose JSON still rejects plain JSON and incomplete verbose metadata', as
   ]) {
     const { request } = fixture(raw);
     await assert.rejects(
-      new XinferenceProvider(config, request)
-        .transcriptionModel('SenseVoiceSmall')
-        .doGenerate({
-          audio: wav,
-          mediaType: 'audio/wav',
-          providerOptions: { xinference: { response_format: 'verbose_json' } },
-        }),
+      async () =>
+        new XinferenceProvider(config, request)
+          .transcriptionModel('SenseVoiceSmall')
+          .doGenerate({
+            audio: wav,
+            mediaType: 'audio/wav',
+            providerOptions: {
+              xinference: { response_format: 'verbose_json' },
+            },
+          }),
       /Invalid transcription response/,
     );
   }

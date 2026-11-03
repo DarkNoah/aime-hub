@@ -20,9 +20,9 @@
 - `srt`、`vtt`：返回经过字幕排版优化的对应格式字符串，规则见下文。
 - `verbose_json`：返回服务端详细 JSON，包括 `text`、`duration`，以及服务端提供的 `language`、`task`、`segments`、`words`、`usage` 等。部分模型（如 Xinference SenseVoiceSmall）不返回 `language`，保留原始响应，不用输入的语言提示补造检测结果。分段使用 OpenAI 的 `start`、`end` 字段，并保留 `id`、`tokens` 等元数据。
 
-不增加自定义返回包装。`json`、`verbose_json`、`text` 的完整结果保留服务端原始内容，不做字幕分句、标点清理或时间调整。不支持的格式会报错，不自动退回 JSON。
+不增加自定义返回包装。`json`、`verbose_json` 的完整结果保留服务端原始内容；`text` 保留转写正文，不做分句或标点清理。不支持的格式会报错，Xinference 的 `text` 兼容行为见下文。
 
-Xinference 通过 `/v1/audio/transcriptions` 识别语音，服务地址未包含 `/v1` 时自动补齐。当前验证的 SenseVoiceSmall 支持 `json`、`verbose_json`，不支持 `text`、`srt`；优先使用默认的 `json`。其详细响应可能返回 `duration: 0`、空 `segments` 和 `words`，不能据此生成准确字幕。其他 Xinference 模型的格式能力以服务端实际支持为准。
+Xinference 通过 `/v1/audio/transcriptions` 识别语音，服务地址未包含 `/v1` 时自动补齐。`response_format: "text"` 会向 Xinference 请求 `json`，然后原样返回响应中的 `text` 字符串，只进行一次识别，保留换行和空白；`save_path` 仍使用 `.txt`。当前验证的 SenseVoiceSmall 原生支持 `json`、`verbose_json`，通过上述兼容支持 `text`，不支持 `srt`。其详细响应可能返回 `duration: 0`、空 `segments` 和 `words`，不能据此生成准确字幕。字幕格式不会自动改为 JSON；其他 Xinference 模型的字幕能力以服务端实际支持为准。
 
 停止线程触发取消时，工具正常返回纯文本 `Speech recognition was cancelled.`，不抛出异常，也不把中止文本保存为转录文件。超时和识别失败仍报错。
 

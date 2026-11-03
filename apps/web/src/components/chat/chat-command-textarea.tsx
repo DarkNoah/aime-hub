@@ -1,6 +1,10 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
-import { PromptInputTextarea } from '@/components/ai-elements/prompt-input';
+import { nanoid } from 'nanoid';
+import {
+  PromptInputTextarea,
+  usePromptInputAttachments,
+} from '@/components/ai-elements/prompt-input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -21,6 +25,8 @@ import {
 } from './slash-command';
 import type { TranslationKey } from '@/i18n/config';
 import './chat-command-textarea.css';
+
+const PASTED_TEXT_FILE_THRESHOLD = 10_000;
 
 export function ChatCommandTextarea({
   value,
@@ -54,6 +60,7 @@ export function ChatCommandTextarea({
   maxLength?: number;
 }) {
   const { t } = useTranslation();
+  const attachments = usePromptInputAttachments();
   const id = useId();
   const localTextarea = useRef<HTMLTextAreaElement>(null);
   const textarea = inputRef ?? localTextarea;
@@ -136,6 +143,25 @@ export function ChatCommandTextarea({
         <PromptInputTextarea
           ref={textarea}
           value={value}
+          onPasteCapture={(event) => {
+            if (disabled || event.defaultPrevented) return;
+            const clipboard = event.clipboardData;
+            // Let PromptInputTextarea handle pasted images/files as usual.
+            if (
+              clipboard.files.length ||
+              Array.from(clipboard.items).some((item) => item.kind === 'file')
+            )
+              return;
+            const text = clipboard.getData('text/plain');
+            if (text.length <= PASTED_TEXT_FILE_THRESHOLD) return;
+            // Intercept before the textarea can insert or truncate the paste.
+            event.preventDefault();
+            attachments.add([
+              new File([text], `pasted-text-${nanoid(8)}.txt`, {
+                type: 'text/plain',
+              }),
+            ]);
+          }}
           onChange={(event) => {
             onValueChange(event.target.value);
             setSelection({

@@ -26,5 +26,5 @@
 
 ## 工具的设计
 - 在 `apps/server/src/mastra/tools` 创建工具时, 看看是否需要添加对应的渲染UI, 和后台配置
-- `inputSchema` 的输入参数不能设计太复杂, 无需使用min, max时尽量不要用, 不要配置正则检测, 不要太严格, 可以在 `execute` 函数中做检验, 但是不要在 `inputSchema` 中强制设置 `regex` `min` `max` 等zod的校验
+- `inputSchema` 的输入参数不能设计太复杂, 无需使用min, max时尽量不要用, 不要配置正则检测, 不要太严格, 可以在 `execute` 函数中做检验, 但是不要在 `inputSchema` 中强制设置 `regex` `min` `max` 等zod的校验, 不要使用 `nullish`, 改用 optional.
 - 工具当触发 AbortSignal 时, 应该立即返回 "用户中止了操作" 之类的文本

@@ -28,14 +28,15 @@ export const intelligentUiInputSchema = z.object({
     .string()
     .describe('Self-contained HTML fragment with inline CSS and JavaScript.'),
   // Model providers may persist omitted optional arguments as explicit nulls.
-  title: z.string().nullish().describe('Short title for the panel.'),
+  title: z.string().optional().describe('Short title for the panel.'),
   tips: z
     .string()
-    .nullish()
+    .optional()
     .describe('Concise instructions shown above the panel.'),
   waitForResponse: z
     .boolean()
-    .nullish()
+    .optional()
+    .default(false)
     .describe(
       'Set true to wait for user data; omit or use false for display-only content.',
     ),

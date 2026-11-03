@@ -1,10 +1,5 @@
 import type { ProviderConfiguration } from '@aime/shared/provider-configuration';
-import type {
-  EmbeddingModel,
-  RerankingModel,
-  SpeechModel,
-  TranscriptionModel,
-} from 'ai';
+import type { EmbeddingModel, RerankingModel, SpeechModel } from 'ai';
 import type { OpenAICompatibleConfig } from '@mastra/core/llm';
 import { z } from 'zod';
 import { createDocumentOcrModel } from './xinference-ocr.js';
@@ -214,13 +209,35 @@ export class XinferenceProvider extends BaseProvider {
     );
   }
 
-  transcriptionModel(modelId: string): TranscriptionModel {
+  transcriptionModel(
+    modelId: string,
+  ): ReturnType<typeof createTranscriptionModel> {
     this.assertModelId(modelId);
-    return createTranscriptionModel(
+    const model = createTranscriptionModel(
       { ...this.provider, baseUrl: this.baseUrl, type: this.type },
       modelId,
       this.request,
     );
+    return {
+      ...model,
+      doGenerate: async (options) => {
+        const extra = options.providerOptions?.xinference;
+        if (extra?.response_format !== 'text') return model.doGenerate(options);
+        // Models such as SenseVoice only support JSON. Plain text needs no
+        // timestamps, so return its transcript without a second inference.
+        const result = await model.doGenerate({
+          ...options,
+          providerOptions: {
+            ...options.providerOptions,
+            xinference: { ...extra, response_format: 'json' },
+          },
+        });
+        return {
+          ...result,
+          response: { ...result.response, body: result.text },
+        };
+      },
+    };
   }
 
   textEmbeddingModel(modelId: string): EmbeddingModel {

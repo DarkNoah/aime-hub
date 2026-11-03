@@ -37,7 +37,7 @@ export function createTranscriptionModel(
   provider: ProviderConfig & { type: string },
   modelId: string,
   request = requestWebResource,
-): TranscriptionModel {
+): Extract<TranscriptionModel, { specificationVersion: 'v3' }> {
   const url = webUrl(provider.baseUrl);
   if (
     (!allowAllNetworks() && url.protocol !== 'https:') ||

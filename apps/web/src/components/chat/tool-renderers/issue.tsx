@@ -16,7 +16,7 @@ const summary = z.object({
   threadId: z.string().nullable(),
   source: z
     .object({ roomId: z.string(), agentId: z.string(), threadId: z.string() })
-    .nullish(),
+    .optional(),
   projectId: z.string().nullable(),
   state: issueStateSchema,
 });
