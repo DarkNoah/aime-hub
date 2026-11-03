@@ -1,4 +1,4 @@
-import type { SpeechCallbacks, SpeechProgress } from './moonshine-runtime';
+import type { SpeechCallbacks, SpeechProgress } from './speech-input-types';
 
 export type SpeechSession = {
   load: (language: 'zh' | 'en') => Promise<void>;

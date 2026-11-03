@@ -39,9 +39,12 @@ export function parseTranscriptionResponse(
     return response;
   }
   const data = transcriptionJsonResponseSchema.parse(response);
+  // Xinference SenseVoice returns task/duration/segments but omits language.
+  // Accept its native verbose response without inventing a detected language.
   if (
     format === 'verbose_json' &&
-    (typeof data.language !== 'string' || typeof data.duration !== 'number')
+    (typeof data.duration !== 'number' ||
+      (typeof data.language !== 'string' && data.task !== 'transcribe'))
   )
     throw new Error(
       'The ASR provider did not return a verbose JSON transcription.',

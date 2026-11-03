@@ -3,7 +3,7 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { webOriginsEnvSchema } from '../../packages/shared/src/web-origins';
-import { moonshineAssets } from './build/moonshine-assets';
+import { senseVoiceAssets } from './build/sensevoice-assets';
 import { filePreviewAssets } from './build/file-preview-assets';
 
 const isolationHeaders = {
@@ -27,7 +27,7 @@ export default defineConfig(({ mode, command }) => {
     plugins: [
       react(),
       tailwindcss(),
-      moonshineAssets(),
+      senseVoiceAssets(),
       filePreviewAssets(),
       {
         name: 'dev-entry-url',

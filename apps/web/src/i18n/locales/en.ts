@@ -324,10 +324,10 @@ export const en = {
 
   'chat.voiceInput.start': 'Start voice input',
   'chat.voiceInput.stop': 'Stop voice input',
-  'chat.voiceInput.downloading': 'Downloading speech model',
-  'chat.voiceInput.initializing': 'Preparing speech model',
+  'chat.voiceInput.downloading': 'Downloading SenseVoiceSmall speech model',
+  'chat.voiceInput.initializing': 'Preparing SenseVoiceSmall speech model',
   'chat.voiceInput.downloadHint':
-    'The first use downloads a model for your interface language. It is cached in this browser for next time.',
+    'The first use downloads the multilingual SenseVoiceSmall model. It is cached in this browser for next time.',
   'chat.voiceInput.starting': 'Opening microphone',
   'chat.voiceInput.listening': 'Listening…',
   'chat.voiceInput.finishing': 'Finishing transcription…',
@@ -338,8 +338,6 @@ export const en = {
     'The microphone is unavailable or in use. Check your device and try again.',
   'chat.voiceInput.unsupported':
     'Voice input needs a browser with microphone support on HTTPS or localhost.',
-  'chat.voiceInput.isolationRequired':
-    'Voice input needs cross-origin isolation. Check the web server configuration and reload.',
   'chat.voiceInput.failed':
     'Voice input failed. Check your network and microphone, then try again. Your draft has been kept.',
   'knowledge.probingEmbedding':

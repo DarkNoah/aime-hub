@@ -24,6 +24,8 @@ coverage/
 apps/server/src/modules/plugins/bundled-skills/
 
 !scripts/chat-image-edit-browser.test.mjs
+!scripts/chat-voice-input.test.ts
+!scripts/sensevoice-browser.test.mjs
 plugins/vibe-quant/**/__pycache__/
 
 # Private trading strategies: scripts, parameters, notes and dedicated tests.
@@ -91,3 +93,4 @@ plugins/vibe-quant/**/__pycache__/
 !apps/server/src/mastra/providers/provider-configuration.test.ts
 !plugins/vibe-quant/tests/backtest-view.test.ts
 !apps/server/src/modules/tools/input-schemas.test.ts
+!scripts/transcription.test.ts

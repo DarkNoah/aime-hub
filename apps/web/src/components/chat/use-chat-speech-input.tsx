@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
-import { MoonshineSession } from '@/components/audio/moonshine-runtime';
+import { SenseVoiceSession } from '@/components/audio/sensevoice-runtime';
 import { SpeechInputController } from '@/components/audio/speech-input-controller';
 
 export function useChatSpeechInput({
@@ -22,7 +22,7 @@ export function useChatSpeechInput({
     () =>
       new SpeechInputController(
         language,
-        (callbacks) => new MoonshineSession(callbacks),
+        (callbacks) => new SenseVoiceSession(callbacks),
         setText,
         (error) => {
           console.error('Speech input failed', error);
@@ -119,13 +119,6 @@ export function useChatSpeechInput({
       if (disabled) return;
       if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
         toast.error(t('chat.voiceInput.unsupported'));
-        return;
-      }
-      if (
-        !window.crossOriginIsolated ||
-        typeof SharedArrayBuffer === 'undefined'
-      ) {
-        toast.error(t('chat.voiceInput.isolationRequired'));
         return;
       }
       void controller.start(draft);

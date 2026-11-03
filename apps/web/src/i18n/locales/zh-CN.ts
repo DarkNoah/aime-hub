@@ -300,10 +300,10 @@ export const zhCN = {
 
   'chat.voiceInput.start': '开始语音输入',
   'chat.voiceInput.stop': '停止语音输入',
-  'chat.voiceInput.downloading': '正在下载语音识别模型',
-  'chat.voiceInput.initializing': '正在准备语音识别模型',
+  'chat.voiceInput.downloading': '正在下载 SenseVoiceSmall 语音识别模型',
+  'chat.voiceInput.initializing': '正在准备 SenseVoiceSmall 语音识别模型',
   'chat.voiceInput.downloadHint':
-    '首次使用会下载当前界面语言的模型，并缓存在此浏览器中，方便下次使用。',
+    '首次使用会下载 SenseVoiceSmall 多语言模型，并缓存在此浏览器中，方便下次使用。',
   'chat.voiceInput.starting': '正在开启麦克风',
   'chat.voiceInput.listening': '正在聆听…',
   'chat.voiceInput.finishing': '正在完成识别…',
@@ -314,8 +314,6 @@ export const zhCN = {
     '麦克风不可用或正被占用，请检查设备后重试。',
   'chat.voiceInput.unsupported':
     '语音输入需要在 HTTPS 或 localhost 下使用支持麦克风的浏览器。',
-  'chat.voiceInput.isolationRequired':
-    '语音输入需要跨源隔离，请检查前端服务器配置并刷新页面。',
   'chat.voiceInput.failed':
     '语音输入失败，请检查网络和麦克风后重试，已输入的内容会保留。',
   'knowledge.probingEmbedding':

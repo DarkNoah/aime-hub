@@ -1,8 +1,14 @@
 import type { ProviderConfiguration } from '@aime/shared/provider-configuration';
-import type { EmbeddingModel, RerankingModel, SpeechModel } from 'ai';
+import type {
+  EmbeddingModel,
+  RerankingModel,
+  SpeechModel,
+  TranscriptionModel,
+} from 'ai';
 import type { OpenAICompatibleConfig } from '@mastra/core/llm';
 import { z } from 'zod';
 import { createDocumentOcrModel } from './xinference-ocr.js';
+import { createTranscriptionModel } from './openai-compatible-transcription.js';
 import {
   BaseProvider,
   type ProviderConfig,
@@ -65,9 +71,9 @@ export class XinferenceProvider extends BaseProvider {
   static override readonly configuration: ProviderConfiguration = {
     fields: [],
     description: {
-      en: 'Supports chat, embeddings, reranking and speech synthesis. Sync imports model types from Xinference.',
+      en: 'Supports chat, embeddings, reranking, speech synthesis and speech recognition. Sync imports model types from Xinference.',
       'zh-CN':
-        '支持聊天、向量、重排和语音合成，同步时自动识别 Xinference 返回的模型类型。',
+        '支持聊天、向量、重排、语音合成和语音识别，同步时自动识别 Xinference 返回的模型类型。',
     },
     baseUrlHint: {
       en: 'Enter the Xinference HTTP(S) service URL. /v1 is added automatically when omitted.',
@@ -199,6 +205,21 @@ export class XinferenceProvider extends BaseProvider {
   async getSpeechModelList() {
     return (await this.getModelList()).filter(
       (model) => model.modelType === 'speech',
+    );
+  }
+
+  async getTranscriptionModelList() {
+    return (await this.getModelList()).filter(
+      (model) => model.modelType === 'asr',
+    );
+  }
+
+  transcriptionModel(modelId: string): TranscriptionModel {
+    this.assertModelId(modelId);
+    return createTranscriptionModel(
+      { ...this.provider, baseUrl: this.baseUrl, type: this.type },
+      modelId,
+      this.request,
     );
   }
 

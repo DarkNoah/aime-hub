@@ -273,9 +273,6 @@ importers:
       '@google/model-viewer':
         specifier: 4.4.0
         version: 4.4.0(three@0.183.2)
-      '@moonshine-ai/moonshine-wasm':
-        specifier: 0.1.5
-        version: 0.1.5
       '@nivo/heatmap':
         specifier: 0.99.0
         version: 0.99.0(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -303,6 +300,15 @@ importers:
       '@rive-app/react-webgl2':
         specifier: ^4.36.0
         version: 4.36.0(react@19.3.0)
+      '@sherpaw/asr':
+        specifier: 0.3.0
+        version: 0.3.0
+      '@sherpaw/shared':
+        specifier: 0.3.0
+        version: 0.3.0
+      '@sherpaw/vad':
+        specifier: 0.3.0
+        version: 0.3.0
       '@streamdown/cjk':
         specifier: ^1.0.4
         version: 1.0.4(@types/mdast@4.0.4)(micromark-util-types@2.0.3)(micromark@4.0.3)(react@19.3.0)(unified@11.0.5)
@@ -2030,10 +2036,6 @@ packages:
     peerDependencies:
       three: '>= 0.159.0'
 
-  '@moonshine-ai/moonshine-wasm@0.1.5':
-    resolution: {integrity: sha512-b90GVFkbuQQthW8wZFU/dvJpnnsISHSSxs/p6Xv/NMfaHotLhRp0e9Risy5/np6QSF3SFust3jGE3Uj2LdecmQ==}
-    engines: {node: '>=18'}
-
   '@napi-rs/canvas-android-arm64@1.0.11':
     resolution: {integrity: sha512-dtJS4FQEfH9OwSYLtMrEnj7T8DzBbJc/97LI/OkiWOYpW/iW5t6R/gcxVrUXS8l45gCVpwMufgucRe/pe0ISqA==}
     engines: {node: '>= 10'}
@@ -3208,6 +3210,20 @@ packages:
   '@sec-ant/readable-stream@0.4.1':
     resolution: {integrity: sha512-831qok9r2t8AlxLko40y2ebgSDhenenCatLVeW/uBtnHPyhHOvG0C7TvfgecV+wHzIm5KUICgzmVpWS+IMEAeg==}
 
+  '@sherpaw/asr@0.3.0':
+    resolution: {integrity: sha512-zLCJk7ZUVdc/GKeUx2dCfqDkbfiuA/iWlWYsHbPz/9ltwXVwAZckUr+bDQ3Jlcbpfvoe+y+GK7WqP0oMUIkCeQ==}
+    peerDependencies:
+      onnxruntime-web: 1.27.0
+    peerDependenciesMeta:
+      onnxruntime-web:
+        optional: true
+
+  '@sherpaw/shared@0.3.0':
+    resolution: {integrity: sha512-J9XTyc/nwmVcW62Jr6NnXgLhQQndox+4931yayZUgC9lVsM8ACTT47c+kgGHeuUGkkSu8IVqcaX/PdMsuFeFng==}
+
+  '@sherpaw/vad@0.3.0':
+    resolution: {integrity: sha512-hj9d65vXIvHIiCV4uPZnRBmJ50pcUeOdXIJL0LdzfLzt7TtHiZKDDP8jItuaYefayp9CZ7guRZbxnRnReP1MFw==}
+
   '@shikijs/core@4.5.0':
     resolution: {integrity: sha512-6CIgwq+bt2JZ3OSjb/nBkkwEf/CfpHcbam+Mg5Pllco7HAGRQ2/EFhZrrJtbyNTgKwknfVS+llsXGygiDGwJWw==}
     engines: {node: '>=20'}
@@ -3831,6 +3847,9 @@ packages:
 
   '@types/debug@4.1.13':
     resolution: {integrity: sha512-KSVgmQmzMwPlmtljOomayoR89W4FynCAi3E8PPs7vmDVPe84hT+vGPKkJfThkmXs0x0jAaa9U8uW8bbfyS2fWw==}
+
+  '@types/emscripten@1.41.6':
+    resolution: {integrity: sha512-uN+9i8bFT5CUcZfyIEYDrSueACEyKGbUs5kC/72DGlZZoinh84sJfVV0i8UOJD1asdzkvLPBRrKs41kZ8MdEXg==}
 
   '@types/estree-jsx@1.0.5':
     resolution: {integrity: sha512-52CcUVNFyfb1A2ALocQw/Dd1BQFNmSdkuC3BkZ6iqhdMfQz7JWOFRuJFloOzjk+6WijU56m9oKXFAXc7o3Towg==}
@@ -10029,8 +10048,6 @@ snapshots:
       promise-worker-transferable: 1.0.4
       three: 0.183.2
 
-  '@moonshine-ai/moonshine-wasm@0.1.5': {}
-
   '@napi-rs/canvas-android-arm64@1.0.11':
     optional: true
 
@@ -11331,6 +11348,14 @@ snapshots:
 
   '@sec-ant/readable-stream@0.4.1': {}
 
+  '@sherpaw/asr@0.3.0': {}
+
+  '@sherpaw/shared@0.3.0':
+    dependencies:
+      '@types/emscripten': 1.41.6
+
+  '@sherpaw/vad@0.3.0': {}
+
   '@shikijs/core@4.5.0':
     dependencies:
       '@shikijs/primitive': 4.5.0
@@ -12005,6 +12030,8 @@ snapshots:
   '@types/debug@4.1.13':
     dependencies:
       '@types/ms': 2.1.0
+
+  '@types/emscripten@1.41.6': {}
 
   '@types/estree-jsx@1.0.5':
     dependencies:
