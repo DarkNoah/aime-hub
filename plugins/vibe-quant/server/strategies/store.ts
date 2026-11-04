@@ -48,7 +48,7 @@ export type StoredStrategy = Omit<
   versions: StoredVersion[];
 };
 export type StoredRun = BacktestRun & {
-  /** Submitter attribution and per-user queue limit, not an access boundary. */
+  /** Submitter attribution only, not an access boundary. */
   user_id: string;
   worker_id: string | null;
   heartbeat_at: string | null;
@@ -70,8 +70,6 @@ const runMetrics = (
 const active = (run: BacktestRun) =>
   ['queued', 'preparing', 'running'].includes(run.status);
 const iso = () => new Date().toISOString();
-const activeSql =
-  "JSONExtractString(payload, 'status') IN ('queued','preparing','running')";
 function primaryVersion(
   row: Pick<StoredStrategy, 'versions' | 'primary_version_id'>,
 ) {
@@ -475,12 +473,11 @@ export class StrategyStore extends ClickHouseClient {
       started_at: null,
       finished_at: null,
     };
+    // Persist the backlog without an active-run cap; workers claim it in FIFO order.
     const condition = `EXISTS (SELECT 1 FROM ${this.table('quant_strategies')} FINAL
       WHERE id = {strategy:String} AND revision = {strategyRevision:UInt64}
       AND JSONExtractBool(payload, 'enabled')
-      AND JSONExtractString(payload, 'status') IN ('', 'active'))
-      AND (SELECT count() FROM ${this.table('quant_strategy_runs')} FINAL
-        WHERE userId = {owner:String} AND ${activeSql}) < 3`;
+      AND JSONExtractString(payload, 'status') IN ('', 'active'))`;
     if (
       !(await this.replace('quant_strategy_runs', row, 0, condition, {
         strategy: id,
@@ -490,9 +487,7 @@ export class StrategyStore extends ClickHouseClient {
       const current = await this.storedStrategy(id);
       assertEditable(current);
       if (!current.enabled) throw new StrategyError('STRATEGY_DISABLED', 409);
-      if (current.revision !== strategy.revision)
-        throw new StrategyError('STRATEGY_CONFLICT', 409);
-      throw new StrategyError('RUN_QUEUE_FULL', 429);
+      throw new StrategyError('STRATEGY_CONFLICT', 409);
     }
     return row;
   }

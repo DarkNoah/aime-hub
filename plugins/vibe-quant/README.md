@@ -324,9 +324,11 @@ QUANT_STRATEGY_INTEGRATION=1 node --import dotenv/config --import tsx --test plu
 | `factor_save`、`factor_publish`        | 保存因子草稿、发布不可变因子版本                                   |
 | `factor_analyze`                       | 对已采集期货日线执行横截面因子分析                                 |
 
-典型流程是 `guide → list/read → create/update → publish → backtest_start（立即返回 run_id，独立队列执行）→ 完成后 result`，中途按需调用 status。创建策略只需 `name`、`source`，`parameters` 默认空对象；更新传 `strategy_id`、`revision` 和要改的字段，`source`、`parameters` 直接放在顶层，无需 `draft`。省略字段保留原值，`parameters` 如提供则整体替换。读取结果仍保留 `strategy.draft` 结构。
+典型流程是 `guide → list/read → create/update → publish → backtest_start（默认原生后台执行）→ 完成后自动返回策略指标`，中途按需调用 status，详细记录用 result 查询。创建策略只需 `name`、`source`，`parameters` 默认空对象；更新传 `strategy_id`、`revision` 和要改的字段，`source`、`parameters` 直接放在顶层，无需 `draft`。省略字段保留原值，`parameters` 如提供则整体替换。读取结果仍保留 `strategy.draft` 结构。
 
-`backtest_start` 和 `backtest_optimize` 立即返回入队记录 `{ run_id, message, run }`，由现有持久化回测队列执行，不设置固定执行时限。聊天前台停止不会取消已入队的回测；用 `backtest_cancel` 或回测页面取消。当前 Mastra 原生后台任务不能禁用计时器（timeoutMs=0 会立即触发超时），因此这两个工具关闭原生后台托管，不再使用聊天后台任务卡片跟踪完成，也不触发原生后台完成通知。
+`backtest_start` 和 `backtest_optimize` 默认通过 Mastra 原生 `backgroundTask` 延后执行，由现有持久化回测队列运行，通过 `background.adopt` 托管从入队到终态的生命周期。后台任务卡片展示状态变化和 `run_id`，完成后自动返回 `{ run_id, run, terminal, message, result, optimization }`：`result.metrics` 是策略指标，同时保留指标单位、解释、交易数量和最近 20 条日志，不携带完整交易或权益曲线。调优的 `result.metrics` 来自最佳训练试验；`optimization` 返回最佳参数、目标值、留出验证指标及试验数量，`run.optimization_version_id` 指向新版本。无原生后台上下文的直接调用仍立即返回入队记录 `{ run_id, message, run }`。
+
+聊天前台停止不会取消后台回测；聊天后台任务卡片取消、`backtest_cancel` 或回测页面取消会停止对应任务。Mastra 1.72 的原生后台计时器不能禁用（`timeoutMs=0` 会立即超时），这两个工具使用 Node 最大安全延时 `2_147_483_647` 毫秒（约 24.9 天），到期会取消对应回测；原生自动重试设为 0，避免重复提交。回测 Worker 本身不增加固定执行时限，调优搜索预算仍由 `optimization.timeout_seconds` 控制。
 
 `backtest_status` 默认只读取一次当前状态，仍兼容显式 `wait=true` 最多等待 10 秒；此等待结束不会终止回测。后续按 `run_id` 查询进度和结果，不在本轮持续轮询。只取消回测执行时限；网络请求、环境安装和失联心跳检测仍有各自的故障处理，`factor_analyze` 保持原行为。
 
@@ -420,7 +422,7 @@ K 线工具 `market_bars` 复用当前引擎行情存储及主连修复、派生
 | `fees.close_today_rate` | number ≥ 0 / null | 平今比例手续费覆盖，null 沿用普通值 |
 | `fees.sell_tax_rate` | number ≥ 0 | 卖出税率，小数比例 |
 
-天勤回测只接受 CFFEX/SHFE/DCE/CZCE/INE/GFEX 的单个实际期货合约（包括已到期合约），须配置天勤凭据；不支持主连、股票、点数、调优和自定义日历。点数模式忽略资金、保证金、乘数、成交量和 T+1。普通回测与调优共用持久化队列，同一提交者最多 3 个活动任务。工具描述要求 end 不晚于当前时间，但当前 `parseBacktestConfig` 只校验正整数、先后顺序和十年跨度，没有单独校验未来时间。
+天勤回测只接受 CFFEX/SHFE/DCE/CZCE/INE/GFEX 的单个实际期货合约（包括已到期合约），须配置天勤凭据；不支持主连、股票、点数、调优和自定义日历。点数模式忽略资金、保证金、乘数、成交量和 T+1。普通回测与调优共用持久化队列，提交后返回任务 ID 和 `queued` 状态，不限制同一提交者的排队数量；每个 Worker 一次执行一个任务，按提交时间领取对应引擎的任务，排队中可取消。工具描述要求 end 不晚于当前时间，但当前 `parseBacktestConfig` 只校验正整数、先后顺序和十年跨度，没有单独校验未来时间。
 
 #### 调优参数 optimization
 

@@ -29,6 +29,7 @@ export interface QuantDependencies {
     | 'run'
     | 'cancel'
     | 'artifact'
+    | 'createOptimizationVersion'
   >;
   state: Pick<StateStore, 'search' | 'instrument'>;
   news: Pick<NewsStore, 'list' | 'article'>;

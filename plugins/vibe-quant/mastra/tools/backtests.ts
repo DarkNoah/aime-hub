@@ -17,6 +17,11 @@ import { OPTIMIZATION_METRICS } from '../../optimization-types.js';
 import type { OptimizationReport } from '../../optimization-types.js';
 import { quantToolContext, type QuantDependencies } from './context.js';
 import { BacktestCompareTool } from './backtest-compare.js';
+import { backtestSummary } from './backtest-summary.js';
+import {
+  BACKTEST_BACKGROUND_TIMEOUT_MS,
+  backtestOperation,
+} from './backtest-background.js';
 
 function runView(run: BacktestRun): BacktestRun {
   return {
@@ -162,12 +167,15 @@ export class BacktestStartTool extends PluginTool {
         ? 'plugin_vibe_quant_backtest_optimize'
         : 'plugin_vibe_quant_backtest_start',
       title: optimize ? '提交后台调优任务' : '提交后台回测任务',
-      // Submission returns immediately. The persisted worker owns execution and cancellation.
-      // Mastra's native background workflow always creates a timeout, even for timeoutMs=0.
-      background: { enabled: false },
+      background: {
+        enabled: true,
+        defaultDisposition: 'deferred',
+        timeoutMs: BACKTEST_BACKGROUND_TIMEOUT_MS,
+        maxRetries: 0,
+      },
       description: optimize
-        ? '管理员提交独立的 Optuna 参数调优任务，立即返回 run_id，由无固定执行时限的回测队列执行；成功后以最佳参数在当前策略中创建新版本，命名为原版本名.opt.vN，例如 v6.opt.v1，末尾序号按该原版本递增。只搜索所选版本已有的默认参数，未搜索的参数沿用原默认值。提供 version_id、symbol、start、end、rules 和 optimization.search_space。默认 30 次、不限搜索时间、TPE 种子 42；可设置 timeout_seconds 搜索预算和 validation_start 留出验证。调优不列入普通回测历史。告知用户后台任务已启动，不在本轮持续轮询；后续确认完成后用 backtest_result 读取报告，optimization_version_id 指向新版本。后续按需用 backtest_status/result/cancel 查询或取消回测 run_id。'
-        : '管理员提交历史回测，立即返回 run_id，由无固定执行时限的回测队列执行。默认内置引擎需要 version_id、symbol、start、end、rules。backtest_engine=tqsdk 使用天勤历史行情和 TqSim，仅支持单个期货实际合约；rules 可省略，tq_options 可覆盖每手手续费和保证金。默认资金 100 万、1 分钟 K 线、滑点 1 tick；内置引擎参与率 10%。告知用户后台任务已启动，不在本轮持续轮询；后续确认完成后用 backtest_result 读取指标和日志。后续按需用 backtest_status/result/cancel 查询或取消回测 run_id。',
+        ? '管理员通过原生 backgroundTask 提交 Optuna 参数调优，默认后台执行，完成后自动返回最佳训练回测的策略指标、最佳参数、优化目标值、留出验证指标和 optimization_version_id。成功后以最佳参数在当前策略中创建新版本，命名为原版本名.opt.vN，例如 v6.opt.v1，末尾序号按该原版本递增。只搜索所选版本已有的默认参数，未搜索的参数沿用原默认值。提供 version_id、symbol、start、end、rules 和 optimization.search_space。默认 30 次、不限搜索时间、TPE 种子 42；可设置 timeout_seconds 搜索预算和 validation_start 留出验证。调优不列入普通回测历史。启动后告知用户正在后台执行，不要持续轮询或重复提交；收到完成结果后向用户汇报策略指标，区分样本内与留出验证。可用 backtest_status/result/cancel 查询明细或取消回测 run_id，也可在聊天后台任务卡片取消。'
+        : '管理员通过原生 backgroundTask 提交历史回测，默认后台执行，完成后自动返回策略指标、交易数量和最近日志。默认内置引擎需要 version_id、symbol、start、end、rules。backtest_engine=tqsdk 使用天勤历史行情和 TqSim，仅支持单个期货实际合约；rules 可省略，tq_options 可覆盖每手手续费和保证金。默认资金 100 万、1 分钟 K 线、滑点 1 tick；内置引擎参与率 10%。启动后告知用户正在后台执行，不要持续轮询或重复提交；收到完成结果后向用户汇报策略指标，检查交易数、指标单位和日志。可用 backtest_status/result/cancel 查询明细或取消回测 run_id，也可在聊天后台任务卡片取消。',
       inputSchema: optimize
         ? agentBacktestSchema.extend({ optimization: optimizationInput })
         : agentBacktestSchema,
@@ -195,6 +203,53 @@ export class BacktestStartTool extends PluginTool {
               parameters: { ...version.parameters, ...input.parameters },
             }),
             signal,
+          );
+          execution?.background?.adopt(
+            backtestOperation(
+              deps.records,
+              actor.userId,
+              run,
+              async (finished) => {
+                const [artifact, optimizationArtifact] = await Promise.all([
+                  deps.records.artifact(finished.id, 'result'),
+                  optimize
+                    ? deps.records.artifact(finished.id, 'optimization')
+                    : null,
+                ]);
+                const report = optimizationArtifact
+                  ? (JSON.parse(
+                      optimizationArtifact.text,
+                    ) as OptimizationReport)
+                  : null;
+                return {
+                  run_id: finished.id,
+                  run: runView(finished),
+                  terminal: true,
+                  message: finished.message,
+                  result: artifact
+                    ? backtestSummary(
+                        JSON.parse(artifact.text) as BacktestResult,
+                        artifact.hash,
+                      )
+                    : null,
+                  optimization: report
+                    ? {
+                        ...report,
+                        trials: undefined,
+                        trial_count: report.trials.length,
+                      }
+                    : null,
+                };
+              },
+              async (current) => {
+                await execution.writer?.write({
+                  run_id: current.id,
+                  status: current.status,
+                  message: current.message,
+                  cancel_requested: current.cancel_requested,
+                });
+              },
+            ),
           );
           return {
             run_id: run.id,
@@ -339,31 +394,7 @@ export class BacktestResultTool extends PluginTool {
           return {
             ...base,
             optimization,
-            result: {
-              status: result.status,
-              pnl_unit: result.pnl_unit ?? 'currency',
-              message: result.message,
-              metrics: result.metrics,
-              metric_notes: result.metric_notes,
-              account: result.account,
-              monthly_returns: result.monthly_returns,
-              yearly_returns: result.yearly_returns,
-              counts: Object.fromEntries(
-                (
-                  [
-                    'trades',
-                    'orders',
-                    'fills',
-                    'signals',
-                    'logs',
-                    'equity_curve',
-                    'risk_levels',
-                  ] as const
-                ).map((key) => [key, result[key]?.length ?? 0]),
-              ),
-              logs: result.logs.slice(-20),
-              result_hash: artifact.hash,
-            },
+            result: backtestSummary(result, artifact.hash),
           };
         }),
     });
