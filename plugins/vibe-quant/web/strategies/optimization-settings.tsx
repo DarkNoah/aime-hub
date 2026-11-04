@@ -19,7 +19,7 @@ export const defaultOptimization: OptimizationConfig = {
   search_space: {},
   metric: 'sharpe',
   n_trials: 30,
-  timeout_seconds: 600,
+  timeout_seconds: 0,
   seed: 42,
   min_trades: 1,
 };
@@ -83,7 +83,7 @@ export function OptimizationSettings({
           {(
             [
               ['n_trials', '试验次数', 1, 200],
-              ['timeout_seconds', '搜索时间上限（秒）', 1, 3600],
+              ['timeout_seconds', '搜索时间预算（秒，0 为不限时）', 0, 3600],
               ['min_trades', '最少交易笔数', 1, undefined],
               ['seed', '随机种子', 0, 4294967295],
             ] as const
@@ -116,7 +116,8 @@ export function OptimizationSettings({
           {validationStart
             ? '开始时间之前用于选参，之后只验证一次。验证账户重新初始化，使用此前行情预热，建议按完整交易日划分。'
             : '未设置验证区间，本次结果全部为样本内结果。建议留出后段数据检验最佳参数。'}
-          搜索最多 200 次，每次最多 5 分钟；验证另有 5 分钟上限。
+          搜索最多 200
+          次，默认不限时；单次试验与验证没有固定执行时限，可手动取消。
         </p>
         <Label className="grid gap-2 text-xs">
           参数搜索范围（JSON）

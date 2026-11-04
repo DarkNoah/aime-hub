@@ -75,7 +75,8 @@ export const optimizationSchema = z.object({
     .default('sharpe'),
   // Bound server work; one optimization occupies one existing queue slot.
   n_trials: z.number().int().min(1).max(200).default(30),
-  timeout_seconds: z.number().int().min(1).max(3600).default(600),
+  // Zero disables the optional search budget; trials/validation have no fixed cap.
+  timeout_seconds: z.number().int().min(0).max(3600).default(0),
   seed: z.number().int().min(0).max(4294967295).default(42),
   min_trades: z.number().int().min(1).default(1),
   validation_start: z.number().int().positive().optional(),

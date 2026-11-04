@@ -15,6 +15,7 @@ from quant_sdk import Bar, Fees, HubClient, Instrument, RunConfig, Strategy, Tra
 from quant_sdk.runtime import Runner
 from strategy_entrypoint import resolve_strategy
 from signal_history import BufferedEvents, MonitorHistory, history_events
+from position_valuation import exit_valuation
 
 
 class BridgeClient(HubClient):
@@ -131,6 +132,10 @@ class SignalOutput:
             record = {'id': value['id'] + ':' + event_type, 'type': event_type,
                 'side': side, 'symbol': symbol, 'time': value['time'], 'reason': str(value.get('reason', '')),
                 'price': price, 'chart_time': value.get('trigger_bar_time', getattr(self.event.payload, 'time', value['time']) if self.event else value['time'])}
+            if event_type == 'exit':
+                pnl = exit_valuation(self.runner, value, side, price)
+                if pnl is not None:
+                    record['pnl'] = pnl
             if self.history:
                 self.history.signal(record)
             # Historical records are persisted, but never replay old notifications.

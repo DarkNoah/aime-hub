@@ -134,6 +134,10 @@ function ChartWorkspace({
     strategies.pages,
     selectedStrategies,
     replayNotifications && !picking,
+    (time) => {
+      replay.pause();
+      if (!replay.seekTime(time)) toast.error('该信号时间不在本次回放范围内');
+    },
   );
   function changePeriod(value: string) {
     const next = parseChartPeriod(value);

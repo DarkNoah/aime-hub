@@ -76,6 +76,9 @@ const trade = (index, open = false) => ({
   exit_time: open ? null : start + 120,
   exit_price: open ? null : 7045.2,
   net_pnl: open ? null : 45,
+  unrealized_pnl: open ? 0 : undefined,
+  mark_price: open ? 7000.2 : undefined,
+  pnl_multiplier: index % 2 ? 1 : 200,
   fees: 0,
   observed_until: start + 600,
   exit_reason: 'take_profit',
@@ -145,7 +148,9 @@ createRoot(document.getElementById('root')!).render(<main className="p-4 sm:ml-5
     let failed = false,
       empty = false,
       count = 6,
-      queries = [];
+      queries = [],
+      barQueries = [],
+      lastPrice = 7010.2;
     await page.route('**/api/plugins/vibe-quant/**', async (route) => {
       const url = new URL(route.request().url());
       if (url.pathname.endsWith('/monitors/positions')) {
@@ -180,27 +185,36 @@ createRoot(document.getElementById('root')!).render(<main className="p-4 sm:ml-5
         return route.fulfill({
           json: {
             status: { engine: 'tqsdk', state: 'syncing' },
-            quotes: [],
+            quotes: watchlist.map((item) => ({
+              symbol: item.symbol,
+              last: lastPrice,
+              time: start + 900,
+            })),
             orderBooks: [],
           },
         });
-      if (url.pathname.endsWith('/bars'))
+      if (url.pathname.endsWith('/bars')) {
+        barQueries.push(url.search);
+        const bars = Array.from({ length: 120 }, (_, index) => ({
+          symbol: url.searchParams.get('symbol'),
+          duration: Number(url.searchParams.get('duration')),
+          time: start - 60 * 60 + index * 60,
+          open: 7000 + index,
+          high: 7002 + index,
+          low: 6998 + index,
+          close: 7001 + index,
+          volume: 1000,
+        }));
         return route.fulfill({
-          json: Array.from({ length: 120 }, (_, index) => ({
-            symbol: url.searchParams.get('symbol'),
-            duration: 60,
-            time: start + index * 60,
-            open: 7000 + index,
-            high: 7002 + index,
-            low: 6998 + index,
-            close: 7001 + index,
-            volume: 1000,
-          })),
+          json: url.searchParams.has('around')
+            ? { bars, targetTime: Number(url.searchParams.get('around')) }
+            : bars,
         });
+      }
       return route.fulfill({ json: [] });
     });
     await page.goto(
-      `http://127.0.0.1:${vite.httpServer.address().port}/${path.basename(fixture)}/index.html`,
+      `http://127.0.0.1:${vite.httpServer.address().port}/${path.basename(fixture)}/index.html?symbol=SHFE.rb2701&monitor=m2&time=${start}&duration=300`,
       { timeout: 60000, waitUntil: 'domcontentloaded' },
     );
     const sidebar = page.getByRole('complementary', { name: '策略持仓与行情' });
@@ -208,6 +222,54 @@ createRoot(document.getElementById('root')!).render(<main className="p-4 sm:ml-5
     const current = list.getByRole('listitem').filter({ hasText: '持仓中' });
     const history = list.getByRole('listitem').filter({ hasText: '已平仓' });
     await current.nth(5).waitFor();
+    await current
+      .first()
+      .getByText('浮动盈亏 +2,000 元', { exact: true })
+      .waitFor();
+    await current
+      .nth(1)
+      .getByText('浮动盈亏 -10 点', { exact: true })
+      .waitFor();
+    assert.ok(
+      barQueries.some(
+        (query) =>
+          query.includes('symbol=SHFE.rb2701') &&
+          query.includes('monitor=m2') &&
+          query.includes(`around=${start}`),
+      ),
+      'notification deep link opens a symbol outside the watchlist',
+    );
+    await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.url().includes('symbol=SSE.000852') &&
+          response.url().includes(`around=${start - 60}`),
+      ),
+      current
+        .nth(1)
+        .getByRole('button', { name: /定位 SSE.000852 入场/ })
+        .click(),
+    ]);
+    assert.ok(
+      barQueries.some(
+        (query) =>
+          query.includes('symbol=SSE.000852') &&
+          query.includes('monitor=m1') &&
+          query.includes('duration=60') &&
+          query.includes(`around=${start - 60}`),
+      ),
+    );
+    await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.url().includes('symbol=CFFEX.IM2611') &&
+          response.url().includes(`around=${start + 120}`),
+      ),
+      history
+        .first()
+        .getByRole('button', { name: /定位 CFFEX.IM2611 离场/ })
+        .click(),
+    ]);
     assert.equal(
       await current.getByText('CFFEX.IM2611', { exact: true }).count(),
       6,
@@ -226,6 +288,16 @@ createRoot(document.getElementById('root')!).render(<main className="p-4 sm:ml-5
     await viewport.evaluate((element) => {
       element.scrollTop = 320;
     });
+    lastPrice = 6990.2;
+    await current
+      .first()
+      .getByText('浮动盈亏 -2,000 元', { exact: true })
+      .waitFor();
+    assert.equal(
+      await viewport.evaluate((element) => element.scrollTop),
+      320,
+      'live valuation preserves scroll',
+    );
     await sidebar.getByRole('button', { name: '刷新策略持仓' }).click();
     await page.waitForResponse((response) =>
       response.url().endsWith('/monitors/positions'),

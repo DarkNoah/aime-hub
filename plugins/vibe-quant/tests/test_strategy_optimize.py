@@ -158,10 +158,21 @@ class OptimizationTest(unittest.TestCase):
             self.assertEqual(report['status'], 'failed')
             self.assertIn('超时', report['trials'][0]['message'])
 
+    def test_zero_budget_completes_trials_and_validation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.setup_run(root, timeout_seconds=0, n_trials=2,
+                           search_space={'size': {'type': 'int', 'low': 1, 'high': 1}})
+            report = self.run_search(root)
+            self.assertEqual(report['status'], 'completed', report)
+            self.assertEqual(report['completed_trials'], 2)
+            self.assertEqual(report['validation']['status'], 'succeeded')
+            self.assertNotIn('时间上限', report['message'])
+
     def test_cancellation_preserves_finished_trials_and_best_result(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            self.setup_run(root, search_space={'size': {'type': 'int', 'low': 1, 'high': 1}})
+            self.setup_run(root, timeout_seconds=0, search_space={'size': {'type': 'int', 'low': 1, 'high': 1}})
             (root / 'strategy.py').write_text("from pathlib import Path\nimport time\nif Path(__file__).parent.name != 'trial-0': time.sleep(30)\n" + SOURCE)
             child = subprocess.Popen(self.command(root), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, start_new_session=True)
             try:

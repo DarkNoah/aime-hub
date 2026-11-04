@@ -4,6 +4,7 @@ from time import monotonic
 from quant_sdk.tq_metrics import performance
 from quant_sdk.tq_restore import snapshot_runner
 from strategy_monitor import SignalOutput
+from position_valuation import open_valuation
 
 
 class NativeSignalOutput(SignalOutput):
@@ -20,6 +21,8 @@ class NativeSignalOutput(SignalOutput):
             "side": side, "symbol": value["symbol"], "time": value["time"],
             "chart_time": int(value["time"] // 60) * 60, "price": value["price"],
             "reason": value.get("exit_reason") or "strategy_signal"}
+        if not opened and value.get('net_pnl') is not None:
+            record['pnl'] = {'value': value['net_pnl'], 'unit': 'currency', 'basis': 'realized'}
         self.targets[value["symbol"]] = self.runner.broker.position(value["symbol"])
         self.dirty = True
         self.history.signal(record)
@@ -112,6 +115,7 @@ class NativeHistory:
                 'entry_time': lot.entry_time, 'entry_price': lot.entry_price, 'entry_signal_id': lot.signal_id,
                 'fees': lot.entry_fee, 'exit_time': None, 'exit_price': None, 'gross_pnl': None, 'net_pnl': None,
                 'exit_signal_id': None, 'observed_until': runner.data.now,
+                **open_valuation(runner, lot),
                 'risk_levels': [v for v in self.state['risk_levels'].values() if v['entry_signal_id'] == lot.signal_id]})
         return {**performance(self.sim, runner.broker.quote), 'start': self.config['history_start'],
             'through': runner.data.now, 'initial_cash': self.config['initial_cash'], 'replaying': self.phase == 'history',

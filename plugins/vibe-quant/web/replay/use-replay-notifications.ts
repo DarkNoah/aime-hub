@@ -21,6 +21,7 @@ export function useReplayNotifications(
   pages: Record<string, SignalHistoryPage>,
   hints: readonly MarketStrategyHint[],
   enabled: boolean,
+  onNavigate: (time: number) => void,
 ) {
   const previous = useRef<{
     key: string;
@@ -96,7 +97,11 @@ export function useReplayNotifications(
               ? '空头'
               : '';
         const title = `回放 · ${hint.strategy_name} · ${side}${signal.type === 'entry' ? '入场' : '离场'}信号`;
-        const body = `${signal.symbol} · ${runVersionName(hint)} · ${dateTime(signal.time)}${signal.price === null ? '' : ` · 参考价 ${number(signal.price)}`}${signal.reason ? ` · ${signal.type === 'exit' ? exitReasonLabel(signal.reason) : signal.reason}` : ''}`;
+        const pnl = signal.pnl;
+        const pnlText = pnl
+          ? ` · ${pnl.basis === 'realized' ? '净盈亏' : '参考盈亏'} ${pnl.value > 0 ? '+' : ''}${number(pnl.value)} ${pnl.unit === 'points' ? '点' : '元'}`
+          : '';
+        const body = `${signal.symbol} · ${runVersionName(hint)} · ${dateTime(signal.time)}${signal.price === null ? '' : ` · 参考价 ${number(signal.price)}`}${pnlText}${signal.reason ? ` · ${signal.type === 'exit' ? exitReasonLabel(signal.reason) : signal.reason}` : ''}`;
         if (channels.toast?.enabled)
           showMarketSignalToast({
             id,
@@ -115,7 +120,9 @@ export function useReplayNotifications(
                   ? exitReasonLabel(signal.reason)
                   : signal.reason,
               replay: true,
+              pnl,
             },
+            onNavigate: () => onNavigate(signal.chart_time ?? signal.time),
             onConfirm: () => {
               shown.current.get(id)?.desktop?.close();
               shown.current.delete(id);
@@ -129,6 +136,10 @@ export function useReplayNotifications(
         ) {
           try {
             desktop = new Notification(title, { body, tag: id });
+            desktop.onclick = () => {
+              window.focus();
+              onNavigate(signal.chart_time ?? signal.time);
+            };
           } catch {
             /* Browser/system may restrict desktop delivery. */
           }
@@ -149,5 +160,5 @@ export function useReplayNotifications(
         shown.current.set(id, { time, desktop });
       }
     }
-  }, [key, time, pages, hints, enabled, session]);
+  }, [key, time, pages, hints, enabled, session, onNavigate]);
 }

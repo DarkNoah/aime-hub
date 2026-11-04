@@ -1,4 +1,5 @@
 import type { StrategyNotifications } from './strategy-notifications.js';
+import type { MarketSignalNotification } from '@aime/shared/notifications';
 import type { BacktestInput, TradeRecord } from './strategy-types.js';
 import type { Engine } from './shared.js';
 import { DURATIONS, MONTH_DURATION } from './shared.js';
@@ -76,6 +77,7 @@ export interface StrategySignal {
   price: number | null;
   /** Source candle/tick time, distinct from delivery time. */
   chart_time?: number;
+  pnl?: MarketSignalNotification['pnl'];
 }
 
 export interface StrategyRiskLevel {

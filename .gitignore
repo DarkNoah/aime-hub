@@ -54,10 +54,13 @@ plugins/vibe-quant/**/__pycache__/
 !plugins/vibe-quant/tests/market-strategy-hints.test.ts
 !plugins/vibe-quant/tests/strategy-sharing.test.ts
 !plugins/vibe-quant/tests/backtest-background.test.ts
+!plugins/vibe-quant/tests/backtest-timeout.test.ts
+!plugins/vibe-quant/tests/market-bars-tool.test.ts
 !plugins/vibe-quant/tests/backtest-market.test.ts
 
 !scripts/notification-sound-browser.test.mjs
 !plugins/vibe-quant/tests/market-positions.test.ts
+!plugins/vibe-quant/tests/position-valuation.test.ts
 !scripts/quant-market-positions-browser.test.mjs
 
 !plugins/vibe-quant/tests/factor-groups.test.ts

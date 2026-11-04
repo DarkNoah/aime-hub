@@ -81,6 +81,7 @@ export class LiveMarket {
     saved: Bar[],
     limit = 1000,
     after?: number,
+    forward = after !== undefined,
   ) {
     const merged = new Map(saved.map((row) => [row.time, row]));
     const live = this.engines.get(engine)?.get(symbol)?.bars.get(duration);
@@ -89,6 +90,6 @@ export class LiveMarket {
         if (row.time < before && (after === undefined || row.time > after))
           merged.set(row.time, row);
     const bars = [...merged.values()].sort((a, b) => a.time - b.time);
-    return after === undefined ? bars.slice(-limit) : bars.slice(0, limit);
+    return forward ? bars.slice(0, limit) : bars.slice(-limit);
   }
 }

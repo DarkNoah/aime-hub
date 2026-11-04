@@ -177,6 +177,7 @@ export class MarketStore extends ClickHouseClient {
           before?: number;
           after?: number;
           limit?: number;
+          order?: 'asc' | 'desc';
           singleThread?: boolean;
           rebuildTicks?: boolean;
         } = {},
@@ -185,10 +186,11 @@ export class MarketStore extends ClickHouseClient {
       before,
       after,
       limit: pageSize = 1000,
+      order,
       singleThread = false,
       rebuildTicks = true,
     } = typeof query === 'number' ? { before: query } : query;
-    const forward = after !== undefined;
+    const forward = order ? order === 'asc' : after !== undefined;
     const period = derivedPeriod(duration, pageSize);
     const sourceDuration = period?.source ?? duration;
     const limit = period?.limit ?? pageSize;
@@ -210,7 +212,7 @@ export class MarketStore extends ClickHouseClient {
       `SELECT symbol, duration, toFloat64(time) AS time, open, high, low, close, COLUMNS('^(volume|amount)$')
       FROM ${this.table('bars')} FINAL WHERE engine = {engine:String} AND symbol = {symbol:String} AND duration = {duration:UInt32}
       AND time < {before:UInt64}
-      ${forward ? 'AND time > {after:UInt64}' : ''}
+      ${lowerBoundary !== undefined ? 'AND time > {after:UInt64}' : ''}
       ORDER BY time ${forward ? 'ASC' : 'DESC'} LIMIT {limit:UInt32}
       ${singleThread ? 'SETTINGS max_threads=1, max_block_size=1000' : ''} FORMAT JSON`,
       {
@@ -235,6 +237,7 @@ export class MarketStore extends ClickHouseClient {
           saved,
           limit,
           lowerBoundary,
+          forward,
         )
       : saved;
     const result = period

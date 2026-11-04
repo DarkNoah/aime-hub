@@ -13,6 +13,11 @@ const taskNotificationSchema = z.object({
 export type TaskNotification = z.infer<typeof taskNotificationSchema>;
 export const notificationSoundSchema = z.enum(['entry', 'exit']);
 export type NotificationSound = z.infer<typeof notificationSoundSchema>;
+export const marketSignalPnlSchema = z.object({
+  value: z.number().finite(),
+  unit: z.enum(['currency', 'points']),
+  basis: z.enum(['realized', 'estimate']),
+});
 export const marketSignalNotificationSchema = z.object({
   type: z.enum(['entry', 'exit']),
   side: z.enum(['long', 'short', 'unknown']),
@@ -23,6 +28,7 @@ export const marketSignalNotificationSchema = z.object({
   price: z.number().nullable(),
   reason: z.string(),
   replay: z.boolean().optional(),
+  pnl: marketSignalPnlSchema.optional(),
 });
 export type MarketSignalNotification = z.infer<
   typeof marketSignalNotificationSchema

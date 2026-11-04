@@ -4,6 +4,7 @@ import { createStrategyTools } from './tools/strategies.js';
 import { createBacktestTools } from './tools/backtests.js';
 import { createNewsTools } from './tools/news.js';
 import { createFactorTools } from './tools/factors.js';
+import { MarketBarsTool } from './tools/market-bars.js';
 import type { QuantDependencies } from './tools/context.js';
 
 export function createQuantMastra(
@@ -13,6 +14,7 @@ export function createQuantMastra(
   return {
     agents: [quantAgent],
     tools: [
+      new MarketBarsTool(context, get),
       ...createStrategyTools(context, get),
       ...createBacktestTools(context, get),
       ...createNewsTools(context, get),

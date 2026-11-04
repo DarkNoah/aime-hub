@@ -4,6 +4,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
+import { marketSignalPnlSchema } from '@aime/shared/notifications';
+import { marketChartUrl } from '../../market-navigation.js';
 import type { PluginContext } from '@app/plugin-sdk/server';
 import type { SyncStatus } from '../../shared.js';
 import type { QuantConfig } from '../config.js';
@@ -26,6 +28,7 @@ const signalSchema = z.object({
   reason: z.string(),
   price: z.number().finite().nullable(),
   chart_time: z.number().finite().optional(),
+  pnl: marketSignalPnlSchema.optional(),
 });
 const overlaySchema = z.object({
   updated_at: z.number().finite(),
@@ -492,12 +495,21 @@ export class SignalWorker {
               timeZone: 'Asia/Shanghai',
               hour12: false,
             });
+            const pnl = event.pnl;
+            const pnlText = pnl
+              ? ` · ${pnl.basis === 'realized' ? '净盈亏' : '参考盈亏'} ${pnl.value > 0 ? '+' : ''}${pnl.value.toFixed(2)} ${pnl.unit === 'points' ? '点' : '元'}`
+              : '';
             await this.context.notifications.publish({
               userId: row.user_id,
               eventId: event.id,
               title: `${strategy.name} · ${side}${event.type === 'entry' ? '入场' : '离场'}信号`,
-              body: `${event.symbol} · ${runVersionName(row)} · ${time}${event.price === null ? '' : ` · 参考价 ${event.price}`}${event.reason ? ` · ${event.reason}` : ''}`,
-              url: `/plugins/vibe-quant/?symbol=${encodeURIComponent(row.config.display_symbol ?? row.config.symbol)}`,
+              body: `${event.symbol} · ${runVersionName(row)} · ${time}${event.price === null ? '' : ` · 参考价 ${event.price}`}${pnlText}${event.reason ? ` · ${event.reason}` : ''}`,
+              url: marketChartUrl({
+                symbol: event.symbol,
+                time: event.chart_time ?? event.time,
+                duration: row.config.duration,
+                monitor: row.id,
+              }),
               toast: channels.toast?.enabled ?? false,
               desktop: channels.desktop?.enabled ?? false,
               ...(channels.sound?.enabled ? { sound: event.type } : {}),
@@ -510,6 +522,7 @@ export class SignalWorker {
                 time: event.time,
                 price: event.price,
                 reason: event.reason,
+                pnl,
               },
             });
           }

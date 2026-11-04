@@ -33,6 +33,8 @@ import { FactorStore } from './factors/store.js';
 import { FactorService } from './factors/service.js';
 import { factorRoutes } from './factors/routes.js';
 import { signalRoutes } from './signals/routes.js';
+import { readMonitorMarketBars } from './signals/market.js';
+import { StrategyError } from './strategies/schema.js';
 import {
   StrategyReplaySessions,
   strategyReplayRoutes,
@@ -204,6 +206,25 @@ export default function createServer(context: PluginContext): PluginServer {
     const query = marketBarsQuery.safeParse(c.req.query());
     if (!symbol.success || !query.success)
       return c.json({ code: 'VALIDATION_ERROR' }, 400);
+    const monitorId = c.req.query('monitor');
+    if (monitorId) {
+      try {
+        return c.json(
+          await readMonitorMarketBars(
+            monitors,
+            store,
+            c.get('userId'),
+            monitorId,
+            symbol.data,
+            query.data,
+          ),
+        );
+      } catch (error) {
+        if (error instanceof StrategyError)
+          return c.json({ code: error.code }, error.status);
+        throw error;
+      }
+    }
     const owned = await state.owns(c.get('userId'), symbol.data);
     if (!owned) return c.json({ code: 'NOT_IN_WATCHLIST' }, 404);
     return c.json(
@@ -269,6 +290,7 @@ export default function createServer(context: PluginContext): PluginServer {
   return {
     api,
     ...createQuantMastra(context, () => ({
+      market: store,
       factors,
       factorService,
       records,

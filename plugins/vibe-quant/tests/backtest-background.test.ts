@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
-import { setImmediate, setTimeout as delay } from 'node:timers/promises';
-import { Agent } from '@mastra/core/agent';
-import { Mastra } from '@mastra/core/mastra';
-import { InMemoryStore } from '@mastra/core/storage';
-import { MastraLanguageModelV2Mock } from '@mastra/core/test-utils/llm-mock';
+import { setImmediate } from 'node:timers/promises';
 import { RequestContext } from '@mastra/core/request-context';
 import { noopObserve } from '@mastra/core/tools';
 import type { PluginContext } from '@app/plugin-sdk/server';
@@ -101,6 +97,11 @@ function fixture() {
 for (const name of ['backtest_start', 'backtest_optimize']) {
   test(`${name} acknowledges the queued task without waiting and survives conversation abort`, async () => {
     const f = fixture();
+    const [tool] = await f.tools
+      .find((item) => item.id === `plugin_vibe_quant_${name}`)!
+      .getTools();
+    assert.ok('background' in tool);
+    assert.deepEqual(tool.background, { enabled: false });
     const controller = new AbortController();
     const result = await f.call(
       name,
@@ -119,6 +120,8 @@ for (const name of ['backtest_start', 'backtest_optimize']) {
     );
     assert.equal(result.run_id, result.run.id);
     assert.equal(result.run.status, 'queued');
+    if (name === 'backtest_optimize')
+      assert.equal(result.run.config.optimization.timeout_seconds, 0);
     assert.match(result.message, /已提交/);
     assert.deepEqual(f.counts, { enqueue: 1, wake: 1, read: 0, cancel: 0 });
     controller.abort();
@@ -193,132 +196,3 @@ test('aborting a pending status read returns immediately without cancelling the 
   assert.equal(f.job().status, 'queued');
   assert.equal(f.counts.cancel, 0);
 });
-
-for (const [name, outcome] of [
-  ['backtest_start', 'completed'],
-  ['backtest_start', 'failed'],
-  ['backtest_start', 'cancelled'],
-  ['backtest_start', 'timed_out'],
-  ['backtest_optimize', 'completed'],
-] as const) {
-  test(
-    `native createTool background responds before ${name} and reconciles ${outcome}`,
-    { timeout: 15000 },
-    async (t) => {
-      const f = fixture();
-      const toolName = `plugin_vibe_quant_${name}`;
-      const [tool] = await f.tools
-        .find((item) => item.id === toolName)!
-        .getTools();
-      assert.ok('background' in tool);
-      assert.equal(tool.background?.enabled, true);
-      assert.equal(tool.background?.defaultDisposition, 'deferred');
-      assert.equal(tool.background?.maxRetries, 0);
-      if (outcome === 'timed_out') tool.background!.timeoutMs = 500;
-      const input = {
-        ...f.input,
-        ...(name === 'backtest_optimize'
-          ? {
-              optimization: {
-                metric: 'total_points',
-                search_space: { window: { type: 'int', low: 2, high: 5 } },
-              },
-            }
-          : {}),
-      };
-      let calls = 0;
-      const model = new MastraLanguageModelV2Mock({
-        doStream: async () => ({
-          stream: new ReadableStream({
-            start(controller) {
-              const first = ++calls === 1;
-              if (first)
-                controller.enqueue({
-                  type: 'tool-call',
-                  toolCallId: 'backtest-call',
-                  toolName,
-                  input: JSON.stringify(input),
-                });
-              else {
-                controller.enqueue({ type: 'text-start', id: 'reply' });
-                controller.enqueue({
-                  type: 'text-delta',
-                  id: 'reply',
-                  delta: '回测已在后台启动。',
-                });
-                controller.enqueue({ type: 'text-end', id: 'reply' });
-              }
-              controller.enqueue({
-                type: 'finish',
-                finishReason: first ? 'tool-calls' : 'stop',
-                usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-              });
-              controller.close();
-            },
-          }),
-        }),
-      });
-      const agent = new Agent({
-        id: 'quant-background-test',
-        name: 'Quant test',
-        instructions: 'Run the backtest in the background.',
-        model,
-        tools: { [toolName]: tool },
-      });
-      const storage = new InMemoryStore();
-      const mastra = new Mastra({
-        agents: { agent },
-        storage,
-        logger: false,
-        backgroundTasks: { enabled: true },
-      });
-      t.after(() => mastra.shutdown());
-      const stream = await agent.stream('运行回测', {
-        requestContext: f.requestContext,
-      });
-      for await (const chunk of stream.fullStream) void chunk;
-      assert.equal(await stream.text, '回测已在后台启动。');
-      const manager = mastra.backgroundTaskManager!;
-      const waitFor = async (check: () => boolean | Promise<boolean>) => {
-        for (let i = 0; i < 300; i++) {
-          if (await check()) return;
-          await delay(10);
-        }
-        assert.fail('Native background task did not reach the expected state');
-      };
-      await waitFor(() => f.counts.enqueue === 1);
-      const { tasks } = await manager.listTasks({ agentId: agent.id });
-      assert.equal(tasks.length, 1);
-      const taskId = tasks[0].id;
-      assert.notEqual(taskId, f.job().id);
-      assert.equal(tasks[0].status, 'running');
-      assert.equal(f.job().status, 'queued');
-      // The foreground already replied while the native task still owns the queued job.
-      if (outcome === 'cancelled' || outcome === 'timed_out') {
-        if (outcome === 'cancelled') await manager.cancel(taskId);
-        await waitFor(() => f.counts.cancel === 1);
-        assert.equal(f.job().status, 'cancelled');
-      } else {
-        f.job().status = outcome;
-        f.job().message = outcome === 'failed' ? '测试回测失败' : '';
-      }
-      await waitFor(
-        async () => (await manager.getTask(taskId))?.status === outcome,
-      );
-      const task = (await manager.getTask(taskId))!;
-      if (outcome === 'completed') {
-        const result = task.result as {
-          run_id: string;
-          run: BacktestRun;
-          terminal: boolean;
-        };
-        assert.equal(result.run_id, f.job().id);
-        assert.equal(result.run.status, 'completed');
-        assert.equal(result.terminal, true);
-      }
-      if (outcome === 'failed')
-        assert.match(task.error?.message ?? '', /测试回测失败/);
-      assert.equal(f.counts.enqueue, 1);
-    },
-  );
-}

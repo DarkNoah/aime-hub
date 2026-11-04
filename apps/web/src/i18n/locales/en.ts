@@ -912,6 +912,13 @@ export const en = {
   'notifications.signal.reason': 'Trigger',
   'notifications.signal.confirmHint': 'Stays until confirmed',
   'notifications.signal.confirm': 'Confirm',
+  'notifications.signal.locate': 'Locate on chart',
+  'notifications.signal.netPnl': 'Net P&L',
+  'notifications.signal.estimatedPnl': 'Estimated P&L',
+  'notifications.signal.estimatedPnlHint':
+    'At the signal price, including paid entry fees; excludes exit fees and slippage',
+  'notifications.signal.currency': 'CNY',
+  'notifications.signal.points': 'pts',
 
   'nav.automations': 'Automations',
   'automations.title': 'Automations',

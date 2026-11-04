@@ -10,8 +10,10 @@ import { StrategyError } from '../../server/strategies/schema.js';
 import { FactorError } from '../../server/factors/schema.js';
 import type { FactorStore } from '../../server/factors/store.js';
 import type { FactorService } from '../../server/factors/service.js';
+import type { MarketStore } from '../../server/clickhouse.js';
 
 export interface QuantDependencies {
+  market: Pick<MarketStore, 'bars'>;
   factors?: FactorStore;
   factorService?: FactorService;
   records: Pick<

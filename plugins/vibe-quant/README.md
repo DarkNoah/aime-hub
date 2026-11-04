@@ -225,7 +225,7 @@ Tick 测试另外覆盖最近窗口完整读取、多 Tick 合并到达、纳秒
 - **冻结数据**：执行前保存原始行情与 SDK Dataset，完成后保存结果和 SDK manifest；这些 JSON 存入 ClickHouse `quant_strategy_run_artifacts`；大产物在传输前使用带版本前缀的 gzip/base64 编码，并以单线程解析入库，降低数据库解析内存，表层仍使用 ZSTD。读取兼容旧明文 JSON，解压受大小上限约束，按运行 ID 和产物类型保持不可覆盖，并校验原始 JSON 的 SHA-256。与当前行情解耦，也不依赖某个服务进程的临时文件。导出包含版本源码、运行参数、Dataset、结果及 manifest。SDK manifest 记录 Python/SDK 版本和运行时源码哈希。
 - **使用插件 venv**：调用现有 `ensurePython()`，运行 `<WORKSPACE_ROOT>/plugins/vibe-quant/.venv/bin/python`（Windows 为 `Scripts/python.exe`），要求 Python 3.10+。行情采集和回测共用环境，初始化/修复有文件锁。SDK 源码复制到本次运行目录并加入 Python 导入路径；用户额外依赖可安装到此 venv。
 - **执行权限**：venv 是依赖环境，不是安全沙箱。只有管理员可提交运行服务器 Python 代码的回测；策略、版本、回测及调优结果在同一 ClickHouse 数据库内向所有已登录用户共享，支持共同编辑、发布和管理；`user_id` 仅记录创建者或任务提交者，编辑时保留原创建者，队列名额仍按提交者计算。已有记录立即共享，无需迁移用户 ID。子进程不继承数据库、行情账号、会话等环境变量。工作目录位于插件空间 `strategy-runs/`，产物入库后移除临时副本；脚本仍是具有宿主文件访问能力的受信任代码。
-- **队列生命周期**：ClickHouse 的单条条件 INSERT 同时检查修订号或用户队列容量，并写入新状态；通过共享查询 ID 串行执行这些单条语句，不把跨请求读写当成事务。此机制沿用“同一台 ClickHouse 24.8+ 服务器”的要求，不支持多节点负载均衡。每进程同时认领一个与自身行情引擎匹配的任务，每用户最多三个未完成任务；两秒心跳用于取消和断线发现。普通回测和每次调参试验执行上限五分钟；取消先请求 SDK 停止，再终止不响应的进程组。服务异常退出后超时的记录标记为失败，不自动重复执行。插件停用会停止本进程运行。
+- **队列生命周期**：ClickHouse 的单条条件 INSERT 同时检查修订号或用户队列容量，并写入新状态；通过共享查询 ID 串行执行这些单条语句，不把跨请求读写当成事务。此机制沿用“同一台 ClickHouse 24.8+ 服务器”的要求，不支持多节点负载均衡。每进程同时认领一个与自身行情引擎匹配的任务，每用户最多三个未完成任务；两秒心跳用于取消和断线发现。普通回测、天勤回测、调参单次试验和留出验证均无固定执行时限；取消先请求 SDK 停止，再终止不响应的进程组。服务异常退出后超时的记录标记为失败，不自动重复执行。插件停用会停止本进程运行。
 - **结果与回放**：显示总收益/收益率、年化、最大回撤、夏普、交易笔数、最终权益、基准收益/年化、索提诺、卡玛、PF、净值曲线、月度/年度收益和交易表。交易表同时展示已平仓及未平仓记录，未平仓按已保存的开仓成交减去对应平仓数量还原，历史回测无需重新运行；部分平仓只展示剩余数量及其开仓手续费，离场与净收益留空。点击「查看入场」可定位原始入场 K 线，未平仓回放不绘制离场标记，止盈止损范围截止本次回测最后观测时间；交易笔数仍按已平仓片段统计，权益与总收益继续计入未平仓头寸的市值变化。交易回放与行情页共用完整的 `MarketChartPanel`，包含分时/多周期 K 线、指标及参数、划线、日期跳转和边缘分页，额外提供入场/离场定位。K 线通过 `useMarketBars` 和行情页相同的历史数据查询按需加载实际成交合约，使用该次回测的数据引擎，不受回测起止时间限制。成交标记仍取自回测记录，行情库后续修订不会改写成交结果。划线按回测、标的、周期保存，支持跨周期显示，与实时行情的划线隔离。打开时定位入场，入场/离场按钮只跳转视窗；拖至边缘继续双向加载，每页 200 根并保留视窗位置。冻结快照仍随回测保留、供导出和结果核验使用，不再限制图表可浏览的范围。
 
 回测仅使用已经采集/导入的行情。所选日期可以超出已有数据范围，结束时间也可晚于当前时间；仅处理区间内已收盘的可用 K 线，不要求数据覆盖起止边界，没有可用行情时明确提示。默认 `actual_contract` 模式缺少历史主力映射或对应实际合约分钟线时明确失败，不替换成当前主力。显式选择 `continuous_price` 时，将所选主连作为保留原符号的合成期货，按主连价格模拟成交；原始行情目录不变，配置、Dataset、manifest 和结果页标明模拟口径，不计实际合约价差及换月成交成本，策略需支持此模式。单次最多十年（3,660 天）、500,000 根输入 K 线、24 个实际合约；单份产物最多 128 MiB。默认交易日历按实际行情和历史映射所需日期生成，使用 venv 中 `chinese-calendar` 的已公布节假日并排除周末，不因所选区间内无数据的未来日期要求额外日历；可在配置中提供完整日期到布尔值的交易所日历以覆盖特殊休市，未知日期失败。股票与期货交易规则需要根据品种明确填写；目录选择股票会填入 100 股、T+1、全额资金的默认配置。保证金和手续费都是回测假设，不代表交易所或经纪商当前标准。
@@ -265,16 +265,16 @@ HTTP 使用 `GET/POST /strategies/:id/optimizations` 查询和提交，`/strateg
   },
   "metric": "sharpe",
   "n_trials": 30,
-  "timeout_seconds": 600,
+  "timeout_seconds": 0,
   "seed": 42,
   "min_trades": 1
 }
 ```
 
 - 使用固定版本、同一份冻结 Dataset 和固定费用/滑点；每次试验启动新的 Python 进程，重置策略模块、实例和账户。未搜索的参数沿用回测参数。行情标的、周期、成交模式不参与搜索。
-- 使用 Optuna 4.5.0 的 `TPESampler`，最多 200 次、搜索时间最多 3600 秒，先达到的限制结束搜索；单次试验最多 300 秒。默认种子 42；策略自身的随机源仍需策略自行固定。每次试验仅保留指标和参数，最佳训练试验保留原始完整结果及 manifest，不通过重跑替代最佳结果。
+- 使用 Optuna 4.5.0 的 `TPESampler`，最多 200 次，默认搜索时间不限（timeout_seconds=0）；可主动设置 1–3600 秒搜索预算。单次试验受剩余搜索预算约束，无额外固定时限；留出验证无固定执行时限。默认种子 42；策略自身的随机源仍需策略自行固定。每次试验仅保留指标和参数，最佳训练试验保留原始完整结果及 manifest，不通过重跑替代最佳结果。
 - 目标可选 `sharpe`、`total_return`、`annual_return`、`max_drawdown`、`sortino`、`calmar`、`profit_factor`。最大回撤取最小，其余取最大。交易不足或指标为 null 的试验不入选；策略错误记录为失败，继续其余试验。全部无效时整个任务失败。
-- 可选 `validation_start`（UTC epoch 秒）将区间按时间拆分：之前用于搜索，之后只用最佳参数验证一次。验证重新初始化资金和仓位，之前的行情仅用于 SDK 历史预热，不调用交易回调；建议按完整交易日划分。验证另有 300 秒上限。未设置时明确标记为仅样本内；这是单次留出验证，不是 walk-forward，训练最佳值不代表泛化表现。
+- 可选 `validation_start`（UTC epoch 秒）将区间按时间拆分：之前用于搜索，之后只用最佳参数验证一次。验证重新初始化资金和仓位，之前的行情仅用于 SDK 历史预热，不调用交易回调；建议按完整交易日划分。验证没有固定执行时限，仍可手动取消。未设置时明确标记为仅样本内；这是单次留出验证，不是 walk-forward，训练最佳值不代表泛化表现。
 - 调优面板单独展示训练目标、验证指标、最佳参数和分页试验记录，完成后可直接查看新版本，并按普通流程创建回测。训练/验证的完整结果和 manifest 仍作为内部产物保存，`optimization` / `validation` 使用现有产物表，无需新表。
 - 运行中通过状态消息显示试验进度；用户取消、插件停止或超时后尽可能保存最后完成的试验和最佳结果，状态仍为取消/失败。不会自动续跑崩溃任务。Agent 可使用现有 `backtest_status`、`backtest_cancel`；`backtest_result` 的 `optimization` 返回摘要，`section=optimization_trials` 每页 50 条。
 - 插件 Python 环境按 requirements 指纹自动安装/更新 Optuna；离线部署的 wheel 包需包含更新后的 `worker/requirements.txt` 及其依赖。
@@ -310,6 +310,7 @@ QUANT_STRATEGY_INTEGRATION=1 node --import dotenv/config --import tsx --test plu
 | 工具                                    | 用途                                                               |
 | --------------------------------------- | ------------------------------------------------------------------ |
 | `strategy_guide`、`instrument_search`   | 当前 SDK 文档、模板、权限和标的目录                                |
+| `market_bars` | 按标的、周期、北京时间日期范围及游标分页查询 K 线 |
 | `strategy_list`、`strategy_read`        | 共享策略列表、草稿及指定版本源码                                   |
 | `strategy_create`、`strategy_update`    | 创建草稿、按 revision 更新；支持启停，省略字段保留原值             |
 | `strategy_versions`、`strategy_publish` | 查看版本摘要、固定当前草稿版本                                     |
@@ -323,11 +324,19 @@ QUANT_STRATEGY_INTEGRATION=1 node --import dotenv/config --import tsx --test plu
 | `factor_save`、`factor_publish`        | 保存因子草稿、发布不可变因子版本                                   |
 | `factor_analyze`                       | 对已采集期货日线执行横截面因子分析                                 |
 
-典型流程是 `guide → list/read → create/update → publish → backtest_start（原生后台执行）→ 完成后 result`，中途按需调用 status。创建策略只需 `name`、`source`，`parameters` 默认空对象；更新传 `strategy_id`、`revision` 和要改的字段，`source`、`parameters` 直接放在顶层，无需 `draft`。省略字段保留原值，`parameters` 如提供则整体替换。读取结果仍保留 `strategy.draft` 结构。
+典型流程是 `guide → list/read → create/update → publish → backtest_start（立即返回 run_id，独立队列执行）→ 完成后 result`，中途按需调用 status。创建策略只需 `name`、`source`，`parameters` 默认空对象；更新传 `strategy_id`、`revision` 和要改的字段，`source`、`parameters` 直接放在顶层，无需 `draft`。省略字段保留原值，`parameters` 如提供则整体替换。读取结果仍保留 `strategy.draft` 结构。
 
-`backtest_start` 和 `backtest_optimize` 使用 `createTool({ background: { enabled: true, defaultDisposition: 'deferred', timeoutMs: 14400000, maxRetries: 0 } })`。宿主的 Mastra 后台任务管理器已启用，聊天先收到原生任务确认并可继续响应；工具通过 `execution.background.adopt()` 将已有回测队列任务的完成与取消交给原生任务管理器。原生任务持续到回测结束，进度包含回测 `run_id`，失败会标记原生任务失败；取消或超时会向回测队列提交取消请求。4 小时上限包含排队、准备数据及执行；Python Worker 原有执行时限仍适用。关闭自动重试是为了避免重复入队。
+`backtest_start` 和 `backtest_optimize` 立即返回入队记录 `{ run_id, message, run }`，由现有持久化回测队列执行，不设置固定执行时限。聊天前台停止不会取消已入队的回测；用 `backtest_cancel` 或回测页面取消。当前 Mastra 原生后台任务不能禁用计时器（timeoutMs=0 会立即触发超时），因此这两个工具关闭原生后台托管，不再使用聊天后台任务卡片跟踪完成，也不触发原生后台完成通知。
 
-原生 `taskId` 与业务回测 `run_id` 是不同 ID：聊天后台任务入口使用 `taskId`，`backtest_status/result/cancel` 使用 `run_id`。宿主的 `untilIdle` 会处理后台完成结果；Agent 不需要循环调用状态工具。`backtest_status` 默认只读取一次当前状态，仍兼容显式 `wait=true` 最多等待 10 秒。直接调用工具且没有原生后台上下文时，仍只返回入队记录 `{ run_id, message, run }`，后续可按需查询。这里只调整策略回测与调优，`factor_analyze` 仍同步执行。
+`backtest_status` 默认只读取一次当前状态，仍兼容显式 `wait=true` 最多等待 10 秒；此等待结束不会终止回测。后续按 `run_id` 查询进度和结果，不在本轮持续轮询。只取消回测执行时限；网络请求、环境安装和失联心跳检测仍有各自的故障处理，`factor_analyze` 保持原行为。
+
+K 线工具 `market_bars` 复用当前引擎行情存储及主连修复、派生周期聚合，登录用户可读已采集行情，无需先添加自选，不启动采集或补历史。参数示例：
+
+```json
+{"symbol":"SSE.000852","duration":300,"start_date":"2026-10-19","end_date":"2026-10-23","order":"asc","limit":100}
+```
+
+只查一天时仅填 `start_date`，默认 `end_date` 同一天；均为北京时间自然日，按 K 线起始时间筛选，期货夜盘自然日不等于交易日。省略日期默认读取最新 100 根，`order` 默认 `desc`，每页 1–500 根。返回 `bars`、`count`、`has_more`、`next_cursor`；翻页时将 `next_cursor` 作为 `cursor`，保持其他条件不变，末页游标为 null。行情先按标的及范围筛选再分页；3 分钟/月线保留完整聚合周期。没有数据返回空列表，成交额缺失不推算。沿用通用工具结果展示和现有行情连接配置，无需新增专属渲染器或后台配置；取消查询立即返回“用户中止了操作”。
 
 版本效果对比：先用 `backtest_list` 找到同一策略各版本已完成的普通回测，调用 `backtest_compare({"run_ids":["版本1回测ID","版本2回测ID"]})`，每个版本选一条，第一条作为差值基准，支持多个版本。返回 `metrics`（总收益、年化、回撤、夏普、胜率、PF 等）、`yearly`、`monthly` 及可直接阅读的中文 `description`；每项含原值、相对基准的差值和描述。结构化收益率及其差值使用小数比例，描述用百分比/百分点；点数回测使用点，不转换成资金收益率。年度/月度直接采用原回测报告，按交易日所属期间对齐，不把月收益率相加作为年收益率；缺失期间为 null，首尾部分年/月不折算成完整期间。
 
@@ -420,7 +429,7 @@ QUANT_STRATEGY_INTEGRATION=1 node --import dotenv/config --import tsx --test plu
 | `search_space` | 必填 object，1–30 个参数 | key 为策略参数名（1–100 字符），value 为下面的搜索分布 |
 | `metric` | enum="sharpe" | 资金模式支持 sharpe/total_return/annual_return/max_drawdown/sortino/calmar/profit_factor；点数模式仅支持 total_points/max_drawdown_points/profit_factor，需显式选择匹配目标 |
 | `n_trials` | integer=30，1–200 | 最多试验次数 |
-| `timeout_seconds` | integer=600，1–3600 | 调优时间预算，单位秒 |
+| `timeout_seconds` | integer=0，0–3600 | 调优搜索预算，单位秒；0 表示不限时 |
 | `seed` | integer=42，0–4294967295 | TPE 随机种子 |
 | `min_trades` | integer=1，≥ 1 | 试验有效所需的最低交易数 |
 | `validation_start` | 可选 positive integer | UTC epoch 秒，严格位于 start/end 之间；后段作为独立验证 |
@@ -443,7 +452,7 @@ QUANT_STRATEGY_INTEGRATION=1 node --import dotenv/config --import tsx --test plu
 
 ```sh
 node --import tsx --test plugins/vibe-quant/tests/quant-agent.test.ts
-node --import tsx --test plugins/vibe-quant/tests/backtest-background.test.ts
+node --import tsx --test plugins/vibe-quant/tests/backtest-background.test.ts plugins/vibe-quant/tests/backtest-timeout.test.ts plugins/vibe-quant/tests/market-bars-tool.test.ts
 # 使用上述隔离测试数据库和插件 Python 环境，验证工具到真实回测的完整链路
 QUANT_STRATEGY_INTEGRATION=1 node --import dotenv/config --import tsx --test plugins/vibe-quant/tests/quant-agent.test.ts
 ```

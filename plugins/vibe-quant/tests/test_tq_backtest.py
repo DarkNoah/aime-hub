@@ -213,6 +213,7 @@ class TqBrokerTests(unittest.TestCase):
         self.broker.sync()
         self.assertEqual(self.broker.trades[0]['gross_pnl'], 200)
         self.assertEqual(self.broker.trades[0]['net_pnl'], 192)
+        self.assertEqual(sum(fill.get('net_pnl', 0) for fill in self.broker.fills), 192)
         self.broker.advance()
         self.assertEqual((self.api.orders[-1].offset, self.api.orders[-1].volume), ('OPEN', 1))
 

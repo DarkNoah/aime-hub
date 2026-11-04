@@ -163,6 +163,10 @@ export interface OpenTrade extends Omit<
   exit_signal_id: null;
   /** Last observed account time; risk drawings must not extend beyond the run. */
   observed_until: number;
+  /** Mark-to-market from entry cost, less paid entry fees; excludes future exit costs. */
+  unrealized_pnl?: number | null;
+  mark_price?: number | null;
+  pnl_multiplier?: number;
 }
 export type TradeRecord = Trade | OpenTrade;
 /** Intrabar execution is anchored to its source candle, not the next candle. */

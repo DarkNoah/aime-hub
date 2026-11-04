@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { pluginRequest, type PluginPageProps } from '@app/plugin-sdk/web';
 import {
   Badge,
@@ -32,11 +32,15 @@ import {
 } from '../shared';
 import { MarketChartPanel } from './components/market-chart-panel';
 import { useMarketBars } from './use-market-bars';
-import { readChartPeriod } from './chart-period';
+import { parseChartPeriod, readChartPeriod } from './chart-period';
 import { OrderBookPanel } from './order-book';
 import { useStrategyHints } from './signals/use-strategy-hints';
 import { StrategyHints } from './signals/strategy-hints';
 import { MarketPositionsPanel } from './signals/market-positions-panel';
+import {
+  readMarketChartTarget,
+  type MarketChartTarget,
+} from '../market-navigation';
 
 const ENGINE_NAMES = { tqsdk: 'TqSdk', tushare: 'Tushare', tdx: '通达信' };
 const STATE_LABELS = {
@@ -80,6 +84,9 @@ const timeText = (value?: string | null) =>
     : '暂无';
 
 export function MarketPage({ pluginId }: PluginPageProps) {
+  const [chartTarget, setChartTarget] = useState(() =>
+    readMarketChartTarget(window.location.search),
+  );
   const [list, setList] = useState<WatchItem[]>([]);
   const [selected, setSelected] = useState(
     () => new URLSearchParams(window.location.search).get('symbol') ?? '',
@@ -99,10 +106,14 @@ export function MarketPage({ pluginId }: PluginPageProps) {
   const [searchError, setSearchError] = useState('');
   const [busy, setBusy] = useState('');
   const busyRef = useRef(false);
-  const [period, setPeriod] = useState(readChartPeriod);
+  const [period, setPeriod] = useState(() =>
+    chartTarget
+      ? parseChartPeriod(String(chartTarget.duration))
+      : readChartPeriod(),
+  );
   const isIntraday = period === 'intraday';
   const duration = isIntraday ? 60 : period;
-  const identity = `${status?.engine ?? ''}:${selected}:${period}`;
+  const identity = `${chartTarget?.monitor ?? status?.engine ?? ''}:${selected}:${period}`;
   const marketBars = useMarketBars({
     pluginId,
     symbol: selected,
@@ -110,7 +121,25 @@ export function MarketPage({ pluginId }: PluginPageProps) {
     intraday: isIntraday,
     identity,
     retry,
+    barsPath: chartTarget?.monitor
+      ? `/bars?symbol=${encodeURIComponent(selected)}&monitor=${encodeURIComponent(chartTarget.monitor)}`
+      : undefined,
   });
+  const locateTarget = useEffectEvent(() => {
+    if (chartTarget) void marketBars.navigate(chartTarget.time);
+  });
+  useEffect(() => {
+    locateTarget();
+  }, [chartTarget, identity]);
+  function navigateChart(target: MarketChartTarget) {
+    setSelected(target.symbol);
+    setPeriod(parseChartPeriod(String(target.duration)));
+    setChartTarget(target);
+  }
+  function selectSymbol(symbol: string) {
+    setChartTarget(null);
+    setSelected(symbol);
+  }
   const hints = useStrategyHints(
     pluginId,
     selected,
@@ -120,6 +149,15 @@ export function MarketPage({ pluginId }: PluginPageProps) {
       ? marketBars.bars.at(-1)!.time + duration
       : undefined,
   );
+  const applyWatchlist = useEffectEvent((items: WatchItem[]) => {
+    setList(items);
+    setSelected((current) =>
+      chartTarget || items.some((item) => item.symbol === current)
+        ? current
+        : (items[0]?.symbol ?? ''),
+    );
+    setListError('');
+  });
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
@@ -127,13 +165,7 @@ export function MarketPage({ pluginId }: PluginPageProps) {
       signal: controller.signal,
     })
       .then((items) => {
-        setList(items);
-        setSelected((current) =>
-          items.some((item) => item.symbol === current)
-            ? current
-            : (items[0]?.symbol ?? ''),
-        );
-        setListError('');
+        applyWatchlist(items);
       })
       .catch(() => {
         if (!controller.signal.aborted) setListError('无法读取自选列表');
@@ -216,7 +248,7 @@ export function MarketPage({ pluginId }: PluginPageProps) {
             ? current.map((entry) => (entry.symbol === symbol ? item : entry))
             : [...current, item],
         );
-        setSelected(symbol);
+        selectSymbol(symbol);
         setSearchOpen(false);
         toast.success('已加入自选，自动同步已开启');
       } else if (action === 'delete') {
@@ -227,7 +259,7 @@ export function MarketPage({ pluginId }: PluginPageProps) {
         );
         const next = list.filter((entry) => entry.symbol !== symbol);
         setList(next);
-        if (selected === symbol) setSelected(next[0]?.symbol ?? '');
+        if (selected === symbol) selectSymbol(next[0]?.symbol ?? '');
         toast.success('已移除自选');
       } else {
         await pluginRequest(
@@ -249,7 +281,20 @@ export function MarketPage({ pluginId }: PluginPageProps) {
       setBusy('');
     }
   }
-  const item = list.find((entry) => entry.symbol === selected);
+  const item: Instrument | undefined =
+    list.find((entry) => entry.symbol === selected) ??
+    (chartTarget
+      ? {
+          symbol: selected,
+          name: selected,
+          kind: 'future',
+          exchange: '',
+          product: '',
+          underlying: '',
+          expired: false,
+          priceTick: marketBars.priceTick ?? 0.01,
+        }
+      : undefined);
   const currentQuote = quotes.find((entry) => entry.symbol === selected);
   return (
     <div
@@ -349,7 +394,7 @@ export function MarketPage({ pluginId }: PluginPageProps) {
                   >
                     <button
                       aria-pressed={isSelected}
-                      onClick={() => setSelected(entry.symbol)}
+                      onClick={() => selectSymbol(entry.symbol)}
                       className={`w-full px-4 py-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-ring ${isSelected ? '' : 'hover:bg-muted/60'}`}
                     >
                       <span className="flex items-center justify-between gap-3">
@@ -429,6 +474,12 @@ export function MarketPage({ pluginId }: PluginPageProps) {
         <section className="flex min-h-0 min-w-0 flex-col">
           {item ? (
             <>
+              {chartTarget && (
+                <div className="flex items-center gap-2 border-b px-4 py-2 text-xs">
+                  <Badge variant="outline">交易定位</Badge>
+                  <span className="min-w-0 truncate font-mono">{selected}</span>
+                </div>
+              )}
               <MarketChartPanel
                 chartClassName="min-h-[440px] lg:min-h-[560px] xl:min-h-0"
                 toolbarActions={(replay) => (
@@ -444,14 +495,18 @@ export function MarketPage({ pluginId }: PluginPageProps) {
                 strategyHints={hints.items}
                 view={marketBars}
                 identity={identity}
-                drawingSharedScope={`${status?.engine ?? ''}:${selected}`}
+                drawingSharedScope={`${chartTarget?.monitor ?? status?.engine ?? ''}:${selected}`}
                 period={period}
                 onPeriodChange={setPeriod}
                 priceTick={item.priceTick}
-                volumeProfileSource={{
-                  pluginId,
-                  path: `/volume-profile?symbol=${encodeURIComponent(selected)}`,
-                }}
+                volumeProfileSource={
+                  chartTarget?.monitor
+                    ? undefined
+                    : {
+                        pluginId,
+                        path: `/volume-profile?symbol=${encodeURIComponent(selected)}`,
+                      }
+                }
               />
             </>
           ) : (
@@ -477,6 +532,8 @@ export function MarketPage({ pluginId }: PluginPageProps) {
           key={`${pluginId}:${status?.engine}`}
           pluginId={pluginId}
           engine={status?.engine}
+          quotes={quotes}
+          onNavigate={navigateChart}
           marketOverview={
             item ? (
               <div aria-label="行情概览与盘口">

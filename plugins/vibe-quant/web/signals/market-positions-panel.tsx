@@ -22,11 +22,14 @@ import type {
 } from '../../market-positions';
 import { monitorExecutionModel } from '../../signal-types';
 import { durationLabel } from '../../shared';
-import { tradeHoldingEnd } from '../../strategy-types';
+import type { Quote } from '../../shared';
+import type { MarketChartTarget } from '../../market-navigation';
+import { tradeExitAnchor, tradeHoldingEnd } from '../../strategy-types';
 import { dateTime, holdingDuration, number } from '../strategies/format';
 import { TradeExitBadge } from '../trade-exit-badge';
 import { useMarketPositions } from './use-market-positions';
 import { MarketStrategyList } from './market-strategy-list';
+import { positionValuation } from './position-valuation';
 
 const statuses = {
   starting: '准备中',
@@ -42,14 +45,33 @@ const price = (value: number | null) =>
 function PositionRow({
   row,
   monitor,
+  quote,
+  engine,
+  onNavigate,
 }: {
   row: MarketPosition;
   monitor: MarketPositionMonitor;
+  quote?: Quote;
+  engine?: string;
+  onNavigate: (target: MarketChartTarget) => void;
 }) {
   const trade = row.trade;
   const open = trade.status === 'open';
   const model = monitorExecutionModel(monitor.config);
   const displaySymbol = monitor.config.display_symbol ?? monitor.config.symbol;
+  const valuation =
+    trade.status === 'open'
+      ? positionValuation(trade, monitor, quote, engine)
+      : null;
+  const pnl = valuation ? valuation.value : trade.net_pnl;
+  function navigate(time: number) {
+    onNavigate({
+      symbol: trade.symbol,
+      time: Math.floor(time),
+      duration: monitor.config.duration,
+      monitor: monitor.id,
+    });
+  }
   return (
     <li className="min-w-0 space-y-2.5 px-4 py-3.5">
       <div className="flex items-start justify-between gap-2">
@@ -80,7 +102,22 @@ function PositionRow({
       <dl className="space-y-1 text-xs">
         <div className="flex justify-between gap-3">
           <dt className="shrink-0 text-muted-foreground">来源标的</dt>
-          <dd className="break-all text-right font-medium">{trade.symbol}</dd>
+          <dd className="min-w-0 break-all text-right font-medium">
+            <button
+              type="button"
+              className="text-primary underline-offset-4 hover:underline focus-visible:outline-ring"
+              title="定位标的行情"
+              onClick={() =>
+                navigate(
+                  trade.status === 'open'
+                    ? trade.observed_until
+                    : tradeExitAnchor(trade)!,
+                )
+              }
+            >
+              {trade.symbol}
+            </button>
+          </dd>
         </div>
         {monitor.config.symbol !== trade.symbol && (
           <div className="flex justify-between gap-3">
@@ -104,12 +141,19 @@ function PositionRow({
       </dl>
       <div className="grid grid-cols-[2rem_minmax(0,1fr)_auto] items-baseline gap-x-2 gap-y-1 text-xs">
         <span className="text-muted-foreground">入场</span>
-        <time
-          className="tabular-nums"
-          dateTime={new Date(trade.entry_time * 1000).toISOString()}
+        <button
+          type="button"
+          className="text-left text-primary underline-offset-4 hover:underline focus-visible:outline-ring"
+          aria-label={`定位 ${trade.symbol} 入场 ${dateTime(trade.entry_time)}`}
+          onClick={() => navigate(trade.entry_time)}
         >
-          {dateTime(trade.entry_time)}
-        </time>
+          <time
+            className="tabular-nums"
+            dateTime={new Date(trade.entry_time * 1000).toISOString()}
+          >
+            {dateTime(trade.entry_time)}
+          </time>
+        </button>
         <span className="text-right font-medium tabular-nums">
           {price(trade.entry_price)}
         </span>
@@ -118,12 +162,19 @@ function PositionRow({
           <span className="col-span-2 text-muted-foreground">尚未离场</span>
         ) : (
           <>
-            <time
-              className="tabular-nums"
-              dateTime={new Date(trade.exit_time * 1000).toISOString()}
+            <button
+              type="button"
+              className="text-left text-primary underline-offset-4 hover:underline focus-visible:outline-ring"
+              aria-label={`定位 ${trade.symbol} 离场 ${dateTime(trade.exit_time)}`}
+              onClick={() => navigate(tradeExitAnchor(trade)!)}
             >
-              {dateTime(trade.exit_time)}
-            </time>
+              <time
+                className="tabular-nums"
+                dateTime={new Date(trade.exit_time * 1000).toISOString()}
+              >
+                {dateTime(trade.exit_time)}
+              </time>
+            </button>
             <span className="text-right font-medium tabular-nums">
               {price(trade.exit_price)}
             </span>
@@ -149,19 +200,25 @@ function PositionRow({
         ) : (
           <TradeExitBadge reason={trade.exit_reason} />
         )}
-        {!open && (
+        {
           <span
-            className={`ml-auto text-xs font-medium tabular-nums ${trade.net_pnl > 0 ? 'text-rose-700 dark:text-rose-300' : trade.net_pnl < 0 ? 'text-emerald-700 dark:text-emerald-300' : ''}`}
+            title={
+              open
+                ? '按最新可用价格计算，含已付入场费用，未计离场费用与滑点'
+                : '已扣除入场及离场费用'
+            }
+            className={`ml-auto text-xs font-medium tabular-nums ${pnl != null && pnl > 0 ? 'text-rose-700 dark:text-rose-300' : pnl != null && pnl < 0 ? 'text-emerald-700 dark:text-emerald-300' : ''}`}
           >
-            净收益 {trade.net_pnl > 0 ? '+' : ''}
-            {number(trade.net_pnl)}
+            {open ? '浮动盈亏' : '净盈亏'} {pnl != null && pnl > 0 ? '+' : ''}
+            {number(pnl)}
             {model === 'points' ? ' 点' : ' 元'}
           </span>
-        )}
+        }
       </div>
       {open && (
         <p className="text-[11px] text-muted-foreground">
-          计算至 {dateTime(monitor.through)}（北京时间）
+          估值价 {price(valuation!.price)} · {dateTime(valuation!.time)}（北京）
+          {pnl == null && ' · 等待估值行情'}
         </p>
       )}
     </li>
@@ -172,14 +229,19 @@ export function MarketPositionsPanel({
   pluginId,
   engine,
   marketOverview,
+  quotes = [],
+  onNavigate,
 }: {
   pluginId: string;
   engine?: string;
   marketOverview?: ReactNode;
+  quotes?: Quote[];
+  onNavigate: (target: MarketChartTarget) => void;
 }) {
   const positions = useMarketPositions(pluginId, engine);
   const [tab, setTab] = useState('positions');
   const data = positions.data;
+  const quoteBySymbol = new Map(quotes.map((quote) => [quote.symbol, quote]));
   const monitors = new Map(
     data?.monitors.map((monitor) => [monitor.id, monitor]),
   );
@@ -273,6 +335,9 @@ export function MarketPositionsPanel({
                       key={`${row.trade.status === 'open' ? 'open' : 'closed'}:${row.monitor_id}:${row.trade.id}`}
                       row={row}
                       monitor={monitor}
+                      quote={quoteBySymbol.get(row.trade.symbol)}
+                      engine={engine}
+                      onNavigate={onNavigate}
                     />
                   ) : null;
                 })}

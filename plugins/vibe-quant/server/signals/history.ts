@@ -63,6 +63,19 @@ export class SignalHistoryStore extends ClickHouseClient {
   async signals(monitor: string): Promise<StrategySignal[]> {
     return (await this.page<StrategySignal>(monitor, 'signal')).rows;
   }
+  /** Authorize a historical execution symbol without adding it to the watchlist. */
+  async hasSymbol(monitor: string, symbol: string) {
+    const rows = await this.rows<{ found: number }>(
+      `SELECT 1 AS found FROM ${this.table('quant_signal_history')} FINAL
+       WHERE monitorId={monitor:String} AND (
+         (kind IN ('trade','signal') AND JSONExtractString(payload,'symbol')={symbol:String})
+         OR (kind='summary' AND arrayExists(trade -> JSONExtractString(trade,'symbol')={symbol:String},
+           JSONExtractArrayRaw(payload,'open_trades')))
+       ) LIMIT 1`,
+      { monitor, symbol },
+    );
+    return rows.length > 0;
+  }
   async chart(monitor: string, range?: { from: number; to: number }) {
     const limit = range ? 2000 : 50;
     const [closed, summary] = await Promise.all([

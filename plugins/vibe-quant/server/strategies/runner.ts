@@ -27,7 +27,7 @@ export function runPython(
   args: string[],
   cwd: string,
   signal: AbortSignal,
-  timeout = 300_000,
+  timeout = 0,
   privateInput?: { tqUser: string; tqPassword: string },
 ): Promise<void> {
   signal.throwIfAborted();
@@ -74,10 +74,14 @@ export function runPython(
       kill('SIGTERM');
       escalation ??= setTimeout(() => kill('SIGKILL'), 1500);
     };
-    const timer = setTimeout(() => {
-      timedOut = true;
-      stop();
-    }, timeout);
+    // Backtests have no execution deadline. Other callers may opt into a limit.
+    const timer =
+      timeout > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            stop();
+          }, timeout)
+        : undefined;
     signal.addEventListener('abort', stop, { once: true });
     child.stdout?.on('data', () => {
       /* Drain script output without storing unbounded logs. */
@@ -364,11 +368,7 @@ export class BacktestWorker {
           ],
           directory,
           signal,
-          optimizing
-            ? (job.config.optimization!.timeout_seconds + 310) * 1000
-            : native
-              ? 900_000
-              : 300_000,
+          0,
           native
             ? {
                 tqUser: this.market.config.tqUser,

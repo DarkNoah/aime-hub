@@ -841,6 +841,13 @@ export const zhCN = {
   'notifications.signal.reason': '触发原因',
   'notifications.signal.confirmHint': '确认后关闭',
   'notifications.signal.confirm': '确认',
+  'notifications.signal.locate': '定位行情',
+  'notifications.signal.netPnl': '净盈亏',
+  'notifications.signal.estimatedPnl': '参考盈亏',
+  'notifications.signal.estimatedPnlHint':
+    '按信号参考价估算，含已付入场费用，未计离场费用与滑点',
+  'notifications.signal.currency': '元',
+  'notifications.signal.points': '点',
 
   'nav.automations': '自动化',
   'automations.title': '自动化任务',

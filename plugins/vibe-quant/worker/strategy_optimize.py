@@ -27,8 +27,8 @@ def read_json(path):
     return json.loads(path.read_text(encoding='utf-8'))
 
 
-def evaluate(root, sdk, config, name, stop, timeout):
-    """Bound each child, including import/on_start hangs. Do not retain losing artifacts."""
+def evaluate(root, sdk, config, name, stop, timeout=None):
+    """Keep cancellation active; only apply an explicitly configured search budget."""
     directory = root / name
     directory.mkdir()
     try:
@@ -40,13 +40,13 @@ def evaluate(root, sdk, config, name, stop, timeout):
             [sys.executable, '-B', '-u', str(Path(__file__).with_name('strategy_run.py')), sdk, str(directory)],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + timeout if timeout is not None else None
         try:
             while child.poll() is None:
                 if stop.wait(0.05):
                     raise InterruptedError('用户中止了操作')
-                if time.monotonic() >= deadline:
-                    raise TimeoutError('单次试验超时或搜索时间已耗尽')
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise TimeoutError('搜索时间预算已耗尽，当前试验超时')
             if stop.is_set():
                 raise InterruptedError('用户中止了操作')
             if child.returncode:
@@ -96,14 +96,15 @@ def optimize(root, sdk, stop):
     checkpoint()
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     study = optuna.create_study(direction=direction, sampler=optuna.samplers.TPESampler(seed=options['seed']))
-    deadline = time.monotonic() + options['timeout_seconds']
+    budget = options.get('timeout_seconds', 0)
+    deadline = time.monotonic() + budget if budget > 0 else None
     timed_out = False
     try:
         for index in range(options['n_trials']):
             if stop.is_set():
                 raise InterruptedError('用户中止了操作')
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
+            remaining = deadline - time.monotonic() if deadline is not None else None
+            if remaining is not None and remaining <= 0:
                 timed_out = True
                 break
             trial = study.ask()
@@ -121,7 +122,7 @@ def optimize(root, sdk, stop):
                             kwargs['step'] = space['step']
                         params[key] = suggest(key, space['low'], space['high'], **kwargs)
                 row['parameters'] = dict(trial.params)
-                result, manifest = evaluate(root, sdk, {**training, 'parameters': params}, f'trial-{index}', stop, min(300, remaining))
+                result, manifest = evaluate(root, sdk, {**training, 'parameters': params}, f'trial-{index}', stop, remaining)
                 row['metrics'] = result['metrics']
                 if result['status'] != 'succeeded':
                     raise RuntimeError(result['message'] or '策略回测失败')
@@ -170,7 +171,7 @@ def optimize(root, sdk, stop):
                     for previous in (root / 'artifacts').iterdir():
                         if previous != best_directory:
                             shutil.rmtree(previous)
-        timed_out = timed_out or (time.monotonic() >= deadline and len(report['trials']) < options['n_trials'])
+        timed_out = timed_out or (deadline is not None and time.monotonic() >= deadline and len(report['trials']) < options['n_trials'])
         if report['best_trial'] is None:
             report['status'] = 'failed'
             checkpoint('没有满足交易数量和目标指标要求的试验，请检查试验记录、范围及数据区间')
@@ -179,7 +180,7 @@ def optimize(root, sdk, stop):
             checkpoint('搜索结束，正在用最佳参数评估留出验证区间')
             validation = report['validation']
             try:
-                result, manifest = evaluate(root, sdk, {**raw, 'start': split, 'parameters': report['best_parameters']}, 'validation', stop, 300)
+                result, manifest = evaluate(root, sdk, {**raw, 'start': split, 'parameters': report['best_parameters']}, 'validation', stop)
                 validation.update(status=result['status'], message=result['message'], metrics=result['metrics'])
                 if result['status'] == 'succeeded' and not result['equity_curve']:
                     validation.update(status='failed', message='验证区间没有可评估的行情')

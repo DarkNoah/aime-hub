@@ -17,7 +17,6 @@ import { OPTIMIZATION_METRICS } from '../../optimization-types.js';
 import type { OptimizationReport } from '../../optimization-types.js';
 import { quantToolContext, type QuantDependencies } from './context.js';
 import { BacktestCompareTool } from './backtest-compare.js';
-import { adoptBacktest } from './backtest-background.js';
 
 function runView(run: BacktestRun): BacktestRun {
   return {
@@ -142,7 +141,10 @@ const optimizationInput = z.object({
     )
     .default('sharpe'),
   n_trials: z.number().default(30),
-  timeout_seconds: z.number().default(600),
+  timeout_seconds: z
+    .number()
+    .default(0)
+    .describe('调参搜索预算秒数，0 表示不限时'),
   seed: z.number().default(42),
   min_trades: z.number().default(1),
   validation_start: z.number().optional(),
@@ -160,17 +162,12 @@ export class BacktestStartTool extends PluginTool {
         ? 'plugin_vibe_quant_backtest_optimize'
         : 'plugin_vibe_quant_backtest_start',
       title: optimize ? '提交后台调优任务' : '提交后台回测任务',
-      background: {
-        enabled: true,
-        defaultDisposition: 'deferred',
-        // Includes queueing, snapshot preparation and up to 65 minutes of optimization.
-        timeoutMs: 4 * 60 * 60 * 1000,
-        // Enqueue is not idempotent: a retry must never create a duplicate run.
-        maxRetries: 0,
-      },
+      // Submission returns immediately. The persisted worker owns execution and cancellation.
+      // Mastra's native background workflow always creates a timeout, even for timeoutMs=0.
+      background: { enabled: false },
       description: optimize
-        ? '管理员提交独立的 Optuna 参数调优任务，默认由原生后台任务执行，不阻塞对话；后台任务持续到调优结束，成功后以最佳参数在当前策略中创建新版本，命名为原版本名.opt.vN，例如 v6.opt.v1，末尾序号按该原版本递增。只搜索所选版本已有的默认参数，未搜索的参数沿用原默认值。提供 version_id、symbol、start、end、rules 和 optimization.search_space。默认 30 次、600 秒、TPE 种子 42；可设置 validation_start 留出验证。调优不列入普通回测历史。告知用户后台任务已启动，不在本轮持续轮询；收到完成结果后用 backtest_result 读取报告，optimization_version_id 指向新版本。后续按需用 backtest_status/result/cancel 查询或取消回测 run_id。'
-        : '管理员提交历史回测，默认由原生后台任务执行，不阻塞对话；后台任务持续到回测结束。默认内置引擎需要 version_id、symbol、start、end、rules。backtest_engine=tqsdk 使用天勤历史行情和 TqSim，仅支持单个期货实际合约；rules 可省略，tq_options 可覆盖每手手续费和保证金。默认资金 100 万、1 分钟 K 线、滑点 1 tick；内置引擎参与率 10%。告知用户后台任务已启动，不在本轮持续轮询；收到完成结果后用 backtest_result 读取指标和日志。后续按需用 backtest_status/result/cancel 查询或取消回测 run_id。',
+        ? '管理员提交独立的 Optuna 参数调优任务，立即返回 run_id，由无固定执行时限的回测队列执行；成功后以最佳参数在当前策略中创建新版本，命名为原版本名.opt.vN，例如 v6.opt.v1，末尾序号按该原版本递增。只搜索所选版本已有的默认参数，未搜索的参数沿用原默认值。提供 version_id、symbol、start、end、rules 和 optimization.search_space。默认 30 次、不限搜索时间、TPE 种子 42；可设置 timeout_seconds 搜索预算和 validation_start 留出验证。调优不列入普通回测历史。告知用户后台任务已启动，不在本轮持续轮询；后续确认完成后用 backtest_result 读取报告，optimization_version_id 指向新版本。后续按需用 backtest_status/result/cancel 查询或取消回测 run_id。'
+        : '管理员提交历史回测，立即返回 run_id，由无固定执行时限的回测队列执行。默认内置引擎需要 version_id、symbol、start、end、rules。backtest_engine=tqsdk 使用天勤历史行情和 TqSim，仅支持单个期货实际合约；rules 可省略，tq_options 可覆盖每手手续费和保证金。默认资金 100 万、1 分钟 K 线、滑点 1 tick；内置引擎参与率 10%。告知用户后台任务已启动，不在本轮持续轮询；后续确认完成后用 backtest_result 读取指标和日志。后续按需用 backtest_status/result/cancel 查询或取消回测 run_id。',
       inputSchema: optimize
         ? agentBacktestSchema.extend({ optimization: optimizationInput })
         : agentBacktestSchema,
@@ -199,7 +196,6 @@ export class BacktestStartTool extends PluginTool {
             }),
             signal,
           );
-          adoptBacktest(execution, deps.records, actor.userId, run, runView);
           return {
             run_id: run.id,
             message: `${optimize ? '调优' : '回测'}任务已提交。后续可用 backtest_status/result 查询回测 run_id，或用 backtest_cancel 取消。`,
@@ -247,7 +243,7 @@ export class BacktestStatusTool extends PluginTool {
       id: 'plugin_vibe_quant_backtest_status',
       title: '查询回测进度',
       description:
-        '按需查询共享回测或调优任务状态，默认立即返回。wait=true 时最多等待 10 秒或直至结束；原生后台任务会跟踪完成，无需持续轮询。中止此等待不会取消后台回测。',
+        '按需查询共享回测或调优任务状态，默认立即返回。wait=true 时最多等待 10 秒或直至结束；回测在独立队列中持续执行，不要为等待完成而在本轮持续轮询。中止此等待不会取消后台回测。',
       inputSchema: z.object({
         run_id: z.string(),
         wait: z.boolean().default(false),

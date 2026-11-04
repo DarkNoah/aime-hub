@@ -2,6 +2,7 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   Check,
+  LocateFixed,
   LogIn,
   LogOut,
   Minus,
@@ -19,6 +20,8 @@ export type SignalToastProps = {
   body: string;
   marketSignal?: MarketSignalNotification;
   onConfirm?: () => void;
+  onNavigate?: () => void;
+  url?: string;
 };
 
 const directionStyles = {
@@ -45,6 +48,8 @@ export function MarketSignalToast({
   body,
   marketSignal: signal,
   onConfirm,
+  onNavigate,
+  url,
 }: SignalToastProps) {
   const { t, i18n } = useTranslation();
   const DirectionIcon = directionIcons[signal?.side ?? 'unknown'];
@@ -121,6 +126,31 @@ export function MarketSignalToast({
                   })}
                 </dd>
               </dl>
+              {signal.type === 'exit' && signal.pnl && (
+                <div className="rounded-md bg-muted/50 p-2.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-muted-foreground">
+                      {t(
+                        `notifications.signal.${signal.pnl.basis === 'realized' ? 'netPnl' : 'estimatedPnl'}`,
+                      )}
+                    </span>
+                    <strong
+                      className={`tabular-nums ${signal.pnl.value > 0 ? 'text-rose-700 dark:text-rose-300' : signal.pnl.value < 0 ? 'text-emerald-700 dark:text-emerald-300' : ''}`}
+                    >
+                      {signal.pnl.value > 0 ? '+' : ''}
+                      {signal.pnl.value.toLocaleString(i18n.language, {
+                        maximumFractionDigits: 2,
+                      })}{' '}
+                      {t(`notifications.signal.${signal.pnl.unit}`)}
+                    </strong>
+                  </div>
+                  {signal.pnl.basis === 'estimate' && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {t('notifications.signal.estimatedPnlHint')}
+                    </p>
+                  )}
+                </div>
+              )}
               {signal.reason && (
                 <p className="border-t pt-2 text-xs leading-5">
                   <span className="mr-2 text-muted-foreground">
@@ -146,9 +176,24 @@ export function MarketSignalToast({
         </>
       )}
       <div className="mt-4 flex items-center justify-between gap-3 border-t pt-3">
-        <span className="text-xs text-muted-foreground">
-          {t('notifications.signal.confirmHint')}
-        </span>
+        {onNavigate || url ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              if (onNavigate) onNavigate();
+              else if (url) window.location.assign(url);
+            }}
+          >
+            <LocateFixed aria-hidden="true" />
+            {t('notifications.signal.locate')}
+          </Button>
+        ) : (
+          <span className="text-xs text-muted-foreground">
+            {t('notifications.signal.confirmHint')}
+          </span>
+        )}
         <Button
           type="button"
           size="sm"

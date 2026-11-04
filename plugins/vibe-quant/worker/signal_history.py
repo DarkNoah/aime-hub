@@ -6,6 +6,7 @@ from quant_sdk.models import Roll
 from quant_sdk.hub import DataError, convert_bar, event_for, three_minute
 from quant_sdk.metrics import summarize
 from quant_sdk.point_metrics import summarize_points
+from position_valuation import open_valuation
 
 
 def history_events(client, runner, symbol, duration, start, end, calendar, rules):
@@ -183,6 +184,7 @@ class MonitorHistory:
                 'entry_signal_id': lot.signal_id, 'fees': lot.entry_fee, 'exit_time': None,
                 'exit_price': None, 'gross_pnl': None, 'net_pnl': None, 'exit_signal_id': None,
                 'observed_until': runner.data.now,
+                **open_valuation(runner, lot),
                 'risk_levels': self.levels(lot.symbol, lot.signal_id)})
         return {key: result[key] for key in ('metrics', 'monthly_returns', 'yearly_returns')} | {
             'start': state['start'], 'through': runner.data.now, 'initial_cash': runner.config.initial_cash,

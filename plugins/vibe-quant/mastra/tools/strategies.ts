@@ -66,7 +66,7 @@ export class StrategyGuideTool extends PluginTool {
               parameters: {},
             },
             workflow:
-              'create/update → publish → backtest_start（默认原生 background deferred，不阻塞对话，不在本轮持续轮询）。收到后台完成结果的 run_id 后调用 backtest_result；中途按需 backtest_status，取消用原生后台任务入口或 backtest_cancel。原生 taskId 与回测 run_id 不同。策略及回测在同一数据库内共享，已发布版本不可变。',
+              'create/update → publish → backtest_start（立即返回 run_id，由无固定执行时限的回测队列执行，不在本轮持续轮询）。后续按需 backtest_status，完成后 backtest_result，取消用 backtest_cancel；不依赖聊天原生后台任务卡片。策略及回测在同一数据库内共享，已发布版本不可变。',
             backtest: {
               engines: {
                 builtin: '默认；已保存历史快照与内置 PaperBroker。',

@@ -347,7 +347,14 @@ createRoot(document.getElementById('root')!).render(<App/>);`,
     await entryToast.getByRole('button', { name: '确认', exact: true }).click();
     await entryToast.waitFor({ state: 'hidden' });
 
-    const exitToast = await showSignal('short-exit', 'exit', 'short');
+    const exitToast = await showSignal('short-exit', 'exit', 'short', {
+      pnl: { value: -123.45, unit: 'currency', basis: 'realized' },
+    });
+    await exitToast.getByText('净盈亏', { exact: true }).waitFor();
+    await exitToast.getByText('-123.45 元', { exact: true }).waitFor();
+    await exitToast
+      .getByRole('button', { name: '定位行情', exact: true })
+      .waitFor();
     await exitToast
       .getByRole('heading', { name: '离场信号', exact: true })
       .waitFor();
@@ -517,6 +524,24 @@ createRoot(document.getElementById('root')!).render(<App/>);`,
       .getByRole('switch', { name: '提示音', exact: true })
       .isDisabled()
       .then((value) => assert.equal(value, true));
+    const estimateToast = await showSignal('estimated-exit', 'exit', 'long', {
+      pnl: { value: 0, unit: 'points', basis: 'estimate' },
+    });
+    await estimateToast.getByText('参考盈亏', { exact: true }).waitFor();
+    await estimateToast.getByText('0 点', { exact: true }).waitFor();
+    await estimateToast.getByText(/未计离场费用与滑点/).waitFor();
+    const navigation = page.waitForRequest(
+      (request) =>
+        request.isNavigationRequest() &&
+        request.url().includes('/plugins/vibe-quant/'),
+    );
+    await page.route('**/plugins/vibe-quant/**', (route) =>
+      route.fulfill({ contentType: 'text/html', body: '<p>行情定位</p>' }),
+    );
+    await estimateToast
+      .getByRole('button', { name: '定位行情', exact: true })
+      .click();
+    await navigation;
     assert.deepEqual(errors, []);
   },
 );

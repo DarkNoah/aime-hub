@@ -240,6 +240,7 @@ class TqBroker:
                    'exit_time_precision': 'quote', 'risk_level_id': parent.risk_level_id,
                    'trigger_price': parent.trigger_price, 'trigger_time': parent.trigger_time,
                    'trigger_bar_time': parent.trigger_bar_time, 'trigger_time_precision': parent.trigger_time_precision}
+        closed_pnl = 0.0
         if trade.offset == 'OPEN':
             self.lots.append(Lot(self.symbol, quantity, price, price, time, day, fee, parent.signal_id))
         else:
@@ -257,6 +258,7 @@ class TqBroker:
                 size = min(remaining, abs(lot.quantity))
                 entry_fee, close_fee = lot.entry_fee * size / abs(lot.quantity), fee * size / abs(quantity)
                 gross = (price - lot.entry_price) * (1 if lot.quantity > 0 else -1) * size * self.quote.volume_multiple
+                closed_pnl += gross - entry_fee - close_fee
                 self.trade_sequence += 1
                 self.trades.append({'id': f'trade-{self.trade_sequence}', 'symbol': self.symbol,
                     'side': 'long' if lot.quantity > 0 else 'short', 'quantity': size,
@@ -276,6 +278,6 @@ class TqBroker:
                 'native_order_id': trade.order_id, 'native_trade_id': trade.trade_id,
                 'symbol': self.symbol, 'time': time, 'trading_day': day, 'quantity': quantity,
                 'price': price, 'fee': fee, 'offset': 'open' if trade.offset == 'OPEN' else 'close',
-                **(details if trade.offset != 'OPEN' else {})}
+                **({**details, 'net_pnl': closed_pnl} if trade.offset != 'OPEN' else {})}
         self.fills.append(fill)
         self.runner._notify('fill', fill)
