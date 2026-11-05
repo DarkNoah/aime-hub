@@ -219,7 +219,9 @@ export async function readBrowserPage(
     const html = await page.content();
     if (Buffer.byteLength(html) > 5_000_000)
       throw new WebRequestError('TOO_LARGE');
-    return extractWebContent(html, webUrl(page.url()).href);
+    // Handle extraction failures before asynchronous browser cleanup begins.
+    // Returning the promise directly leaves rejections unhandled during close().
+    return await extractWebContent(html, webUrl(page.url()).href);
   } catch (error) {
     // Browser shutdown interrupts pending Playwright operations. Preserve the
     // caller's cancellation reason instead of reporting it as a page failure.
