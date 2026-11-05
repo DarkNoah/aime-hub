@@ -22,6 +22,7 @@ const metrics = {
   profit_factor: 2.4,
   trade_count: 12,
 };
+const backtestMetrics = { ...metrics, total_points: 200 };
 const optimization = {
   status: 'completed',
   metric: 'total_points',
@@ -43,6 +44,9 @@ async function waitFor(check: () => boolean | Promise<boolean>) {
 function fixture() {
   const strategyId = randomUUID();
   const versionId = randomUUID();
+  const optimizedVersionId = randomUUID();
+  const defaults = { window: 2, unchanged: 9 };
+  const optimizedParameters = { ...defaults, window: 4 };
   const requestContext = new RequestContext();
   requestContext.set('userId', 'admin');
   const counts = { enqueue: 0, wake: 0, read: 0, cancel: 0 };
@@ -54,32 +58,37 @@ function fixture() {
     execution_model: 'points',
   };
   let job: BacktestRun;
+  const jobs = new Map<string, BacktestRun>();
   const deps = {
     config: { engine: 'tqsdk' },
     state: {
       instrument: async () => ({ symbol: input.symbol, kind: 'index' }),
     },
     records: {
-      version: async () => ({
-        id: versionId,
+      version: async (_user: string, id: string) => ({
+        id,
         strategy_id: strategyId,
-        parameters: {},
+        parameters: id === optimizedVersionId ? optimizedParameters : defaults,
       }),
       detail: async () => ({ id: strategyId }),
       enqueue: async (
         _user: string,
         _strategy: string,
         config: BacktestInput,
+        engine: BacktestRun['engine'],
       ) => {
         counts.enqueue++;
         job = {
           id: randomUUID(),
           strategy_id: strategyId,
-          version_id: versionId,
+          version_id: config.version_id,
           version_number: 1,
           source_hash: 'source-hash',
-          engine: 'tqsdk',
-          config,
+          engine,
+          config: {
+            ...config,
+            parameters: config.optimization ? defaults : config.parameters,
+          },
           status: 'queued',
           message: '',
           cancel_requested: false,
@@ -87,18 +96,22 @@ function fixture() {
           started_at: null,
           finished_at: null,
         };
+        jobs.set(job.id, job);
         return job;
       },
-      run: async () => {
+      runs: async () =>
+        [...jobs.values()].filter((run) => !run.config.optimization),
+      run: async (_user: string, id: string) => {
         counts.read++;
-        return job;
+        return jobs.get(id)!;
       },
-      cancel: async () => {
+      cancel: async (_user: string, id: string) => {
         counts.cancel++;
-        job.status = 'cancelled';
-        return job;
+        const run = jobs.get(id)!;
+        run.status = 'cancelled';
+        return run;
       },
-      artifact: async (_id: string, name: string) => ({
+      artifact: async (id: string, name: string) => ({
         hash: 'result-hash',
         text: JSON.stringify(
           name === 'optimization'
@@ -106,7 +119,10 @@ function fixture() {
             : {
                 status: 'succeeded',
                 pnl_unit: 'points',
-                metrics,
+                metrics:
+                  jobs.get(id)?.version_id === optimizedVersionId
+                    ? backtestMetrics
+                    : metrics,
                 metric_notes: { sharpe: '点数回测不计算资金夏普' },
                 logs: Array.from({ length: 25 }, (_, i) => ({
                   message: `log-${i}`,
@@ -116,9 +132,11 @@ function fixture() {
               },
         ),
       }),
-      createOptimizationVersion: async () => {
-        job.optimization_version_id = 'optimized-version';
-        return { version: { id: job.optimization_version_id } };
+      createOptimizationVersion: async (_user: string, id: string) => {
+        jobs.get(id)!.optimization_version_id = optimizedVersionId;
+        return {
+          version: { id: optimizedVersionId, parameters: optimizedParameters },
+        };
       },
     },
     // Native background tasks must stay active until this worker finishes.
@@ -156,6 +174,9 @@ function fixture() {
     call,
     tools,
     requestContext,
+    optimizedVersionId,
+    optimizedParameters,
+    jobs,
     job: () => job,
     seed: () =>
       deps.records.enqueue(
@@ -165,6 +186,34 @@ function fixture() {
         'tqsdk',
       ),
   };
+}
+
+async function assertFollowup(f: ReturnType<typeof fixture>) {
+  const optimizationRun = [...f.jobs.values()].find(
+    (run) => run.config.optimization,
+  )!;
+  await waitFor(() => f.counts.wake === 2);
+  const backtest = f.job();
+  assert.notEqual(backtest.id, optimizationRun.id);
+  assert.equal(backtest.version_id, f.optimizedVersionId);
+  assert.equal(backtest.strategy_id, optimizationRun.strategy_id);
+  assert.equal(backtest.engine, optimizationRun.engine);
+  assert.deepEqual(backtest.config.parameters, f.optimizedParameters);
+  const expected = {
+    ...optimizationRun.config,
+    version_id: f.optimizedVersionId,
+    parameters: f.optimizedParameters,
+  };
+  delete expected.optimization;
+  assert.deepEqual(
+    backtest.config,
+    expected,
+    'rerun the complete original period with the winning defaults',
+  );
+  assert.equal(backtest.status, 'queued');
+  assert.deepEqual(await f.deps.records.runs('admin', backtest.strategy_id), [
+    backtest,
+  ]);
 }
 
 for (const name of ['backtest_start', 'backtest_optimize']) {
@@ -189,9 +238,14 @@ for (const name of ['backtest_start', 'backtest_optimize']) {
             ...f.input,
             ...(name === 'backtest_optimize'
               ? {
+                  parameters: { window: 99, unchanged: 99 },
+                  duration: 300,
+                  point_cost: 0.5,
+                  slippage_ticks: 3,
                   optimization: {
                     metric: 'total_points',
                     search_space: { window: { type: 'int', low: 2, high: 5 } },
+                    validation_start: f.input.start + 3600,
                   },
                 }
               : {}),
@@ -222,14 +276,27 @@ for (const name of ['backtest_start', 'backtest_optimize']) {
       await setImmediate();
       assert.equal(settled, false);
       f.job().status = 'completed';
+      if (name === 'backtest_optimize') {
+        f.deps.config.engine = 'tushare';
+        await assertFollowup(f);
+        assert.equal(
+          settled,
+          false,
+          'optimization completion must still wait for the ordinary backtest',
+        );
+        f.job().status = 'completed';
+      }
       const result = await pending;
       assert.equal(result.run_id, result.run.id);
       assert.equal(result.run.status, 'completed');
       assert.equal(result.terminal, true);
       assert.deepEqual(result.result.metrics, metrics);
-      if (name === 'backtest_optimize')
+      if (name === 'backtest_optimize') {
         assert.equal(result.run.config.optimization.timeout_seconds, 0);
-      assert.equal(f.counts.enqueue, 1);
+        assert.equal(result.backtest.run_id, f.job().id);
+        assert.deepEqual(result.backtest.result.metrics, backtestMetrics);
+      }
+      assert.equal(f.counts.enqueue, name === 'backtest_optimize' ? 2 : 1);
       assert.equal(f.counts.cancel, 0);
     });
   }
@@ -358,6 +425,12 @@ for (const name of ['backtest_start', 'backtest_optimize']) {
           'the model cannot continue before the final result',
         );
         f.job().status = 'completed';
+        if (name === 'backtest_optimize') {
+          await assertFollowup(f);
+          assert.equal(streamFinished, false);
+          assert.equal(calls, 1);
+          f.job().status = 'completed';
+        }
         await consuming;
         assert.ok(chunks.includes('tool-result'));
         assert.equal(
@@ -369,7 +442,7 @@ for (const name of ['backtest_start', 'backtest_optimize']) {
             JSON.stringify(call.prompt).includes('"total_points":128'),
           ),
         );
-        assert.equal(f.counts.enqueue, 1);
+        assert.equal(f.counts.enqueue, name === 'backtest_optimize' ? 2 : 1);
         return;
       }
       assert.ok(chunks.includes('background-task-started'));
@@ -380,6 +453,11 @@ for (const name of ['backtest_start', 'backtest_optimize']) {
         outcome === 'timed_out' ? 1000 : BACKTEST_BACKGROUND_TIMEOUT_MS,
       );
       assert.equal(tasks[0].status, 'running');
+      if (name === 'backtest_optimize' && outcome === 'cancelled') {
+        f.job().status = 'completed';
+        await assertFollowup(f);
+        assert.equal((await manager.getTask(taskId))!.status, 'running');
+      }
       if (!completed) controller.abort();
       await delay(80);
       assert.equal(
@@ -399,8 +477,16 @@ for (const name of ['backtest_start', 'backtest_optimize']) {
         await waitFor(() => f.counts.cancel === 1);
         assert.equal(f.job().status, 'cancelled');
         assert.equal((await manager.getTask(taskId))!.status, 'cancelled');
+        if (name === 'backtest_optimize')
+          assert.equal([...f.jobs.values()][0].status, 'completed');
       } else {
         f.job().status = 'completed';
+        if (name === 'backtest_optimize') {
+          await assertFollowup(f);
+          assert.equal((await manager.getTask(taskId))!.status, 'running');
+          assert.equal(chunks.includes('background-task-completed'), false);
+          f.job().status = 'completed';
+        }
         await waitFor(
           async () => (await manager.getTask(taskId))!.status === 'completed',
         );
@@ -417,8 +503,13 @@ for (const name of ['backtest_start', 'backtest_optimize']) {
             equity_curve?: unknown;
           };
           optimization: typeof optimization & { trial_count: number };
+          backtest?: {
+            run_id: string;
+            run: BacktestRun;
+            result: { metrics: typeof backtestMetrics };
+          };
         };
-        assert.equal(report.run_id, f.job().id);
+        assert.equal(report.run_id, [...f.jobs.keys()][0]);
         assert.equal(report.run.status, 'completed');
         assert.equal(report.terminal, true);
         assert.deepEqual(report.result.metrics, metrics);
@@ -436,7 +527,13 @@ for (const name of ['backtest_start', 'backtest_optimize']) {
           );
           assert.equal(report.optimization.trial_count, 1);
           assert.equal(report.optimization.trials, undefined);
-          assert.equal(report.run.optimization_version_id, 'optimized-version');
+          assert.equal(
+            report.run.optimization_version_id,
+            f.optimizedVersionId,
+          );
+          assert.equal(report.backtest!.run_id, f.job().id);
+          assert.equal(report.backtest!.run.status, 'completed');
+          assert.deepEqual(report.backtest!.result.metrics, backtestMetrics);
         } else assert.equal(report.optimization, null);
         await consuming;
         assert.ok(
@@ -448,12 +545,150 @@ for (const name of ['backtest_start', 'backtest_optimize']) {
             JSON.stringify(call.prompt).includes('"total_points":128'),
           ),
         );
+        if (name === 'backtest_optimize')
+          assert.ok(
+            model.doStreamCalls.some((call) =>
+              JSON.stringify(call.prompt).includes('"total_points":200'),
+            ),
+          );
       }
       await consuming;
-      assert.equal(f.counts.enqueue, 1);
+      assert.equal(
+        f.counts.enqueue,
+        name === 'backtest_optimize' && (completed || outcome === 'cancelled')
+          ? 2
+          : 1,
+      );
     });
   }
 }
+
+function optimizeInput(f: ReturnType<typeof fixture>) {
+  return {
+    ...f.input,
+    optimization: {
+      metric: 'total_points',
+      search_space: { window: { type: 'int', low: 2, high: 5 } },
+    },
+  };
+}
+
+for (const status of ['failed', 'cancelled'] as const) {
+  test(`unsuccessful optimization (${status}) does not enqueue an ordinary backtest`, async () => {
+    const f = fixture();
+    const pending = f.call('backtest_optimize', optimizeInput(f));
+    await waitFor(() => f.counts.wake === 1);
+    f.job().status = status;
+    const result = await pending;
+    assert.equal(result.run.status, status);
+    assert.equal(result.backtest, undefined);
+    assert.equal(f.counts.enqueue, 1);
+  });
+}
+
+test('follow-up backtest failure preserves its record and the successful optimization', async () => {
+  const f = fixture();
+  const pending = f.call('backtest_optimize', optimizeInput(f));
+  await waitFor(() => f.counts.wake === 1);
+  f.job().status = 'completed';
+  await assertFollowup(f);
+  f.job().status = 'failed';
+  f.job().message = '历史数据缺失';
+  const result = await pending;
+  assert.equal(result.run.status, 'completed');
+  assert.deepEqual(
+    result.optimization.best_parameters,
+    optimization.best_parameters,
+  );
+  assert.equal(result.backtest.run_id, f.job().id);
+  assert.equal(result.backtest.run.status, 'failed');
+  assert.equal(result.backtest.message, '历史数据缺失');
+  assert.equal(f.counts.enqueue, 2);
+});
+
+test('follow-up submission failure preserves optimization results without leaking infrastructure details', async () => {
+  const f = fixture();
+  const enqueue = f.deps.records.enqueue;
+  f.deps.records.enqueue = async (...args) => {
+    if (f.counts.enqueue === 1) throw new Error('database password=secret');
+    return enqueue(...args);
+  };
+  const pending = f.call('backtest_optimize', optimizeInput(f));
+  await waitFor(() => f.counts.wake === 1);
+  f.job().status = 'completed';
+  const result = await pending;
+  assert.equal(result.run.optimization_version_id, f.optimizedVersionId);
+  assert.deepEqual(
+    result.optimization.best_parameters,
+    optimization.best_parameters,
+  );
+  assert.equal(result.backtest.error, 'QUANT_SERVICE_UNAVAILABLE');
+  assert.match(result.backtest.message, /回测提交失败/);
+  assert.doesNotMatch(JSON.stringify(result), /secret/);
+  assert.equal(f.counts.enqueue, 1);
+});
+
+test('follow-up result lookup failure retains both run IDs for recovery', async () => {
+  const f = fixture();
+  const pending = f.call('backtest_optimize', optimizeInput(f));
+  await waitFor(() => f.counts.wake === 1);
+  const optimizationId = f.job().id;
+  f.job().status = 'completed';
+  await assertFollowup(f);
+  f.job().status = 'completed';
+  f.deps.records.artifact = async () => {
+    throw new Error('database password=secret');
+  };
+  const result = await pending;
+  assert.equal(result.run_id, optimizationId);
+  assert.equal(result.run.status, 'completed');
+  assert.equal(result.backtest.run_id, f.job().id);
+  assert.equal(result.backtest.error, 'QUANT_SERVICE_UNAVAILABLE');
+  assert.match(result.backtest.message, /回测结果暂不可用/);
+  assert.doesNotMatch(JSON.stringify(result), /secret/);
+  assert.equal(f.counts.enqueue, 2);
+});
+
+test('foreground abort during the follow-up backtest cancels only that run', async () => {
+  const f = fixture();
+  const controller = new AbortController();
+  const pending = f.call(
+    'backtest_optimize',
+    optimizeInput(f),
+    controller.signal,
+  );
+  await waitFor(() => f.counts.wake === 1);
+  f.job().status = 'completed';
+  await assertFollowup(f);
+  controller.abort();
+  const result = await pending;
+  assert.equal(result.cancelled, true);
+  assert.equal(result.message, '用户中止了操作');
+  assert.equal(f.job().status, 'cancelled');
+  assert.equal([...f.jobs.values()][0].status, 'completed');
+  assert.equal(f.counts.cancel, 1);
+});
+
+test('abort between optimization and the follow-up prevents a new backtest', async () => {
+  const f = fixture();
+  const controller = new AbortController();
+  const version = f.deps.records.version;
+  f.deps.records.version = async (...args) => {
+    if (args[1] === f.optimizedVersionId) controller.abort();
+    return version(...args);
+  };
+  const pending = f.call(
+    'backtest_optimize',
+    optimizeInput(f),
+    controller.signal,
+  );
+  await waitFor(() => f.counts.wake === 1);
+  f.job().status = 'completed';
+  assert.equal((await pending).cancelled, true);
+  await setImmediate();
+  assert.equal(f.counts.enqueue, 1);
+  assert.equal(f.counts.cancel, 0);
+});
 
 test('native cancellation settles immediately even while a status query is pending', async () => {
   const f = fixture();

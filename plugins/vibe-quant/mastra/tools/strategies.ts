@@ -66,7 +66,7 @@ export class StrategyGuideTool extends PluginTool {
               parameters: {},
             },
             workflow:
-              'create/update → publish → backtest_start（默认前台阻塞；显式传 _background: { enabled: true } 时走 Mastra 原生后台，不持续轮询或重复提交）→ 完成后自动返回策略指标并向用户汇报。backtest_optimize 使用相同的前台/后台规则，返回最佳训练指标、最佳参数、验证指标和新版本 ID。后续按需 backtest_status/result 查看状态和明细，取消用聊天后台任务卡片或 backtest_cancel。策略及回测在同一数据库内共享，已发布版本不可变。',
+              'create/update → publish → backtest_start（默认前台阻塞；显式传 _background: { enabled: true } 时走 Mastra 原生后台，不持续轮询或重复提交）→ 完成后自动返回策略指标并向用户汇报。backtest_optimize 使用相同的前台/后台规则，成功调优并创建新版本后自动在原完整区间执行普通回测，保存历史记录；等待该回测结束后返回最佳训练指标、最佳参数、验证指标、新版本 ID，以及 backtest.run_id 和 backtest.result.metrics，无需再次调用 backtest_start。后续按需 backtest_status/result 查看状态和明细，取消用聊天后台任务卡片或 backtest_cancel。策略及回测在同一数据库内共享，已发布版本不可变。',
             backtest: {
               engines: {
                 builtin: '默认；已保存历史快照与内置 PaperBroker。',

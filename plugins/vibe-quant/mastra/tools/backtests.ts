@@ -48,6 +48,34 @@ function runView(run: BacktestRun): BacktestRun {
   };
 }
 
+async function completedBacktest(
+  records: QuantDependencies['records'],
+  run: BacktestRun,
+) {
+  const [artifact, optimizationArtifact] = await Promise.all([
+    records.artifact(run.id, 'result'),
+    run.config.optimization ? records.artifact(run.id, 'optimization') : null,
+  ]);
+  const report = optimizationArtifact
+    ? (JSON.parse(optimizationArtifact.text) as OptimizationReport)
+    : null;
+  return {
+    run_id: run.id,
+    run: runView(run),
+    terminal: true,
+    message: run.message,
+    result: artifact
+      ? backtestSummary(
+          JSON.parse(artifact.text) as BacktestResult,
+          artifact.hash,
+        )
+      : null,
+    optimization: report
+      ? { ...report, trials: undefined, trial_count: report.trials.length }
+      : null,
+  };
+}
+
 export const agentBacktestSchema = z.object({
   backtest_engine: z
     .enum(['builtin', 'tqsdk'])
@@ -174,7 +202,7 @@ export class BacktestStartTool extends PluginTool {
         maxRetries: 0,
       },
       description: optimize
-        ? '管理员执行 Optuna 参数调优。默认前台阻塞等待；需要后台执行时由 Agent 直接调用并传 _background: { enabled: true }（或 disposition: deferred），交给 Mastra 原生后台任务，不放进 exec。完成后自动返回最佳训练回测的策略指标、最佳参数、优化目标值、留出验证指标和 optimization_version_id。成功后以最佳参数在当前策略中创建新版本，命名为原版本名.opt.vN，例如 v6.opt.v1，末尾序号按该原版本递增。只搜索所选版本已有的默认参数，未搜索的参数沿用原默认值。提供 version_id、symbol、start、end、rules 和 optimization.search_space。默认 30 次、不限搜索时间、TPE 种子 42；可设置 timeout_seconds 搜索预算和 validation_start 留出验证。调优不列入普通回测历史。后台模式启动后可告知用户正在执行；不要持续轮询或重复提交。收到完成结果后向用户汇报策略指标，区分样本内与留出验证。可用 backtest_status/result/cancel 查询明细或取消回测 run_id，也可在聊天后台任务卡片取消。'
+        ? '管理员执行 Optuna 参数调优。默认前台阻塞等待；需要后台执行时由 Agent 直接调用并传 _background: { enabled: true }（或 disposition: deferred），交给 Mastra 原生后台任务，不放进 exec。调优成功后以新版本在原 start/end 完整区间内再执行一次普通回测，沿用行情、资金和交易设置，等待该回测结束后一起返回。backtest.run_id 是普通回测历史记录 ID，backtest.result.metrics 是此次完整区间回测指标；顶层 result.metrics 仍是最佳训练指标，optimization 保留最佳参数、优化目标值和留出验证指标。成功后以最佳参数在当前策略中创建新版本，命名为原版本名.opt.vN，例如 v6.opt.v1，末尾序号按该原版本递增。只搜索所选版本已有的默认参数，未搜索的参数沿用原默认值。提供 version_id、symbol、start、end、rules 和 optimization.search_space。默认 30 次、不限搜索时间、TPE 种子 42；可设置 timeout_seconds 搜索预算和 validation_start 留出验证。调优任务本身不列入普通回测历史，后续普通回测会保存到历史；无需 Agent 再调用 backtest_start。后台模式启动后可告知用户正在执行；不要持续轮询或重复提交。收到完成结果后向用户汇报策略指标，区分样本内与留出验证。可用 backtest_status/result/cancel 查询明细或取消回测 run_id，也可在聊天后台任务卡片取消。'
         : '管理员执行历史回测。默认前台阻塞等待；需要后台执行时由 Agent 直接调用并传 _background: { enabled: true }（或 disposition: deferred），交给 Mastra 原生后台任务，不放进 exec。完成后自动返回策略指标、交易数量和最近日志。默认内置引擎需要 version_id、symbol、start、end、rules。backtest_engine=tqsdk 使用天勤历史行情和 TqSim，仅支持单个期货实际合约；rules 可省略，tq_options 可覆盖每手手续费和保证金。默认资金 100 万、1 分钟 K 线、滑点 1 tick；内置引擎参与率 10%。后台模式启动后可告知用户正在执行；不要持续轮询或重复提交。收到完成结果后向用户汇报策略指标，检查交易数、指标单位和日志。可用 backtest_status/result/cancel 查询明细或取消回测 run_id，也可在聊天后台任务卡片取消。',
       inputSchema: optimize
         ? agentBacktestSchema.extend({ optimization: optimizationInput })
@@ -204,52 +232,91 @@ export class BacktestStartTool extends PluginTool {
             }),
             signal,
           );
-          // Native dispatch owns the background lifecycle. The tool itself only
-          // resolves once the durable job has ended, including direct calls.
-          return waitForBacktest(
+          const progress = async (current: BacktestRun) => {
+            await execution?.writer?.write({
+              run_id: current.id,
+              ...(optimize
+                ? {
+                    optimization_run_id: run.id,
+                    phase: current.config.optimization
+                      ? 'optimization'
+                      : 'backtest',
+                  }
+                : {}),
+              status: current.status,
+              message: current.message,
+              cancel_requested: current.cancel_requested,
+            });
+          };
+          // Native dispatch owns the background lifecycle. Both modes wait for
+          // optimization AND its subsequent ordinary backtest to finish.
+          const result = await waitForBacktest(
             deps.records,
             actor.userId,
             run,
-            async (finished) => {
-              const [artifact, optimizationArtifact] = await Promise.all([
-                deps.records.artifact(finished.id, 'result'),
-                optimize
-                  ? deps.records.artifact(finished.id, 'optimization')
-                  : null,
-              ]);
-              const report = optimizationArtifact
-                ? (JSON.parse(optimizationArtifact.text) as OptimizationReport)
-                : null;
-              return {
-                run_id: finished.id,
-                run: runView(finished),
-                terminal: true,
-                message: finished.message,
-                result: artifact
-                  ? backtestSummary(
-                      JSON.parse(artifact.text) as BacktestResult,
-                      artifact.hash,
-                    )
-                  : null,
-                optimization: report
-                  ? {
-                      ...report,
-                      trials: undefined,
-                      trial_count: report.trials.length,
-                    }
-                  : null,
-              };
-            },
-            async (current) => {
-              await execution?.writer?.write({
-                run_id: current.id,
-                status: current.status,
-                message: current.message,
-                cancel_requested: current.cancel_requested,
-              });
-            },
+            (finished) => completedBacktest(deps.records, finished),
+            progress,
             signal,
           );
+          if (!optimize || result.run.status !== 'completed') return result;
+
+          let backtest: BacktestRun | undefined;
+          try {
+            signal?.throwIfAborted();
+            if (!result.run.optimization_version_id)
+              throw new StrategyError('OPTIMIZATION_RESULT_MISSING', 409);
+            const optimized = await deps.records.version(
+              actor.userId,
+              result.run.optimization_version_id,
+            );
+            // The new immutable version owns the winning defaults. Do not
+            // reapply the original overrides or the training/validation split.
+            const config = {
+              ...result.run.config,
+              version_id: optimized.id,
+              parameters: optimized.parameters,
+            };
+            delete config.optimization;
+            backtest = await enqueueBacktest(
+              deps.records,
+              {
+                ...deps,
+                config: { ...deps.config, engine: result.run.engine },
+              },
+              actor,
+              result.run.strategy_id,
+              config,
+              signal,
+            );
+            return {
+              ...result,
+              backtest: await waitForBacktest(
+                deps.records,
+                actor.userId,
+                backtest,
+                (finished) => completedBacktest(deps.records, finished),
+                progress,
+                signal,
+              ),
+            };
+          } catch (error) {
+            signal?.throwIfAborted();
+            // Preserve the successful optimization and any queued run ID when
+            // the subsequent submission or result lookup fails.
+            return {
+              ...result,
+              backtest: {
+                ...(backtest ? { run_id: backtest.id } : {}),
+                error:
+                  error instanceof StrategyError
+                    ? error.code
+                    : 'QUANT_SERVICE_UNAVAILABLE',
+                message: backtest
+                  ? '调优已完成，后续回测结果暂不可用，请按 run_id 查询状态和结果。'
+                  : '调优已完成，后续回测提交失败，可用 optimization_version_id 重试普通回测。',
+              },
+            };
+          }
         });
         // The native manager must classify its abort as cancelled/timed_out,
         // rather than recording the foreground cancellation text as success.
