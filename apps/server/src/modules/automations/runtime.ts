@@ -188,10 +188,9 @@ export function createAutomationRuntime({
   type Execution = Awaited<ReturnType<typeof buildExecution>>;
   const byContext = new WeakMap<RequestContext, Promise<Execution>>();
   const buildExecution = async (task: Automation, key: string) => {
-    const abortSignal = AbortSignal.any([
-      stopping.signal,
-      AbortSignal.timeout(10 * 60_000),
-    ]);
+    // Scheduled work may run for longer than ten minutes; only service shutdown
+    // should abort the execution at this level.
+    const abortSignal = stopping.signal;
     abortSignal.throwIfAborted();
     const { config, model } = await resolveModel(task);
     const thread = await assertThread(task);
