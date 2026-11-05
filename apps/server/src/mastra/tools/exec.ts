@@ -5,6 +5,7 @@ import type {
   ToolRegistryOptions,
 } from '../../modules/tools/types.js';
 import { randomUUID } from 'node:crypto';
+import { resolveBackgroundConfig } from '@mastra/core/background-tasks';
 import type { RegisteredTool } from '../../modules/tools/types.js';
 import {
   standardSchemaToJSONSchema,
@@ -41,7 +42,7 @@ Call await tools.read_file({ path: 'README.md' }) or await tools.mcp__server__to
 text(value) explicitly emits text (non-strings are JSON serialized); image(value) explicitly emits an image from a base64 data URL, { image_url: dataURL }, an MCP image block, or a workspace media result. HTTP URLs are not accepted.
 Only text() and image() output is returned. Return values, bare expressions, console output and nested tool results are not automatically emitted. Await all tool calls you need; unawaited work is cancelled when the script ends, but already-started external side effects cannot be rolled back.
 Available imports: node:fs (promises and callback APIs), node:fs/promises (readFile, writeFile, appendFile, mkdir), node:path (join, resolve, normalize, dirname, basename, extname, relative, isAbsolute, parse, format, posix/win32); names without node: also work. These are limited compatibility modules, not full Node. File operations use the current workspace, including its path, read-only, enabled-tool and approval restrictions. readFile(path, 'utf8') returns text; without encoding it returns Uint8Array. writeFile accepts text or typed arrays; flags w/wx/a and Node encodings are supported. mkdir requires the workspace mkdir tool to be enabled. Sync filesystem APIs, Buffer, process, require, other imports, network, console and timers are unavailable. path.resolve uses the workspace root. Runtime limits: 64 MiB memory, 1 second of synchronous CPU execution, at most 256 async tool/module calls and 32 concurrent calls; file reads are capped at 8 MiB. yield_time_ms is a wall-clock timeout, not a background continuation. max_output_tokens is an approximate text budget (4 UTF-8 bytes/token); image output has a separate 10 MiB budget.
-Disabled tools remain unavailable. Approval and suspension tools must be called directly by the Agent; exec cannot resume their interactions. exec itself is excluded from tools to prevent recursion.
+Disabled tools remain unavailable. Calls that request native background execution (including _background.enabled=true or disposition=deferred/awaited), tools that default to background execution, approval tools and suspension tools must be called directly by the Agent; exec cannot dispatch native background tasks or resume interactions. Foreground calls can run inside exec and block until their result. exec itself is excluded from tools to prevent recursion.
 Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.txt', 'hello', 'utf8'); text('saved'); const fs = await import('node:fs'); text(await fs.promises.readFile('output.txt', 'utf8')); text(ALL_TOOLS.filter(t => t.name.startsWith('mcp__'))); text(await tools.read_file({ path: 'document.pdf' })); image(await tools.read_file({ path: 'photo.png', encoding: 'base64' }));`,
     inputSchema: z.object({
       code: z
@@ -145,7 +146,9 @@ Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.
               name,
               description: execToolDescription(
                 name,
-                tool.description ?? '',
+                tool.background?.enabled
+                  ? `${tool.description ?? ''}\nCall ${tool.id} directly through the Agent for native background execution. exec only supports foreground calls; it cannot dispatch native background tasks.`
+                  : (tool.description ?? ''),
                 inputSchema,
                 outputSchema,
               ),
@@ -158,6 +161,10 @@ Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.
             signal.throwIfAborted();
             const tool = catalog.get(name);
             if (!tool?.execute) throw new Error(`Unknown tool: ${name}`);
+            if (requiresBackgroundDispatch(tool, input))
+              throw new Error(
+                `${tool.id} requires a direct Agent call for native background execution; do not call it inside exec`,
+              );
             const validated = validateToolInput(
               tool.inputSchema ? toStandardSchema(tool.inputSchema) : undefined,
               input,
@@ -242,6 +249,24 @@ Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.
       };
     },
   });
+}
+
+function requiresBackgroundDispatch(
+  tool: Tool<unknown, unknown>,
+  input: unknown,
+) {
+  const override =
+    input && typeof input === 'object' && '_background' in input
+      ? input._background
+      : undefined;
+  return resolveBackgroundConfig({
+    toolName: tool.id,
+    toolConfig: tool.background,
+    llmBgOverrides:
+      override && typeof override === 'object' && !Array.isArray(override)
+        ? (override as Record<string, unknown>)
+        : {},
+  }).runInBackground;
 }
 
 async function abortable<T>(

@@ -324,11 +324,11 @@ QUANT_STRATEGY_INTEGRATION=1 node --import dotenv/config --import tsx --test plu
 | `factor_save`、`factor_publish`        | 保存因子草稿、发布不可变因子版本                                   |
 | `factor_analyze`                       | 对已采集期货日线执行横截面因子分析                                 |
 
-典型流程是 `guide → list/read → create/update → publish → backtest_start（默认原生后台执行）→ 完成后自动返回策略指标`，中途按需调用 status，详细记录用 result 查询。创建策略只需 `name`、`source`，`parameters` 默认空对象；更新传 `strategy_id`、`revision` 和要改的字段，`source`、`parameters` 直接放在顶层，无需 `draft`。省略字段保留原值，`parameters` 如提供则整体替换。读取结果仍保留 `strategy.draft` 结构。
+典型流程是 `guide → list/read → create/update → publish → backtest_start（默认前台阻塞；显式 _background 启用原生后台）→ 完成后自动返回策略指标`，中途按需调用 status，详细记录用 result 查询。创建策略只需 `name`、`source`，`parameters` 默认空对象；更新传 `strategy_id`、`revision` 和要改的字段，`source`、`parameters` 直接放在顶层，无需 `draft`。省略字段保留原值，`parameters` 如提供则整体替换。读取结果仍保留 `strategy.draft` 结构。
 
-`backtest_start` 和 `backtest_optimize` 默认通过 Mastra 原生 `backgroundTask` 延后执行，由现有持久化回测队列运行，通过 `background.adopt` 托管从入队到终态的生命周期。后台任务卡片展示状态变化和 `run_id`，完成后自动返回 `{ run_id, run, terminal, message, result, optimization }`：`result.metrics` 是策略指标，同时保留指标单位、解释、交易数量和最近 20 条日志，不携带完整交易或权益曲线。调优的 `result.metrics` 来自最佳训练试验；`optimization` 返回最佳参数、目标值、留出验证指标及试验数量，`run.optimization_version_id` 指向新版本。无原生后台上下文的直接调用仍立即返回入队记录 `{ run_id, message, run }`。
+`backtest_start` 和 `backtest_optimize` 默认前台阻塞执行；由 Agent 调用时显式传 `"_background": { "enabled": true }` 或 `"_background": { "disposition": "deferred" }` 才进入 Mastra 原生后台任务。`enabled: false` 或 `disposition: "foreground"` 保持前台执行。两种模式均由现有持久化回测队列运行，工具的 `execute` 持续等待队列任务到达终态才返回结果，不再把入队记录作为工具结果提前返回。后台模式的任务卡片展示状态变化和 `run_id`，完成后自动返回 `{ run_id, run, terminal, message, result, optimization }`：`result.metrics` 是策略指标，同时保留指标单位、解释、交易数量和最近 20 条日志，不携带完整交易或权益曲线。调优的 `result.metrics` 来自最佳训练试验；`optimization` 返回最佳参数、目标值、留出验证指标及试验数量，`run.optimization_version_id` 指向新版本。前台和无原生后台上下文的直接执行同样等待终态。后台请求必须由 Agent 直接调用，不能放进 `exec`；前台调用可以放进 `exec`，但受其执行时限和取消信号约束。`_background` 使用 Mastra 注入的原生参数，不另设业务层的 `background` 开关。
 
-聊天前台停止不会取消后台回测；聊天后台任务卡片取消、`backtest_cancel` 或回测页面取消会停止对应任务。Mastra 1.72 的原生后台计时器不能禁用（`timeoutMs=0` 会立即超时），这两个工具使用 Node 最大安全延时 `2_147_483_647` 毫秒（约 24.9 天），到期会取消对应回测；原生自动重试设为 0，避免重复提交。回测 Worker 本身不增加固定执行时限，调优搜索预算仍由 `optimization.timeout_seconds` 控制。
+聊天前台停止不会取消原生后台回测；聊天后台任务卡片取消、`backtest_cancel` 或回测页面取消会停止对应任务。Mastra 1.72 的原生后台计时器不能禁用（`timeoutMs=0` 会立即超时），这两个工具使用 Node 最大安全延时 `2_147_483_647` 毫秒（约 24.9 天），到期会取消对应回测；原生自动重试设为 0，避免重复提交。回测 Worker 本身不增加固定执行时限，调优搜索预算仍由 `optimization.timeout_seconds` 控制。
 
 `backtest_status` 默认只读取一次当前状态，仍兼容显式 `wait=true` 最多等待 10 秒；此等待结束不会终止回测。后续按 `run_id` 查询进度和结果，不在本轮持续轮询。只取消回测执行时限；网络请求、环境安装和失联心跳检测仍有各自的故障处理，`factor_analyze` 保持原行为。
 
@@ -350,7 +350,7 @@ K 线工具 `market_bars` 复用当前引擎行情存储及主连修复、派生
 
 资讯查询无需策略指南：`news_search` 可直接留空查看最新资讯，或传 `query` 和可选行业名称/`industry` key，每页 20 条，用 `next_cursor` 继续。把返回的资讯 `id` 传给 `news_read.article_id` 读取正文；返回原文链接、来源、发布时间、采集时间及正文状态，不触发额外抓取。引用时区分发布时间与采集时间，说明正文缺失、截断或同步关闭的限制。
 
-工具以当前消息作者的可信 `userId` 校验登录、记录创建者或任务提交者，每次执行检查账号和插件状态；策略和关联回测共享访问；Python 回测沿用 HTTP 接口的管理员限制，并重新查询账号角色。工具自动出现在后台工具配置中，可单独启停；聊天使用已有通用工具结果及原生后台任务展示。中止工具读取会立即返回“用户中止了操作”；停止前台对话不会取消已提交的回测，需通过原生后台任务入口或 `backtest_cancel` 明确取消。提交过程中延迟写入的任务会在检测到中止后补充取消。数据库写入如已提交仍可能保留，恢复操作前应重新读取状态。
+工具以当前消息作者的可信 `userId` 校验登录、记录创建者或任务提交者，每次执行检查账号和插件状态；策略和关联回测共享访问；Python 回测沿用 HTTP 接口的管理员限制，并重新查询账号角色。工具自动出现在后台工具配置中，可单独启停；聊天使用已有通用工具结果及原生后台任务展示。中止工具读取会立即返回“用户中止了操作”；前台阻塞调用被中止时会取消对应回测；已派发的原生后台任务不受前台对话中止影响，需通过后台任务入口或 `backtest_cancel` 明确取消。提交过程中延迟写入的任务会在检测到中止后补充取消。数据库写入如已提交仍可能保留，恢复操作前应重新读取状态。
 
 ### 工具输入参数完整说明
 
@@ -366,8 +366,8 @@ K 线工具 `market_bars` 复用当前引擎行情存储及主连修复、派生
 | `strategy_update` | `strategy_id: string`；`revision: number`；`name?: string`；`description?: string`；`enabled?: boolean`；`source?: string`；`parameters?: object` | revision 必须匹配刚读取的值；省略的字段保留，source/parameters 整体替换；拒绝未声明字段；保存约束同创建 |
 | `strategy_versions` | `strategy_id: string` | 返回不可变版本摘要及参数，源码需通过 `strategy_read` 读取 |
 | `strategy_publish` | `strategy_id: string`；`revision: positive integer`；`note: string=""` | note 最多 2000 字符；固定当前草稿，返回 `strategy.revision` 与 `version.id`，不启动回测 |
-| `backtest_start` | 见“回测公共参数” | 原生后台回测；直接工具执行无后台上下文时返回入队记录 |
-| `backtest_optimize` | 回测公共参数 + `optimization: object` | 原生后台 Optuna 调优；成功后在当前策略中创建调优版本 |
+| `backtest_start` | 见“回测公共参数” | 默认前台阻塞；显式 _background 启用原生后台；终态返回策略指标 |
+| `backtest_optimize` | 回测公共参数 + `optimization: object` | 默认前台阻塞；显式 _background 启用原生后台；成功后创建调优版本 |
 | `backtest_list` | `strategy_id: UUID`；`before?: UUID` | 最近 30 条普通回测；before 传上一页最后一条 ID，返回 `next_before`；不含调优记录 |
 | `backtest_status` | `run_id: UUID`；`wait: boolean=false` | 默认读取一次当前状态与 `terminal`；wait=true 最多等待 10 秒或至结束；queued/preparing/running 为进行中，completed/failed/cancelled 为终态 |
 | `backtest_result` | `run_id: UUID`；`section: enum="summary"`；`offset: integer=0` | section 可为 summary/trades/orders/fills/signals/logs/equity_curve/risk_levels/optimization_trials；offset ≥ 0，明细每页 50 条；summary 含指标、年/月收益、数量与最近 20 条日志；未产生报告时 `result=null` |
@@ -422,7 +422,7 @@ K 线工具 `market_bars` 复用当前引擎行情存储及主连修复、派生
 | `fees.close_today_rate` | number ≥ 0 / null | 平今比例手续费覆盖，null 沿用普通值 |
 | `fees.sell_tax_rate` | number ≥ 0 | 卖出税率，小数比例 |
 
-天勤回测只接受 CFFEX/SHFE/DCE/CZCE/INE/GFEX 的单个实际期货合约（包括已到期合约），须配置天勤凭据；不支持主连、股票、点数、调优和自定义日历。点数模式忽略资金、保证金、乘数、成交量和 T+1。普通回测与调优共用持久化队列，提交后返回任务 ID 和 `queued` 状态，不限制同一提交者的排队数量；每个 Worker 一次执行一个任务，按提交时间领取对应引擎的任务，排队中可取消。工具描述要求 end 不晚于当前时间，但当前 `parseBacktestConfig` 只校验正整数、先后顺序和十年跨度，没有单独校验未来时间。
+天勤回测只接受 CFFEX/SHFE/DCE/CZCE/INE/GFEX 的单个实际期货合约（包括已到期合约），须配置天勤凭据；不支持主连、股票、点数、调优和自定义日历。点数模式忽略资金、保证金、乘数、成交量和 T+1。普通回测与调优共用持久化队列，HTTP 提交接口返回任务 ID 和 `queued` 状态；Agent 工具在后台等待结束后返回指标，不限制同一提交者的排队数量；每个 Worker 一次执行一个任务，按提交时间领取对应引擎的任务，排队中可取消。工具描述要求 end 不晚于当前时间，但当前 `parseBacktestConfig` 只校验正整数、先后顺序和十年跨度，没有单独校验未来时间。
 
 #### 调优参数 optimization
 

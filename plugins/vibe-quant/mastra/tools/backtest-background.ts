@@ -1,5 +1,4 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import type { BackgroundTaskOperation } from '@mastra/core/background-tasks';
 import { activeRun, type BacktestRun } from '../../strategy-types.js';
 import { StrategyError } from '../../server/strategies/schema.js';
 import type { QuantDependencies } from './context.js';
@@ -8,33 +7,36 @@ import type { QuantDependencies } from './context.js';
 // Use Node's largest safe delay (~24.9 days), without changing the worker's execution budget.
 export const BACKTEST_BACKGROUND_TIMEOUT_MS = 2_147_483_647;
 
-export function backtestOperation<T>(
+export function waitForBacktest<T>(
   records: QuantDependencies['records'],
   userId: string,
   submitted: BacktestRun,
   result: (run: BacktestRun) => Promise<T>,
   progress?: (run: BacktestRun) => Promise<void>,
-): BackgroundTaskOperation<T> {
-  const controller = new AbortController();
-  const { signal } = controller;
-  let cancellation: Promise<void> | undefined;
+  signal?: AbortSignal,
+): Promise<T> {
   let onAbort: () => void;
   const aborted = new Promise<never>((_, reject) => {
-    onAbort = () => reject(signal.reason);
-    signal.addEventListener('abort', onAbort, { once: true });
+    onAbort = () => {
+      // Cancellation must settle even while storage is unavailable or a read is pending.
+      void records.cancel(userId, submitted.id).catch(() => {});
+      reject(signal?.reason ?? new Error('用户中止了操作'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
   });
   const track = async () => {
     let run = submitted;
     let previous = '';
     while (true) {
-      signal.throwIfAborted();
+      signal?.throwIfAborted();
       const state = `${run.status}:${run.message}:${run.cancel_requested}`;
       if (state !== previous) {
         previous = state;
         // Losing a progress subscriber must not lose the durable task's result.
         await progress?.(run).catch(() => {});
       }
-      signal.throwIfAborted();
+      signal?.throwIfAborted();
       if (!activeRun(run.status)) {
         if (run.config.optimization && run.status === 'completed') {
           // The worker persists completion just before creating the version.
@@ -44,7 +46,7 @@ export function backtestOperation<T>(
             run.id,
           );
           run = { ...run, optimization_version_id: version.id };
-          signal.throwIfAborted();
+          signal?.throwIfAborted();
         }
         return result(run);
       }
@@ -52,21 +54,13 @@ export function backtestOperation<T>(
       run = await records.run(userId, run.id);
     }
   };
-  const completion = Promise.race([track(), aborted])
+  return Promise.race([track(), aborted])
     .catch((error: unknown) => {
-      if (signal.aborted) throw signal.reason;
+      if (signal?.aborted) throw signal.reason;
       // Storage errors can contain connection details; keep them out of task history.
       throw new Error(
         `回测任务 ${submitted.id} 结果读取失败：${error instanceof StrategyError ? error.code : '量化服务暂不可用，请用 backtest_status/result 重试。'}`,
       );
     })
-    .finally(() => signal.removeEventListener('abort', onAbort));
-  return {
-    completion,
-    cancel: () => {
-      controller.abort(new Error('用户中止了操作'));
-      cancellation ??= records.cancel(userId, submitted.id).then(() => {});
-      return cancellation;
-    },
-  };
+    .finally(() => signal?.removeEventListener('abort', onAbort));
 }

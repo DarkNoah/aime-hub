@@ -3,8 +3,8 @@ import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { setImmediate, setTimeout as delay } from 'node:timers/promises';
 import { Agent } from '@mastra/core/agent';
-import type { BackgroundTaskOperation } from '@mastra/core/background-tasks';
 import { Mastra } from '@mastra/core/mastra';
+import { MockMemory } from '@mastra/core/memory';
 import { InMemoryStore } from '@mastra/core/storage';
 import { MastraLanguageModelV2Mock } from '@mastra/core/test-utils/llm-mock';
 import { RequestContext } from '@mastra/core/request-context';
@@ -14,6 +14,7 @@ import { createBacktestTools } from '../mastra/tools/backtests.js';
 import type { QuantDependencies } from '../mastra/tools/context.js';
 import type { BacktestInput, BacktestRun } from '../strategy-types.js';
 import { BACKTEST_BACKGROUND_TIMEOUT_MS } from '../mastra/tools/backtest-background.js';
+import { quantAgent } from '../mastra/agents/quant-agent.js';
 
 const metrics = {
   total_points: 128,
@@ -148,57 +149,102 @@ function fixture() {
       ...execution,
     });
   }
-  return { input, deps, counts, call, tools, requestContext, job: () => job };
+  return {
+    input,
+    deps,
+    counts,
+    call,
+    tools,
+    requestContext,
+    job: () => job,
+    seed: () =>
+      deps.records.enqueue(
+        'admin',
+        strategyId,
+        input as BacktestInput,
+        'tqsdk',
+      ),
+  };
 }
 
 for (const name of ['backtest_start', 'backtest_optimize']) {
-  test(`${name} direct execution acknowledges the queue and survives conversation abort`, async () => {
-    const f = fixture();
-    const [tool] = await f.tools
-      .find((item) => item.id === `plugin_vibe_quant_${name}`)!
-      .getTools();
-    assert.ok('background' in tool);
-    assert.deepEqual(tool.background, {
-      enabled: true,
-      defaultDisposition: 'deferred',
-      timeoutMs: BACKTEST_BACKGROUND_TIMEOUT_MS,
-      maxRetries: 0,
+  for (const isBackgroundTask of [false, true]) {
+    test(`${name} waits for final metrics without an adoption context (background=${isBackgroundTask})`, async () => {
+      const f = fixture();
+      const [tool] = await f.tools
+        .find((item) => item.id === `plugin_vibe_quant_${name}`)!
+        .getTools();
+      assert.ok('background' in tool);
+      assert.deepEqual(tool.background, {
+        enabled: true,
+        defaultDisposition: 'foreground',
+        timeoutMs: BACKTEST_BACKGROUND_TIMEOUT_MS,
+        maxRetries: 0,
+      });
+      let settled = false;
+      const pending = f
+        .call(
+          name,
+          {
+            ...f.input,
+            ...(name === 'backtest_optimize'
+              ? {
+                  optimization: {
+                    metric: 'total_points',
+                    search_space: { window: { type: 'int', low: 2, high: 5 } },
+                  },
+                }
+              : {}),
+          },
+          undefined,
+          {
+            agent: {
+              agentId: 'quant-test',
+              toolCallId: 'test-call',
+              messages: [],
+              suspend: async () => {},
+              isBackgroundTask,
+            },
+          },
+        )
+        .then((result) => {
+          settled = true;
+          return result;
+        });
+      await waitFor(() => f.counts.wake === 1);
+      await setImmediate();
+      assert.equal(
+        settled,
+        false,
+        'an enqueued job is not a completed tool result',
+      );
+      f.job().status = 'running';
+      await setImmediate();
+      assert.equal(settled, false);
+      f.job().status = 'completed';
+      const result = await pending;
+      assert.equal(result.run_id, result.run.id);
+      assert.equal(result.run.status, 'completed');
+      assert.equal(result.terminal, true);
+      assert.deepEqual(result.result.metrics, metrics);
+      if (name === 'backtest_optimize')
+        assert.equal(result.run.config.optimization.timeout_seconds, 0);
+      assert.equal(f.counts.enqueue, 1);
+      assert.equal(f.counts.cancel, 0);
     });
-    const controller = new AbortController();
-    const result = await f.call(
-      name,
-      {
-        ...f.input,
-        ...(name === 'backtest_optimize'
-          ? {
-              optimization: {
-                metric: 'total_points',
-                search_space: { window: { type: 'int', low: 2, high: 5 } },
-              },
-            }
-          : {}),
-      },
-      controller.signal,
-    );
-    assert.equal(result.run_id, result.run.id);
-    assert.equal(result.run.status, 'queued');
-    if (name === 'backtest_optimize')
-      assert.equal(result.run.config.optimization.timeout_seconds, 0);
-    assert.match(result.message, /已提交/);
-    assert.deepEqual(f.counts, { enqueue: 1, wake: 1, read: 0, cancel: 0 });
-    controller.abort();
-    await setImmediate();
-    assert.equal(f.job().status, 'queued');
-    assert.equal(f.counts.cancel, 0);
-    const cancelled = await f.call('backtest_cancel', {
-      run_id: result.run_id,
-    });
-    assert.equal(cancelled.run.status, 'cancelled');
-    assert.equal(f.counts.cancel, 1);
-  });
+  }
 
-  for (const outcome of ['completed', 'cancelled', 'timed_out']) {
-    test(`${name} native deferred execution: ${outcome}`, async (t) => {
+  for (const outcome of [
+    'foreground',
+    'disabled',
+    'completed',
+    'deferred',
+    'cancelled',
+    'timed_out',
+  ]) {
+    test(`${name} native execution mode: ${outcome}`, async (t) => {
+      const background = !['foreground', 'disabled'].includes(outcome);
+      const completed = !['cancelled', 'timed_out'].includes(outcome);
       const f = fixture();
       const [tool] = await f.tools
         .find((item) => item.id === `plugin_vibe_quant_${name}`)!
@@ -216,9 +262,17 @@ for (const name of ['backtest_start', 'backtest_optimize']) {
                   type: 'tool-call',
                   toolCallId: 'quant-call',
                   toolName: tool.id,
-                  // No _background override: the tool must dispatch in the background by default.
+                  // Foreground is the default; native background requires an explicit override.
                   input: JSON.stringify({
                     ...f.input,
+                    ...(outcome === 'foreground'
+                      ? {}
+                      : {
+                          _background:
+                            outcome === 'deferred'
+                              ? { disposition: 'deferred' }
+                              : { enabled: background },
+                        }),
                     ...(name === 'backtest_optimize'
                       ? {
                           optimization: {
@@ -250,16 +304,18 @@ for (const name of ['backtest_start', 'backtest_optimize']) {
           }),
         }),
       });
+      const storage = new InMemoryStore();
       const agent = new Agent({
         id: 'quant-test',
         name: 'Quant test',
-        instructions: 'Run the requested backtest.',
+        instructions: quantAgent.instructions,
+        memory: new MockMemory({ storage, enableMessageHistory: true }),
         model,
         tools: { [tool.id]: tool },
       });
       const mastra = new Mastra({
         agents: { quant: agent },
-        storage: new InMemoryStore(),
+        storage,
         logger: false,
         // If the tool forgets its own budget, this test times out before the worker completes.
         backgroundTasks: { enabled: true, defaultTimeoutMs: 50 },
@@ -269,13 +325,54 @@ for (const name of ['backtest_start', 'backtest_optimize']) {
       const output = await agent.stream('Run the backtest', {
         requestContext: f.requestContext,
         abortSignal: controller.signal,
+        memory: { thread: 'quant-thread', resource: 'admin' },
+        ...(background && completed ? { untilIdle: true } : {}),
       });
       const chunks: string[] = [];
-      for await (const chunk of output.fullStream) chunks.push(chunk.type);
-      assert.ok(chunks.includes('background-task-started'));
+      let streamFinished = false;
+      const consuming = (async () => {
+        for await (const chunk of output.fullStream) chunks.push(chunk.type);
+        streamFinished = true;
+      })();
+      await waitFor(
+        () =>
+          f.counts.enqueue === 1 &&
+          (!background || chunks.includes('background-task-started')),
+      );
       assert.equal(f.counts.enqueue, 1);
       const manager = mastra.backgroundTaskManager!;
       const { tasks } = await manager.listTasks({ toolName: tool.id });
+      if (!background) {
+        await delay(80);
+        assert.equal(tasks.length, 0);
+        assert.equal(chunks.includes('background-task-started'), false);
+        assert.equal(chunks.includes('tool-result'), false);
+        assert.equal(
+          streamFinished,
+          false,
+          'the tool call must block while the job runs',
+        );
+        assert.equal(
+          calls,
+          1,
+          'the model cannot continue before the final result',
+        );
+        f.job().status = 'completed';
+        await consuming;
+        assert.ok(chunks.includes('tool-result'));
+        assert.equal(
+          (await manager.listTasks({ toolName: tool.id })).tasks.length,
+          0,
+        );
+        assert.ok(
+          model.doStreamCalls.some((call) =>
+            JSON.stringify(call.prompt).includes('"total_points":128'),
+          ),
+        );
+        assert.equal(f.counts.enqueue, 1);
+        return;
+      }
+      assert.ok(chunks.includes('background-task-started'));
       assert.equal(tasks.length, 1);
       const taskId = tasks[0].id;
       assert.equal(
@@ -283,7 +380,7 @@ for (const name of ['backtest_start', 'backtest_optimize']) {
         outcome === 'timed_out' ? 1000 : BACKTEST_BACKGROUND_TIMEOUT_MS,
       );
       assert.equal(tasks[0].status, 'running');
-      controller.abort();
+      if (!completed) controller.abort();
       await delay(80);
       assert.equal(
         f.counts.cancel,
@@ -341,7 +438,18 @@ for (const name of ['backtest_start', 'backtest_optimize']) {
           assert.equal(report.optimization.trials, undefined);
           assert.equal(report.run.optimization_version_id, 'optimized-version');
         } else assert.equal(report.optimization, null);
+        await consuming;
+        assert.ok(
+          chunks.includes('background-task-completed'),
+          JSON.stringify(chunks),
+        );
+        assert.ok(
+          model.doStreamCalls.some((call) =>
+            JSON.stringify(call.prompt).includes('"total_points":128'),
+          ),
+        );
       }
+      await consuming;
       assert.equal(f.counts.enqueue, 1);
     });
   }
@@ -349,7 +457,7 @@ for (const name of ['backtest_start', 'backtest_optimize']) {
 
 test('native cancellation settles immediately even while a status query is pending', async () => {
   const f = fixture();
-  let operation!: BackgroundTaskOperation<unknown>;
+  const controller = new AbortController();
   let release!: (run: BacktestRun) => void;
   f.deps.records.run = async () => {
     f.counts.read++;
@@ -357,18 +465,18 @@ test('native cancellation settles immediately even while a status query is pendi
       release = resolve;
     });
   };
-  await f.call('backtest_start', f.input, undefined, {
-    background: {
-      taskId: 'native-task',
-      disposition: 'deferred',
-      adopt: (value) => {
-        operation = value;
-      },
+  const pending = f.call('backtest_start', f.input, controller.signal, {
+    agent: {
+      agentId: 'quant-test',
+      toolCallId: 'test-call',
+      messages: [],
+      suspend: async () => {},
+      isBackgroundTask: true,
     },
   });
-  const rejected = assert.rejects(operation.completion, /用户中止了操作/);
+  const rejected = assert.rejects(pending, /用户中止了操作/);
   await waitFor(() => f.counts.read === 1);
-  await operation.cancel!();
+  controller.abort(new Error('用户中止了操作'));
   await rejected;
   release(f.job());
   await setImmediate();
@@ -378,7 +486,7 @@ test('native cancellation settles immediately even while a status query is pendi
 
 test('status reads once by default and reports active and terminal states', async () => {
   const f = fixture();
-  const started = await f.call('backtest_start', f.input);
+  const started = await f.seed();
   for (const status of [
     'queued',
     'preparing',
@@ -395,7 +503,7 @@ test('status reads once by default and reports active and terminal states', asyn
       return f.job();
     };
     const result = await f.call('backtest_status', {
-      run_id: started.run_id,
+      run_id: started.id,
     });
     assert.equal(result.run.status, status);
     assert.equal(
@@ -406,9 +514,23 @@ test('status reads once by default and reports active and terminal states', asyn
   }
 });
 
+test('direct execution abort returns immediately and cancels the pending backtest', async () => {
+  const f = fixture();
+  const controller = new AbortController();
+  const pending = f.call('backtest_start', f.input, controller.signal);
+  await waitFor(() => f.counts.wake === 1);
+  controller.abort();
+  assert.deepEqual(await pending, {
+    cancelled: true,
+    message: '用户中止了操作',
+  });
+  assert.equal(f.counts.cancel, 1);
+  assert.equal(f.job().status, 'cancelled');
+});
+
 test('aborting a pending status read returns immediately without cancelling the background task', async () => {
   const f = fixture();
-  const started = await f.call('backtest_start', f.input);
+  const started = await f.seed();
   let release!: (value: BacktestRun) => void;
   let reading!: () => void;
   const ready = new Promise<void>((resolve) => {
@@ -422,7 +544,7 @@ test('aborting a pending status read returns immediately without cancelling the 
   const controller = new AbortController();
   const pending = f.call(
     'backtest_status',
-    { run_id: started.run_id },
+    { run_id: started.id },
     controller.signal,
   );
   await ready;

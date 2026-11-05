@@ -100,3 +100,4 @@ plugins/vibe-quant/**/__pycache__/
 !apps/server/src/modules/tools/input-schemas.test.ts
 !scripts/transcription.test.ts
 !scripts/web-fetch-lifecycle.test.ts
+!apps/server/src/modules/tools/exec-background.test.ts
