@@ -1,11 +1,11 @@
-import { DURATIONS, type Bar } from '../shared';
+import { CHART_DURATIONS, type Bar } from '../shared';
 
-export type ChartPeriod = (typeof DURATIONS)[number] | 'intraday';
+export type ChartPeriod = (typeof CHART_DURATIONS)[number] | 'intraday';
 export const CHART_PERIOD_STORAGE_KEY = 'vibe-quant:chart-period:v1';
 
 export function parseChartPeriod(value: string | null): ChartPeriod {
   if (value === 'intraday') return value;
-  return DURATIONS.find((duration) => String(duration) === value) ?? 60;
+  return CHART_DURATIONS.find((duration) => String(duration) === value) ?? 60;
 }
 
 export function readChartPeriod(): ChartPeriod {

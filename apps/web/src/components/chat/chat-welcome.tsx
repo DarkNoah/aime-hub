@@ -1,6 +1,7 @@
-import { FileText, Layers2, Search, TerminalSquare } from 'lucide-react';
+import { FileText, Search, TerminalSquare } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ConversationEmptyState } from '@/components/ai-elements/conversation';
+import { BrandMark } from '@/components/brand-mark';
 
 const capabilities = [
   {
@@ -21,7 +22,7 @@ export function ChatWelcome() {
   return (
     <ConversationEmptyState className="m-auto w-full max-w-2xl gap-0 px-5 py-8 @lg/chat:px-8">
       <span className="mb-6 flex size-12 items-center justify-center rounded-2xl bg-secondary text-primary">
-        <Layers2 className="size-6" aria-hidden />
+        <BrandMark className="size-7" />
       </span>
       <h2 className="text-2xl leading-snug font-semibold @lg/chat:text-3xl">
         {t('chat.welcome')}

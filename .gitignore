@@ -98,6 +98,7 @@ plugins/vibe-quant/**/__pycache__/
 !apps/server/src/mastra/providers/alibaba*.test.ts
 !apps/server/src/mastra/providers/provider-configuration.test.ts
 !plugins/vibe-quant/tests/backtest-view.test.ts
+!plugins/vibe-quant/tests/hour-periods.test.ts
 !apps/server/src/modules/tools/input-schemas.test.ts
 !scripts/transcription.test.ts
 !scripts/web-fetch-lifecycle.test.ts

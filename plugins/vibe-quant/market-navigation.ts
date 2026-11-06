@@ -1,4 +1,4 @@
-import { DURATIONS } from './shared.js';
+import { CHART_DURATIONS } from './shared.js';
 
 export interface MarketChartTarget {
   symbol: string;
@@ -28,7 +28,7 @@ export function readMarketChartTarget(
   return {
     symbol,
     time,
-    duration: DURATIONS.find((value) => value === duration) ?? 60,
+    duration: CHART_DURATIONS.find((value) => value === duration) ?? 60,
     monitor: query.get('monitor') || undefined,
   };
 }

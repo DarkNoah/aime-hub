@@ -1,5 +1,5 @@
 import { runVersionName } from '../../strategy-version';
-import { Badge, ScrollArea, Skeleton } from '@app/plugin-ui';
+import { Badge, Label, ScrollArea, Skeleton, Switch } from '@app/plugin-ui';
 import type { MarketPositionsPage } from '../../market-positions';
 import { durationLabel } from '../../shared';
 import { dateTime } from '../strategies/format';
@@ -15,10 +15,14 @@ export function MarketStrategyList({
   data,
   loading,
   error,
+  hiddenStrategyIds,
+  onVisibleChange,
 }: {
   data?: MarketPositionsPage;
   loading: boolean;
   error: string;
+  hiddenStrategyIds: ReadonlySet<string>;
+  onVisibleChange: (id: string, visible: boolean) => void;
 }) {
   const openCounts = new Map<string, number>();
   for (const row of data?.open ?? [])
@@ -36,6 +40,7 @@ export function MarketStrategyList({
       ) : data?.monitors.length ? (
         <ul aria-label="已加载策略列表" className="divide-y">
           {data.monitors.map((monitor) => {
+            const visible = !hiddenStrategyIds.has(monitor.id);
             const displaySymbol =
               monitor.config.display_symbol ?? monitor.config.symbol;
             const status = !monitor.enabled ? 'paused' : monitor.status;
@@ -96,6 +101,21 @@ export function MarketStrategyList({
                     </dd>
                   </div>
                 </dl>
+                <Label className="flex items-center justify-between gap-3 text-xs">
+                  图表止盈止损
+                  <span className="flex shrink-0 items-center gap-2">
+                    <Badge variant={visible ? 'secondary' : 'outline'}>
+                      {visible ? '已显示' : '已隐藏'}
+                    </Badge>
+                    <Switch
+                      checked={visible}
+                      aria-label={`${monitor.strategy_name} ${runVersionName(monitor)} 图表止盈止损`}
+                      onCheckedChange={(checked) =>
+                        onVisibleChange(monitor.id, checked)
+                      }
+                    />
+                  </span>
+                </Label>
                 {monitor.message && status !== 'running' && (
                   <p
                     className={`break-words text-xs leading-5 ${status === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}

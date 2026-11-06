@@ -63,6 +63,7 @@ export function MarketChart({
   markerTimes,
   riskLevels,
   strategyHints,
+  hiddenStrategyIds,
   showDrawingTools = true,
   volumeProfileSource,
   replay = false,
@@ -84,6 +85,7 @@ export function MarketChart({
   markerTimes?: TradeReplay['markerTimes'];
   riskLevels?: readonly RiskLevelRecord[];
   strategyHints?: readonly MarketStrategyHint[];
+  hiddenStrategyIds?: ReadonlySet<string>;
   showDrawingTools?: boolean;
   volumeProfileSource?: VolumeProfileSource;
   replay?: boolean;
@@ -573,12 +575,18 @@ export function MarketChart({
       ...(trade && riskLevels
         ? tradeRiskDrawings(trade, riskLevels, bars, duration, priceTick)
         : []),
-      ...strategyHintDrawings(strategyHints ?? [], bars, duration, priceTick),
+      ...strategyHintDrawings(
+        strategyHints?.filter((hint) => !hiddenStrategyIds?.has(hint.id)) ?? [],
+        bars,
+        duration,
+        priceTick,
+      ),
     ]);
   }, [
     trade,
     riskLevels,
     strategyHints,
+    hiddenStrategyIds,
     bars,
     duration,
     identity,

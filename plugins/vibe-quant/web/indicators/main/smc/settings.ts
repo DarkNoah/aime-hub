@@ -162,7 +162,21 @@ export const SMC_FIELDS = {
   showFairValueGapsInput: field('Fair Value Gaps', 'Fair Value Gaps', false),
   fairValueGapsThresholdInput: field('Fair Value Gaps', 'Auto Threshold', true),
   fairValueGapsTimeframeInput: field('Fair Value Gaps', 'Timeframe', '', {
-    options: ['', '1m', '3m', '5m', '15m', '30m', '60m', '1d', '1w', '1M'],
+    options: [
+      '',
+      '1m',
+      '3m',
+      '5m',
+      '15m',
+      '30m',
+      '60m',
+      '120m',
+      '180m',
+      '240m',
+      '1d',
+      '1w',
+      '1M',
+    ],
   }),
   fairValueGapsBullColorInput: field(
     'Fair Value Gaps',

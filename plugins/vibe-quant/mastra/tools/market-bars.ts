@@ -1,7 +1,7 @@
 import { createTool } from '@mastra/core/tools';
 import { PluginTool, type PluginContext } from '@app/plugin-sdk/server';
 import { z } from 'zod';
-import { DURATIONS } from '../../shared.js';
+import { CHART_DURATIONS } from '../../shared.js';
 import { derivedPeriod, nextPeriodStart } from '../../server/bar-periods.js';
 import { symbol } from '../../server/strategies/schema.js';
 import { quantToolContext, type QuantDependencies } from './context.js';
@@ -12,7 +12,7 @@ const inputSchema = z.object({
     .number()
     .default(60)
     .describe(
-      'K 线周期秒数：60、180、300、900、1800、3600、86400 或 2592000（月线）',
+      'K 线周期秒数：60、180、300、900、1800、3600、7200（2小时）、10800（3小时）、14400（4小时）、86400 或 2592000（月线）',
     ),
   start_date: z
     .string()
@@ -42,7 +42,7 @@ const querySchema = inputSchema
     duration: z
       .number()
       .refine(
-        (value) => DURATIONS.some((item) => item === value),
+        (value) => CHART_DURATIONS.some((item) => item === value),
         '不支持的 K 线周期',
       ),
     start_date: z.iso.date().optional(),

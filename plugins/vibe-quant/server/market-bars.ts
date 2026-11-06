@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DURATIONS, type Engine } from '../shared.js';
+import { CHART_DURATIONS, type Engine } from '../shared.js';
 import type { MarketStore } from './clickhouse.js';
 
 const timestamp = z.coerce.number().int().positive().safe().optional();
@@ -7,7 +7,7 @@ export const marketBarsQuery = z
   .object({
     duration: z.coerce
       .number()
-      .refine((value) => DURATIONS.some((d) => d === value))
+      .refine((value) => CHART_DURATIONS.some((d) => d === value))
       .default(60),
     before: timestamp,
     after: timestamp,

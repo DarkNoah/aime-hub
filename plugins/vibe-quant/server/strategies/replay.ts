@@ -2,7 +2,7 @@ import { z } from 'zod';
 import {
   BAR_JUMP_RADIUS,
   BAR_PAGE_SIZE,
-  DURATIONS,
+  CHART_DURATIONS,
   MONTH_DURATION,
   type Bar,
 } from '../../shared.js';
@@ -15,7 +15,7 @@ export const replayQuerySchema = z
   .object({
     duration: z.coerce
       .number()
-      .refine((value) => DURATIONS.some((item) => item === value))
+      .refine((value) => CHART_DURATIONS.some((item) => item === value))
       .default(60),
     at: z.enum(['entry', 'exit', 'latest']).default('entry'),
     around: timestamp.optional(),

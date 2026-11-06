@@ -35,6 +35,7 @@ import { useMarketBars } from './use-market-bars';
 import { parseChartPeriod, readChartPeriod } from './chart-period';
 import { OrderBookPanel } from './order-book';
 import { useStrategyHints } from './signals/use-strategy-hints';
+import { useStrategyVisibility } from './signals/use-strategy-visibility';
 import { StrategyHints } from './signals/strategy-hints';
 import { MarketPositionsPanel } from './signals/market-positions-panel';
 import {
@@ -84,6 +85,7 @@ const timeText = (value?: string | null) =>
     : '暂无';
 
 export function MarketPage({ pluginId }: PluginPageProps) {
+  const strategyVisibility = useStrategyVisibility();
   const [chartTarget, setChartTarget] = useState(() =>
     readMarketChartTarget(window.location.search),
   );
@@ -493,6 +495,7 @@ export function MarketPage({ pluginId }: PluginPageProps) {
                   />
                 )}
                 strategyHints={hints.items}
+                hiddenStrategyIds={strategyVisibility.hiddenStrategyIds}
                 view={marketBars}
                 identity={identity}
                 drawingSharedScope={`${chartTarget?.monitor ?? status?.engine ?? ''}:${selected}`}
@@ -534,6 +537,8 @@ export function MarketPage({ pluginId }: PluginPageProps) {
           engine={status?.engine}
           quotes={quotes}
           onNavigate={navigateChart}
+          hiddenStrategyIds={strategyVisibility.hiddenStrategyIds}
+          onStrategyVisibleChange={strategyVisibility.setVisible}
           marketOverview={
             item ? (
               <div aria-label="行情概览与盘口">

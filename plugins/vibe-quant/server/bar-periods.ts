@@ -4,6 +4,8 @@ const SHANGHAI_OFFSET = 8 * 3600;
 
 export function derivedPeriod(duration: number, limit = 1000) {
   if (duration === 180) return { source: 60, limit: limit * 3 + 1 };
+  if (duration === 7200 || duration === 10800 || duration === 14400)
+    return { source: 60, limit: limit * (duration / 60) + 1 };
   if (duration === MONTH_DURATION)
     return { source: 86400, limit: limit * 31 + 1 };
   return undefined;

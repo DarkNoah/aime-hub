@@ -17,7 +17,7 @@ import {
   LocateFixed,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { DURATIONS, durationLabel } from '../../shared';
+import { CHART_DURATIONS, durationLabel } from '../../shared';
 import type {
   RiskLevelRecord,
   TradeRecord,
@@ -67,6 +67,7 @@ interface MarketChartPanelProps {
   markerTimes?: TradeReplay['markerTimes'];
   riskLevels?: readonly RiskLevelRecord[];
   strategyHints?: readonly MarketStrategyHint[];
+  hiddenStrategyIds?: ReadonlySet<string>;
   toolbarActions?: ReactNode | ((replay?: StrategyReplayView) => ReactNode);
   volumeProfileSource?: VolumeProfileSource;
   latestLabel?: string;
@@ -85,6 +86,7 @@ function ChartWorkspace({
   markerTimes,
   riskLevels,
   strategyHints,
+  hiddenStrategyIds,
   toolbarActions,
   volumeProfileSource,
   latestLabel = '最新行情',
@@ -172,7 +174,7 @@ function ChartWorkspace({
               </SelectTrigger>
               <SelectContent position="popper" align="start">
                 <SelectItem value="intraday">分时图</SelectItem>
-                {DURATIONS.map((value) => (
+                {CHART_DURATIONS.map((value) => (
                   <SelectItem key={value} value={String(value)}>
                     {durationLabel(value)}
                   </SelectItem>
@@ -224,6 +226,7 @@ function ChartWorkspace({
           markerTimes={markerTimes}
           riskLevels={riskLevels}
           strategyHints={replaying ? strategies.items : strategyHints}
+          hiddenStrategyIds={hiddenStrategyIds}
           volumeProfileSource={volumeProfileSource}
         />
         {!bars.length && (

@@ -119,13 +119,14 @@ export interface SyncStatus {
 }
 // API identifier for calendar months, not a fixed 30-day aggregation window.
 export const MONTH_DURATION = 2592000;
-export const DURATIONS = [
-  60,
-  180,
-  300,
-  900,
-  1800,
-  3600,
+const MINUTE_DURATIONS = [60, 180, 300, 900, 1800, 3600] as const;
+export const DURATIONS = [...MINUTE_DURATIONS, 86400, MONTH_DURATION] as const;
+/** Chart aggregation also supports periods that strategy execution does not. */
+export const CHART_DURATIONS = [
+  ...MINUTE_DURATIONS,
+  7200,
+  10800,
+  14400,
   86400,
   MONTH_DURATION,
 ] as const;
@@ -134,7 +135,9 @@ export const durationLabel = (duration: number) =>
     ? '月线'
     : duration === 86400
       ? '日线'
-      : `${duration / 60} 分钟`;
+      : duration > 3600 && duration < 86400 && duration % 3600 === 0
+        ? `${duration / 3600} 小时`
+        : `${duration / 60} 分钟`;
 export const KIND_LABELS: Record<InstrumentKind, string> = {
   stock: '股票 / 指数',
   future: '期货',
