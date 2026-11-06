@@ -82,7 +82,8 @@ export const threadsContract = {
     .route({
       method: 'GET',
       path: '/threads/{threadId}',
-      summary: '读取线程状态和当前消息快照',
+      summary:
+        '读取线程状态和最近最多 30 条消息，较早消息通过 history 分页读取',
       inputStructure: 'detailed',
     })
     .input(z.object({ params: z.object({ threadId }) }))

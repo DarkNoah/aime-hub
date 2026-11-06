@@ -49,7 +49,7 @@ export function threadRoutes(
     const threadId = c.req.param('threadId');
     if (!/^(?:schedule:)?[a-zA-Z0-9_-]{16}$/.test(threadId))
       throw new ThreadError('THREAD_NOT_FOUND', 404);
-    await service.getThread(userId, threadId);
+    await service.getThreadSummary(userId, threadId);
     const summary = c.req.query('view') === 'summary';
     return eventStream(
       c.req.raw.signal,
@@ -76,7 +76,7 @@ export function threadRoutes(
         });
         if (!session || session.user.id !== userId) return 'expired';
         try {
-          await service.getThread(userId, threadId);
+          await service.getThreadSummary(userId, threadId);
         } catch {
           return 'revoked';
         }

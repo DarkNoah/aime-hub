@@ -13,6 +13,7 @@ import {
 import { createTool } from '@mastra/core/tools';
 import type { CDPSession } from 'playwright-core';
 import { UserBrowser } from './browser/user-browser.js';
+import { browserOperation } from './browser/operation.js';
 
 /** Project threads can contain messages from different users in the same Agent run. */
 export class ThreadBrowserRouter extends AgentBrowser {
@@ -144,11 +145,12 @@ export class ThreadBrowser extends AgentBrowser {
     this.status = 'closed';
     this.lastBrowserState = undefined;
     this.threadManager.reset();
-    await Promise.all(
-      [...this.activeScreencastStreams.values()].map((stream) => stream.stop()),
-    );
+    const streams = [...this.activeScreencastStreams.values()];
     this.activeScreencastStreams.clear();
+    // Notify before asynchronous teardown. A late stop must never reset a newly
+    // reopened browser or clear its streams.
     this.notifyBrowserClosed(this.threadId);
+    await Promise.allSettled(streams.map((stream) => stream.stop()));
   }
   /** Thread cleanup releases its pages; browser_close ends the user's browser in this scope. */
   async release() {
@@ -223,12 +225,29 @@ export class ThreadBrowser extends AgentBrowser {
   override async startScreencast(options?: ScreencastOptions) {
     const manager = await this.getManagerForThread(options?.threadId);
     let cdp: CDPSession | undefined;
+    let stopped = false;
     const stream = new ScreencastStreamImpl(
       {
         getCdpSession: async () => {
-          await cdp?.detach().catch(() => {});
+          if (stopped) throw new Error('Screencast closed');
+          if (cdp)
+            await browserOperation(
+              'detach previous screencast',
+              cdp.detach(),
+              2_000,
+            ).catch(() => {});
+          if (stopped) throw new Error('Screencast closed');
           const page = manager.getPage();
-          cdp = await page.context().newCDPSession(page);
+          const session = await page.context().newCDPSession(page);
+          if (stopped) {
+            void browserOperation(
+              'detach stale screencast',
+              session.detach(),
+              2_000,
+            ).catch(() => {});
+            throw new Error('Screencast closed');
+          }
+          cdp = session;
           return cdp;
         },
         isBrowserRunning: () => manager.isLaunched(),
@@ -239,14 +258,28 @@ export class ThreadBrowser extends AgentBrowser {
     await this.activeScreencastStreams.get(key)?.stop();
     this.activeScreencastStreams.set(key, stream);
     let pending = Promise.resolve();
-    let stopped = false;
+    let stopping: Promise<void> | undefined;
     const stop = stream.stop.bind(stream);
-    stream.stop = async () => {
+    stream.stop = () => {
+      if (stopping) return stopping;
       stopped = true;
-      await pending.catch(() => {});
-      await stop();
-      await cdp?.detach().catch(() => {});
-      cdp = undefined;
+      cleanup();
+      stopping = (async () => {
+        // Do not wait for start/reconnect: detaching CDP interrupts that work.
+        try {
+          await browserOperation('stop CDP screencast', stop(), 2_000);
+        } finally {
+          const session = cdp;
+          cdp = undefined;
+          if (session)
+            await browserOperation(
+              'detach screencast',
+              session.detach(),
+              2_000,
+            ).catch(() => {});
+        }
+      })();
+      return stopping;
     };
     const active = () => {
       pending = pending
@@ -257,27 +290,40 @@ export class ThreadBrowser extends AgentBrowser {
             await stop();
             return;
           }
-          await stream.reconnect();
+          await browserOperation(
+            'reconnect screencast',
+            resume(stream.reconnect()),
+          );
         });
       void pending.catch(() => {
-        if (!stopped) void stream.stop();
+        if (!stopped) void stream.stop().catch(() => {});
       });
     };
     const url = (value: string) => stream.emitUrl(value);
     manager.events.on('active', active);
     manager.events.on('url', url);
-    stream.once('stop', () => {
+    const cleanup = () => {
       stopped = true;
       manager.events.off('active', active);
       manager.events.off('url', url);
       if (this.activeScreencastStreams.get(key) === stream)
         this.activeScreencastStreams.delete(key);
-    });
-    pending = stream.start();
+    };
+    stream.once('stop', cleanup);
+    const resume = async (operation: Promise<void>) => {
+      await operation;
+      if (stopped) {
+        await browserOperation('stop late screencast', stop(), 2_000).catch(
+          () => {},
+        );
+        throw new Error('Screencast closed');
+      }
+    };
+    pending = browserOperation('start screencast', resume(stream.start()));
     try {
       await pending;
     } catch (error) {
-      await stream.stop();
+      await stream.stop().catch(() => {});
       throw error;
     }
     return stream;

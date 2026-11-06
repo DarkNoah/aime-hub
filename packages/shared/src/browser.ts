@@ -34,18 +34,8 @@ export const browserActionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('text'), text: z.string().min(1).max(10000) }),
   z.object({
     kind: z.literal('navigate'),
-    url: z
-      .string()
-      .max(8192)
-      .url()
-      .refine((value) => {
-        const url = new URL(value);
-        return (
-          ['http:', 'https:'].includes(url.protocol) &&
-          !url.username &&
-          !url.password
-        );
-      }),
+    // Chromium also supports internal pages, about:, file: and other schemes.
+    url: z.string().min(1).max(8192),
   }),
   z.object({ kind: z.enum(['back', 'forward', 'reload', 'close']) }),
   z.object({

@@ -9,6 +9,7 @@ import { emptyBrowserState } from '@aime/shared/browser';
 import { ThreadBrowser } from '../browser.js';
 import type { UserBrowser } from './user-browser.js';
 import { ThreadError } from '../errors.js';
+import { browserOperation } from './operation.js';
 
 /** Keep provider-specific navigation and text insertion outside the stream lifecycle. */
 export function createBrowserDriver(threadId: string, owner: UserBrowser) {
@@ -91,6 +92,8 @@ export class ThreadBrowserSession {
   private refreshing?: Promise<void>;
   private wasRunning = false;
   private unsubscribeClosed?: () => void;
+  private generation = 0;
+  private closing?: Promise<void>;
 
   constructor(
     readonly threadId: string,
@@ -98,12 +101,13 @@ export class ThreadBrowserSession {
   ) {
     this.browser = driver.browser;
     this.unsubscribeClosed = this.browser.onBrowserClosed?.(() => {
+      this.invalidate();
       this.wasRunning = true;
       this.emit({
         type: 'state',
         state: { ...emptyBrowserState, status: 'closed' },
       });
-      void this.serial(() => this.stopStream()).catch(() => {});
+      void this.stopStream().catch(() => {});
     }, threadId);
   }
 
@@ -116,15 +120,31 @@ export class ThreadBrowserSession {
   }
 
   private serial<T>(work: () => Promise<T>): Promise<T> {
-    const next = this.pending.catch(() => {}).then(work);
+    const generation = this.generation;
+    const next = this.pending
+      .catch(() => {})
+      .then(() => {
+        if (generation !== this.generation || this.disposed || this.closing)
+          throw new ThreadError('BROWSER_NOT_RUNNING', 409);
+        return work();
+      });
     this.pending = next;
     return next;
+  }
+
+  private invalidate() {
+    this.generation++;
+    this.pending = Promise.resolve();
+    this.refreshing = undefined;
   }
 
   async state(): Promise<BrowserState> {
     const running = this.isRunning();
     const state = running
-      ? await this.browser.getBrowserState(this.threadId)
+      ? await browserOperation(
+          'read browser state',
+          this.browser.getBrowserState(this.threadId),
+        )
       : null;
     return {
       ...emptyBrowserState,
@@ -145,17 +165,22 @@ export class ThreadBrowserSession {
     const stream = this.stream;
     this.stream = undefined;
     this.lastFrame = undefined;
-    await stream?.stop();
+    if (stream) await browserOperation('stop screencast', stream.stop(), 2_000);
   }
 
   private refresh() {
+    if (this.closing || this.disposed) return Promise.resolve();
     if (this.refreshing) return this.refreshing;
-    this.refreshing = this.serial(async () => {
+    const generation = this.generation;
+    const current = () =>
+      generation === this.generation && !this.disposed && !this.closing;
+    const refreshing = this.serial(async () => {
       if (this.disposed || !this.listeners.size) {
         await this.stopStream();
         return;
       }
       const state = await this.state();
+      if (!current()) return;
       this.emit({ type: 'state', state });
       if (state.status !== 'ready') {
         await this.stopStream();
@@ -164,6 +189,7 @@ export class ThreadBrowserSession {
       this.wasRunning = true;
       if (this.stream?.isActive()) return;
       await this.stopStream();
+      if (!current()) return;
       const stream = await this.browser.startScreencastIfBrowserActive({
         threadId: this.threadId,
         format: 'jpeg',
@@ -173,9 +199,13 @@ export class ThreadBrowserSession {
         everyNthFrame: 2,
       });
       if (!stream) return;
+      if (!current()) {
+        await browserOperation('stop stale screencast', stream.stop(), 2_000);
+        return;
+      }
       this.stream = stream;
       stream.on('frame', (frame) => {
-        if (this.stream !== stream || this.disposed) return;
+        if (this.stream !== stream || !current()) return;
         const now = Date.now();
         this.lastFrame = frame;
         const deliver = () => {
@@ -194,13 +224,17 @@ export class ThreadBrowserSession {
         }
       });
       // Seed static pages and late subscribers; CDP may emit its first frame before start resolves.
-      const frame = await this.driver.capture();
-      if (this.stream === stream) {
+      const frame = await browserOperation(
+        'capture browser frame',
+        this.driver.capture(),
+      );
+      if (this.stream === stream && current()) {
         this.lastFrame = frame;
         this.emit({ type: 'frame', frame });
       }
     })
       .catch(() => {
+        if (!current()) return;
         this.emit({
           type: 'state',
           state: { ...emptyBrowserState, status: 'error' },
@@ -208,9 +242,10 @@ export class ThreadBrowserSession {
         void this.serial(() => this.stopStream()).catch(() => {});
       })
       .finally(() => {
-        this.refreshing = undefined;
+        if (this.refreshing === refreshing) this.refreshing = undefined;
       });
-    return this.refreshing;
+    this.refreshing = refreshing;
+    return refreshing;
   }
 
   subscribe(listener: (event: BrowserEvent) => void) {
@@ -235,10 +270,44 @@ export class ThreadBrowserSession {
   }
 
   async action(action: BrowserAction) {
+    if (action.kind === 'close') {
+      if (this.closing) return this.closing;
+      if (this.disposed) throw new ThreadError('BROWSER_NOT_RUNNING', 409);
+      this.invalidate();
+      // Closing the context is what interrupts stuck screenshots/CDP calls.
+      // Never queue it behind refresh or wait for screencast teardown first.
+      void this.stopStream().catch(() => {});
+      this.closing = browserOperation(
+        'close browser',
+        this.driver.action(action),
+        10_000,
+      )
+        .then(() => {
+          this.wasRunning = true;
+          this.emit({
+            type: 'state',
+            state: { ...emptyBrowserState, status: 'closed' },
+          });
+        })
+        .catch((error: unknown) => {
+          this.emit({
+            type: 'state',
+            state: { ...emptyBrowserState, status: 'error' },
+          });
+          throw error;
+        })
+        .finally(() => {
+          this.closing = undefined;
+        });
+      return this.closing;
+    }
     await this.serial(async () => {
       if (this.disposed) throw new ThreadError('BROWSER_NOT_RUNNING', 409);
-      if (action.kind === 'close') await this.stopStream();
-      await this.driver.action(action);
+      await browserOperation(
+        'browser input',
+        this.driver.action(action),
+        20_000,
+      );
     });
     // Input must not wait for another screenshot or state query.
     if (!['mouse', 'keyboard', 'text'].includes(action.kind))
@@ -247,17 +316,22 @@ export class ThreadBrowserSession {
 
   async dispose() {
     this.disposed = true;
+    this.invalidate();
     this.unsubscribeClosed?.();
     clearInterval(this.timer);
-    await this.serial(async () => {
-      await this.stopStream();
-      if (this.driver.dispose) await this.driver.dispose();
-      else await this.browser.close();
+    void this.stopStream().catch(() => {});
+    try {
+      await browserOperation(
+        'release browser session',
+        this.driver.dispose ? this.driver.dispose() : this.browser.close(),
+        10_000,
+      );
       this.emit({
         type: 'state',
         state: { ...emptyBrowserState, status: 'closed' },
       });
+    } finally {
       this.listeners.clear();
-    });
+    }
   }
 }

@@ -94,38 +94,37 @@ function BrowserContent({ threadId }: { threadId: string }) {
   const state = useSyncExternalStore(resource.subscribe, resource.getSnapshot);
   const [interactive, setInteractive] = useState(true);
   const [draft, setDraft] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
+  const [pending, setPending] = useState(0);
+  const [closing, setClosing] = useState(false);
   const lastError = useRef(0);
   const ready = state.status === 'ready' && state.connection === 'connected';
-  const canControl = ready && !state.busy && interactive && !pending;
+  const canControl =
+    ready && !state.busy && interactive && !pending && !closing;
   function report(error: unknown) {
     if (Date.now() - lastError.current < 2000) return;
     lastError.current = Date.now();
     toast.error(t(browserErrorKey(error)));
   }
   async function action(value: BrowserAction) {
-    setPending(true);
+    if (value.kind === 'close') setClosing(true);
+    else setPending((count) => count + 1);
     try {
       await resource.action(value);
       if (value.kind === 'close') toast.success(t('browser.closedSuccess'));
     } catch (error) {
       report(error);
     } finally {
-      setPending(false);
+      if (value.kind === 'close') setClosing(false);
+      else setPending((count) => count - 1);
     }
   }
   function navigate() {
     const value = (draft ?? state.url).trim();
     try {
+      if (!value) throw new Error();
       const url = new URL(
         /^[a-z][a-z\d+.-]*:/i.test(value) ? value : `https://${value}`,
       );
-      if (
-        !['http:', 'https:'].includes(url.protocol) ||
-        url.username ||
-        url.password
-      )
-        throw new Error();
       setDraft(null);
       void action({ kind: 'navigate', url: url.href });
     } catch {
@@ -237,7 +236,11 @@ function BrowserContent({ threadId }: { threadId: string }) {
         <Button
           variant="ghost"
           size="icon-xs"
-          disabled={!ready || pending}
+          disabled={
+            closing ||
+            state.connection === 'forbidden' ||
+            (state.status !== 'ready' && state.status !== 'error')
+          }
           title={t('browser.closeBrowser')}
           aria-label={t('browser.closeBrowser')}
           onClick={() => void action({ kind: 'close' })}

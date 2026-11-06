@@ -13,6 +13,7 @@ import { chromium } from '../../../lib/browser.js';
 import { ThreadPageManager } from './page-manager.js';
 import { recoverBrowserProfileLock } from './profile-lock.js';
 import { browserProxy } from './proxy.js';
+import { browserOperation } from './operation.js';
 
 /** One persistent Chromium context per user and scope, outside chat workspaces. */
 export class UserBrowser {
@@ -118,6 +119,9 @@ export class UserBrowser {
         this.context = undefined;
         this.epoch++;
         this.managers.clear();
+        // Explicit close already notified listeners before asking Chromium to
+        // exit. Only an unexpected disconnect needs another notification.
+        if (this.closing) return;
         for (const listener of this.closedListeners)
           void listener().catch(() => {});
       });
@@ -160,27 +164,49 @@ export class UserBrowser {
     this.epoch++;
     this.closing = this.serial(async () => {
       const context = this.context;
-      await Promise.allSettled(
-        [...this.closedListeners].map((listener) => listener()),
+      // Stream listeners can themselves be waiting on Chromium. They must not
+      // prevent context.close(), which interrupts those pending CDP commands.
+      void Promise.allSettled(
+        [...this.closedListeners].map((listener) =>
+          browserOperation(
+            'notify browser closed',
+            Promise.resolve().then(listener),
+            2_000,
+          ),
+        ),
       );
       if (!context) return;
       // Save only session cookies here; persistent cookies and origin storage stay in Chromium.
       try {
-        const cookies = (await context.cookies()).filter(
-          (cookie) => cookie.expires === -1,
-        );
+        const cookies = (
+          await browserOperation(
+            'save session cookies',
+            context.cookies(),
+            2_000,
+          )
+        ).filter((cookie) => cookie.expires === -1);
         const path = join(this.directory, 'session-cookies.json');
         await writeFile(`${path}.tmp`, JSON.stringify(cookies), {
           mode: 0o600,
         });
         await rename(`${path}.tmp`, path);
+      } catch (error) {
+        // Keep the persistent profile and any previous session-cookie backup.
+        // Failure to read cookies must not prevent shutdown.
+        console.warn(
+          'Could not save browser session cookies',
+          error instanceof Error ? error.message : 'Unknown error',
+        );
       } finally {
-        this.context = undefined;
-        try {
-          await context.close();
-        } finally {
-          this.managers.clear();
-        }
+        // Retain the context on failure so a later close can retry; do not report
+        // a successful shutdown or launch a second process against its profile.
+        await browserOperation(
+          'close Chromium context',
+          context.close(),
+          5_000,
+        );
+        if (this.context === context) this.context = undefined;
+        this.managers.clear();
       }
     }).finally(() => {
       this.closing = undefined;

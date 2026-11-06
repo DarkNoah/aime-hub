@@ -116,6 +116,7 @@ type Runtime = {
   turnLocators: Map<string, string>;
   historyCursor: string | null;
   turnHistoryCurrent: boolean;
+  partialTurnId?: string;
   changedMessages: Map<string, UIMessage>;
   removedMessageIds: Set<string>;
   activeMessageId: string | null;
@@ -192,7 +193,7 @@ type ThreadMemory = Pick<
   | 'saveMessages'
   | 'deleteThread'
 >;
-const PAGE_SIZE = 40;
+const PAGE_SIZE = 30;
 const isChatThread = (thread: StorageThreadType) =>
   !groupChatThreadBinding(thread.metadata) &&
   !Object.hasOwn(thread.metadata ?? {}, 'goalJudge') &&
@@ -1212,7 +1213,11 @@ export class ThreadService {
     return { ...usage, consumedTokens };
   }
 
-  private async runtime(userId: string, id: string) {
+  private async runtime(
+    userId: string,
+    id: string,
+    historyMode: 'turns' | 'messages' = 'turns',
+  ) {
     const thread = await this.accessible(userId, id);
     const cached = this.runtimes.get(id);
     if (cached) return cached;
@@ -1227,10 +1232,21 @@ export class ThreadService {
       data.error = 'RUN_INTERRUPTED';
       data.status = 'failed';
     }
-    const history = await readTurnPage(this.memory, {
-      threadId: id,
-      resourceId: thread.resourceId,
-    });
+    const history =
+      historyMode === 'turns'
+        ? await readTurnPage(this.memory, {
+            threadId: id,
+            resourceId: thread.resourceId,
+          })
+        : {
+            ...(await this.history(userId, id)),
+            locators: new Map<string, string>(),
+            cursor: null,
+          };
+    const messages =
+      historyMode === 'messages'
+        ? mergeThreadMessages([], history.messages)
+        : history.messages;
     const runtime: Runtime = {
       thread,
       data,
@@ -1241,10 +1257,18 @@ export class ThreadService {
         (thread.metadata?.issueEvents ?? []) as IssueThreadObservation[],
       ),
       goal: (await this.runner.getGoal?.(id)) ?? null,
-      messages: history.messages,
+      messages,
       turnLocators: history.locators,
       historyCursor: history.cursor,
-      turnHistoryCurrent: true,
+      turnHistoryCurrent:
+        historyMode === 'turns' ||
+        (!history.hasMore && groupTurns(messages).length <= TURN_PAGE_SIZE),
+      partialTurnId:
+        historyMode === 'messages' &&
+        history.hasMore &&
+        messages[0]?.role === 'assistant'
+          ? messages[0].id
+          : undefined,
       changedMessages: new Map(),
       removedMessageIds: new Set(),
       queueCount: 0,
@@ -1435,9 +1459,14 @@ export class ThreadService {
   }
 
   getThread(userId: string, id: string) {
-    return this.scopeLocked(userId, id, async () =>
-      this.snapshot(await this.runtime(userId, id)),
-    );
+    return this.scopeLocked(userId, id, async () => {
+      const snapshot = this.snapshot(
+        await this.runtime(userId, id, 'messages'),
+      );
+      // Live runtimes can hold complete turns with thousands of tool messages.
+      // Limit the response without trimming state used by streams and details.
+      return { ...snapshot, messages: snapshot.messages.slice(-PAGE_SIZE) };
+    });
   }
 
   /** Validate provenance without opening a session or accepting public metadata. */
@@ -1516,8 +1545,8 @@ export class ThreadService {
     );
   }
 
-  browserAction(userId: string, id: string, action: BrowserAction) {
-    return this.scopeLocked(userId, id, async () => {
+  async browserAction(userId: string, id: string, action: BrowserAction) {
+    const perform = async () => {
       const browser = this.runner.browsers?.get(id, userId);
       if (!browser) throw new ThreadError('BROWSER_NOT_RUNNING', 409);
       // Closing is always explicit; all other user input waits until Agent work is idle.
@@ -1534,7 +1563,14 @@ export class ThreadService {
         if (error instanceof ThreadError) throw error;
         throw new ThreadError('BROWSER_ACTION_FAILED', 502);
       }
-    });
+    };
+    // Browser shutdown may need to interrupt a stuck CDP action. It must neither
+    // wait for nor hold the chat/project lock used by room reads and Agent work.
+    if (action.kind === 'close') {
+      await this.accessible(userId, id);
+      return perform();
+    }
+    return this.scopeLocked(userId, id, perform);
   }
 
   async listArchivedThreads(userId: string) {
@@ -1738,6 +1774,8 @@ export class ThreadService {
       resourceId: thread.resourceId,
       page,
       perPage: PAGE_SIZE,
+      includeTotal: false,
+      hideSignals: false,
       filter: { dateRange: { end: new Date(anchor) } },
       orderBy: { field: 'createdAt', direction: 'DESC' },
     });
@@ -1782,10 +1820,13 @@ export class ThreadService {
   ): Promise<ChatTurnDetail> {
     const thread = await this.accessible(userId, id);
     const scope = { threadId: id, resourceId: thread.resourceId };
-    const live = groupTurns(this.runtimes.get(id)?.messages ?? []).find(
-      (turn) => turn.id === turnId,
+    const runtime = this.runtimes.get(id);
+    const live = groupTurns(runtime?.messages ?? []).find(
+      (turn) => turn.id === turnId && turn.id !== runtime?.partialTurnId,
     );
-    let messages = live?.messages;
+    // A bounded get snapshot can start in the middle of a turn. Recover its
+    // complete persisted history before overlaying unsaved live messages.
+    let messages = runtime?.turnHistoryCurrent ? live?.messages : undefined;
     if (!messages && cursor)
       messages = await readTurnDetail(this.memory, scope, turnId, cursor);
     // A newly streamed turn has no stored locator yet. Recover after runtime expiry.
@@ -1799,6 +1840,10 @@ export class ThreadService {
         before = page.cursor ?? undefined;
       } while (!messages && before);
     }
+    if (live && messages !== live.messages)
+      messages = messages
+        ? mergeThreadMessages(messages, live.messages)
+        : live.messages;
     if (!messages) throw new ThreadError('TURN_NOT_FOUND', 404);
     await this.accessible(userId, id);
     return {
@@ -2355,6 +2400,7 @@ export class ThreadService {
             ? (runtime.turnLocators.get(visible[0]!.id) ?? page.cursor)
             : page.cursor;
         runtime.turnHistoryCurrent = true;
+        runtime.partialTurnId = undefined;
       }
       clearTimeout(runtime.expiry);
       const subscription: Subscription = {

@@ -25,6 +25,9 @@ export function createBrowserResource(threadId: string, sessionId: string) {
   let retry: ReturnType<typeof setTimeout> | undefined;
   let input: Promise<unknown> = Promise.resolve();
   let queued = 0;
+  let generation = 0;
+  let inputController: AbortController | undefined;
+  let closing: Promise<void> | undefined;
 
   function update(next: BrowserViewState) {
     if (JSON.stringify(next) === JSON.stringify(state)) return;
@@ -113,17 +116,45 @@ export function createBrowserResource(threadId: string, sessionId: string) {
       };
     },
     action(action: BrowserAction) {
+      if (action.kind === 'close') {
+        if (closing) return closing;
+        generation++;
+        queued = 0;
+        input = Promise.resolve();
+        inputController?.abort();
+        // Shutdown must reach the server even when navigation/input is stuck.
+        closing = api.threads.browser
+          .action({ params: { threadId }, body: action })
+          .finally(() => {
+            closing = undefined;
+          });
+        return closing;
+      }
+      if (closing) return Promise.resolve();
       if (queued >= 64)
         return Promise.reject(new Error('BROWSER_INPUT_QUEUE_FULL'));
+      const version = generation;
       queued += 1;
       const next = input
         .catch(() => {})
-        .then(() =>
-          api.threads.browser.action({ params: { threadId }, body: action }),
-        );
+        .then(async () => {
+          if (version !== generation) return;
+          const controller = new AbortController();
+          inputController = controller;
+          try {
+            await api.threads.browser.action(
+              { params: { threadId }, body: action },
+              { signal: controller.signal },
+            );
+          } catch (error) {
+            if (!controller.signal.aborted) throw error;
+          } finally {
+            if (inputController === controller) inputController = undefined;
+          }
+        });
       input = next;
       return next.finally(() => {
-        queued -= 1;
+        if (version === generation) queued -= 1;
       });
     },
   };

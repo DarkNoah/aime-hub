@@ -1879,7 +1879,7 @@ export const zhCN = {
   'browser.forbidden': '会话已失效或已无权访问此浏览器。',
   'browser.streamFailed': '暂时无法获取画面，正在重试…',
   'browser.actionFailed': '浏览器操作失败，请重试。',
-  'browser.invalidUrl': '请输入有效的 HTTP 或 HTTPS 网址。',
+  'browser.invalidUrl': '请输入有效的浏览器地址。',
   'browser.textTooLong': '单次输入或粘贴最多支持 10000 个字符。',
   'browser.status.waiting': '待启动',
   'browser.status.ready': '运行中',

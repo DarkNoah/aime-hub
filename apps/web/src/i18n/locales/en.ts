@@ -2062,7 +2062,7 @@ export const en = {
     'Your session expired or you no longer have access to this browser.',
   'browser.streamFailed': 'The browser view is unavailable. Retrying…',
   'browser.actionFailed': 'Browser action failed. Please retry.',
-  'browser.invalidUrl': 'Enter a valid HTTP or HTTPS URL.',
+  'browser.invalidUrl': 'Enter a valid browser address.',
   'browser.textTooLong': 'Type or paste up to 10,000 characters at a time.',
   'browser.status.waiting': 'Not started',
   'browser.status.ready': 'Running',
