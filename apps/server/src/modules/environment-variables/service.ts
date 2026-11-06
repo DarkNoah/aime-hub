@@ -72,7 +72,6 @@ export class EnvironmentVariableService {
       'variable.userId',
       'variable.projectId',
     ]);
-    if (userId !== undefined) query.orWhere(scopeWhere(userId));
     if (projectId !== undefined)
       query.orWhere(
         `variable.projectId = :projectId AND EXISTS (
@@ -80,7 +79,10 @@ export class EnvironmentVariableService {
       )`,
         { projectId },
       );
-    // Global < personal < project. Explicit empty strings also override.
+    else if (userId !== undefined) query.orWhere(scopeWhere(userId));
+    // Project runs use global + project; personal runs use global + user.
+    // Never expose a member's personal variables to a shared project workspace.
+    // Explicit empty strings also override global values.
     const rows = await query
       .orderBy('variable.projectId', 'ASC', 'NULLS FIRST')
       .addOrderBy('variable.userId', 'ASC', 'NULLS FIRST')

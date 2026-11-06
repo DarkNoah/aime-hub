@@ -37,7 +37,7 @@ export class ThreadBrowserRouter extends AgentBrowser {
   }
 }
 
-/** Mastra's thread routing is retained; the actual context belongs to the user. */
+/** Mastra routes threads; the context belongs to this user in the current scope. */
 class ThreadBrowserManager extends AgentBrowserThreadManager {
   constructor(
     config: ConstructorParameters<typeof AgentBrowserThreadManager>[0],
@@ -83,7 +83,7 @@ export class ThreadBrowser extends AgentBrowser {
     let manager!: ThreadBrowserManager;
     super({
       headless: true,
-      // This scope routes tools and streams by thread. UserBrowser owns the shared process/profile.
+      // Tools and streams route by thread; UserBrowser shares its process within one user/scope.
       scope: 'thread',
       createThreadManager: (config) =>
         (manager = new ThreadBrowserManager(config, owner, threadId)),
@@ -150,7 +150,7 @@ export class ThreadBrowser extends AgentBrowser {
     this.activeScreencastStreams.clear();
     this.notifyBrowserClosed(this.threadId);
   }
-  /** Chat/thread cleanup releases only its pages; explicit browser_close ends the user browser. */
+  /** Thread cleanup releases its pages; browser_close ends the user's browser in this scope. */
   async release() {
     this.released = true;
     this.unsubscribe();
@@ -163,13 +163,13 @@ export class ThreadBrowser extends AgentBrowser {
     tools[BROWSER_TOOLS.CLOSE] = createTool({
       id: BROWSER_TOOLS.CLOSE,
       description:
-        'End this user’s browser across all chat threads. Closes every tab, preserves login data, and does not restore old pages on the next launch. To close only a tab in this thread, use browser_tabs with action close.',
+        'End this user’s browser in the current personal or project scope. Closes its tabs across threads in that scope, preserves login data, and does not restore old pages on the next launch. Other projects and users keep their browsers. To close only a tab in this thread, use browser_tabs with action close.',
       inputSchema: closeInputSchema,
       execute: async () => {
         await this.close();
         return {
           success: true,
-          hint: 'The user browser is closed for all threads. Login data is retained. Opening a URL starts fresh pages.',
+          hint: 'The user browser is closed for all threads in this personal or project scope. Login data is retained. Opening a URL starts fresh pages.',
         };
       },
     });

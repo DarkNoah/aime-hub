@@ -1,6 +1,6 @@
 import type { LaunchOptions } from 'playwright-core';
 
-/** Only explicitly configured global variables apply to the shared user browser. */
+/** Convert the browser owner's effective environment into Chromium proxy options. */
 export function browserProxy(
   environment: Record<string, string>,
 ): LaunchOptions['proxy'] {

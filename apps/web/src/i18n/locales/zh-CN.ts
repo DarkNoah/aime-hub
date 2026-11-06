@@ -1797,7 +1797,7 @@ export const zhCN = {
   'projects.removeMember': '移除成员',
   'projects.settings': '项目设置',
   'projects.environmentVariablesDescription':
-    '供本项目成员的命令共享使用，覆盖同名全局和个人变量。仅项目所有者和管理员可管理；保存后对新启动的命令生效，已有终端需重新启动。',
+    '项目命令和浏览器使用全局配置与当前项目覆盖，不加载个人变量。仅项目所有者和管理员可管理；保存后对新启动的命令和浏览器生效，已有终端或浏览器需重新启动。',
   'projects.settingsHint':
     '项目聊天使用的共享默认配置，与个人聊天默认配置相互独立。',
   'projects.dashboard': '项目仪表盘',

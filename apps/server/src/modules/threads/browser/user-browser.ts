@@ -14,7 +14,7 @@ import { ThreadPageManager } from './page-manager.js';
 import { recoverBrowserProfileLock } from './profile-lock.js';
 import { browserProxy } from './proxy.js';
 
-/** One persistent Chromium context per user; profiles never live in chat workspaces. */
+/** One persistent Chromium context per user and scope, outside chat workspaces. */
 export class UserBrowser {
   private context?: BrowserContext;
   private managers = new Map<string, ThreadPageManager>();
@@ -27,11 +27,21 @@ export class UserBrowser {
   constructor(
     root: string,
     readonly userId: string,
-    private getEnvironment?: () => Promise<Record<string, string>>,
+    private getEnvironment?: (
+      userId: string,
+      projectId?: string,
+    ) => Promise<Record<string, string>>,
+    readonly projectId?: string,
   ) {
     if (!userId) throw new Error('Browser owner is required');
     this.directory = join(
-      root,
+      projectId
+        ? join(
+            root,
+            'projects',
+            createHash('sha256').update(projectId).digest('hex'),
+          )
+        : root,
       createHash('sha256').update(userId).digest('hex'),
     );
   }
@@ -58,7 +68,9 @@ export class UserBrowser {
   }
 
   private async launch() {
-    const proxy = browserProxy((await this.getEnvironment?.()) ?? {});
+    const proxy = browserProxy(
+      (await this.getEnvironment?.(this.userId, this.projectId)) ?? {},
+    );
     const profile = join(this.directory, 'profile');
     await mkdir(profile, { recursive: true, mode: 0o700 });
     await chmod(this.directory, 0o700);

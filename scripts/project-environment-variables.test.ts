@@ -174,6 +174,30 @@ test(
     assert.deepEqual(await variables.getEnv('owner', otherId), {
       API_KEY: 'other-project',
     });
+    const personalOnly = await variables.create(
+      { name: 'PERSONAL_ONLY', value: 'private' },
+      'owner',
+    );
+    const fallbackGlobal = await variables.create({
+      name: 'FALLBACK',
+      value: 'global',
+    });
+    const fallbackPersonal = await variables.create(
+      { name: 'FALLBACK', value: 'personal' },
+      'owner',
+    );
+    assert.deepEqual(await variables.getEnv('owner', projectId), {
+      API_KEY: 'project',
+      FALLBACK: 'global',
+    });
+    assert.deepEqual(await variables.getEnv('owner'), {
+      API_KEY: 'personal',
+      FALLBACK: 'personal',
+      PERSONAL_ONLY: 'private',
+    });
+    await variables.remove(personalOnly.id, 'owner');
+    await variables.remove(fallbackPersonal.id, 'owner');
+    await variables.remove(fallbackGlobal.id);
     user = { id: 'admin', role: 'user' };
     await client.update({
       params: { ...params, id: saved.id },
@@ -229,7 +253,7 @@ test(
     );
     await client.remove({ params: { ...params, id: saved.id } });
     assert.deepEqual(await variables.getEnv('owner', projectId), {
-      API_KEY: 'personal',
+      API_KEY: 'global',
     });
     assert.deepEqual(await variables.getEnv('member', projectId), {
       API_KEY: 'global',
@@ -269,7 +293,7 @@ test(
     await database.getRepository(Project).softDelete(projectId);
     assert.equal((await app.request(path)).status, 404);
     assert.deepEqual(await variables.getEnv('owner', projectId), {
-      API_KEY: 'personal',
+      API_KEY: 'global',
     });
     await database.getRepository(Project).delete(otherId);
     assert.equal(

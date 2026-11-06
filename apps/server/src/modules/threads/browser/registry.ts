@@ -9,13 +9,13 @@ import {
   type BrowserDriver,
 } from './session.js';
 
-/** Threads own page sets; users own persistent browser processes and profiles. */
+/** Threads own pages; each user has separate personal and project browser profiles. */
 export class ThreadBrowsers {
   private sessions = new Map<
     string,
-    { userId: string; session: ThreadBrowserSession }
+    { userId: string; projectId?: string; session: ThreadBrowserSession }
   >();
-  private users = new Map<string, UserBrowser>();
+  private owners = new Map<string, UserBrowser>();
   private watchers = new Map<string, Set<() => void>>();
   constructor(
     private profilesRoot: string,
@@ -23,7 +23,10 @@ export class ThreadBrowsers {
       threadId: string,
       owner: UserBrowser,
     ) => BrowserDriver = createBrowserDriver,
-    private getEnvironment?: () => Promise<Record<string, string>>,
+    private getEnvironment?: (
+      userId: string,
+      projectId?: string,
+    ) => Promise<Record<string, string>>,
   ) {}
 
   private key(id: string, userId: string) {
@@ -37,9 +40,9 @@ export class ThreadBrowsers {
       if (entry.userId === userId)
         yield [entry.session.threadId, entry.session] as const;
   }
-  forThread(id: string, defaultUserId: string) {
+  forThread(id: string, defaultUserId: string, projectId?: string) {
     return new ThreadBrowserRouter(
-      (userId) => this.acquire(id, userId).browser,
+      (userId) => this.acquire(id, userId, projectId).browser,
       defaultUserId,
     );
   }
@@ -61,22 +64,27 @@ export class ThreadBrowsers {
       },
     };
   }
-  acquire(id: string, userId: string) {
+  acquire(id: string, userId: string, projectId?: string) {
     const key = this.key(id, userId);
-    let session = this.sessions.get(key)?.session;
+    const entry = this.sessions.get(key);
+    if (entry && entry.projectId !== projectId)
+      throw new Error('Browser thread scope mismatch');
+    let session = entry?.session;
     if (!session) {
-      let owner = this.users.get(userId);
+      const ownerKey = JSON.stringify([userId, projectId ?? null]);
+      let owner = this.owners.get(ownerKey);
       if (!owner)
-        this.users.set(
-          userId,
+        this.owners.set(
+          ownerKey,
           (owner = new UserBrowser(
             this.profilesRoot,
             userId,
             this.getEnvironment,
+            projectId,
           )),
         );
       session = new ThreadBrowserSession(id, this.create(id, owner));
-      this.sessions.set(key, { userId, session });
+      this.sessions.set(key, { userId, projectId, session });
       for (const update of this.watchers.get(key) ?? []) update();
     }
     return session;
@@ -125,13 +133,13 @@ export class ThreadBrowsers {
     );
   }
   async dispose() {
-    await Promise.all([...this.users.values()].map((owner) => owner.close()));
+    await Promise.all([...this.owners.values()].map((owner) => owner.close()));
     await Promise.allSettled(
       [...this.sessions.values()].map((entry) =>
         this.removeSession(entry.session, entry.userId),
       ),
     );
     this.watchers.clear();
-    this.users.clear();
+    this.owners.clear();
   }
 }

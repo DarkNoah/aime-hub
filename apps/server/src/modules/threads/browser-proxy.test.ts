@@ -8,13 +8,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { promisify } from 'node:util';
-import type { LaunchOptions } from 'playwright-core';
+import type { LaunchOptions, Page } from 'playwright-core';
+import { RequestContext } from '@mastra/core/request-context';
 import { chromium } from '../../lib/browser.js';
 import { ThreadBrowser } from './browser.js';
 import { browserProxy } from './browser/proxy.js';
 import { createChatRunner } from './runner.js';
 
-test('browser proxy is optional and accepts lowercase or uppercase global settings', () => {
+test('browser proxy is optional and accepts lowercase or uppercase settings', () => {
   assert.equal(browserProxy({}), undefined);
   assert.equal(browserProxy({ http_proxy: '  ', HTTP_PROXY: '' }), undefined);
   assert.deepEqual(browserProxy({ http_proxy: ' proxy.test:7890 ' }), {
@@ -77,6 +78,8 @@ test('invalid browser proxy settings fail without exposing credentials or fallin
 async function fixture(t: TestContext) {
   const root = await mkdtemp(join(tmpdir(), 'browser-proxy-'));
   let environment: Record<string, string> = {};
+  const personal = new Map<string, Record<string, string>>();
+  const projects = new Map<string, Record<string, string>>();
   const reads: unknown[][] = [];
   const runner = createChatRunner(
     { getStorage: () => ({}) } as never,
@@ -89,7 +92,14 @@ async function fixture(t: TestContext) {
     {
       async getEnv(...scope) {
         reads.push(scope);
-        return environment;
+        return {
+          ...environment,
+          ...(scope[1]
+            ? projects.get(scope[1])
+            : scope[0]
+              ? personal.get(scope[0])
+              : {}),
+        };
       },
     },
   );
@@ -102,13 +112,17 @@ async function fixture(t: TestContext) {
     root,
     reads,
     browsers,
-    configure(value: Record<string, string>) {
-      environment = value;
+    configure(value: Record<string, string>, userId?: string) {
+      if (userId) personal.set(userId, value);
+      else environment = value;
+    },
+    configureProject(projectId: string, value: Record<string, string>) {
+      projects.set(projectId, value);
     },
   };
 }
 
-test('chat runner loads only global proxy variables at launch, including retries after configuration changes', async (t) => {
+test('browser tools load the acting user’s personal proxy over global settings and reread changes at launch', async (t) => {
   const { browsers, configure, reads } = await fixture(t);
   const proxies: LaunchOptions['proxy'][] = [];
   const stopped = new Error('Launch captured');
@@ -122,17 +136,42 @@ test('chat runner loads only global proxy variables at launch, including retries
   );
   const browser = browsers.acquire('project-thread', 'alice')
     .browser as ThreadBrowser;
+  const bob = browsers.acquire('project-thread', 'bob')
+    .browser as ThreadBrowser;
   assert.deepEqual(reads, []);
-  configure({ http_proxy: 'http://proxy.test:7890', no_proxy: 'localhost' });
+  configure({ http_proxy: 'http://global.test:7890' });
+  configure(
+    { http_proxy: 'http://personal.test:8888', no_proxy: 'localhost' },
+    'alice',
+  );
+  const tool = browsers
+    .forThread('project-thread', 'bob')
+    .getTools().browser_goto;
+  await assert.rejects(async () => {
+    await tool.execute!({ url: 'https://example.com' }, {
+      agent: { threadId: 'project-thread' },
+      requestContext: new RequestContext([['userId', 'alice']]),
+    } as never);
+  }, stopped);
+  await assert.rejects(bob.ensureReady(), stopped);
+  configure({ http_proxy: 'http://second.test:8888' }, 'alice');
   await assert.rejects(browser.ensureReady(), stopped);
-  configure({ HTTP_PROXY: 'http://second.test:8888' });
+  configure({}, 'alice');
   await assert.rejects(browser.ensureReady(), stopped);
   configure({});
   await assert.rejects(browser.ensureReady(), stopped);
-  assert.deepEqual(reads, [[], [], []]);
+  assert.deepEqual(reads, [
+    ['alice', undefined],
+    ['bob', undefined],
+    ['alice', undefined],
+    ['alice', undefined],
+    ['alice', undefined],
+  ]);
   assert.deepEqual(proxies, [
-    { server: 'http://proxy.test:7890', bypass: 'localhost' },
+    { server: 'http://personal.test:8888', bypass: 'localhost' },
+    { server: 'http://global.test:7890' },
     { server: 'http://second.test:8888' },
+    { server: 'http://global.test:7890' },
     undefined,
   ]);
 });
@@ -154,6 +193,17 @@ async function listen(t: TestContext, server: Server) {
   const address = server.address();
   assert.ok(address && typeof address !== 'string');
   return address.port;
+}
+
+async function browserCommandLine(page: Page) {
+  const version = await page.context().newPage();
+  try {
+    // Stealth disables --enable-automation, so CDP getBrowserCommandLine is unavailable.
+    await version.goto('chrome://version');
+    return await version.locator('#command_line').innerText();
+  } finally {
+    await version.close();
+  }
 }
 
 test(
@@ -222,6 +272,8 @@ test(
       }
     });
     proxy.on('connect', (req, socket, head) => {
+      // Chromium may reset speculative/background tunnels after a rejection.
+      socket.on('error', () => socket.destroy());
       if (req.url !== 'browser-proxy.invalid:443') {
         socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
         return;
@@ -243,21 +295,39 @@ test(
       socket.on('close', () => upstream.destroy());
     });
     const proxyPort = await listen(t, proxy);
-    configure({
-      http_proxy: `http://browser:sec%3Aret@127.0.0.1:${proxyPort}`,
-      no_proxy: '127.0.0.1',
-    });
+    configure(
+      {
+        http_proxy: `http://browser:sec%3Aret@127.0.0.1:${proxyPort}`,
+        no_proxy: '127.0.0.1',
+      },
+      'alice',
+    );
     const browser = browsers.acquire('thread', 'alice')
       .browser as ThreadBrowser;
-    await browser.ensureReady();
+    const tool = browsers.forThread('thread', 'alice').getTools().browser_goto;
+    const result = await tool.execute!(
+      { url: 'http://browser-proxy.invalid/article' },
+      { agent: { threadId: 'thread' } } as never,
+    );
+    assert.ok(
+      result &&
+        typeof result === 'object' &&
+        'success' in result &&
+        result.success,
+    );
     const manager = await browser.getManagerForThread('thread');
     const page = manager.getPage();
-    await page.goto('http://browser-proxy.invalid/article');
     assert.equal(await page.title(), 'HTTP through proxy');
     assert.ok(hits.includes('http://browser-proxy.invalid/article'));
     assert.ok(hits.includes('http://browser-proxy.invalid/script.js'));
 
-    // Trust only this test's self-signed origin, without weakening production TLS.
+    const launchArguments = await browserCommandLine(page);
+    assert.ok(
+      launchArguments.includes(`--proxy-server=http://127.0.0.1:${proxyPort}`),
+    );
+    assert.ok(launchArguments.includes('--proxy-bypass-list=127.0.0.1'));
+    assert.doesNotMatch(launchArguments, /sec:ret|sec%3Aret/);
+    // Allow the fixture's self-signed certificate without weakening production TLS.
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Security.setIgnoreCertificateErrors', { ignore: true });
     await page.goto('https://browser-proxy.invalid/secure');
@@ -268,7 +338,7 @@ test(
     assert.equal(await page.title(), 'Direct');
     assert.ok(directHits > 0);
 
-    configure({ http_proxy: 'invalid://proxy' });
+    configure({ http_proxy: 'invalid://proxy' }, 'alice');
     await browser.ensureReady();
     const other = browsers.acquire('other-thread', 'alice')
       .browser as ThreadBrowser;
@@ -281,12 +351,116 @@ test(
     await browser.close();
     await assert.rejects(browser.ensureReady(), /http_proxy 配置无效/);
 
-    configure({});
+    configure({}, 'alice');
     await browser.ensureReady();
     const reopened = (await browser.getManagerForThread('thread')).getPage();
     assert.notEqual(reopened.context(), page.context());
     await reopened.goto(`http://127.0.0.1:${directPort}/without-proxy`);
     assert.equal(await reopened.title(), 'Direct');
-    assert.deepEqual(reads, [[], [], []]);
+    assert.doesNotMatch(await browserCommandLine(reopened), /--proxy-server=/);
+    assert.deepEqual(reads, [
+      ['alice', undefined],
+      ['alice', undefined],
+      ['alice', undefined],
+    ]);
+  },
+);
+
+test(
+  'browser tools isolate project proxies and login data from personal settings and other projects',
+  { skip: process.env.BROWSER_INTEGRATION !== '1', timeout: 60000 },
+  async (t) => {
+    const { browsers, configure, configureProject, reads } = await fixture(t);
+    const proxy = async (title: string) => {
+      const server = createServer((_req, res) => {
+        res.setHeader('Content-Type', 'text/html');
+        res.end(`<html><title>${title}</title><body>${title}</body></html>`);
+      });
+      server.on('connect', (_req, socket) => {
+        socket.on('error', () => socket.destroy());
+        socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+      });
+      return `http://127.0.0.1:${await listen(t, server)}`;
+    };
+    const globalProxy = await proxy('Global proxy');
+    const personalProxy = await proxy('Personal proxy');
+    const projectProxy = await proxy('Project proxy');
+    configure({ http_proxy: globalProxy });
+    configure({ http_proxy: personalProxy }, 'alice');
+    configure({ http_proxy: 'http://unused.invalid:7890' }, 'bob');
+    configureProject('project-a', { http_proxy: projectProxy });
+    const open = async (
+      threadId: string,
+      userId: string,
+      projectId?: string,
+    ) => {
+      const tools = browsers.forThread(threadId, userId, projectId).getTools();
+      const result = await tools.browser_goto.execute!(
+        { url: 'http://browser-proxy.invalid/' },
+        { agent: { threadId } } as never,
+      );
+      assert.ok(
+        result &&
+          typeof result === 'object' &&
+          'success' in result &&
+          result.success,
+      );
+      const browser = browsers.get(threadId, userId)!.browser as ThreadBrowser;
+      return {
+        browser,
+        page: (await browser.getManagerForThread(threadId)).getPage(),
+        tools,
+      };
+    };
+    const personal = await open('personal', 'alice');
+    const project = await open('project', 'alice', 'project-a');
+    const projectTab = await open('project-other-thread', 'alice', 'project-a');
+    const otherProject = await open('other-project', 'alice', 'project-b');
+    const otherUser = await open('project', 'bob', 'project-a');
+    assert.equal(await personal.page.title(), 'Personal proxy');
+    assert.equal(await project.page.title(), 'Project proxy');
+    assert.equal(await otherProject.page.title(), 'Global proxy');
+    assert.equal(await otherUser.page.title(), 'Project proxy');
+    for (const [entry, server] of [
+      [personal, personalProxy],
+      [project, projectProxy],
+      [otherProject, globalProxy],
+      [otherUser, projectProxy],
+    ] as const)
+      assert.ok(
+        (await browserCommandLine(entry.page)).includes(
+          `--proxy-server=${server}`,
+        ),
+      );
+    assert.equal(project.page.context(), projectTab.page.context());
+    assert.notEqual(project.page.context(), personal.page.context());
+    assert.notEqual(project.page.context(), otherProject.page.context());
+    assert.notEqual(project.page.context(), otherUser.page.context());
+    await project.page.evaluate(() => {
+      document.cookie = 'project_login=alice; path=/';
+    });
+    assert.match(
+      await projectTab.page.evaluate(() => document.cookie),
+      /project_login=alice/,
+    );
+    for (const entry of [personal, otherProject, otherUser])
+      assert.equal(await entry.page.evaluate(() => document.cookie), '');
+    assert.deepEqual(reads, [
+      ['alice', undefined],
+      ['alice', 'project-a'],
+      ['alice', 'project-b'],
+      ['bob', 'project-a'],
+    ]);
+    assert.throws(
+      () => browsers.acquire('project', 'alice', 'project-b'),
+      /scope mismatch/,
+    );
+    await project.tools.browser_close.execute!({}, {
+      agent: { threadId: 'project' },
+    } as never);
+    assert.equal(project.browser.isBrowserRunning(), false);
+    assert.equal(projectTab.browser.isBrowserRunning(), false);
+    for (const entry of [personal, otherProject, otherUser])
+      assert.equal(entry.browser.isBrowserRunning(), true);
   },
 );

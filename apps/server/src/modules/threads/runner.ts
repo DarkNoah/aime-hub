@@ -166,9 +166,14 @@ export function createChatRunner(
   const browsers = new ThreadBrowsers(
     resolve(workspaceRoot, '.browser-profiles'),
     undefined,
-    // Browsers are shared across a user's threads, so project/personal overrides
-    // must not change their network configuration. Read global values on launch.
-    environmentVariables ? () => environmentVariables.getEnv() : undefined,
+    // Match exec_command: global + project, or global + the acting user's values.
+    environmentVariables
+      ? (userId, projectId) =>
+          environmentVariables.getEnv(
+            userId === 'system' ? undefined : userId,
+            projectId,
+          )
+      : undefined,
   );
   const projectFilesystem = async (userId: string, projectId: string) => {
     const config = projects
@@ -561,7 +566,7 @@ export function createChatRunner(
             judge: () => resolved.model,
             maxRuns: GOAL_MAX_RUNS,
           },
-          browser: browsers.forThread(thread.id, userId),
+          browser: browsers.forThread(thread.id, userId, projectId),
           buildTools: async (ids, defaults, disabledTools) => {
             const built = await (tools
               ? tools.buildTools(ids, defaults, disabledTools)

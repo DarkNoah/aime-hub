@@ -1969,7 +1969,7 @@ export const en = {
   'projects.removeMember': 'Remove member',
   'projects.settings': 'Project settings',
   'projects.environmentVariablesDescription':
-    'Shared by commands in this project, overriding global and personal variables with the same name. Only project owners and admins can manage them. Changes apply to new commands; restart existing terminals to use them.',
+    'Project commands and browsers use global variables plus this project’s overrides; personal variables are excluded. Only project owners and admins can manage them. Changes apply to new commands and browser launches; restart existing terminals or browsers to use them.',
   'projects.settingsHint':
     'Shared defaults for project chats. Personal chat defaults are independent.',
   'projects.dashboard': 'Project dashboard',
