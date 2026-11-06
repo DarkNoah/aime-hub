@@ -12,6 +12,7 @@ import type { BrowserContext, Cookie } from 'playwright-core';
 import { chromium } from '../../../lib/browser.js';
 import { ThreadPageManager } from './page-manager.js';
 import { recoverBrowserProfileLock } from './profile-lock.js';
+import { browserProxy } from './proxy.js';
 
 /** One persistent Chromium context per user; profiles never live in chat workspaces. */
 export class UserBrowser {
@@ -26,6 +27,7 @@ export class UserBrowser {
   constructor(
     root: string,
     readonly userId: string,
+    private getEnvironment?: () => Promise<Record<string, string>>,
   ) {
     if (!userId) throw new Error('Browser owner is required');
     this.directory = join(
@@ -56,6 +58,7 @@ export class UserBrowser {
   }
 
   private async launch() {
+    const proxy = browserProxy((await this.getEnvironment?.()) ?? {});
     const profile = join(this.directory, 'profile');
     await mkdir(profile, { recursive: true, mode: 0o700 });
     await chmod(this.directory, 0o700);
@@ -77,6 +80,7 @@ export class UserBrowser {
       headless: true,
       executablePath: chromium.executablePath(),
       viewport: { width: 1280, height: 720 },
+      proxy,
       args: ['--no-first-run', '--disable-session-crashed-bubble'],
     });
     try {

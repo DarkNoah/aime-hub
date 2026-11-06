@@ -102,3 +102,4 @@ plugins/vibe-quant/**/__pycache__/
 !scripts/transcription.test.ts
 !scripts/web-fetch-lifecycle.test.ts
 !apps/server/src/modules/tools/exec-background.test.ts
+!apps/server/src/modules/threads/browser-proxy.test.ts

@@ -165,6 +165,10 @@ export function createChatRunner(
   if (!storage) throw new Error('Mastra storage is required for chat');
   const browsers = new ThreadBrowsers(
     resolve(workspaceRoot, '.browser-profiles'),
+    undefined,
+    // Browsers are shared across a user's threads, so project/personal overrides
+    // must not change their network configuration. Read global values on launch.
+    environmentVariables ? () => environmentVariables.getEnv() : undefined,
   );
   const projectFilesystem = async (userId: string, projectId: string) => {
     const config = projects

@@ -23,6 +23,7 @@ export class ThreadBrowsers {
       threadId: string,
       owner: UserBrowser,
     ) => BrowserDriver = createBrowserDriver,
+    private getEnvironment?: () => Promise<Record<string, string>>,
   ) {}
 
   private key(id: string, userId: string) {
@@ -68,7 +69,11 @@ export class ThreadBrowsers {
       if (!owner)
         this.users.set(
           userId,
-          (owner = new UserBrowser(this.profilesRoot, userId)),
+          (owner = new UserBrowser(
+            this.profilesRoot,
+            userId,
+            this.getEnvironment,
+          )),
         );
       session = new ThreadBrowserSession(id, this.create(id, owner));
       this.sessions.set(key, { userId, session });
