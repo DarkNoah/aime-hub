@@ -87,6 +87,16 @@ export const threadsContract = {
     })
     .input(z.object({ params: z.object({ threadId }) }))
     .output(type<ThreadSnapshot<UIMessage>>()),
+  summary: procedure
+    .meta({ localApi: true })
+    .route({
+      method: 'GET',
+      path: '/threads/{threadId}/summary',
+      summary: '仅读取线程状态和设置，不加载消息历史',
+      inputStructure: 'detailed',
+    })
+    .input(z.object({ params: z.object({ threadId }) }))
+    .output(type<ThreadSummary>()),
   update: procedure
     .route({
       method: 'PATCH',

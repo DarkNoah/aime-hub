@@ -8,8 +8,8 @@ from .live import LiveRunner
 from .risk import RiskLevels
 from .factors import Factor, load_factor
 from .kronos import KronosFactor, KronosForecast, kronos_forecast
+from .checkpoint import SDK_VERSION as __version__
 
-__version__ = '0.1.0'
 __all__ = ['backtest', 'live', 'DataView', 'Dataset', 'Bar', 'Event', 'Fees', 'Instrument',
            'Quote', 'Roll', 'RunConfig', 'Context', 'Strategy', 'LiveRunner',
            'InstrumentUpdate', 'TradingCalendar', 'HubClient', 'DataError', 'RiskLevels',

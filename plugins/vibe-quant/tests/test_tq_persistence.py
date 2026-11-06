@@ -102,6 +102,38 @@ class PersistenceTests(unittest.TestCase):
         self.assertEqual(len(history.notifications), 1)
 
 class RestoreIntentTests(unittest.TestCase):
+    def test_legacy_sdk_upgrade_preserves_native_pending_order_identity(self):
+        import test_tq_backtest as fixture
+        from quant_sdk.checkpoint import CHECKPOINT_VERSION, LEGACY_CHECKPOINT_VERSIONS
+        from quant_sdk.tq_restore import snapshot_runner, restore_runner, restore_broker
+        from quant_sdk.tq_broker import TqBroker
+        for fingerprint in LEGACY_CHECKPOINT_VERSIONS:
+            with self.subTest(runtime=fingerprint):
+                case = fixture.TqBrokerTests()
+                case.setUp()
+                restored = None
+                try:
+                    case.target(1)
+                    case.broker.advance()
+                    native_id = case.api.orders[0].order_id
+                    saved = snapshot_runner(case.runner, 3)
+                    saved['runner']['manifest'].pop('checkpoint_version')
+                    saved['runner']['manifest']['runtime_hash'] = fingerprint
+                    restored = restore_runner(fixture.IdleStrategy(), saved, Path(case.tmp.name) / 'upgraded', None)
+                    api = fixture.FakeApi()
+                    api.get_order = lambda: {o.order_id: o for o in api.orders}
+                    restored.broker = TqBroker(restored, api, api, api.quote, case.calendar)
+                    restore_broker(restored, saved, api)
+                    self.assertEqual(restored.manifest['checkpoint_version'], CHECKPOINT_VERSION)
+                    self.assertEqual([o.order_id for o in api.orders], [native_id])
+                    api.fill(api.orders[0])
+                    restored.broker.sync()
+                    restored.broker.sync()
+                    self.assertEqual(len(restored.broker.fills), 1)
+                finally:
+                    if restored: restored.journal.close()
+                    case.tearDown()
+
     def test_queued_order_restores_original_identity_and_cancellation_is_not_reopened(self):
         import test_tq_backtest as fixture
         from quant_sdk.tq_restore import snapshot_runner, restore_runner, restore_broker

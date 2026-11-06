@@ -70,6 +70,7 @@ plugins/vibe-quant/**/__pycache__/
 !plugins/vibe-quant/tests/indicator-renderer.test.ts
 
 !scripts/local-api.test.ts
+!scripts/thread-summary.test.ts
 !apps/server/src/modules/threads/workspace-env.test.ts
 !apps/server/src/modules/threads/model-compatibility.test.ts
 !scripts/environment-variables.test.ts

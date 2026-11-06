@@ -457,11 +457,48 @@ class Signals(Strategy):
         );
         const saved = checkpoint as {
           history_version: number;
-          runner: { manifest: { runtime_hash: string } };
+          runner: {
+            manifest: {
+              runtime_hash: string;
+              checkpoint_version?: number;
+              resumed_runtime_hash?: string;
+            };
+          };
         };
         assert.equal(saved.history_version, 3);
+        const upgraded = structuredClone(saved);
+        delete upgraded.runner.manifest.checkpoint_version;
+        upgraded.runner.manifest.runtime_hash =
+          '91acc1838741c0d91ba3c29603785d8109d176d44a0d444a124eff4d6eeaef10';
+        const beforeUpgrade = [...history.entries()];
+        await writeFile(
+          join(directory, 'checkpoint.json'),
+          JSON.stringify(upgraded),
+        );
+        await execute(true);
+        assert.equal(
+          ready,
+          3,
+          'service startup automatically resumes the deployed legacy SDK',
+        );
+        assert.equal(
+          signals.length,
+          1,
+          'SDK upgrade must not repeat notifications',
+        );
+        assert.deepEqual([...history.entries()], beforeUpgrade);
+        const upgradedManifest = (checkpoint as typeof saved).runner.manifest;
+        assert.equal(upgradedManifest.checkpoint_version, 1);
+        assert.equal(
+          upgradedManifest.runtime_hash,
+          saved.runner.manifest.runtime_hash,
+        );
+        assert.equal(
+          upgradedManifest.resumed_runtime_hash,
+          upgraded.runner.manifest.runtime_hash,
+        );
         // Old checkpoints need a fresh replay under the corrected SDK. Do not
-        // bypass the fingerprint check to reuse an incompatible runner state.
+        // bypass compatibility checks to reuse an incompatible runner state.
         const legacy = structuredClone(saved);
         legacy.history_version = 2;
         legacy.runner.manifest.runtime_hash = 'previous-sdk';
@@ -472,7 +509,7 @@ class Signals(Strategy):
           JSON.stringify(legacy),
         );
         await execute(true);
-        assert.equal(ready, 3);
+        assert.equal(ready, 4);
         assert.equal(
           signals.length,
           1,

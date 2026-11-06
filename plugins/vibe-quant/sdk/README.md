@@ -281,7 +281,9 @@ with client.stream(["KQ.m@CFFEX.IM"], calendar=calendar, rules=rules) as source:
 
 源码和运行数据以文件协议解耦，页面后续可以把同一套不可变内容转存对象存储／Git，而不用改变策略接口。SDK 不提供任意脚本沙箱；应在独立 Python worker 中运行自己信任的策略。外部模块、依赖锁文件和辅助资源仍需随策略项目管理，单个源码快照不能代替整个项目归档。
 
-恢复使用 `LiveRunner.restore(Strategy(), checkpoint_path, ...)`，校验策略与 SDK 指纹。使用未处理的**连续事件流**续跑；检查点本身不会恢复已经断开的 HTTP 会话游标。录制事件可用 `Dataset.from_run(run_directory)` 重新回测，参数和时段在其 `metadata` 中。恢复分支目录只记录续跑部分，清单的 `resumed_from` 指向父检查点；完整分支审计需同时保留父目录。
+恢复使用 `LiveRunner.restore(Strategy(), checkpoint_path, ...)`，严格校验策略源码与类名，并按 `checkpoint_version` 校验 SDK 状态兼容性。服务启动恢复行情策略时，兼容版本会自动续跑并保存当前 SDK 的检查点，无需移除或重新添加策略；参数、持仓、挂单、历史与输出去重状态均保留。`runtime_hash` 仍记录实际 SDK 代码指纹，跨版本恢复另记录 `resumed_runtime_hash`，不再因兼容的代码更新而拒绝恢复。未带兼容版本的旧检查点仅允许代码指纹完全相同或已审核的旧版本迁移；未知或不兼容版本明确报错并保留原检查点，不会自动清空历史。修改 SDK 状态结构或成交语义而不能安全续跑时，必须提升 `quant_sdk/checkpoint.py` 中的 `CHECKPOINT_VERSION` 并提供相应迁移；TqSim 的原生账户及 TqSdk 版本校验仍独立执行。
+
+使用未处理的**连续事件流**续跑；检查点本身不会恢复已经断开的 HTTP 会话游标。录制事件可用 `Dataset.from_run(run_directory)` 重新回测，参数和时段在其 `metadata` 中。恢复分支目录只记录续跑部分，清单的 `resumed_from` 指向父检查点；完整分支审计需同时保留父目录。
 
 检查点在发送信号前保存，其余默认每 5 秒更新。事件日志先于执行写入；未确认输出恢复后可能再次投递，下游以 ID 去重。进程崩溃恢复不是券商委托的 exactly-once 承诺。历史窗口和去重缓存有界；本次会话的完整净值、信号和交易结果仍保留在内存，建议按交易日用 `RunConfig.end` 分段运行，后续任务服务再负责长驻归档。
 

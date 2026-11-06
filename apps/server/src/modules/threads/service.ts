@@ -1428,6 +1428,12 @@ export class ThreadService {
     };
   }
 
+  /** Settings/status reads must not hydrate history or wait for a runtime lock. */
+  async getThreadSummary(userId: string, id: string): Promise<ThreadSummary> {
+    const thread = await this.accessible(userId, id);
+    return this.summary(thread, this.runtimes.get(id));
+  }
+
   getThread(userId: string, id: string) {
     return this.scopeLocked(userId, id, async () =>
       this.snapshot(await this.runtime(userId, id)),

@@ -46,8 +46,8 @@ function SettingsSession({
       threadId
         ? {
             read: async () => {
-              const [{ thread }, personal] = await Promise.all([
-                chatApi.get(threadId),
+              const [thread, personal] = await Promise.all([
+                chatApi.summary(threadId),
                 readPersonal(),
               ]);
               return {

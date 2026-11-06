@@ -182,7 +182,7 @@ def main():
     config = json.loads((directory / 'config.json').read_text())
     saved = json.loads((directory / 'checkpoint.json').read_text()) if (directory / 'checkpoint.json').exists() else None
     # Rebuild pre-v3 checkpoints once under the corrected SDK restore lifecycle.
-    # Keep SDK fingerprint checks intact; stable trade/signal IDs replace the
+    # Keep SDK compatibility checks intact; stable trade/signal IDs replace the
     # same history records and historical replay never sends notifications.
     if saved and saved.get('history_version') != 3:
         saved = None

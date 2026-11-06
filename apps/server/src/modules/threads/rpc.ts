@@ -48,6 +48,9 @@ export function threadRouter(
     get: p.get.handler(({ context, input }) =>
       threads().getThread(context.userId, input.params.threadId),
     ),
+    summary: p.summary.handler(({ context, input }) =>
+      threads().getThreadSummary(context.userId, input.params.threadId),
+    ),
     update: p.update.handler(({ context, input }) =>
       threads().updateThread(context.userId, input.params.threadId, input.body),
     ),

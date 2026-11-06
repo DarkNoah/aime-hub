@@ -17,6 +17,7 @@ from .models import Bar, Event, Fees, Instrument, Quote, Roll, RunConfig
 from .risk import RiskLevels, accept, publish
 from .state_codec import encode_state, decode_state
 from .factors import snapshot_factors
+from .checkpoint import SDK_VERSION, CHECKPOINT_VERSION, validate_checkpoint_runtime
 
 
 class Strategy:
@@ -135,7 +136,8 @@ class Runner:
         (self.directory / 'strategy.py').write_text(self.source, encoding='utf-8')
         self.manifest = {'schema_version': 1, 'run_id': self.run_id, 'mode': mode,
                          'strategy_class': type(strategy).__qualname__, 'source_hash': self.source_hash,
-                         'sdk_version': '0.1.0', 'python_version': platform.python_version(),
+                         'sdk_version': SDK_VERSION, 'python_version': platform.python_version(),
+                         'checkpoint_version': CHECKPOINT_VERSION,
                          'runtime_hash': self.runtime_hash,
                          'config': asdict(self.config), 'params': json.loads(json.dumps(self.context.params)),
                          'instruments': [asdict(i) for i in self.data._instruments.values()],
@@ -337,11 +339,21 @@ class Runner:
         instruments = [Instrument(**{**item, 'fees': Fees(**item['fees'])}) for item in manifest['instruments']]
         runner = cls(strategy, instruments, config=RunConfig(**manifest['config']), params=manifest['params'],
                      mode=manifest['mode'], output_dir=output_dir, on_event=on_event)
-        if (runner.source_hash != manifest['source_hash'] or runner.runtime_hash != manifest['runtime_hash']
-                or type(strategy).__qualname__ != manifest['strategy_class']):
-            runner.finish('failed', 'Strategy source differs from checkpoint')
-            raise ValueError('Strategy source differs from checkpoint')
+        try:
+            if runner.source_hash != manifest['source_hash']:
+                raise ValueError('Strategy source differs from checkpoint')
+            if type(strategy).__qualname__ != manifest['strategy_class']:
+                raise ValueError('Strategy class differs from checkpoint')
+            validate_checkpoint_runtime(manifest, runner.runtime_hash)
+        except ValueError as error:
+            # A rejected restore must not invoke strategy callbacks or deliver
+            # outputs before its saved state has been validated and hydrated.
+            runner.journal.close()
+            _write(runner.directory / 'status.json', {'status': 'failed', 'message': str(error)})
+            raise
         runner.manifest['resumed_from'] = str(Path(checkpoint).resolve())
+        if runner.runtime_hash != manifest['runtime_hash']:
+            runner.manifest['resumed_runtime_hash'] = manifest['runtime_hash']
         _write(runner.directory / 'manifest.json', runner.manifest)
         # Recreate transient attributes (parameters, caches, context references)
         # on the new strategy instance before hydrating durable trading state.

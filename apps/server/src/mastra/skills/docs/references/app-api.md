@@ -41,7 +41,7 @@ node "$APP_API_SCRIPT" call agents.available "$(node -e 'console.log(JSON.string
 
 - 查找已有线程，使用 `threads.list`；默认是当前用户个人线程。查询项目线程时指定项目，插件专属线程按插件筛选。先查真实 ID，再操作；分页从 0 开始，按 `hasMore` 翻页。
 - 创建新会话用 `threads.create`；它只创建线程，不自动发送消息。用户明确要求发送内容或执行任务后，才调用 `threads.run`。
-- 发送前用 `threads.get` 读取目标线程，沿用其中的模型、Agent 和推理设置，除非用户要求修改。按 `describe threads.run` 构造请求体，每条新消息提供唯一消息 ID（例如 UUID）与消息内容。通用调用器不生成业务字段，也不补写模型设置。
+- 发送前用 `threads.summary` 读取目标线程的状态和设置，沿用其中的模型、Agent 和推理设置，除非用户要求修改。该接口不加载消息历史。按 `describe threads.run` 构造请求体，每条新消息提供唯一消息 ID（例如 UUID）与消息内容。通用调用器不生成业务字段，也不补写模型设置。
 - 发送返回 202 表示已接收，运行中可能排队，不表示回复完成。用 `threads.get` 查看状态和最新消息；遇到暂停、等待用户或失败时报告，不无限轮询。不要向当前线程重复发送正在执行的任务。
 - 查历史消息使用 `threads.history`，不是 SSE 消息接口。读取更早的完整消息页时沿用首个响应的 `anchor`；摘要视图按 `cursor` 翻页，详情使用 `threads.turn`。
 - `projects.list` 列出当前用户有权访问的项目；`projects.get` 读取详情；`projects.create` 创建项目并将当前用户设为所有者。自定义工作区或 GitHub 来源的字段以 `describe` 为准，克隆超时后先检查是否已创建。

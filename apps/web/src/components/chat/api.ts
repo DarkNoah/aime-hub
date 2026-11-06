@@ -30,6 +30,8 @@ export const chatApi = {
     ),
   get: (threadId: string, signal?: AbortSignal) =>
     api.threads.get({ params: { threadId } }, { signal }),
+  summary: (threadId: string, signal?: AbortSignal) =>
+    api.threads.summary({ params: { threadId } }, { signal }),
   create: (settings: CreateThreadInput) =>
     api.threads.create({ body: settings }),
   update: (

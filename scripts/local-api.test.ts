@@ -344,7 +344,13 @@ test('skill scripts use existing APIs with scoped identity, ownership, paging an
   );
   const client = createAppApi({ env, fetchImpl });
   const catalog = await client.list();
-  assert.equal(catalog.length, 20);
+  assert.equal(catalog.length, 21);
+  assert.ok(
+    catalog.some(
+      (operation: { operationId: string }) =>
+        operation.operationId === 'threads.summary',
+    ),
+  );
   assert.deepEqual(
     (await client.list('agents.')).map(
       (operation: { operationId: string }) => operation.operationId,
@@ -443,9 +449,9 @@ test('skill scripts use existing APIs with scoped identity, ownership, paging an
     (await call('threads.list', { query: { projectId } })).threads[0].id,
     shared.id,
   );
-  const target = (
-    await call('threads.get', { params: { threadId: thread.id } })
-  ).thread;
+  const target = await call('threads.summary', {
+    params: { threadId: thread.id },
+  });
   assert.equal(target.model, 'provider/model');
   const messageId = 'message-001';
   const message = {
@@ -497,7 +503,7 @@ test('skill scripts use existing APIs with scoped identity, ownership, paging an
     /404/,
   );
   assert.deepEqual((await call('threads.list', {}, bobEnv)).threads, []);
-  for (const command of ['threads.get', 'threads.history'])
+  for (const command of ['threads.get', 'threads.summary', 'threads.history'])
     await assert.rejects(
       call(command, { params: { threadId: thread.id } }, bobEnv),
       /404/,
