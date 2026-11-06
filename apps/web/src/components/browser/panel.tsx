@@ -11,6 +11,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Globe2,
+  LoaderCircle,
   PanelRightClose,
   RotateCw,
   Square,
@@ -96,10 +97,12 @@ function BrowserContent({ threadId }: { threadId: string }) {
   const [draft, setDraft] = useState<string | null>(null);
   const [pending, setPending] = useState(0);
   const [closing, setClosing] = useState(false);
+  const [navigating, setNavigating] = useState(false);
   const lastError = useRef(0);
   const ready = state.status === 'ready' && state.connection === 'connected';
-  const canControl =
-    ready && !state.busy && interactive && !pending && !closing;
+  const canNavigate =
+    state.connection === 'connected' && interactive && !pending && !closing;
+  const canControl = ready && canNavigate;
   function report(error: unknown) {
     if (Date.now() - lastError.current < 2000) return;
     lastError.current = Date.now();
@@ -111,29 +114,39 @@ function BrowserContent({ threadId }: { threadId: string }) {
     try {
       await resource.action(value);
       if (value.kind === 'close') toast.success(t('browser.closedSuccess'));
+      return true;
     } catch (error) {
       report(error);
+      return false;
     } finally {
       if (value.kind === 'close') setClosing(false);
       else setPending((count) => count - 1);
     }
   }
-  function navigate() {
+  async function navigate() {
+    if (!canNavigate) return;
     const value = (draft ?? state.url).trim();
+    let url: URL;
     try {
       if (!value) throw new Error();
-      const url = new URL(
+      url = new URL(
         /^[a-z][a-z\d+.-]*:/i.test(value) ? value : `https://${value}`,
       );
-      setDraft(null);
-      void action({ kind: 'navigate', url: url.href });
     } catch {
       toast.error(t('browser.invalidUrl'));
+      return;
+    }
+    setDraft(url.href);
+    setNavigating(true);
+    try {
+      if (await action({ kind: 'navigate', url: url.href })) setDraft(null);
+    } finally {
+      setNavigating(false);
     }
   }
   const statusLabel =
     state.connection === 'connected'
-      ? state.busy && ready
+      ? state.busy
         ? 'browser.agentWorking'
         : (`browser.status.${state.status}` as const)
       : (`browser.${state.connection}` as const);
@@ -168,13 +181,36 @@ function BrowserContent({ threadId }: { threadId: string }) {
           value={draft ?? state.url}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && canControl) navigate();
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              void navigate();
+            }
           }}
-          readOnly={!canControl}
+          readOnly={!canNavigate}
+          inputMode="url"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
           aria-label={t('browser.address')}
           placeholder={t('browser.address')}
           className="h-8 min-w-0 flex-1 text-xs"
         />
+        <Button
+          size="sm"
+          className="h-8 shrink-0 gap-1 px-2 text-xs"
+          disabled={!canNavigate || !(draft ?? state.url).trim()}
+          aria-label={t('browser.openPage')}
+          aria-busy={navigating}
+          onClick={() => void navigate()}
+        >
+          {navigating && (
+            <LoaderCircle
+              className="size-3.5 animate-spin motion-reduce:animate-none"
+              aria-hidden
+            />
+          )}
+          {t(navigating ? 'browser.opening' : 'browser.openPage')}
+        </Button>
         {state.tabs.length > 1 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -229,7 +265,7 @@ function BrowserContent({ threadId }: { threadId: string }) {
             id={switchId}
             size="sm"
             checked={interactive}
-            disabled={!ready || state.busy}
+            disabled={state.connection !== 'connected' || !!pending || closing}
             onCheckedChange={setInteractive}
           />
         </label>
@@ -256,11 +292,11 @@ function BrowserContent({ threadId }: { threadId: string }) {
       <p className="shrink-0 border-t px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
         <span className="mb-1 block">{t('browser.sharedProfileHint')}</span>
         {t(
-          state.busy
-            ? 'browser.busyHint'
-            : interactive
-              ? 'browser.keyboardHint'
-              : 'browser.watchHint',
+          !interactive
+            ? 'browser.watchHint'
+            : state.busy
+              ? 'browser.busyHint'
+              : 'browser.keyboardHint',
         )}
       </p>
     </WebPreview>

@@ -416,7 +416,7 @@ export function MarketPositionsPanel({
           className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
         >
           <p className="px-4 pb-2 text-xs text-muted-foreground">
-            显示开关仅控制图表中的止盈止损，策略计算和通知按原设置继续运行。
+            显示开关控制策略的全部图表标记，策略计算和通知按原设置继续运行。
           </p>
           <MarketStrategyList
             data={data}

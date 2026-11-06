@@ -172,7 +172,6 @@ export function getBrowserResource(threadId: string, sessionId: string) {
 export function browserErrorKey(error: unknown) {
   const code = apiErrorCode(error);
   if (code === 'BROWSER_TEXT_TOO_LONG') return 'browser.textTooLong';
-  if (code === 'BROWSER_BUSY') return 'browser.busyHint';
   if (code === 'BROWSER_NOT_RUNNING') return 'browser.waitingHint';
   if (
     [

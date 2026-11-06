@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { EventEmitter } from 'node:events';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { MastraBrowser, ScreencastStream } from '@mastra/core/browser';
 import {
   browserActionSchema,
@@ -85,6 +86,153 @@ function deferred<T = void>() {
   return { promise, resolve };
 }
 
+test('manual navigation starts and reopens an authorized browser in the thread scope', async (t) => {
+  const fixture = fakeMemory();
+  const created: { userId: string; projectId?: string }[] = [];
+  const fakes: ReturnType<typeof fakeDriver>[] = [];
+  const browsers = new ThreadBrowsers(
+    '/tmp/browser-unit-tests',
+    (_id, owner) => {
+      created.push({ userId: owner.userId, projectId: owner.projectId });
+      const fake = fakeDriver();
+      fake.setRunning(false);
+      const action = fake.driver.action;
+      fake.driver.action = async (input) => {
+        if (input.kind === 'navigate') fake.setRunning(true);
+        await action(input);
+      };
+      fakes.push(fake);
+      return fake.driver;
+    },
+  );
+  const service = new ThreadService(
+    fixture.memory,
+    {
+      browsers,
+      validate: async () => {},
+      createWorkspace: async () => '/tmp/browser-test',
+      open: openSessionStub,
+    },
+    { assertMember: async () => ({ role: 'member' }) } as never,
+  );
+  t.after(() => service.shutdown());
+  const thread = await service.createThread('owner', {
+    model: null,
+    reasoningEffort: 'auto',
+    title: 'Manual browser',
+  });
+  const navigate = { kind: 'navigate' as const, url: 'https://example.com' };
+  await assert.rejects(service.browserAction('other', thread.id, navigate), {
+    code: 'THREAD_NOT_FOUND',
+  });
+  await assert.rejects(
+    service.browserAction('owner', thread.id, { kind: 'reload' }),
+    { code: 'BROWSER_NOT_RUNNING' },
+  );
+  assert.equal(created.length, 0);
+  const events: BrowserEvent[] = [];
+  const unsubscribe = await service.subscribeBrowser(
+    'owner',
+    thread.id,
+    (event) => events.push(event),
+  );
+  t.after(unsubscribe);
+  await service.browserAction('owner', thread.id, navigate);
+  await delay(10);
+  assert.deepEqual(created, [{ userId: 'owner', projectId: undefined }]);
+  assert.equal(
+    (await service.getBrowserState('owner', thread.id)).status,
+    'ready',
+  );
+  assert.ok(events.some((event) => event.type === 'frame'));
+  await service.browserAction('owner', thread.id, {
+    kind: 'text',
+    text: 'manual input',
+  });
+  assert.deepEqual(fakes[0]!.calls, [
+    navigate,
+    { kind: 'text', text: 'manual input' },
+  ]);
+  await service.browserAction('owner', thread.id, { kind: 'close' });
+  assert.equal((await service.listBrowsers('owner')).length, 0);
+  await service.browserAction('owner', thread.id, navigate);
+  assert.equal(
+    (await service.getBrowserState('owner', thread.id)).status,
+    'ready',
+  );
+
+  const projectId = 'abcdefghijklmnop';
+  const projectThread = await fixture.memory.createThread({
+    threadId: 'manual-project-browser',
+    resourceId: `project:${projectId}`,
+    title: 'Project browser',
+    metadata: { createdBy: 'owner' },
+  });
+  await service.browserAction('other', projectThread.id, navigate);
+  assert.deepEqual(created.at(-1), { userId: 'other', projectId });
+  assert.equal(
+    (await service.getBrowserState('owner', projectThread.id)).status,
+    'waiting',
+  );
+});
+
+test('manual navigation and input remain available during Agent work', async (t) => {
+  const { memory } = fakeMemory();
+  let created = 0;
+  const fake = fakeDriver();
+  const browsers = new ThreadBrowsers('/tmp/browser-unit-tests', () => {
+    created++;
+    return fake.driver;
+  });
+  const service = new ThreadService(memory, {
+    browsers,
+    validate: async () => {},
+    createWorkspace: async () => '/tmp/browser-test',
+    open: openSessionStub,
+  });
+  t.after(() => service.shutdown());
+  const thread = await service.createThread('owner', {
+    model: null,
+    reasoningEffort: 'auto',
+  });
+  await service.run('owner', thread.id, {
+    id: 'input',
+    model: null,
+    reasoningEffort: 'auto',
+    isImmediate: false,
+    parts: [{ type: 'text', text: 'Continue' }],
+  });
+  assert.equal(created, 0);
+  assert.equal((await service.getBrowserState('owner', thread.id)).busy, true);
+  const actions: BrowserAction[] = [
+    { kind: 'navigate', url: 'https://example.com' },
+    {
+      kind: 'mouse',
+      event: { type: 'mousePressed', x: 20, y: 30, button: 'left' },
+    },
+    {
+      kind: 'mouse',
+      event: { type: 'mouseReleased', x: 20, y: 30, button: 'left' },
+    },
+    {
+      kind: 'keyboard',
+      event: { type: 'keyDown', key: 'Enter', code: 'Enter' },
+    },
+    { kind: 'keyboard', event: { type: 'keyUp', key: 'Enter', code: 'Enter' } },
+    { kind: 'text', text: '同时输入' },
+    { kind: 'mouse', event: { type: 'mouseWheel', x: 20, y: 30, deltaY: 100 } },
+    { kind: 'back' },
+    { kind: 'forward' },
+    { kind: 'reload' },
+    { kind: 'tab', index: 0 },
+  ];
+  for (const action of actions)
+    await service.browserAction('owner', thread.id, action);
+  assert.equal(created, 1);
+  assert.deepEqual(fake.calls, actions);
+  assert.equal((await service.getBrowserState('owner', thread.id)).busy, true);
+});
+
 test('navigation leaves scheme support to Chromium', () => {
   for (const url of [
     'https://example.com',
@@ -129,8 +277,17 @@ test(
       await owner.close();
       await rm(root, { recursive: true, force: true });
     });
-    await driver.browser.ensureReady();
+    await browser.action({
+      kind: 'navigate',
+      url: 'data:text/html,<input aria-label="Manual input">',
+    });
     const manager = await driver.browser.getManagerForThread('thread');
+    const input = manager
+      .getPage()
+      .getByRole('textbox', { name: 'Manual input' });
+    await input.focus();
+    await browser.action({ kind: 'text', text: '手动交互' });
+    assert.equal(await input.inputValue(), '手动交互');
     const context = manager.getContext();
     const createSession = context.newCDPSession.bind(context);
     context.newCDPSession = async (page) => {
@@ -160,7 +317,6 @@ test(
     );
     assert.equal(browser.isRunning(), false);
     unsubscribe();
-    await driver.browser.ensureReady();
     await browser.action({ kind: 'navigate', url: 'chrome://version' });
     const page = (await driver.browser.getManagerForThread('thread')).getPage();
     assert.equal(page.url(), 'chrome://version/');

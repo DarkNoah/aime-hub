@@ -47,8 +47,7 @@ export function BrowserScreencast({
     interactive &&
     hasFrame &&
     state.connection === 'connected' &&
-    state.status === 'ready' &&
-    !state.busy;
+    state.status === 'ready';
   const enabledRef = useRef(enabled);
   useLayoutEffect(() => {
     errorRef.current = onError;

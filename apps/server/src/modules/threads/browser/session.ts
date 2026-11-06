@@ -22,6 +22,8 @@ export function createBrowserDriver(threadId: string, owner: UserBrowser) {
         await browser.closeThreadSession(threadId);
         return;
       }
+      // Explicit navigation can start a fresh browser without an Agent run.
+      if (action.kind === 'navigate') await browser.ensureReady();
       if (
         !browser.hasThreadSession(threadId) ||
         !browser.isBrowserRunning(threadId)

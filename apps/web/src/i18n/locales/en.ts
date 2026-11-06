@@ -2036,6 +2036,8 @@ export const en = {
   'browser.title': 'Browser',
   'browser.screen': 'Live browser view',
   'browser.address': 'Enter URL',
+  'browser.openPage': 'Open page',
+  'browser.opening': 'Opening…',
   'browser.back': 'Go back',
   'browser.forward': 'Go forward',
   'browser.reload': 'Reload page',
@@ -2045,14 +2047,13 @@ export const en = {
   'browser.keyboardHint':
     'Click the view to type, paste or scroll. Press Esc to leave keyboard focus.',
   'browser.watchHint':
-    'This is the Agent’s browser. Enable interaction to use the page.',
+    'You share this browser with the Agent. Enable interaction to use the page.',
   'browser.busyHint':
-    'The Agent is running. Interaction becomes available when its work pauses or finishes.',
-  'browser.startChat': 'Start a chat to view the Agent’s browser here.',
+    'The Agent is running. You can still interact with the same browser.',
+  'browser.startChat': 'Start a chat to open and interact with web pages here.',
   'browser.waitingHint':
-    'Ask the Agent to open a page. Its live view will appear here.',
-  'browser.closedHint':
-    'Browser closed. The view will reconnect when the Agent opens a page again.',
+    'Enter a URL above, then press Enter or click Open page. You can also ask the Agent to open a page.',
+  'browser.closedHint': 'Browser closed. Enter a URL above to open it again.',
   'browser.loading': 'Loading browser view…',
   'browser.connecting': 'Connecting…',
   'browser.connected': 'Connected',

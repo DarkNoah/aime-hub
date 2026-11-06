@@ -1547,14 +1547,16 @@ export class ThreadService {
 
   async browserAction(userId: string, id: string, action: BrowserAction) {
     const perform = async () => {
-      const browser = this.runner.browsers?.get(id, userId);
+      let browser = this.runner.browsers?.get(id, userId);
+      if (!browser && action.kind === 'navigate' && this.runner.browsers) {
+        const thread = await this.accessible(userId, id);
+        browser = this.runner.browsers.acquire(
+          id,
+          userId,
+          threadScope(thread.resourceId).projectId,
+        );
+      }
       if (!browser) throw new ThreadError('BROWSER_NOT_RUNNING', 409);
-      // Closing is always explicit; all other user input waits until Agent work is idle.
-      const releasing =
-        (action.kind === 'mouse' && action.event.type === 'mouseReleased') ||
-        (action.kind === 'keyboard' && action.event.type === 'keyUp');
-      if (action.kind !== 'close' && !releasing && this.browserBusy(id))
-        throw new ThreadError('BROWSER_BUSY', 409);
       try {
         await browser.action(action);
         if (action.kind === 'close' && !this.runtimes.get(id)?.session)

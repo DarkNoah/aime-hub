@@ -556,11 +556,17 @@ export function MarketChart({
     if (!series || !strategyHints) return;
     const markers = createSeriesMarkers(
       series,
-      strategyHintMarkers(strategyHints, bars, duration, priceTick),
+      strategyHintMarkers(
+        strategyHints.filter((hint) => !hiddenStrategyIds?.has(hint.id)),
+        bars,
+        duration,
+        priceTick,
+      ),
     );
     return () => markers.detach();
   }, [
     strategyHints,
+    hiddenStrategyIds,
     bars,
     duration,
     priceTick,

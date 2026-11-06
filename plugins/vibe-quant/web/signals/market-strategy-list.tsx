@@ -102,14 +102,14 @@ export function MarketStrategyList({
                   </div>
                 </dl>
                 <Label className="flex items-center justify-between gap-3 text-xs">
-                  图表止盈止损
+                  图表显示
                   <span className="flex shrink-0 items-center gap-2">
                     <Badge variant={visible ? 'secondary' : 'outline'}>
                       {visible ? '已显示' : '已隐藏'}
                     </Badge>
                     <Switch
                       checked={visible}
-                      aria-label={`${monitor.strategy_name} ${runVersionName(monitor)} 图表止盈止损`}
+                      aria-label={`${monitor.strategy_name} ${runVersionName(monitor)} 图表显示`}
                       onCheckedChange={(checked) =>
                         onVisibleChange(monitor.id, checked)
                       }
