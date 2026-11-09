@@ -199,6 +199,25 @@ export const en = {
     'Enter a number greater than 0 and no greater than 8760. Decimals are supported.',
   'groupChat.addMember': 'Add member',
   'groupChat.memberAdded': 'Member added',
+  'groupChat.role.owner': 'Owner',
+  'groupChat.role.admin': 'Admin',
+  'groupChat.role.member': 'Member',
+  'groupChat.systemAdmin': 'System admin',
+  'groupChat.editMemberRole': 'Change {{name}}’s role',
+  'groupChat.saveMemberRole': 'Save role',
+  'groupChat.memberRoleSaved': 'Member role updated',
+  'groupChat.memberRoleHint':
+    'Admins can manage the room, ordinary members and agents. Members can participate in the chat.',
+  'groupChat.projectMemberRoleHint':
+    'Role changes apply to the entire project. Admins can manage the project and ordinary members. Members can access the project and collaborate.',
+  'groupChat.removeMember': 'Remove member {{name}}',
+  'groupChat.confirmRemoveMember': 'Remove member',
+  'groupChat.removingMember': 'Removing…',
+  'groupChat.memberRemoved': 'Member removed',
+  'groupChat.removeMemberHint':
+    'This member will lose access to this room. Existing messages will be kept.',
+  'groupChat.removeProjectMemberHint':
+    'This member will also be removed from the project and lose access to its chats, files and shared content. Existing messages will be kept.',
   'groupChat.addingMember': 'Adding…',
   'groupChat.searchMembers': 'Search members',
   'groupChat.searchMembersHint':

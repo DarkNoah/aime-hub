@@ -22,6 +22,8 @@ import type {
   GroupChatEvent,
   GroupChatSearch,
   MemberProfile,
+  GroupChatMember,
+  GroupChatMemberRole,
 } from '@aime/shared/group-chats';
 import {
   groupChatCreateSchema,
@@ -139,7 +141,7 @@ export class GroupChatService {
   }
   constructor(
     private database: DataSource,
-    private projects?: Pick<ProjectService, 'addMember'>,
+    private projects?: Pick<ProjectService, 'addMember' | 'changeMember'>,
     private plugins?: PluginRoomAccess,
   ) {
     this.a2aKeys = new GroupChatA2aKeys(
@@ -224,38 +226,89 @@ export class GroupChatService {
     );
     const room = rows[0];
     if (!room) throw new ORPCError('NOT_FOUND');
+    if (room.projectId) {
+      const role = await this.projectAccess(
+        userId,
+        room.projectId,
+        manager,
+        lock,
+      );
+      return {
+        room,
+        canManage:
+          room.createdBy === userId || role === 'owner' || role === 'admin',
+        canManageMembers: role === 'owner' || role === 'admin',
+        canManageMemberRoles: role === 'owner',
+      };
+    }
+    let systemAdmin = false;
     if (room.pluginId) {
       await this.pluginAccess(userId, room.pluginId, manager);
-      const canManage =
-        room.createdBy === userId ||
-        (await this.plugins!.isAdmin(userId, manager));
-      if (!canManage) {
-        const members = await manager.query(
-          'SELECT 1 FROM group_chat_members WHERE room_id=$1 AND user_id=$2',
-          [roomId, userId],
-        );
-        if (!members.length) throw new ORPCError('NOT_FOUND');
-      }
-      return { room, canManage, canManageMembers: canManage };
+      systemAdmin = await this.plugins!.isAdmin(userId, manager);
     }
-    const role = room.projectId
-      ? await this.projectAccess(userId, room.projectId, manager, lock)
-      : null;
-    if (!room.projectId && room.createdBy !== userId) {
-      const members = await manager.query(
-        `SELECT 1 FROM group_chat_members WHERE room_id=$1 AND user_id=$2 ${lock ? 'FOR SHARE' : ''}`,
+    let role: GroupChatMemberRole =
+      room.createdBy === userId ? 'owner' : 'member';
+    if (role !== 'owner' && !systemAdmin) {
+      const members: { role: GroupChatMemberRole }[] = await manager.query(
+        `SELECT role FROM group_chat_members WHERE room_id=$1 AND user_id=$2 ${lock ? 'FOR SHARE' : ''}`,
         [roomId, userId],
       );
       if (!members.length) throw new ORPCError('NOT_FOUND');
+      role = members[0].role;
     }
+    const canManage = systemAdmin || role === 'owner' || role === 'admin';
     return {
       room,
-      canManage:
-        room.createdBy === userId || role === 'owner' || role === 'admin',
-      canManageMembers: room.projectId
-        ? role === 'owner' || role === 'admin'
-        : room.createdBy === userId,
+      canManage,
+      canManageMembers: canManage,
+      canManageMemberRoles: systemAdmin || role === 'owner',
     };
+  }
+
+  private async memberDetails(
+    room: RoomRow,
+    userId: string,
+    manager: EntityManager,
+    permissions: { canManageMembers: boolean; canManageMemberRoles: boolean },
+  ): Promise<GroupChatMember[]> {
+    let members: {
+      userId: string;
+      role: GroupChatMemberRole;
+      systemAdmin?: boolean;
+    }[] = room.projectId
+      ? await manager.query(
+          `SELECT user_id AS "userId", role FROM project_members WHERE project_id=$1 AND deleted_at IS NULL ORDER BY created_at,user_id`,
+          [room.projectId],
+        )
+      : [
+          { userId: room.createdBy, role: 'owner' },
+          ...(await manager.query(
+            `SELECT user_id AS "userId", role FROM group_chat_members WHERE room_id=$1 AND user_id<>$2 ORDER BY created_at,user_id`,
+            [room.id, room.createdBy],
+          )),
+        ];
+    if (room.pluginId)
+      members = await this.plugins!.filterMembers(
+        room.pluginId,
+        members,
+        manager,
+      );
+    return members.map((member) => {
+      const protectedMember =
+        member.userId === userId ||
+        member.role === 'owner' ||
+        !!member.systemAdmin;
+      return {
+        ...member,
+        role:
+          member.systemAdmin && member.role !== 'owner' ? 'admin' : member.role,
+        canChangeRole: !protectedMember && permissions.canManageMemberRoles,
+        canRemove:
+          !protectedMember &&
+          permissions.canManageMembers &&
+          (permissions.canManageMemberRoles || member.role === 'member'),
+      };
+    });
   }
 
   async list(
@@ -435,33 +488,86 @@ export class GroupChatService {
     });
   }
 
+  async removeMember(userId: string, roomId: string, targetId: string) {
+    const { room, canManageMembers } = await this.access(userId, roomId);
+    if (!canManageMembers || targetId === userId)
+      throw new ORPCError('FORBIDDEN');
+    if (room.projectId) {
+      if (!this.projects) throw new ORPCError('INTERNAL_SERVER_ERROR');
+      // Project rooms inherit membership, including owner/admin protections.
+      await this.projects.changeMember(userId, room.projectId, targetId);
+      return room.projectId;
+    }
+    await this.database.transaction(async (manager) => {
+      const access = await this.access(userId, roomId, manager, true);
+      if (!access.canManageMembers || targetId === access.room.createdBy)
+        throw new ORPCError('FORBIDDEN');
+      const [target]: { role: GroupChatMemberRole }[] = await manager.query(
+        'SELECT role FROM group_chat_members WHERE room_id=$1 AND user_id=$2',
+        [roomId, targetId],
+      );
+      if (target && !access.canManageMemberRoles && target.role !== 'member')
+        throw new ORPCError('FORBIDDEN');
+      // Also protect a system admin who is currently outside the visible roster.
+      if (room.pluginId && (await this.plugins!.isAdmin(targetId, manager)))
+        throw new ORPCError('FORBIDDEN');
+      await manager.query(
+        'DELETE FROM group_chat_members WHERE room_id=$1 AND user_id=$2',
+        [roomId, targetId],
+      );
+    });
+    return null;
+  }
+
+  async updateMemberRole(
+    userId: string,
+    roomId: string,
+    targetId: string,
+    role: 'admin' | 'member',
+  ) {
+    const access = await this.access(userId, roomId);
+    if (!access.canManageMemberRoles || targetId === userId)
+      throw new ORPCError('FORBIDDEN');
+    const { room } = access;
+    if (room.projectId) {
+      if (!this.projects) throw new ORPCError('INTERNAL_SERVER_ERROR');
+      await this.projects.changeMember(userId, room.projectId, targetId, role);
+      const members = await this.memberDetails(
+        room,
+        userId,
+        this.database.manager,
+        access,
+      );
+      const member = members.find((member) => member.userId === targetId);
+      if (!member) throw new ORPCError('NOT_FOUND');
+      return { member, projectId: room.projectId };
+    }
+    return this.database.transaction(async (manager) => {
+      const current = await this.access(userId, roomId, manager, true);
+      if (!current.canManageMemberRoles) throw new ORPCError('FORBIDDEN');
+      const member = (
+        await this.memberDetails(current.room, userId, manager, current)
+      ).find((member) => member.userId === targetId);
+      if (!member) throw new ORPCError('NOT_FOUND');
+      if (!member.canChangeRole) throw new ORPCError('FORBIDDEN');
+      await manager.query(
+        'UPDATE group_chat_members SET role=$3 WHERE room_id=$1 AND user_id=$2',
+        [roomId, targetId, role],
+      );
+      return { member: { ...member, role }, projectId: null };
+    });
+  }
+
   async get(userId: string, roomId: string): Promise<GroupChatDetail> {
     const detail = await this.database.transaction(async (manager) => {
-      const { room, canManage, canManageMembers } = await this.access(
-        userId,
-        roomId,
-        manager,
-        true,
-      );
+      const access = await this.access(userId, roomId, manager, true);
+      const { room, canManage, canManageMembers, canManageMemberRoles } =
+        access;
       await this.ensureBot(manager, roomId);
-      let members: { userId: string }[] = room.projectId
-        ? await manager.query(
-            `SELECT user_id AS "userId" FROM project_members WHERE project_id=$1 AND deleted_at IS NULL ORDER BY created_at,user_id`,
-            [room.projectId],
-          )
-        : [
-            { userId: room.createdBy },
-            ...(await manager.query(
-              `SELECT user_id AS "userId" FROM group_chat_members WHERE room_id=$1 AND user_id<>$2 ORDER BY created_at,user_id`,
-              [roomId, room.createdBy],
-            )),
-          ];
-      if (room.pluginId)
-        members = await this.plugins!.filterMembers(
-          room.pluginId,
-          members,
-          manager,
-        );
+      const members = await this.memberDetails(room, userId, manager, access);
+      const removableMemberIds = members
+        .filter((member) => member.canRemove)
+        .map((member) => member.userId);
       const agents: GroupChatAgent[] = await manager.query(
         `SELECT ${agentColumns} FROM group_chat_agents WHERE room_id=$1 AND NOT deleting ORDER BY role,created_at,id`,
         [roomId],
@@ -470,6 +576,9 @@ export class GroupChatService {
         ...roomDto(room),
         canManage,
         canManageMembers,
+        canManageMemberRoles,
+        members,
+        removableMemberIds,
         memberIds: members.map((m) => m.userId),
         a2aMembers: await this.a2aKeys.list(manager, roomId),
         agents,

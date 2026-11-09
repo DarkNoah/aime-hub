@@ -16,10 +16,19 @@ import type {
   GroupChatA2AMember,
   GroupChatDetail,
   MemberProfile,
+  GroupChatMember,
 } from '@aime/shared/group-chats';
 import { MemberAvatar } from '@/components/member-avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sheet } from '@/components/ui/sheet';
 import { RoomAgentThreadDrawer } from './room-agent-thread-drawer';
@@ -28,6 +37,7 @@ import { groupChatApi, groupChatErrorKey } from '../api';
 import { AgentStatus } from './agent-status';
 import { RoomA2aMember } from './room-a2a-member';
 import { RoomAgentAvatar } from './room-agent-avatar';
+import { RoomMemberRoleEditor } from './room-member-role-editor';
 
 export function RoomMembersPanel({
   room,
@@ -35,6 +45,8 @@ export function RoomMembersPanel({
   userId,
   onEdit,
   onAddMember,
+  onMemberRemoved,
+  onMemberUpdated,
   onEditA2a,
   onA2aUpdated,
   onA2aRemoved,
@@ -50,6 +62,8 @@ export function RoomMembersPanel({
   userId: string;
   onEdit: (agent: GroupChatAgent | 'new') => void;
   onAddMember: () => void;
+  onMemberRemoved: (memberId: string) => void;
+  onMemberUpdated: (member: GroupChatMember) => void;
   onEditA2a: (member: GroupChatA2AMember | 'new') => void;
   onA2aUpdated: (member: GroupChatA2AMember) => void;
   onA2aRemoved: (memberId: string) => void;
@@ -77,6 +91,18 @@ export function RoomMembersPanel({
   const [opener, setOpener] = useState<HTMLElement | null>(null);
   const threadAgent = room.agents.find((agent) => agent.id === threadAgentId);
   const [changingAgent, setChangingAgent] = useState<string | null>(null);
+  const [memberToRemove, setMemberToRemove] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [removingMember, setRemovingMember] = useState(false);
+  const [roleEditor, setRoleEditor] = useState<{
+    member: GroupChatMember;
+    name: string;
+  } | null>(null);
+  const memberDetails = new Map(
+    room.members?.map((member) => [member.userId, member]),
+  );
   const agents = [...room.agents].sort(
     (left, right) => Number(right.role === 'bot') - Number(left.role === 'bot'),
   );
@@ -109,6 +135,21 @@ export function RoomMembersPanel({
       toast.error(t(groupChatErrorKey(cause)));
     } finally {
       setChangingAgent(null);
+    }
+  }
+
+  async function removeMember() {
+    if (!memberToRemove || removingMember) return;
+    setRemovingMember(true);
+    try {
+      await groupChatApi.removeMember(room.id, memberToRemove.id);
+      onMemberRemoved(memberToRemove.id);
+      setMemberToRemove(null);
+      toast.success(t('groupChat.memberRemoved'));
+    } catch (cause) {
+      toast.error(t(groupChatErrorKey(cause)));
+    } finally {
+      setRemovingMember(false);
     }
   }
 
@@ -320,6 +361,10 @@ export function RoomMembersPanel({
             ))}
             {room.memberIds.map((id) => {
               const profile = profiles.get(id);
+              const member = memberDetails.get(id);
+              const role =
+                member?.role ??
+                (!room.projectId && id === room.createdBy ? 'owner' : 'member');
               const name =
                 profile?.name ||
                 profile?.username ||
@@ -328,26 +373,131 @@ export function RoomMembersPanel({
                 <li key={id} className="flex items-center gap-3 py-4">
                   <MemberAvatar member={profile} label={name} />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium" title={name}>
-                      {name}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-sm font-medium" title={name}>
+                        {name}
+                      </p>
+                      {id === userId && (
+                        <Badge variant="secondary">{t('groupChat.you')}</Badge>
+                      )}
+                    </div>
                     {profile?.username && (
                       <p className="truncate text-xs text-muted-foreground">
                         @{profile.username}
                       </p>
                     )}
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      <Badge
+                        variant={role === 'member' ? 'outline' : 'secondary'}
+                      >
+                        {t(`groupChat.role.${role}`)}
+                      </Badge>
+                      {member?.systemAdmin && (
+                        <Badge variant="outline">
+                          {t('groupChat.systemAdmin')}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
-                  <Badge variant={id === userId ? 'secondary' : 'outline'}>
-                    {t(
-                      id === userId ? 'groupChat.you' : 'groupChat.memberRole',
+                  {member?.canChangeRole && room.canManageMemberRoles && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t('groupChat.editMemberRole', { name })}
+                      title={t('groupChat.editMemberRole', { name })}
+                      disabled={removingMember}
+                      onClick={() => setRoleEditor({ member, name })}
+                    >
+                      <Settings2 className="size-3.5" aria-hidden="true" />
+                    </Button>
+                  )}
+                  {room.canManageMembers &&
+                    room.removableMemberIds?.includes(id) && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        aria-label={t('groupChat.removeMember', { name })}
+                        title={t('groupChat.removeMember', { name })}
+                        disabled={removingMember}
+                        onClick={() => setMemberToRemove({ id, name })}
+                      >
+                        <Trash2 className="size-3.5" aria-hidden="true" />
+                      </Button>
                     )}
-                  </Badge>
                 </li>
               );
             })}
           </ul>
         </ScrollArea>
       </div>
+      {roleEditor && (
+        <RoomMemberRoleEditor
+          roomId={room.id}
+          projectId={room.projectId}
+          member={
+            memberDetails.get(roleEditor.member.userId) ?? roleEditor.member
+          }
+          name={roleEditor.name}
+          canEdit={
+            !!room.canManageMemberRoles &&
+            !!memberDetails.get(roleEditor.member.userId)?.canChangeRole
+          }
+          onSaved={onMemberUpdated}
+          onClose={() => setRoleEditor(null)}
+        />
+      )}
+      <Dialog
+        open={!!memberToRemove}
+        onOpenChange={(open) => {
+          if (!open && !removingMember) setMemberToRemove(null);
+        }}
+      >
+        {memberToRemove && (
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                {t('groupChat.removeMember', { name: memberToRemove.name })}
+              </DialogTitle>
+              <DialogDescription>
+                {t(
+                  room.projectId
+                    ? 'groupChat.removeProjectMemberHint'
+                    : 'groupChat.removeMemberHint',
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={removingMember}
+                onClick={() => setMemberToRemove(null)}
+              >
+                {t('agents.cancel')}
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={
+                  removingMember ||
+                  !room.canManageMembers ||
+                  !room.removableMemberIds?.includes(memberToRemove.id)
+                }
+                onClick={() => void removeMember()}
+              >
+                {t(
+                  removingMember
+                    ? 'groupChat.removingMember'
+                    : 'groupChat.confirmRemoveMember',
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
       <Sheet
         open={!!threadAgent}
         modal={false}

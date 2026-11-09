@@ -26,6 +26,7 @@ import { AddGeneratedAssetMetadata1780000011000 } from '../packages/db/src/migra
 import { GroupChatIdleWake1780000029000 } from '../packages/db/src/migrations/1780000029000-group-chat-idle-wake.js';
 import { GroupChatAgents1780000026000 } from '../packages/db/src/migrations/1780000026000-group-chat-agents.js';
 import { GroupChatMembers1780000027000 } from '../packages/db/src/migrations/1780000027000-group-chat-members.js';
+import { GroupChatMemberRoles1780000043000 } from '../packages/db/src/migrations/1780000043000-group-chat-member-roles.js';
 import { GroupChatReads1780000032000 } from '../packages/db/src/migrations/1780000032000-group-chat-reads.js';
 import { CreateGroupChats1780000024000 } from '../packages/db/src/migrations/1780000024000-create-group-chats.js';
 import { GroupChatService } from '../apps/server/src/modules/group-chats/service.js';
@@ -139,6 +140,21 @@ test(
     await runner.query(`INSERT INTO group_chats(id,title,created_by) VALUES('legacybotroom001','Legacy','alice');
       INSERT INTO group_chat_agents(id,room_id,thread_id,name,role,enabled) VALUES('legacybot0000001','legacybotroom001','legacythread0001','Bot','bot',false)`);
     await new GroupChatMembers1780000027000().up(runner);
+    await runner.query(
+      "INSERT INTO group_chat_members(room_id,user_id) VALUES('legacybotroom001','bob')",
+    );
+    const memberRolesMigration = new GroupChatMemberRoles1780000043000();
+    await memberRolesMigration.up(runner);
+    assert.equal(
+      (
+        await runner.query(
+          "SELECT role FROM group_chat_members WHERE room_id='legacybotroom001'",
+        )
+      )[0].role,
+      'member',
+    );
+    await memberRolesMigration.down(runner);
+    await memberRolesMigration.up(runner);
     await new GroupChatIdleWake1780000029000().up(runner);
     await new PluginGroupChats1780000042000().up(runner);
     await new GroupChatA2aMembers1780000030000().up(runner);
@@ -878,6 +894,35 @@ test(
           rooms.update('guest', room.id, 'No'),
           code('FORBIDDEN'),
         );
+        assert.deepEqual(
+          (await rooms.get('alice', room.id)).removableMemberIds,
+          ['guest'],
+        );
+        assert.deepEqual(shared.removableMemberIds, []);
+        await assert.rejects(
+          rooms.removeMember('guest', room.id, 'alice'),
+          code('FORBIDDEN'),
+        );
+        await assert.rejects(
+          rooms.removeMember('alice', room.id, 'alice'),
+          code('FORBIDDEN'),
+        );
+        await rooms.removeMember('alice', room.id, 'guest');
+        await rooms.removeMember('alice', room.id, 'guest');
+        assert.deepEqual((await rooms.get('alice', room.id)).memberIds, [
+          'alice',
+        ]);
+        await assert.rejects(rooms.get('guest', room.id), code('NOT_FOUND'));
+        assert.equal(
+          (await rooms.messages('alice', room.id, { limit: 50 })).messages[0]
+            .senderId,
+          'guest',
+        );
+        await rooms.addMember('alice', room.id, 'guest');
+        assert.deepEqual((await rooms.get('guest', room.id)).memberIds, [
+          'alice',
+          'guest',
+        ]);
         await rooms.remove('alice', room.id);
         assert.equal(
           (
@@ -890,6 +935,80 @@ test(
         );
         await assert.rejects(rooms.get('guest', room.id), code('NOT_FOUND'));
         await rooms.remove('guest', own.id);
+      },
+    );
+
+    await t.test(
+      'personal member roles persist and enforce promotion, demotion and peer protections',
+      async () => {
+        const room = await rooms.create('alice', { title: 'Roles' });
+        await rooms.addMember('alice', room.id, 'bob');
+        await rooms.addMember('alice', room.id, 'guest');
+        const ownerView = await rooms.get('alice', room.id);
+        assert.equal(ownerView.canManageMemberRoles, true);
+        assert.deepEqual(
+          ownerView.members?.map(({ userId, role }) => ({ userId, role })),
+          [
+            { userId: 'alice', role: 'owner' },
+            { userId: 'bob', role: 'member' },
+            { userId: 'guest', role: 'member' },
+          ],
+        );
+        await assert.rejects(
+          rooms.updateMemberRole('bob', room.id, 'bob', 'admin'),
+          code('FORBIDDEN'),
+        );
+        await assert.rejects(
+          rooms.updateMemberRole('bob', room.id, 'guest', 'admin'),
+          code('FORBIDDEN'),
+        );
+        await assert.rejects(
+          rooms.updateMemberRole('alice', room.id, 'alice', 'member'),
+          code('FORBIDDEN'),
+        );
+        await assert.rejects(
+          rooms.updateMemberRole('alice', room.id, 'missing', 'admin'),
+          code('NOT_FOUND'),
+        );
+        const promoted = await rooms.updateMemberRole(
+          'alice',
+          room.id,
+          'guest',
+          'admin',
+        );
+        assert.equal(promoted.member.role, 'admin');
+        assert.equal(promoted.member.canChangeRole, true);
+        const adminView = await rooms.get('guest', room.id);
+        assert.equal(adminView.canManage, true);
+        assert.equal(adminView.canManageMembers, true);
+        assert.equal(adminView.canManageMemberRoles, false);
+        assert.deepEqual(adminView.removableMemberIds, ['bob']);
+        await rooms.addMember('guest', room.id, 'outsider');
+        await rooms.removeMember('guest', room.id, 'outsider');
+        await rooms.updateMemberRole('alice', room.id, 'bob', 'admin');
+        await assert.rejects(
+          rooms.removeMember('guest', room.id, 'bob'),
+          code('FORBIDDEN'),
+        );
+        await assert.rejects(
+          rooms.updateMemberRole('guest', room.id, 'bob', 'member'),
+          code('FORBIDDEN'),
+        );
+        await assert.rejects(
+          rooms.removeMember('guest', room.id, 'alice'),
+          code('FORBIDDEN'),
+        );
+        await rooms.updateMemberRole('alice', room.id, 'guest', 'member');
+        assert.equal((await rooms.get('guest', room.id)).canManage, false);
+        await assert.rejects(
+          rooms.addMember('guest', room.id, 'outsider'),
+          code('FORBIDDEN'),
+        );
+        await assert.rejects(
+          rooms.removeMember('guest', room.id, 'bob'),
+          code('FORBIDDEN'),
+        );
+        await rooms.remove('alice', room.id);
       },
     );
 
@@ -931,13 +1050,61 @@ test(
           await rooms.searchUsers('alice', room.id, 'guest'),
           [],
         );
-        await projects.changeMember('alice', room.projectId!, 'bob');
+        await assert.rejects(
+          rooms.removeMember('bob', room.id, 'guest'),
+          code('FORBIDDEN'),
+        );
+        await rooms.updateMemberRole('alice', room.id, 'bob', 'admin');
+        assert.equal(
+          (await projects.assertMember('bob', room.projectId!)).role,
+          'admin',
+        );
+        assert.equal(
+          (await rooms.get('bob', room.id)).canManageMemberRoles,
+          false,
+        );
+        await assert.rejects(
+          rooms.updateMemberRole('bob', room.id, 'guest', 'admin'),
+          code('FORBIDDEN'),
+        );
+        assert.deepEqual((await rooms.get('bob', room.id)).removableMemberIds, [
+          'guest',
+        ]);
+        await assert.rejects(
+          rooms.removeMember('bob', room.id, 'alice'),
+          code('PROJECT_OWNER_REQUIRED'),
+        );
+        await rooms.updateMemberRole('alice', room.id, 'guest', 'admin');
+        assert.deepEqual(
+          (await rooms.get('bob', room.id)).removableMemberIds,
+          [],
+        );
+        await assert.rejects(
+          rooms.removeMember('bob', room.id, 'guest'),
+          code('FORBIDDEN'),
+        );
+        await projects.changeMember(
+          'alice',
+          room.projectId!,
+          'guest',
+          'member',
+        );
+        assert.equal(
+          await rooms.removeMember('bob', room.id, 'guest'),
+          room.projectId,
+        );
+        await assert.rejects(
+          projects.assertMember('guest', room.projectId!),
+          code('PROJECT_NOT_FOUND'),
+        );
+        await rooms.addMember('alice', room.id, 'guest');
+        await rooms.removeMember('alice', room.id, 'bob');
         assert.equal(
           (await rooms.searchUsers('alice', room.id, 'bob'))[0].id,
           'bob',
         );
         await rooms.addMember('alice', room.id, 'bob');
-        await projects.changeMember('alice', room.projectId!, 'guest');
+        await rooms.removeMember('alice', room.id, 'guest');
         await assert.rejects(rooms.get('guest', room.id), code('NOT_FOUND'));
         await rooms.remove('alice', room.id);
         await database.query(
@@ -2033,8 +2200,17 @@ test(
                 : null,
           },
         } as unknown as Auth;
+        const invalidations: [string, string | undefined][] = [];
+        const navigationRefreshes: (string | undefined)[] = [];
         const app = createApp(auth, undefined, {
-          threads: {} as ThreadService,
+          threads: {
+            refreshNavigation: (userId?: string) => {
+              navigationRefreshes.push(userId);
+            },
+            invalidateProject: (projectId: string, userId?: string) => {
+              invalidations.push([projectId, userId]);
+            },
+          } as unknown as ThreadService,
           models: {} as LanguageModelService,
           groupChats: rooms,
           users,
@@ -2056,6 +2232,95 @@ test(
             },
             ...(body ? { body: JSON.stringify(body) } : {}),
           });
+        const removalRoom = await rooms.create('alice', {
+          title: 'Remove members',
+        });
+        await rooms.addMember('alice', removalRoom.id, 'guest');
+        const removalPath = `/group-chats/${removalRoom.id}/members/guest`;
+        assert.equal(
+          (await request(removalPath, 'PATCH', { role: 'admin' }, '')).status,
+          401,
+        );
+        assert.equal(
+          (await request(removalPath, 'PATCH', { role: 'admin' }, 'guest'))
+            .status,
+          403,
+        );
+        assert.equal(
+          (await request(removalPath, 'PATCH', { role: 'admin' }, 'outsider'))
+            .status,
+          404,
+        );
+        assert.equal(
+          (await request(removalPath, 'PATCH', { role: 'owner' })).status,
+          400,
+        );
+        const roleResponse = await request(removalPath, 'PATCH', {
+          role: 'admin',
+        });
+        assert.equal(roleResponse.status, 200);
+        assert.equal((await roleResponse.json()).role, 'admin');
+        assert.equal(
+          (await rooms.get('guest', removalRoom.id)).canManageMembers,
+          true,
+        );
+        assert.equal(
+          (await request(removalPath, 'PATCH', { role: 'member' })).status,
+          200,
+        );
+        assert.equal(
+          (await rooms.get('guest', removalRoom.id)).canManageMembers,
+          false,
+        );
+        assert.equal(
+          (await request(removalPath, 'DELETE', undefined, '')).status,
+          401,
+        );
+        assert.equal(
+          (await request(removalPath, 'DELETE', undefined, 'outsider')).status,
+          404,
+        );
+        assert.equal(
+          (await request(removalPath, 'DELETE', undefined, 'guest')).status,
+          403,
+        );
+        assert.equal((await request(removalPath, 'DELETE')).status, 204);
+        assert.deepEqual((await rooms.get('alice', removalRoom.id)).memberIds, [
+          'alice',
+        ]);
+        await rooms.addMember('alice', removalRoom.id, 'guest');
+        assert.equal(
+          (
+            await request('/rpc/groupChats/removeMember', 'POST', {
+              json: { params: { roomId: removalRoom.id, userId: 'guest' } },
+            })
+          ).status,
+          200,
+        );
+        await rooms.addMember('alice', project.id, 'guest');
+        assert.equal(
+          (
+            await request('/rpc/groupChats/updateMemberRole', 'POST', {
+              json: {
+                params: { roomId: project.id, userId: 'guest' },
+                body: { role: 'admin' },
+              },
+            })
+          ).status,
+          200,
+        );
+        assert.equal(
+          (await projects.assertMember('guest', project.projectId!)).role,
+          'admin',
+        );
+        assert.deepEqual(navigationRefreshes, ['guest']);
+        assert.equal(
+          (await request(`/group-chats/${project.id}/members/guest`, 'DELETE'))
+            .status,
+          204,
+        );
+        assert.deepEqual(invalidations, [[project.projectId, 'guest']]);
+        await rooms.remove('alice', removalRoom.id);
         assert.equal(
           (await request('/group-chats', 'GET', undefined, '')).status,
           401,

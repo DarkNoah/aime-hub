@@ -21,6 +21,7 @@ import {
   type GroupChatSearch,
   type GroupChat,
   type GroupChatDetail,
+  type GroupChatMember,
   type GroupChatList,
   type GroupChatMessage,
   type GroupChatMessages,
@@ -118,6 +119,28 @@ export const groupChatsContract = {
     })
     .input(z.object({ params, body: z.object({ userId: id }) }))
     .output(type<MemberProfile>()),
+  updateMemberRole: procedure
+    .route({
+      method: 'PATCH',
+      path: '/group-chats/{roomId}/members/{userId}',
+      inputStructure: 'detailed',
+    })
+    .input(
+      z.object({
+        params: params.extend({ userId: id }),
+        body: z.object({ role: z.enum(['admin', 'member']) }),
+      }),
+    )
+    .output(type<GroupChatMember>()),
+  removeMember: procedure
+    .route({
+      method: 'DELETE',
+      path: '/group-chats/{roomId}/members/{userId}',
+      inputStructure: 'detailed',
+      successStatus: 204,
+    })
+    .input(z.object({ params: params.extend({ userId: id }) }))
+    .output(type<void>()),
   addAgent: procedure
     .route({
       method: 'POST',

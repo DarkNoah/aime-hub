@@ -141,10 +141,21 @@ export type GroupChatAgent = {
   /** Bot-only inactivity interval; null disables proactive idle wake-ups. */
   idleWakeHours: number | null;
 };
+export type GroupChatMemberRole = 'owner' | 'admin' | 'member';
+export type GroupChatMember = {
+  userId: string;
+  role: GroupChatMemberRole;
+  systemAdmin?: boolean;
+  canChangeRole: boolean;
+  canRemove: boolean;
+};
 export type GroupChatDetail = GroupChat & {
   memberIds: string[];
+  members?: GroupChatMember[];
   canManage: boolean;
   canManageMembers?: boolean;
+  canManageMemberRoles?: boolean;
+  removableMemberIds?: string[];
   agents: GroupChatAgent[];
   a2aMembers?: GroupChatA2AMember[];
   botAgentId: string;

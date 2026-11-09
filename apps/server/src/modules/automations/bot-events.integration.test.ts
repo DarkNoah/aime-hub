@@ -8,6 +8,7 @@ import type { RunInput } from '@aime/shared/threads';
 import { CreateGroupChats1780000024000 } from '../../../../../packages/db/src/migrations/1780000024000-create-group-chats.js';
 import { GroupChatAgents1780000026000 } from '../../../../../packages/db/src/migrations/1780000026000-group-chat-agents.js';
 import { GroupChatMembers1780000027000 } from '../../../../../packages/db/src/migrations/1780000027000-group-chat-members.js';
+import { GroupChatMemberRoles1780000043000 } from '../../../../../packages/db/src/migrations/1780000043000-group-chat-member-roles.js';
 import { GroupChatIdleWake1780000029000 } from '../../../../../packages/db/src/migrations/1780000029000-group-chat-idle-wake.js';
 import { GroupChatA2aMembers1780000030000 } from '../../../../../packages/db/src/migrations/1780000030000-group-chat-a2a-members.js';
 import { GroupChatA2aMemberDeletion1780000031000 } from '../../../../../packages/db/src/migrations/1780000031000-group-chat-a2a-member-deletion.js';
@@ -61,6 +62,7 @@ test(
       new CreateGroupChats1780000024000(),
       new GroupChatAgents1780000026000(),
       new GroupChatMembers1780000027000(),
+      new GroupChatMemberRoles1780000043000(),
       new GroupChatIdleWake1780000029000(),
       new PluginGroupChats1780000042000(),
       new GroupChatA2aMembers1780000030000(),

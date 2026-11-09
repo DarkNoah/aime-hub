@@ -6,6 +6,7 @@ import type {
   GroupChatMessage,
   GroupChatFile,
   MemberProfile,
+  GroupChatMember,
 } from '@aime/shared/group-chats';
 import { apiErrorCode } from '@/lib/rpc';
 import {
@@ -36,6 +37,7 @@ export function useRoom(roomId: string, projectId?: string, pluginId?: string) {
   const historyBefore = useRef<string | null>(null);
   const earlierChanges = useRef(new Map<string, GroupChatMessage>());
   const removedA2aIds = useRef(new Set<string>());
+  const memberRevision = useRef(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -69,9 +71,14 @@ export function useRoom(roomId: string, projectId?: string, pluginId?: string) {
       try {
         if (document.visibilityState !== 'hidden') {
           // Keep agent status current; refresh profile details less frequently.
+          const requestedMemberRevision = memberRevision.current;
           currentRoom = await groupChatApi.get(roomId, signal);
           await hydrate(currentRoom.memberIds, ++polls % 5 === 0);
-          if (!signal.aborted) setRoom(visibleRoom(currentRoom));
+          if (
+            !signal.aborted &&
+            requestedMemberRevision === memberRevision.current
+          )
+            setRoom(visibleRoom(currentRoom));
           let more = true;
           while (more && !signal.aborted) {
             const page = await groupChatApi.messages(
@@ -323,6 +330,7 @@ export function useRoom(roomId: string, projectId?: string, pluginId?: string) {
     },
     addMember: (member: MemberProfile) => {
       if (lifecycle.current?.signal.aborted) return;
+      memberRevision.current += 1;
       setProfiles((previous) => new Map(previous).set(member.id, member));
       setRoom(
         (previous) =>
@@ -331,6 +339,58 @@ export function useRoom(roomId: string, projectId?: string, pluginId?: string) {
             memberIds: previous.memberIds.includes(member.id)
               ? previous.memberIds
               : [...previous.memberIds, member.id],
+            members: previous.members?.some((item) => item.userId === member.id)
+              ? previous.members
+              : [
+                  ...(previous.members ?? []),
+                  {
+                    userId: member.id,
+                    role: 'member',
+                    canChangeRole: !!previous.canManageMemberRoles,
+                    canRemove: !!previous.canManageMembers,
+                  },
+                ],
+            removableMemberIds: [
+              ...new Set([...(previous.removableMemberIds ?? []), member.id]),
+            ],
+          },
+      );
+    },
+    removeMember: (memberId: string) => {
+      if (lifecycle.current?.signal.aborted) return;
+      memberRevision.current += 1;
+      setRoom(
+        (previous) =>
+          previous && {
+            ...previous,
+            memberIds: previous.memberIds.filter((id) => id !== memberId),
+            members: previous.members?.filter(
+              (member) => member.userId !== memberId,
+            ),
+            removableMemberIds: previous.removableMemberIds?.filter(
+              (id) => id !== memberId,
+            ),
+          },
+      );
+    },
+    updateMember: (member: GroupChatMember) => {
+      if (lifecycle.current?.signal.aborted) return;
+      memberRevision.current += 1;
+      setRoom(
+        (previous) =>
+          previous && {
+            ...previous,
+            members: previous.members?.map((item) =>
+              item.userId === member.userId ? member : item,
+            ),
+            removableMemberIds: [
+              ...new Set([
+                ...(previous.removableMemberIds ?? []).filter(
+                  (id) => id !== member.userId,
+                ),
+                ...(member.canRemove ? [member.userId] : []),
+              ]),
+            ],
           },
       );
     },

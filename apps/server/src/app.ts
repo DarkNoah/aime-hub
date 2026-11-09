@@ -149,7 +149,7 @@ export function createApp(
   if (chat?.groupChats)
     app.route('/api/a2a/rooms', groupChatA2aRoutes(chat.groupChats));
   const router = rpc.router({
-    groupChats: groupChatRouter(chat?.groupChats),
+    groupChats: groupChatRouter(chat?.groupChats, chat?.threads),
     users: userRouter(chat?.users),
     knowledge: knowledgeRouter(knowledge),
     usage: usageRouter(usage?.service),

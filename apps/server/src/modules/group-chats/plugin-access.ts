@@ -66,9 +66,9 @@ export class PluginRoomAccess {
     if (allowed && !allowed.includes(userId)) throw new ORPCError('FORBIDDEN');
   }
 
-  async filterMembers(
+  async filterMembers<T extends { userId: string }>(
     pluginId: string,
-    members: { userId: string }[],
+    members: T[],
     reader: Pick<DataSource, 'query'> = this.database,
   ) {
     const allowed = await this.candidateIds(pluginId, reader);
@@ -85,6 +85,14 @@ export class PluginRoomAccess {
         )
         .map((user) => user.id),
     );
-    return members.filter((member) => visible.has(member.userId));
+    const admins = new Set(
+      users.filter((user) => hasAdminRole(user.role)).map((user) => user.id),
+    );
+    return members
+      .filter((member) => visible.has(member.userId))
+      .map((member) => ({
+        ...member,
+        systemAdmin: admins.has(member.userId),
+      }));
   }
 }

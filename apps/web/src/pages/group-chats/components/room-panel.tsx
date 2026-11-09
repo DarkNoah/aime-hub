@@ -153,6 +153,8 @@ export function RoomPanel({
             onThreadAgentChange={clearThreadRequest}
             onEdit={setEditor}
             onAddMember={() => setMemberEditor(true)}
+            onMemberRemoved={state.removeMember}
+            onMemberUpdated={state.updateMember}
             onEditA2a={setA2aEditor}
             onA2aUpdated={state.updateA2aMember}
             onA2aRemoved={state.removeA2aMember}

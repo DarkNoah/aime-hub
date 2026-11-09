@@ -184,6 +184,25 @@ export const zhCN = {
     '请输入大于 0 且不超过 8760 的小时数，支持小数。',
   'groupChat.addMember': '添加成员',
   'groupChat.memberAdded': '成员已添加',
+  'groupChat.role.owner': '创建者',
+  'groupChat.role.admin': '管理员',
+  'groupChat.role.member': '普通成员',
+  'groupChat.systemAdmin': '系统管理员',
+  'groupChat.editMemberRole': '修改 {{name}} 的角色',
+  'groupChat.saveMemberRole': '保存角色',
+  'groupChat.memberRoleSaved': '成员角色已更新',
+  'groupChat.memberRoleHint':
+    '管理员可管理聊天室、普通成员和 Agent；普通成员可参与聊天。',
+  'groupChat.projectMemberRoleHint':
+    '角色修改会同步到整个项目。管理员可管理项目和普通成员，普通成员可访问项目并参与协作。',
+  'groupChat.removeMember': '移除成员 {{name}}',
+  'groupChat.confirmRemoveMember': '移除成员',
+  'groupChat.removingMember': '正在移除…',
+  'groupChat.memberRemoved': '成员已移除',
+  'groupChat.removeMemberHint':
+    '移除后，该成员将无法继续访问此聊天室。历史消息会保留。',
+  'groupChat.removeProjectMemberHint':
+    '该成员将同时被移出项目，无法继续访问项目中的聊天、文件及共享内容。历史消息会保留。',
   'groupChat.addingMember': '正在添加…',
   'groupChat.searchMembers': '搜索成员',
   'groupChat.searchMembersHint': '输入至少 2 个字符搜索姓名或用户名',

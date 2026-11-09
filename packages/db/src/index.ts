@@ -1,4 +1,5 @@
 import { PluginGroupChats1780000042000 } from './migrations/1780000042000-plugin-group-chats.js';
+import { GroupChatMemberRoles1780000043000 } from './migrations/1780000043000-group-chat-member-roles.js';
 import { AutomationBotEvents1780000040000 } from './migrations/1780000040000-automation-bot-events.js';
 import { IssueOptionalThread1780000039000 } from './migrations/1780000039000-issue-optional-thread.js';
 import { IssueEvents1780000038000 } from './migrations/1780000038000-issue-events.js';
@@ -98,6 +99,7 @@ export function createDataSource(
       GeneratedAsset,
     ],
     migrations: [
+      GroupChatMemberRoles1780000043000,
       PluginGroupChats1780000042000,
       ProviderModel3d1780000041000,
       AutomationBotEvents1780000040000,

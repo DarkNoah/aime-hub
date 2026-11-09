@@ -24,6 +24,7 @@ import { PluginAccess1780000025000 } from '../packages/db/src/migrations/1780000
 import { CreateGroupChats1780000024000 } from '../packages/db/src/migrations/1780000024000-create-group-chats.js';
 import { GroupChatAgents1780000026000 } from '../packages/db/src/migrations/1780000026000-group-chat-agents.js';
 import { GroupChatMembers1780000027000 } from '../packages/db/src/migrations/1780000027000-group-chat-members.js';
+import { GroupChatMemberRoles1780000043000 } from '../packages/db/src/migrations/1780000043000-group-chat-member-roles.js';
 import { GroupChatIdleWake1780000029000 } from '../packages/db/src/migrations/1780000029000-group-chat-idle-wake.js';
 import { GroupChatA2aMembers1780000030000 } from '../packages/db/src/migrations/1780000030000-group-chat-a2a-members.js';
 import { GroupChatA2aMemberDeletion1780000031000 } from '../packages/db/src/migrations/1780000031000-group-chat-a2a-member-deletion.js';
@@ -134,6 +135,7 @@ test(
       new CreateGroupChats1780000024000(),
       new GroupChatAgents1780000026000(),
       new GroupChatMembers1780000027000(),
+      new GroupChatMemberRoles1780000043000(),
       new GroupChatIdleWake1780000029000(),
       new GroupChatA2aMembers1780000030000(),
       new GroupChatA2aMemberDeletion1780000031000(),
@@ -222,6 +224,62 @@ test(
     ]);
     assert.equal((await rooms.get('bob', first.id)).canManage, false);
     assert.equal((await rooms.get('admin', first.id)).canManage, true);
+    assert.deepEqual((await rooms.get('admin', first.id)).removableMemberIds, [
+      'bob',
+    ]);
+    await assert.rejects(
+      rooms.removeMember('bob', first.id, 'alice'),
+      code('FORBIDDEN'),
+    );
+    await assert.rejects(
+      rooms.removeMember('admin', first.id, 'alice'),
+      code('FORBIDDEN'),
+    );
+    await rooms.removeMember('admin', first.id, 'bob');
+    await assert.rejects(rooms.get('bob', first.id), code('NOT_FOUND'));
+    await rooms.addMember('alice', first.id, 'bob');
+    await rooms.updateMemberRole('alice', first.id, 'bob', 'admin');
+    const roomAdmin = await rooms.get('bob', first.id);
+    assert.equal(roomAdmin.canManage, true);
+    assert.equal(roomAdmin.canManageMembers, true);
+    assert.equal(roomAdmin.canManageMemberRoles, false);
+    assert.equal(
+      roomAdmin.members?.find((member) => member.userId === 'bob')?.role,
+      'admin',
+    );
+    await assert.rejects(
+      rooms.updateMemberRole('bob', first.id, 'alice', 'member'),
+      code('FORBIDDEN'),
+    );
+    await assert.rejects(
+      rooms.addMember('bob', first.id, 'outsider'),
+      code('FORBIDDEN'),
+    );
+    await db.query(
+      'INSERT INTO group_chat_members(room_id,user_id) VALUES($1,$2)',
+      [first.id, 'admin'],
+    );
+    const systemAdmin = (await rooms.get('alice', first.id)).members?.find(
+      (member) => member.userId === 'admin',
+    );
+    assert.equal(systemAdmin?.role, 'admin');
+    assert.equal(systemAdmin?.systemAdmin, true);
+    assert.equal(systemAdmin?.canChangeRole, false);
+    assert.equal(systemAdmin?.canRemove, false);
+    await assert.rejects(
+      rooms.updateMemberRole('alice', first.id, 'admin', 'member'),
+      code('FORBIDDEN'),
+    );
+    await assert.rejects(
+      rooms.removeMember('alice', first.id, 'admin'),
+      code('FORBIDDEN'),
+    );
+    await rooms.updateMemberRole('admin', first.id, 'bob', 'member');
+    assert.equal((await rooms.get('bob', first.id)).canManage, false);
+    await db.query(
+      'DELETE FROM group_chat_members WHERE room_id=$1 AND user_id=$2',
+      [first.id, 'admin'],
+    );
     assert.equal(
       (await rooms.create('bob', { title: 'Same', pluginId: 'demo' })).id,
       first.id,

@@ -1,7 +1,11 @@
 import { rpc, required } from '../../rpc/context.js';
 import type { GroupChatService } from './service.js';
+import type { ThreadService } from '../threads/service.js';
 
-export function groupChatRouter(service?: GroupChatService) {
+export function groupChatRouter(
+  service?: GroupChatService,
+  threads?: Pick<ThreadService, 'invalidateProject' | 'refreshNavigation'>,
+) {
   const p = rpc.groupChats;
   const rooms = () => required(service);
   return p.router({
@@ -44,6 +48,24 @@ export function groupChatRouter(service?: GroupChatService) {
     addMember: p.addMember.handler(({ context, input }) =>
       rooms().addMember(context.userId, input.params.roomId, input.body.userId),
     ),
+    updateMemberRole: p.updateMemberRole.handler(async ({ context, input }) => {
+      const { member, projectId } = await rooms().updateMemberRole(
+        context.userId,
+        input.params.roomId,
+        input.params.userId,
+        input.body.role,
+      );
+      if (projectId) threads?.refreshNavigation(input.params.userId);
+      return member;
+    }),
+    removeMember: p.removeMember.handler(async ({ context, input }) => {
+      const projectId = await rooms().removeMember(
+        context.userId,
+        input.params.roomId,
+        input.params.userId,
+      );
+      if (projectId) threads?.invalidateProject(projectId, input.params.userId);
+    }),
     addAgent: p.addAgent.handler(({ context, input }) =>
       rooms().addAgent(context.userId, input.params.roomId, input.body),
     ),

@@ -29,6 +29,17 @@ export const groupChatApi = {
     ),
   addMember: (roomId: string, userId: string) =>
     api.groupChats.addMember({ params: { roomId }, body: { userId } }),
+  removeMember: (roomId: string, userId: string) =>
+    api.groupChats.removeMember({ params: { roomId, userId } }),
+  updateMemberRole: (
+    roomId: string,
+    userId: string,
+    role: 'admin' | 'member',
+  ) =>
+    api.groupChats.updateMemberRole({
+      params: { roomId, userId },
+      body: { role },
+    }),
   createA2aMember: (roomId: string, body: GroupChatA2AMemberInput) =>
     api.groupChats.createA2aMember({ params: { roomId }, body }),
   updateA2aMember: (

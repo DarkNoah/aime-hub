@@ -257,6 +257,11 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     const historyCursors = [];
     const agentUpdates = [];
     const memberAdds = [];
+    const memberRemovals = [];
+    const memberRoleUpdates = [];
+    const memberRoles = new Map();
+    let failMemberRoleUpdate = false;
+    let failMemberRemoval = false;
     const a2aCreates = [];
     const a2aUpdates = [];
     const a2aRemovals = [];
@@ -288,17 +293,46 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       if (!agentsByRoom.has(roomId)) agentsByRoom.set(roomId, [botFor(roomId)]);
       return agentsByRoom.get(roomId);
     };
+    const roomMemberIds = (room) =>
+      membersByRoom.get(room.id) ??
+      (room.projectId || room.createdBy !== 'alice'
+        ? ['alice', 'bob']
+        : ['alice']);
+    const canManageRoles = (room) =>
+      room.projectId
+        ? canManageProjectMembers
+        : room.createdBy === 'alice' && canManagePersonalMembers;
     const detail = (room) => ({
       ...room,
       canManage: room.projectId !== null || room.createdBy === 'alice',
       canManageMembers: room.projectId
         ? canManageProjectMembers
         : room.createdBy === 'alice' && canManagePersonalMembers,
+      canManageMemberRoles: canManageRoles(room),
+      members: roomMemberIds(room).map((userId) => ({
+        userId,
+        role:
+          memberRoles.get(`${room.id}:${userId}`) ??
+          (userId === room.createdBy ? 'owner' : 'member'),
+        canChangeRole:
+          canManageRoles(room) &&
+          userId !== 'alice' &&
+          userId !== room.createdBy,
+        canRemove:
+          canManageRoles(room) &&
+          userId !== 'alice' &&
+          userId !== room.createdBy,
+      })),
       memberIds:
         membersByRoom.get(room.id) ??
         (room.projectId || room.createdBy !== 'alice'
           ? ['alice', 'bob']
           : ['alice']),
+      removableMemberIds: (
+        membersByRoom.get(room.id) ?? ['alice', 'bob']
+      ).filter(
+        (id) => id !== 'alice' && (room.projectId || id !== room.createdBy),
+      ),
       agents: roomAgents(room.id),
       a2aMembers: roomA2aMembers(room.id),
       botAgentId: 'bot0000000000001',
@@ -530,6 +564,62 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
           ]);
           memberAdds.push(structuredClone(input));
           result = users.find((user) => user.id === input.body.userId);
+          break;
+        }
+        case 'groupChats/updateMemberRole': {
+          const room = rooms.find((room) => room.id === input.params.roomId);
+          assert.ok(
+            detail(room).members.find(
+              (member) => member.userId === input.params.userId,
+            )?.canChangeRole,
+          );
+          if (failMemberRoleUpdate) {
+            await route.fulfill({
+              status: 500,
+              contentType: 'application/json',
+              body: JSON.stringify({
+                json: {
+                  code: 'INTERNAL_SERVER_ERROR',
+                  message: 'Failed',
+                  status: 500,
+                },
+              }),
+            });
+            return;
+          }
+          memberRoles.set(`${room.id}:${input.params.userId}`, input.body.role);
+          memberRoleUpdates.push(structuredClone(input));
+          result = detail(room).members.find(
+            (member) => member.userId === input.params.userId,
+          );
+          break;
+        }
+        case 'groupChats/removeMember': {
+          const room = rooms.find((room) => room.id === input.params.roomId);
+          assert.equal(detail(room).canManageMembers, true);
+          assert.ok(
+            detail(room).removableMemberIds.includes(input.params.userId),
+          );
+          if (failMemberRemoval) {
+            await route.fulfill({
+              status: 500,
+              contentType: 'application/json',
+              body: JSON.stringify({
+                json: {
+                  code: 'INTERNAL_SERVER_ERROR',
+                  message: 'Failed',
+                  status: 500,
+                },
+              }),
+            });
+            return;
+          }
+          memberRemovals.push(structuredClone(input));
+          membersByRoom.set(
+            room.id,
+            detail(room).memberIds.filter((id) => id !== input.params.userId),
+          );
+          result = undefined;
           break;
         }
         case 'groupChats/createA2aMember': {
@@ -1132,10 +1222,137 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       params: { roomId },
       body: { userId: 'charlie' },
     });
+    const charlieRow = roster
+      .locator('li')
+      .filter({ has: page.getByText('周宁', { exact: true }) });
+    await charlieRow.getByText('普通成员', { exact: true }).waitFor();
+    await roster
+      .locator('li')
+      .filter({ has: page.getByText('林然', { exact: true }) })
+      .getByText('创建者', { exact: true })
+      .waitFor();
+    assert.equal(
+      await roster
+        .getByRole('button', { name: '修改 林然 的角色', exact: true })
+        .count(),
+      0,
+    );
+    await charlieRow
+      .getByRole('button', { name: '修改 周宁 的角色', exact: true })
+      .click();
+    const roleDialog = page.getByRole('dialog', {
+      name: '修改 周宁 的角色',
+      exact: true,
+    });
+    await roleDialog.getByText(/角色修改会同步到整个项目/).waitFor();
+    await roleDialog.getByRole('combobox').click();
+    await page.getByRole('option', { name: '管理员', exact: true }).click();
+    await roleDialog.getByRole('button', { name: '取消', exact: true }).click();
+    assert.equal(memberRoleUpdates.length, 0);
+    await charlieRow
+      .getByRole('button', { name: '修改 周宁 的角色', exact: true })
+      .click();
+    await roleDialog.getByRole('combobox').click();
+    await page.getByRole('option', { name: '管理员', exact: true }).click();
+    failMemberRoleUpdate = true;
+    const roleFailure = page.waitForResponse(
+      (response) =>
+        response.url().endsWith('/groupChats/updateMemberRole') &&
+        response.status() === 500,
+    );
+    await roleDialog
+      .getByRole('button', { name: '保存角色', exact: true })
+      .click();
+    await roleFailure;
+    await roleDialog
+      .getByRole('button', { name: '保存角色', exact: true })
+      .waitFor();
+    assert.equal(memberRoleUpdates.length, 0);
+    failMemberRoleUpdate = false;
+    await roleDialog
+      .getByRole('button', { name: '保存角色', exact: true })
+      .click();
+    await roleDialog.waitFor({ state: 'hidden' });
+    await charlieRow.getByText('管理员', { exact: true }).waitFor();
+    await page.screenshot({ path: '/tmp/group-chat-member-roles-desktop.png' });
+    await charlieRow
+      .getByRole('button', { name: '修改 周宁 的角色', exact: true })
+      .click();
+    await roleDialog.getByRole('combobox').click();
+    await page.getByRole('option', { name: '普通成员', exact: true }).click();
+    await roleDialog
+      .getByRole('button', { name: '保存角色', exact: true })
+      .click();
+    await roleDialog.waitFor({ state: 'hidden' });
+    await charlieRow.getByText('普通成员', { exact: true }).waitFor();
+    assert.deepEqual(
+      memberRoleUpdates.map((update) => update.body.role),
+      ['admin', 'member'],
+    );
+    assert.equal(await input.inputValue(), '切换成员面板时保留草稿');
+    assert.equal(await page.locator('[data-chat-turn]').count(), 50);
+    assert.equal(
+      await roster
+        .getByRole('button', { name: '移除成员 林然', exact: true })
+        .count(),
+      0,
+    );
+    await roster
+      .getByRole('button', { name: '移除成员 周宁', exact: true })
+      .click();
+    const removalDialog = page.getByRole('dialog', {
+      name: '移除成员 周宁',
+      exact: true,
+    });
+    await removalDialog.getByText(/同时被移出项目/).waitFor();
+    await page.screenshot({ path: '/tmp/group-chat-remove-member-dialog.png' });
+    await removalDialog
+      .getByRole('button', { name: '取消', exact: true })
+      .click();
+    assert.equal(memberRemovals.length, 0);
+    await roster
+      .getByRole('button', { name: '移除成员 周宁', exact: true })
+      .click();
+    failMemberRemoval = true;
+    await removalDialog
+      .getByRole('button', { name: '移除成员', exact: true })
+      .click();
+    await page.waitForFunction(
+      () =>
+        !document.querySelector('[role="dialog"] button:last-child')?.disabled,
+    );
+    await removalDialog.waitFor();
+    assert.equal(
+      await page.locator('li').getByText('周宁', { exact: true }).count(),
+      1,
+    );
+    assert.equal(memberRemovals.length, 0);
+    failMemberRemoval = false;
+    await removalDialog
+      .getByRole('button', { name: '移除成员', exact: true })
+      .click();
+    await removalDialog.waitFor({ state: 'hidden' });
+    await roster
+      .getByText('周宁', { exact: true })
+      .waitFor({ state: 'hidden' });
+    assert.deepEqual(memberRemovals, [
+      { params: { roomId, userId: 'charlie' } },
+    ]);
+    assert.equal(await input.inputValue(), '切换成员面板时保留草稿');
+    assert.equal(await page.locator('[data-chat-turn]').count(), 50);
+    await page.getByRole('button', { name: '3 位成员', exact: true }).waitFor();
     canManageProjectMembers = false;
     await roster
       .getByRole('button', { name: '添加成员', exact: true })
       .waitFor({ state: 'hidden' });
+    assert.equal(
+      await roster.getByRole('button', { name: /^移除成员 / }).count(),
+      0,
+    );
+    assert.equal(
+      await roster.getByRole('button', { name: /^修改 .* 的角色$/ }).count(),
+      0,
+    );
     await roster
       .getByRole('button', { name: '添加 Agent', exact: true })
       .waitFor();
@@ -1318,6 +1535,30 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     });
     await membersDrawer.getByText('Room assistant', { exact: true }).waitFor();
     await membersDrawer.getByText('陈禾', { exact: true }).waitFor();
+    await membersDrawer
+      .getByRole('button', { name: '修改 陈禾 的角色', exact: true })
+      .click();
+    const mobileRoleDialog = page.getByRole('dialog', {
+      name: '修改 陈禾 的角色',
+      exact: true,
+    });
+    await mobileRoleDialog.getByRole('combobox').click();
+    await page.getByRole('option', { name: '管理员', exact: true }).click();
+    await page.screenshot({ path: '/tmp/group-chat-member-roles-mobile.png' });
+    assert.ok(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    );
+    await mobileRoleDialog
+      .getByRole('button', { name: '保存角色', exact: true })
+      .click();
+    await mobileRoleDialog.waitFor({ state: 'hidden' });
+    await membersDrawer
+      .locator('li')
+      .filter({ has: page.getByText('陈禾', { exact: true }) })
+      .getByText('管理员', { exact: true })
+      .waitFor();
     const mobileDraft = await page.locator('textarea').inputValue();
     await membersDrawer
       .getByRole('button', { name: '提及 Room assistant', exact: true })
