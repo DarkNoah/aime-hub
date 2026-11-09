@@ -2718,6 +2718,13 @@ export const en = {
   'admin.settingsTitle': 'Default models',
   'admin.settingsHint':
     'Configure default models and thinking mode on the model providers page.',
+  'settings.appName': 'Application name',
+  'settings.appNameHint':
+    'Set the name at the top of the sidebar. Changes apply immediately after saving.',
+  'settings.appNameEdit': 'Edit name',
+  'settings.appNameLimit':
+    'Use 1–80 characters. Leading and trailing spaces are removed.',
+  'settings.appNameInvalid': 'Enter an application name with 1–80 characters.',
   'settings.registrationTitle': 'Account registration',
   'settings.allowRegistration': 'Allow new account registration',
   'settings.registrationHint':

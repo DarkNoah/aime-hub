@@ -74,7 +74,7 @@ export const rpc = implementation.use(
         path[0] === 'usage' ||
         path[0] === 'tools' ||
         path[0] === 'mcp' ||
-        path[0] === 'systemSettings' ||
+        (path[0] === 'systemSettings' && path[1] !== 'branding') ||
         (path[0] === 'providers' && path[1] !== 'available');
       if (admin && !hasAdminRole(session?.user.role))
         throw new ORPCError('FORBIDDEN');

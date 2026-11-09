@@ -23,6 +23,7 @@ export const desktopTimeoutSchema = z.number().int().positive();
 
 export const systemSettingsSchema = z
   .object({
+    appName: z.string().trim().min(1).max(80),
     registrationEnabled: z.boolean(),
     requestLoggingEnabled: z.boolean(),
     e2bDesktopEnabled: z.boolean(),
@@ -36,6 +37,8 @@ export const systemSettingsSchema = z
 
 export type SystemSettings = z.infer<typeof systemSettingsSchema>;
 
+export const appBrandingSchema = systemSettingsSchema.pick({ appName: true });
+
 export const systemSettingsUpdateSchema = systemSettingsSchema
   .omit({ e2bDesktopHasApiKey: true, e2bDesktopManaged: true })
   .extend({ e2bDesktopApiKey: z.string().trim().nullable() })
@@ -45,6 +48,7 @@ export const systemSettingsUpdateSchema = systemSettingsSchema
 export type SystemSettingsUpdate = z.infer<typeof systemSettingsUpdateSchema>;
 
 export const defaultSystemSettings: SystemSettings = {
+  appName: 'aime hub',
   registrationEnabled: true,
   requestLoggingEnabled: true,
   e2bDesktopEnabled: false,

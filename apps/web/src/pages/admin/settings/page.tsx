@@ -22,9 +22,12 @@ import {
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { E2BDesktopSettings } from './components/e2b-desktop-settings';
+import { AppNameSettings } from './components/app-name-settings';
+import { useAppBranding } from '@/features/settings/app-branding-context';
 
 export function AdminSettingsPage() {
   const { t } = useTranslation();
+  const { updateAppName } = useAppBranding();
   const [settings, setSettings] = useState<SystemSettings>();
   const [loadError, setLoadError] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -37,6 +40,7 @@ export function AdminSettingsPage() {
       (value) => {
         if (!controller.signal.aborted) {
           setSettings(value);
+          updateAppName(value.appName);
           setLoadError(false);
         }
       },
@@ -45,14 +49,16 @@ export function AdminSettingsPage() {
       },
     );
     return () => controller.abort();
-  }, [revision]);
+  }, [revision, updateAppName]);
 
   async function updateSettings(body: SystemSettingsUpdate) {
     if (!settings || changing.current) return false;
     changing.current = true;
     setSaving(true);
     try {
-      setSettings(await api.systemSettings.update({ body }));
+      const updated = await api.systemSettings.update({ body });
+      setSettings(updated);
+      updateAppName(updated.appName);
       toast.success(t('settings.saved'));
       return true;
     } catch (cause) {
@@ -64,7 +70,9 @@ export function AdminSettingsPage() {
             : code === 'FORBIDDEN'
               ? 'errors.forbidden'
               : code === 'VALIDATION_ERROR'
-                ? 'settings.desktopInvalid'
+                ? body.appName !== undefined
+                  ? 'settings.appNameInvalid'
+                  : 'settings.desktopInvalid'
                 : code === 'E2B_MANAGED_CONFIG'
                   ? 'settings.desktopManagedError'
                   : 'errors.request',
@@ -83,6 +91,13 @@ export function AdminSettingsPage() {
         title={t('nav.settings')}
         description={t('admin.settingsDescription')}
       />
+      {settings && (
+        <AppNameSettings
+          appName={settings.appName}
+          saving={saving || loadError}
+          onSave={updateSettings}
+        />
+      )}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

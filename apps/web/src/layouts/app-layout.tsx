@@ -27,6 +27,7 @@ import { NotificationProvider } from '@/features/notifications/notification-prov
 import { BrowserDock } from '@/components/browser/dock';
 import { BrowserPanelOpenContext } from '@/components/browser/layout-context';
 import type { FloatingPreviewStackHandle } from '@/components/floating-preview-stack';
+import { AppBrandingProvider } from '@/features/settings/app-branding-provider';
 
 export function AppLayout() {
   const { data } = useAuthSession();
@@ -36,30 +37,32 @@ export function AppLayout() {
     [],
   );
   return (
-    <PersonalChatSettingsProvider>
-      <ThreadListProvider key={data?.session.id}>
-        <ProjectNavigationProvider>
-          <ThreadNavigationProvider>
-            <RoomUnreadProvider>
-              <NotificationProvider />
-              <BrowserPanelOpenContext.Provider value={minimizeBrowserDock}>
-                {data?.user.id ? (
-                  <BrowserDock
-                    ref={browserDock}
-                    key={data.user.id}
-                    userId={data.user.id}
-                  >
+    <AppBrandingProvider key={data?.session.id}>
+      <PersonalChatSettingsProvider>
+        <ThreadListProvider key={data?.session.id}>
+          <ProjectNavigationProvider>
+            <ThreadNavigationProvider>
+              <RoomUnreadProvider>
+                <NotificationProvider />
+                <BrowserPanelOpenContext.Provider value={minimizeBrowserDock}>
+                  {data?.user.id ? (
+                    <BrowserDock
+                      ref={browserDock}
+                      key={data.user.id}
+                      userId={data.user.id}
+                    >
+                      <LayoutContent />
+                    </BrowserDock>
+                  ) : (
                     <LayoutContent />
-                  </BrowserDock>
-                ) : (
-                  <LayoutContent />
-                )}
-              </BrowserPanelOpenContext.Provider>
-            </RoomUnreadProvider>
-          </ThreadNavigationProvider>
-        </ProjectNavigationProvider>
-      </ThreadListProvider>
-    </PersonalChatSettingsProvider>
+                  )}
+                </BrowserPanelOpenContext.Provider>
+              </RoomUnreadProvider>
+            </ThreadNavigationProvider>
+          </ProjectNavigationProvider>
+        </ThreadListProvider>
+      </PersonalChatSettingsProvider>
+    </AppBrandingProvider>
   );
 }
 

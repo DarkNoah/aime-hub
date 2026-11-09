@@ -17,6 +17,9 @@ const storedSettingsSchema = systemSettingsSchema
     e2bDesktopManaged: true,
   })
   .extend({
+    appName: systemSettingsSchema.shape.appName.default(
+      defaultSystemSettings.appName,
+    ),
     requestLoggingEnabled:
       systemSettingsSchema.shape.requestLoggingEnabled.default(
         defaultSystemSettings.requestLoggingEnabled,

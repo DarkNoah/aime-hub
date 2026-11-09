@@ -38,9 +38,11 @@ import { ThreadSidebar } from '@/components/chat/thread-sidebar';
 import { ProjectSidebar } from '@/pages/projects/components/project-sidebar';
 import { RoomUnreadDot } from '@/pages/group-chats/components/room-unread-dot';
 import { adminNavigation, workspaceNavigation } from './navigation';
+import { useAppBranding } from '@/features/settings/app-branding-context';
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { t } = useTranslation();
+  const { appName } = useAppBranding();
   const { data, refetch } = useAuthSession();
   const navigate = useNavigate();
   const [pending, setPending] = useState(false);
@@ -78,7 +80,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="px-5 pt-6 pb-6">
-        <Brand />
+        <Brand appName={appName} />
       </div>
       <ScrollArea
         className="min-h-0 flex-1"

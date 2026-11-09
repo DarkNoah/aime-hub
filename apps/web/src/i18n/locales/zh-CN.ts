@@ -2480,6 +2480,11 @@ export const zhCN = {
   'workspace.quickAccess': '工作空间管理',
   'admin.settingsTitle': '默认模型',
   'admin.settingsHint': '在模型供应商页面中配置默认模型与思考模式。',
+  'settings.appName': '应用名称',
+  'settings.appNameHint': '设置左侧栏顶部显示的名称，保存后立即生效。',
+  'settings.appNameEdit': '修改名称',
+  'settings.appNameLimit': '支持 1–80 个字符，首尾空格会自动去除。',
+  'settings.appNameInvalid': '请输入 1–80 个字符的应用名称。',
   'settings.registrationTitle': '账号注册',
   'settings.allowRegistration': '允许注册新账号',
   'settings.registrationHint':

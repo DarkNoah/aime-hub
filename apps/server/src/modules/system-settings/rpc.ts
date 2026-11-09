@@ -6,6 +6,10 @@ export function systemSettingsRouter(service?: SystemSettingsService) {
   const p = rpc.systemSettings;
   const desktop = service ? new E2BDesktopService(service) : undefined;
   return p.router({
+    branding: p.branding.handler(async () => {
+      const { appName } = await required(service).get();
+      return { appName };
+    }),
     desktop: p.desktop.router({
       test: p.desktop.test.handler(() => required(desktop).test()),
       list: p.desktop.list.handler(({ input }) =>
