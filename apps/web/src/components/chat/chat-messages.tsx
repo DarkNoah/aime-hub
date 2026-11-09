@@ -133,6 +133,7 @@ export const ChatMessage = memo(function ChatMessage({
   onToolResponse,
   disabled,
   showAllReasoning = false,
+  hideToolDetails = false,
 }: {
   message: UIMessage;
   threadId?: string;
@@ -148,6 +149,7 @@ export const ChatMessage = memo(function ChatMessage({
   ) => Promise<void>;
   disabled?: boolean;
   showAllReasoning?: boolean;
+  hideToolDetails?: boolean;
 }) {
   const { t } = useTranslation();
   const openPreview = useMessagePreview();
@@ -193,6 +195,14 @@ export const ChatMessage = memo(function ChatMessage({
               );
             }
             if (item.type === 'tools') {
+              if (hideToolDetails)
+                return (
+                  <ChatToolAttachments
+                    key={item.id}
+                    tools={item.tools}
+                    threadId={threadId}
+                  />
+                );
               return (
                 <Fragment key={item.id}>
                   <ChainOfThought

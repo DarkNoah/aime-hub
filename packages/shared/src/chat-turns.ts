@@ -56,7 +56,7 @@ export function hasChatTurnDetails(messages: readonly UIMessage[]) {
 export type ChatTurnSummary = {
   id: string;
   user: UIMessage | null;
-  /** Final text, completed HTML panels, and answered questions in part order. */
+  /** Final text, generated images, completed panels, and answered questions in order. */
   assistant: UIMessage | null;
   /** Whether details add visible content beyond the final assistant text. */
   hasDetails?: boolean;

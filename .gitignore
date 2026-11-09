@@ -81,6 +81,7 @@ plugins/vibe-quant/**/__pycache__/
 !apps/server/src/mastra/providers/xinference-ocr.test.ts
 
 !apps/server/src/modules/tools/pdf-reading.test.ts
+!apps/server/src/modules/tools/read-file-output.test.ts
 
 !apps/server/src/modules/tools/ocr-provider-resolution.test.ts
 

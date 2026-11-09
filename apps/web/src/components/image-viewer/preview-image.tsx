@@ -13,6 +13,7 @@ type PreviewImageProps = Pick<
   alt: string;
   downloadUrl?: string;
   containerClassName?: string;
+  onPreview?: () => void;
 };
 
 export function PreviewImage(props: PreviewImageProps) {
@@ -28,6 +29,7 @@ function PreviewImageContent({
   loading = 'lazy',
   className,
   containerClassName,
+  onPreview,
 }: PreviewImageProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -48,7 +50,7 @@ function PreviewImageContent({
           aria-label={label}
           title={label}
           disabled={failed}
-          onClick={() => setOpen(true)}
+          onClick={() => (onPreview ? onPreview() : setOpen(true))}
           className={cn(
             'group relative mx-auto block max-w-full cursor-zoom-in rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
             'w-full disabled:cursor-default',

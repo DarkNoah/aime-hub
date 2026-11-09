@@ -3,7 +3,7 @@ import type { OfficeContentNode, OfficeIssue } from 'officeparser';
 import { includesPage, pageSelection } from './selection.js';
 import { spreadsheetContent } from './spreadsheet.js';
 import { zoomImage } from './image-zoom.js';
-import { selectPdfPages } from './pdf-pages.js';
+import { readPdfPages } from './pdf-pages.js';
 import { pdfText } from './pdf-text.js';
 import { withAbortSignal } from '../../../lib/abort.js';
 import { inspectImageFile, maxBinaryFileBytes } from '../binary-file.js';
@@ -83,7 +83,7 @@ export async function parseFileContent(
     const parameters = options.parameters ?? {};
     const pageRanges = pageSelection(parameters.pdf_pages, 'pdf_pages');
     const warnings: string[] = [];
-    let metadata = {
+    let metadata: Omit<FileContent, 'type' | 'format' | 'text'> = {
       fileName,
       mimeType:
         format?.mimeType ??
@@ -131,6 +131,23 @@ export async function parseFileContent(
       !data.subarray(0, 1024).includes(Buffer.from('%PDF-'))
     )
       throw new FileContentError('FILE_INVALID_FORMAT', '文件不是有效的 PDF。');
+
+    let pdf: Awaited<ReturnType<typeof readPdfPages>> | undefined;
+    if (metadata.kind === 'pdf') {
+      try {
+        pdf = await readPdfPages(data, pageRanges, signal);
+        metadata = {
+          ...metadata,
+          totalPages: pdf.totalPages,
+          selectedPages: pdf.selectedPages,
+        };
+      } catch (error) {
+        signal.throwIfAborted();
+        if (error instanceof FileContentError) throw error;
+        // A provider may still recognize PDFs that the local parser cannot open.
+        warnings.push('无法读取 PDF 页数，页码信息不可用。');
+      }
+    }
 
     if (
       parameters.image_base64 !== undefined &&
@@ -184,7 +201,9 @@ export async function parseFileContent(
             pageRanges !== undefined &&
             resolved.model.supportsPageRanges === false;
           const ocrData = selectLocally
-            ? await selectPdfPages(data, pageRanges, signal)
+            ? await (
+                pdf ?? (await readPdfPages(data, pageRanges, signal))
+              ).select()
             : data;
           validateFileContentSize(ocrData.byteLength);
           const result = await resolved.model.doOCR({
@@ -197,6 +216,7 @@ export async function parseFileContent(
           signal.throwIfAborted();
           return {
             ...textResult(result.markdown),
+            textSource: 'ocr',
             images,
             model: resolved.reference,
             taskId: result.taskId,
@@ -258,6 +278,7 @@ export async function parseFileContent(
     if (metadata.kind === 'pdf') {
       try {
         const text = await pdfText(data, pageRanges, signal);
+        metadata = { ...metadata, textSource: 'pdf-text' };
         if (text.trim()) return textResult(text);
         if (options.skipOcrErrors) {
           warnings.push('PDF 中没有可靠的可读文本，已跳过需要 OCR 的内容。');

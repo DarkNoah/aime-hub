@@ -49,6 +49,10 @@ test('PDF page selection is applied before OCR for endpoints without page ranges
   );
   assert.equal(calls, 1);
   assert.equal(result.text, 'OCR selected pages');
+  assert.equal(result.totalPages, 3);
+  assert.deepEqual(result.selectedPages, [1, 3]);
+  assert.equal(result.size, source.length);
+  assert.equal(result.textSource, 'ocr');
   assert.deepEqual(source, original);
 });
 
@@ -77,6 +81,9 @@ test('PDF OCR errors and empty results fall back to selected local text even in 
     );
     assert.match(result.text, /Last page END/);
     assert.doesNotMatch(result.text, /First page content/);
+    assert.equal(result.totalPages, 2);
+    assert.deepEqual(result.selectedPages, [2]);
+    assert.equal(result.textSource, 'pdf-text');
     assert.ok(result.warnings?.length);
     assert.doesNotMatch(JSON.stringify(result), /secret provider error/);
   }

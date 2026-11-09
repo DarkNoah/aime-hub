@@ -213,6 +213,9 @@ export function createReadFileTool(
             size: file.size,
             width: file.width,
             height: file.height,
+            totalPages: file.totalPages,
+            selectedPages: file.selectedPages,
+            textSource: file.textSource,
             model: file.model,
             taskId: file.taskId,
             archiveUrl: file.archiveUrl,
@@ -281,32 +284,56 @@ export function createReadFileTool(
       if (isValidationError(output)) return { type: 'json', value: output };
       if (typeof output === 'string' || '__workspaceMedia' in output)
         return readFileTool.toModelOutput!(output);
-      const text = [
+      const texts = [
         `${output.ok ? 'File' : 'Error reading file'}: ${output.file_path}`,
-        output.content[0].text,
-        ...(output.warnings ?? []),
-        ...(output.truncated
+      ];
+      const metadata = [
+        ...(output.mimeType ? [`MIME type: ${output.mimeType}`] : []),
+        ...(output.size !== undefined ? [`Size: ${output.size} bytes`] : []),
+        ...(output.kind === 'image' && output.width && output.height
+          ? [`Dimensions: ${output.width} x ${output.height} pixels`]
+          : []),
+        ...(output.kind === 'pdf'
           ? [
-              output.nextOffset
-                ? `[Output truncated. Showing parsed lines ${output.startLine}-${output.endLine} of ${output.totalLines}. Continue with offset=${output.nextOffset}.]`
-                : '[Output truncated to 100000 characters within a single line. Split the file into smaller documents to read the remaining content.]',
+              `Total pages: ${output.totalPages ?? 'unknown'}`,
+              `Selected pages (original PDF, before text slicing): ${output.selectedPages?.join(', ') ?? 'unknown'}`,
             ]
           : []),
-      ].join('\n\n');
+        ...(output.textSource
+          ? [
+              `Text source: ${output.textSource === 'ocr' ? 'OCR' : 'PDF text layer'}`,
+            ]
+          : []),
+        ...(output.totalLines !== undefined
+          ? [
+              `Text lines: ${output.startLine}-${output.endLine} of ${output.totalLines}`,
+            ]
+          : []),
+      ];
+      if (metadata.length) texts.push(metadata.join('\n'));
+      const body = output.content[0].text;
+      if (output.textSource === 'ocr')
+        texts.push(`<ocr-content>\n${body}\n</ocr-content>`);
+      else if (body) texts.push(body);
+      texts.push(...(output.warnings ?? []));
+      if (output.truncated)
+        texts.push(
+          output.nextOffset
+            ? `[Output truncated. Showing parsed lines ${output.startLine}-${output.endLine} of ${output.totalLines}. Continue with offset=${output.nextOffset}.]`
+            : '[Output truncated to 100000 characters within a single line. Split the file into smaller documents to read the remaining content.]',
+        );
       const images = output.content.filter((part) => part.type === 'image');
-      return images.length
-        ? {
-            type: 'content' as const,
-            value: [
-              { type: 'text' as const, text },
-              ...images.map((image) => ({
-                type: 'image-data' as const,
-                data: image.data,
-                mediaType: image.mimeType,
-              })),
-            ],
-          }
-        : { type: 'text' as const, value: text };
+      return {
+        type: 'content' as const,
+        value: [
+          ...texts.map((text) => ({ type: 'text' as const, text })),
+          ...images.map((image) => ({
+            type: 'image-data' as const,
+            data: image.data,
+            mediaType: image.mimeType,
+          })),
+        ],
+      };
     },
   });
 }

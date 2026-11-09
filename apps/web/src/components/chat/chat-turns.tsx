@@ -266,6 +266,7 @@ const ChatTurnRow = memo(function ChatTurnRow({
               threadId={threadId}
               streaming={streaming}
               showReasoning={false}
+              hideToolDetails
               elapsedMs={turn.elapsedMs}
             />
           )}

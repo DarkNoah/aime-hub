@@ -11,6 +11,7 @@ import { emptyModelDefaults } from '@aime/shared/providers';
 import { ToolService } from './service.js';
 import { XinferenceProvider } from '../../mastra/providers/xinference.js';
 import type { createReadFileTool } from '../../mastra/tools/read_file.js';
+import { pdfFixture } from './file-content-fixtures.js';
 
 function fixture(type = 'xinference', enabled = true, modelType = 'ocr') {
   const reference = 'ocr/MiniCPM-OCR-1.0';
@@ -75,7 +76,7 @@ test('ToolService default Xinference OCR reaches multipart Markdown parsing thro
     await workspace.destroy();
     await rm(directory, { recursive: true, force: true });
   });
-  await writeFile(join(directory, 'invoice.pdf'), '%PDF-1.4\n%%EOF');
+  await writeFile(join(directory, 'invoice.pdf'), pdfFixture());
   const f = fixture();
   const tools = await f.service.buildTools(['read_file']);
   const tool = tools.read_file as ReturnType<typeof createReadFileTool>;

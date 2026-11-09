@@ -49,6 +49,60 @@ function timestamp(metadata: unknown) {
   return Number.isFinite(time) ? time : undefined;
 }
 
+function imageGenerationOverview(part: UIMessage['parts'][number]) {
+  if (
+    !isToolUIPart(part) ||
+    (part.type === 'dynamic-tool' ? part.toolName : part.type.slice(5)) !==
+      'image_gen' ||
+    part.state !== 'output-available'
+  )
+    return;
+  let output = part.output;
+  if (typeof output === 'string') {
+    try {
+      output = JSON.parse(output) as unknown;
+    } catch {
+      return;
+    }
+  }
+  if (!output || typeof output !== 'object') return;
+  const result = output as Record<string, unknown>;
+  if (result.ok === false || result.isError === true) return;
+  const path =
+    typeof result.file_path === 'string' ? result.file_path : undefined;
+  const asset = result.asset as { threadId?: unknown } | undefined;
+  const threadId =
+    typeof asset?.threadId === 'string' ? asset.threadId : undefined;
+  const content = Array.isArray(result.content)
+    ? result.content.filter(
+        (item): item is Record<string, unknown> =>
+          !!item && typeof item === 'object' && item.type === 'image',
+      )
+    : [];
+  if (!content.length) return;
+  return {
+    ...(part.type === 'dynamic-tool'
+      ? { type: part.type, toolName: part.toolName }
+      : { type: part.type }),
+    toolCallId: part.toolCallId,
+    state: 'output-available' as const,
+    input: {},
+    output: {
+      file_path: path,
+      // Saved images load on demand; prompts and reference-image bytes stay in details.
+      content: content.map((image) =>
+        path && threadId
+          ? {
+              type: 'image',
+              mimeType: image.mimeType,
+              url: `/api/threads/${encodeURIComponent(threadId)}/files/raw?${new URLSearchParams({ path })}`,
+            }
+          : image,
+      ),
+    },
+  };
+}
+
 export function summarizeTurn(
   turn: ChatTurn,
   cursor?: string,
@@ -67,6 +121,11 @@ export function summarizeTurn(
       continue;
     }
     for (const part of message.parts) {
+      const image = imageGenerationOverview(part);
+      if (image) {
+        assistantMessage ??= message;
+        overview.push(image);
+      }
       if (isCompletedIntelligentUiPart(part) || isCompletedAskUserPart(part)) {
         assistantMessage ??= message;
         overview.push(part);
@@ -104,7 +163,7 @@ export function summarizeTurn(
         ...(createdAt !== undefined
           ? { metadata: { createdAt: new Date(createdAt).toISOString() } }
           : {}),
-        // Keep panels at their original positions while omitting intermediate text.
+        // Keep generated images and panels in order while omitting intermediate text.
         parts: overview.filter(
           (part) => part.type !== 'text' || part === finalText,
         ),

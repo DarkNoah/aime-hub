@@ -44,6 +44,10 @@ type FileContentMetadata = {
   size: number;
   width?: number;
   height?: number;
+  totalPages?: number;
+  /** Selected 1-based page numbers in the original PDF, before text line slicing. */
+  selectedPages?: number[];
+  textSource?: 'ocr' | 'pdf-text';
   model?: string;
   taskId?: string;
   archiveUrl?: string;

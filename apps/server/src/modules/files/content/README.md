@@ -51,6 +51,13 @@ PDF 页码统一放在 `parameters.pdf_pages`，`read_file` 不再提供顶层 `
 
 `read_file` 单次返回最多 100,000 字符，`offset` / `limit` 在转换后的文本上生效；
 `nextOffset` 用于继续读取。极长单行无法通过行偏移恢复时会明确提示拆分文件。
+PDF 元信息包含原文件的 `totalPages` 和 `selectedPages`（从 1 开始的原始页码），
+不受 OCR 服务上传前选页或工具输出行范围截取影响；无法在本地读取页数时保留警告，不编造页码。
+`textSource` 区分 `ocr` 与 PDF 本地文字层 `pdf-text`。
+`read_file.toModelOutput` 将路径、元信息、正文、各条警告及截断提示分别输出为独立的 text 块；
+元信息包含文件大小（字节）、图片长宽（像素）、PDF 总页数/所选原始页码及返回文本行范围。
+OCR 正文单独用 `<ocr-content>` / `</ocr-content>` 包裹，其他来源正文不使用该标签，图片仍作为独立多模态块附在末尾。
+原始工具返回值的 `content` 保留正文和图片，供前端直接渲染；通过 `exec` 获取的仍是此原始对象。
 `extract` 超过 1,000,000 字符时报错，不会基于静默裁剪后的来源抽取。
 这些预算和知识库分块限制均在调用层。
 

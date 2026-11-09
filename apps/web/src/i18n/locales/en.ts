@@ -1862,6 +1862,11 @@ export const en = {
   'imagePreview.exitFullscreen': 'Exit fullscreen',
   'imagePreview.loading': 'Loading image…',
   'imagePreview.gallery': 'Image preview',
+  'imagePreview.previous': 'Previous image',
+  'imagePreview.next': 'Next image',
+  'imagePreview.count': '{{count}} images',
+  'imagePreview.showAll': 'View all {{count}} images',
+  'imagePreview.showLess': 'Show fewer images',
   'imagePreview.downloadError':
     'Could not download the image. Try the download link in the preview.',
   'files.binary':
