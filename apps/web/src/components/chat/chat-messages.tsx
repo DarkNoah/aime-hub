@@ -331,7 +331,11 @@ export const ChatMessage = memo(function ChatMessage({
                   {part.text}
                 </p>
               ) : (
-                <MessageResponse key={index} isAnimating={streaming}>
+                <MessageResponse
+                  key={index}
+                  isAnimating={streaming}
+                  workspaceThreadId={threadId}
+                >
                   {part.text}
                 </MessageResponse>
               );

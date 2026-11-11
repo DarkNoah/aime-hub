@@ -131,6 +131,24 @@ export function rehypeWorkspaceFileLinks() {
         }
       }
 
+      if (node.type === 'element' && node.tagName === 'img') {
+        const src = node.properties?.src;
+        if (typeof src === 'string') {
+          const target = getWorkspaceFileTarget(src);
+          if (
+            target &&
+            target.line === undefined &&
+            !isWorkspaceDirectoryLink(src) &&
+            node.properties
+          ) {
+            // Preserve workspace paths before Streamdown hardens image URLs.
+            // A dedicated tag keeps its built-in renderer for remote images.
+            node.tagName = 'workspace-image';
+            node.properties.src = toWorkspaceFileLink(target.path);
+          }
+        }
+      }
+
       node.children?.forEach(visit);
     };
 

@@ -148,7 +148,9 @@ export function RoomMessage({
         {message.text && (
           <MessageContent className="rounded-lg bg-muted/60 px-4 py-3 [overflow-wrap:anywhere]">
             {message.senderKind === 'agent' ? (
-              <MessageResponse>{message.text}</MessageResponse>
+              <MessageResponse workspaceThreadId={fileThreadId}>
+                {message.text}
+              </MessageResponse>
             ) : (
               <span className="whitespace-pre-wrap">{message.text}</span>
             )}

@@ -27,6 +27,8 @@ import {
 import { defaultRehypePlugins, Streamdown } from 'streamdown';
 import { MarkupCodeBlock } from './markup-code-block';
 import { MarkdownLink } from './markdown-link';
+import { MarkdownImage } from './markdown-image';
+import { WorkspaceFileThreadContext } from '@/components/file-manager/context';
 import { rehypeWorkspaceFileLinks } from './markdown-file-link';
 import { math } from './math-plugin';
 
@@ -321,6 +323,7 @@ export const MessageBranchPage = ({
 
 export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
   renderEnhancedLinks?: boolean;
+  workspaceThreadId?: string;
 };
 
 const streamdownPlugins = {
@@ -335,7 +338,10 @@ const streamdownPlugins = {
     },
   ],
 };
-const streamdownComponents = { a: MarkdownLink };
+const streamdownComponents = {
+  a: MarkdownLink,
+  'workspace-image': MarkdownImage,
+};
 const messageRehypePlugins = [
   defaultRehypePlugins.raw,
   defaultRehypePlugins.sanitize,
@@ -347,22 +353,26 @@ export const MessageResponse = memo(
   ({
     className,
     renderEnhancedLinks = true,
+    workspaceThreadId,
     ...props
   }: MessageResponseProps) => (
-    <Streamdown
-      className={cn(
-        'size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_table]:[overflow-wrap:normal]',
-        className,
-      )}
-      components={renderEnhancedLinks ? streamdownComponents : undefined}
-      plugins={streamdownPlugins}
-      rehypePlugins={renderEnhancedLinks ? messageRehypePlugins : undefined}
-      {...props}
-    />
+    <WorkspaceFileThreadContext.Provider value={workspaceThreadId}>
+      <Streamdown
+        className={cn(
+          'size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_table]:[overflow-wrap:normal]',
+          className,
+        )}
+        components={renderEnhancedLinks ? streamdownComponents : undefined}
+        plugins={streamdownPlugins}
+        rehypePlugins={renderEnhancedLinks ? messageRehypePlugins : undefined}
+        {...props}
+      />
+    </WorkspaceFileThreadContext.Provider>
   ),
   (prevProps, nextProps) =>
     prevProps.children === nextProps.children &&
     nextProps.isAnimating === prevProps.isAnimating &&
+    nextProps.workspaceThreadId === prevProps.workspaceThreadId &&
     nextProps.renderEnhancedLinks === prevProps.renderEnhancedLinks,
 );
 
