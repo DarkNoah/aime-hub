@@ -340,8 +340,10 @@ const streamdownPlugins = {
 };
 const streamdownComponents = {
   a: MarkdownLink,
+  img: MarkdownImage,
   'workspace-image': MarkdownImage,
 };
+const imageComponents = { img: MarkdownImage };
 const messageRehypePlugins = [
   defaultRehypePlugins.raw,
   defaultRehypePlugins.sanitize,
@@ -362,7 +364,9 @@ export const MessageResponse = memo(
           'size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_table]:[overflow-wrap:normal]',
           className,
         )}
-        components={renderEnhancedLinks ? streamdownComponents : undefined}
+        components={
+          renderEnhancedLinks ? streamdownComponents : imageComponents
+        }
         plugins={streamdownPlugins}
         rehypePlugins={renderEnhancedLinks ? messageRehypePlugins : undefined}
         {...props}

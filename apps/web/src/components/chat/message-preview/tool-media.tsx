@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PreviewImage } from '@/components/image-viewer/preview-image';
-import { ImageEditButton } from '@/components/image-viewer/image-edit-button';
 import { AudioClip } from '@/components/audio/audio-clip';
 import type { ReadFileBlock } from './read-file-output';
 
@@ -23,6 +22,16 @@ export function ToolMedia({
   if (kind === 'audio') {
     return <AudioClip src={source} filename={name} mediaType={mediaType} />;
   }
+  if (kind === 'image' && !failed) {
+    return (
+      <PreviewImage
+        src={source}
+        alt={name}
+        referrerPolicy="no-referrer"
+        onError={onError}
+      />
+    );
+  }
   return (
     <section
       aria-label={t('chat.readFile.media')}
@@ -38,13 +47,6 @@ export function ToolMedia({
         >
           {mediaType}
         </Badge>
-        {kind === 'image' && !failed && (
-          <ImageEditButton
-            src={source}
-            name={name}
-            referrerPolicy="no-referrer"
-          />
-        )}
         {source && (
           <Button
             asChild
@@ -69,14 +71,6 @@ export function ToolMedia({
           <p role="status" className="text-sm leading-6 text-muted-foreground">
             {t(source ? 'files.mediaError' : 'chat.readFile.mediaUnavailable')}
           </p>
-        ) : kind === 'image' ? (
-          <PreviewImage
-            src={source}
-            alt={name}
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={onError}
-          />
         ) : kind === 'video' ? (
           <video
             src={source}

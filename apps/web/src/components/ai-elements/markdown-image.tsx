@@ -9,13 +9,17 @@ import { useTranslation } from 'react-i18next';
 import type { ExtraProps } from 'streamdown';
 import type { WorkspaceFileReference } from '@aime/shared/files';
 import { fileErrorKey, filesApi } from '@/components/file-manager/api';
-import { WorkspaceFileThreadContext } from '@/components/file-manager/context';
+import {
+  WorkspaceFileThreadContext,
+  useWorkspaceFile,
+} from '@/components/file-manager/context';
+import { PreviewImage } from '@/components/image-viewer/preview-image';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { getWorkspaceFileTarget } from './markdown-file-link';
 
 type MarkdownImageProps = ComponentProps<'img'> & ExtraProps;
-const imageClassName = 'my-2 max-h-[60vh] max-w-full rounded-lg object-contain';
+const imageClassName = 'max-h-[60vh] max-w-full rounded-lg object-contain';
 
 export function MarkdownImage({
   src,
@@ -24,6 +28,20 @@ export function MarkdownImage({
   title,
 }: MarkdownImageProps) {
   const threadId = useContext(WorkspaceFileThreadContext);
+  if (typeof src !== 'string' || !src) return <span>{alt}</span>;
+  if (!src.toLowerCase().startsWith('streamdown:workspace-file/')) {
+    return (
+      <PreviewImage
+        inline
+        src={src}
+        alt={alt}
+        title={title}
+        referrerPolicy="no-referrer"
+        containerClassName="my-2"
+        className={cn(imageClassName, className)}
+      />
+    );
+  }
   const target = getWorkspaceFileTarget(
     typeof src === 'string' ? src : undefined,
   );
@@ -55,6 +73,7 @@ function WorkspaceMarkdownImage({
   title?: string;
 }) {
   const { t } = useTranslation();
+  const openFile = useWorkspaceFile();
   const container = useRef<HTMLSpanElement>(null);
   const [target, setTarget] = useState<WorkspaceFileReference>();
   const [error, setError] = useState<
@@ -110,13 +129,19 @@ function WorkspaceMarkdownImage({
       data-workspace-image={path}
     >
       {url && !unavailable ? (
-        <img
+        <PreviewImage
+          inline
           src={url}
-          alt={alt}
+          alt={alt || path.split('/').at(-1) || path}
           title={title}
-          loading="lazy"
+          downloadUrl={
+            threadId && target
+              ? filesApi.raw(threadId, target.path, true, target.scope)
+              : undefined
+          }
           className={cn(imageClassName, className)}
           onError={() => setError('files.mediaError')}
+          onOpen={openFile ? () => openFile(path) : undefined}
         />
       ) : (
         <span

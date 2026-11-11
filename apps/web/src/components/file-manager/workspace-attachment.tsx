@@ -118,6 +118,7 @@ function WorkspaceAttachmentContent({
                   containerClassName="w-full"
                   className="max-h-80 rounded-none"
                   onError={() => setMediaFailed(true)}
+                  onOpen={openFile ? () => openFile(file.path) : undefined}
                 />
               ) : (
                 <video
@@ -137,45 +138,47 @@ function WorkspaceAttachmentContent({
               aria-label={t('files.loading')}
             />
           ) : null}
-          <div className="flex min-w-0 items-center gap-2 p-2">
-            <Button
-              type="button"
-              variant="ghost"
-              className="h-auto min-w-0 flex-1 justify-start gap-2 px-2 py-1.5 text-sm font-normal"
-              disabled={!openFile}
-              onClick={() => openFile?.(file.path)}
-              title={file.path}
-            >
-              <File
-                className="size-4 shrink-0 text-muted-foreground"
-                aria-hidden="true"
-              />
-              <span className="truncate">{file.name}</span>
-            </Button>
-            {downloadUrl ? (
-              <Button asChild variant="ghost" size="icon-sm">
-                <a
-                  href={downloadUrl}
-                  download={file.name}
+          {(kind !== 'image' || !url || mediaFailed) && (
+            <div className="flex min-w-0 items-center gap-2 p-2">
+              <Button
+                type="button"
+                variant="ghost"
+                className="h-auto min-w-0 flex-1 justify-start gap-2 px-2 py-1.5 text-sm font-normal"
+                disabled={!openFile}
+                onClick={() => openFile?.(file.path)}
+                title={file.path}
+              >
+                <File
+                  className="size-4 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <span className="truncate">{file.name}</span>
+              </Button>
+              {downloadUrl ? (
+                <Button asChild variant="ghost" size="icon-sm">
+                  <a
+                    href={downloadUrl}
+                    download={file.name}
+                    aria-label={downloadLabel}
+                    title={downloadLabel}
+                  >
+                    <Download className="size-4" aria-hidden="true" />
+                  </a>
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled
                   aria-label={downloadLabel}
                   title={downloadLabel}
                 >
                   <Download className="size-4" aria-hidden="true" />
-                </a>
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                disabled
-                aria-label={downloadLabel}
-                title={downloadLabel}
-              >
-                <Download className="size-4" aria-hidden="true" />
-              </Button>
-            )}
-          </div>
+                </Button>
+              )}
+            </div>
+          )}
           {(error || mediaFailed || !threadId) && (
             <div className="space-y-2 border-t px-3 py-2 text-xs text-muted-foreground">
               <p role="status">

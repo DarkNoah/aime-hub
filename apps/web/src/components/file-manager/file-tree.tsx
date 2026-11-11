@@ -214,6 +214,7 @@ function Directory({
             key={entry.path}
             entry={entry}
             scope={state.scope}
+            downloadUrl={state.client.raw(entry.path, true)}
             onAction={onAction}
             onUpload={onUpload}
           >

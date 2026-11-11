@@ -29,6 +29,7 @@ import {
   ToolOutput,
 } from '@/components/ai-elements/tool';
 import { Button } from '@/components/ui/button';
+import { PreviewImage } from '@/components/image-viewer/preview-image';
 import { ChatBackgroundTask } from './chat-background-task';
 import { ChatMessageActions } from './chat-message-actions';
 import { ChatMessageAttachments } from './chat-message-attachments';
@@ -372,7 +373,7 @@ export const ChatMessage = memo(function ChatMessage({
             }
             if (part.type === 'file' && part.mediaType.startsWith('image/'))
               return (
-                <img
+                <PreviewImage
                   key={index}
                   src={part.url}
                   alt={part.filename ?? t('chat.image')}

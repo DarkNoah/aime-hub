@@ -8,7 +8,6 @@ import {
   Attachments,
 } from '@/components/ai-elements/attachments';
 import { PreviewImage } from '@/components/image-viewer/preview-image';
-import { ImageEditButton } from '@/components/image-viewer/image-edit-button';
 import { useWorkspaceFile } from '@/components/file-manager/context';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -101,6 +100,7 @@ export function ChatToolAttachments({
                 : 'h-48 object-cover',
             )}
             onPreview={() => setPreviewId(file.id)}
+            onOpen={canPreview ? openPreview : undefined}
           />
         ) : kind === 'video' ? (
           <video
@@ -121,43 +121,37 @@ export function ChatToolAttachments({
             <AttachmentPreview className="h-20" />
           </button>
         )}
-        <div className="flex min-w-0 items-center gap-1 border-t px-2 py-1">
-          <button
-            type="button"
-            onClick={openPreview}
-            disabled={!canPreview}
-            aria-label={previewLabel}
-            title={file.workspacePath || name}
-            className="min-w-0 flex-1 truncate rounded px-1 py-1 text-left text-xs text-muted-foreground enabled:hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
-          >
-            {name}
-          </button>
-          {kind === 'image' && (
-            <ImageEditButton
-              src={file.url}
-              name={name}
-              referrerPolicy="no-referrer"
-              className="size-6"
-            />
-          )}
-          <Button
-            asChild
-            variant="ghost"
-            size="icon-sm"
-            className="size-6 shrink-0 text-muted-foreground"
-            aria-label={`${t('files.download')}: ${name}`}
-            title={t('files.download')}
-          >
-            <a
-              href={file.url}
-              download={name}
-              target="_blank"
-              rel="noopener noreferrer"
+        {kind !== 'image' && (
+          <div className="flex min-w-0 items-center gap-1 border-t px-2 py-1">
+            <button
+              type="button"
+              onClick={openPreview}
+              disabled={!canPreview}
+              aria-label={previewLabel}
+              title={file.workspacePath || name}
+              className="min-w-0 flex-1 truncate rounded px-1 py-1 text-left text-xs text-muted-foreground enabled:hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
             >
-              <Download className="size-3.5" aria-hidden="true" />
-            </a>
-          </Button>
-        </div>
+              {name}
+            </button>
+            <Button
+              asChild
+              variant="ghost"
+              size="icon-sm"
+              className="size-6 shrink-0 text-muted-foreground"
+              aria-label={`${t('files.download')}: ${name}`}
+              title={t('files.download')}
+            >
+              <a
+                href={file.url}
+                download={name}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Download className="size-3.5" aria-hidden="true" />
+              </a>
+            </Button>
+          </div>
+        )}
       </Attachment>
     );
   };

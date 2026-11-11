@@ -383,6 +383,7 @@ function FileManagerPane({
                             <EntryActions
                               entry={matches[0]}
                               scope={state.scope}
+                              downloadUrl={state.client.raw(path, true)}
                               onAction={setAction}
                               onUpload={chooseUpload}
                             >

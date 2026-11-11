@@ -1,6 +1,7 @@
 import { useContext, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  Download,
   FilePlus2,
   FolderPlus,
   MoreHorizontal,
@@ -31,6 +32,7 @@ export function EntryActions({
   children,
   onAction,
   onUpload,
+  downloadUrl,
   dropTarget = false,
   scope,
 }: {
@@ -38,6 +40,7 @@ export function EntryActions({
   children: ReactNode;
   onAction: (action: EntryAction) => void;
   onUpload?: (directory: string) => void;
+  downloadUrl?: string;
   dropTarget?: boolean;
   scope?: FileScope;
 }) {
@@ -85,6 +88,14 @@ export function EntryActions({
         </DropdownMenuTrigger>
       </div>
       <DropdownMenuContent align="end">
+        {entry.kind === 'file' && downloadUrl && (
+          <DropdownMenuItem asChild>
+            <a href={downloadUrl} download={entry.name}>
+              <Download />
+              {t('files.download')}
+            </a>
+          </DropdownMenuItem>
+        )}
         {onUpload && (
           <DropdownMenuItem
             onSelect={() =>
