@@ -23,6 +23,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { E2BDesktopSettings } from './components/e2b-desktop-settings';
 import { AppNameSettings } from './components/app-name-settings';
+import { MessageCompressionSettings } from './components/message-compression-settings';
 import { useAppBranding } from '@/features/settings/app-branding-context';
 
 export function AdminSettingsPage() {
@@ -72,7 +73,9 @@ export function AdminSettingsPage() {
               : code === 'VALIDATION_ERROR'
                 ? body.appName !== undefined
                   ? 'settings.appNameInvalid'
-                  : 'settings.desktopInvalid'
+                  : body.messageCompressionTokens !== undefined
+                    ? 'settings.messageCompressionInvalid'
+                    : 'settings.desktopInvalid'
                 : code === 'E2B_MANAGED_CONFIG'
                   ? 'settings.desktopManagedError'
                   : 'errors.request',
@@ -215,6 +218,13 @@ export function AdminSettingsPage() {
           )}
         </CardContent>
       </Card>
+      {settings && (
+        <MessageCompressionSettings
+          tokens={settings.messageCompressionTokens}
+          saving={saving || loadError}
+          onSave={updateSettings}
+        />
+      )}
       {settings && (
         <E2BDesktopSettings
           settings={settings}

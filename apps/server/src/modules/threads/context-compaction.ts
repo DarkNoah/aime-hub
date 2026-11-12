@@ -87,6 +87,7 @@ export class ContextBudget {
 /** Add a provider-usage trigger while retaining Mastra's native turn lifecycle. */
 class ContextObservationalMemory extends ObservationalMemory {
   private forcingObservation = false;
+  private messageTokens: number | undefined;
 
   constructor(
     config: ObservationalMemoryConfig,
@@ -95,10 +96,17 @@ class ContextObservationalMemory extends ObservationalMemory {
     super(config);
   }
 
+  setMessageTokens(value: number) {
+    this.messageTokens = value;
+  }
+
   override async getStatus(
     opts: Parameters<ObservationalMemory['getStatus']>[0],
   ) {
-    const status = await super.getStatus(opts);
+    const status = await super.getStatus({
+      ...opts,
+      record: opts.record ? this.withThreshold(opts.record) : undefined,
+    });
     if (this.budget.shouldCompact && status.pendingTokens > 0)
       return { ...status, shouldObserve: true, threshold: 1 };
     return status;
@@ -106,9 +114,15 @@ class ContextObservationalMemory extends ObservationalMemory {
 
   override async getOrCreateRecord(threadId: string, resourceId?: string) {
     const record = await super.getOrCreateRecord(threadId, resourceId);
-    if (!this.forcingObservation) return record;
-    // observe() rechecks the threshold inside its lock. Supply a transient view
-    // for that call only: never write 1 to storage or mutate a cached turn record.
+    return this.withThreshold(record);
+  }
+
+  private withThreshold(record: ObservationalMemoryRecord) {
+    const messageTokens = this.forcingObservation ? 1 : this.messageTokens;
+    if (messageTokens === undefined) return record;
+    // Both status checks (including cached turn records) and observe()'s locked
+    // recheck use the latest global threshold. Keep this override transient so
+    // neither it nor the usage-triggered threshold of 1 sticks to the thread.
     const overrides = record.config?._overrides as
       { observation?: Record<string, unknown> } | undefined;
     return {
@@ -117,7 +131,7 @@ class ContextObservationalMemory extends ObservationalMemory {
         ...record.config,
         _overrides: {
           ...overrides,
-          observation: { ...overrides?.observation, messageTokens: 1 },
+          observation: { ...overrides?.observation, messageTokens },
         },
       },
     } satisfies ObservationalMemoryRecord;
@@ -127,7 +141,7 @@ class ContextObservationalMemory extends ObservationalMemory {
     this.forcingObservation = this.budget.shouldCompact;
     try {
       const result = await super.observe(opts);
-      // Also consume usage when the ordinary 30k condition fired first.
+      // Also consume usage when the configured message threshold fired first.
       if (result.observed) await this.budget.consume();
       return result;
     } finally {
@@ -137,6 +151,8 @@ class ContextObservationalMemory extends ObservationalMemory {
 }
 
 export class ContextCompactionProcessor extends ObservationalMemoryProcessor {
+  private readonly contextEngine: ContextObservationalMemory;
+
   constructor(
     config: ObservationalMemoryConfig,
     private readonly contextMemory: MemoryContextProvider,
@@ -145,8 +161,11 @@ export class ContextCompactionProcessor extends ObservationalMemoryProcessor {
       args: ProcessInputStepArgs,
     ) => Promise<number | undefined>,
     private readonly onError: (error: unknown) => void,
+    private readonly resolveMessageTokens?: () => Promise<number>,
   ) {
-    super(new ContextObservationalMemory(config, budget), contextMemory);
+    const engine = new ContextObservationalMemory(config, budget);
+    super(engine, contextMemory);
+    this.contextEngine = engine;
   }
 
   override async processInputStep(args: ProcessInputStepArgs) {
@@ -173,6 +192,8 @@ export class ContextCompactionProcessor extends ObservationalMemoryProcessor {
           await this.contextMemory.persistMessages(completedTools);
         args.state.resumedToolsPersisted = true;
       }
+      if (this.resolveMessageTokens)
+        this.contextEngine.setMessageTokens(await this.resolveMessageTokens());
       this.budget.setLimit(await this.resolveLimit(args));
       return await super.processInputStep(args);
     } catch (error) {

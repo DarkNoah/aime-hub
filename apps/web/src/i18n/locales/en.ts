@@ -2793,6 +2793,15 @@ export const en = {
   'settings.appNameLimit':
     'Use 1–80 characters. Leading and trailing spaces are removed.',
   'settings.appNameInvalid': 'Enter an application name with 1–80 characters.',
+  'settings.messageCompression': 'Message compression',
+  'settings.messageCompressionHint':
+    'Automatically summarize uncompressed messages when they reach this token count. Default: {{tokens}} tokens.',
+  'settings.messageCompressionThreshold': 'Automatic compression threshold',
+  'settings.messageCompressionEdit': 'Edit compression threshold',
+  'settings.messageCompressionEffect':
+    'Applies to the next model call in all conversations after saving. Context usage reaching 80% of the model limit can still trigger compression earlier.',
+  'settings.messageCompressionInvalid':
+    'Enter a whole token count greater than 0.',
   'settings.registrationTitle': 'Account registration',
   'settings.allowRegistration': 'Allow new account registration',
   'settings.registrationHint':

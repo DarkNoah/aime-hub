@@ -262,6 +262,7 @@ const threads = new ThreadService(
     localApi,
     plugins,
     groupChats,
+    async () => (await systemSettings.get()).messageCompressionTokens,
   ),
   projects,
   mastra.backgroundTaskManager,

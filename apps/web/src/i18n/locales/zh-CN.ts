@@ -2546,6 +2546,14 @@ export const zhCN = {
   'settings.appNameEdit': '修改名称',
   'settings.appNameLimit': '支持 1–80 个字符，首尾空格会自动去除。',
   'settings.appNameInvalid': '请输入 1–80 个字符的应用名称。',
+  'settings.messageCompression': '消息压缩',
+  'settings.messageCompressionHint':
+    '未压缩消息达到此 token 数时自动生成记忆摘要，默认 {{tokens}} tokens。',
+  'settings.messageCompressionThreshold': '自动压缩阈值',
+  'settings.messageCompressionEdit': '修改压缩阈值',
+  'settings.messageCompressionEffect':
+    '保存后对所有会话的下一次模型调用生效。上下文用量达到模型上限 80% 时仍会提前触发压缩。',
+  'settings.messageCompressionInvalid': '请输入大于 0 的整数 token 数。',
   'settings.registrationTitle': '账号注册',
   'settings.allowRegistration': '允许注册新账号',
   'settings.registrationHint':

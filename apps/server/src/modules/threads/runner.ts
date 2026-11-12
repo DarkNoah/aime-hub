@@ -34,6 +34,7 @@ import { createObservabilityContext } from '@mastra/core/observability';
 import { ThreadMessageMemory } from './message-memory.js';
 import type { ResolveMemoryConfig } from '../../mastra/memory.js';
 import { chatSettingsSchema, type ChatSettings } from '@aime/shared/threads';
+import { defaultSystemSettings } from '@aime/shared/system-settings';
 import {
   reconcileThreadMessages,
   sortThreadMessages,
@@ -116,6 +117,8 @@ export function createChatRunner(
   localApi?: LocalApiAccess,
   plugins?: Pick<PluginService, 'workspaceDirectory' | 'access'>,
   groupChats?: GroupChatService,
+  getMessageCompressionTokens: () => Promise<number> = async () =>
+    defaultSystemSettings.messageCompressionTokens,
 ): ChatRunner {
   const getConfig = async (
     id?: string | null,
@@ -318,7 +321,7 @@ export function createChatRunner(
         model: resolved.model,
         scope: 'thread',
         observation: {
-          messageTokens: 30_000,
+          messageTokens: await getMessageCompressionTokens(),
           bufferTokens: false,
           failurePolicy: 'abort',
         },
@@ -372,6 +375,7 @@ export function createChatRunner(
           return (await sessionModel(selected)).maxContextTokens;
         },
         (error) => onEvent({ type: 'error', error }),
+        getMessageCompressionTokens,
       );
       const filesystem =
         projectId && !workspacePlugin

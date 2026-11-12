@@ -24,6 +24,10 @@ const storedSettingsSchema = systemSettingsSchema
       systemSettingsSchema.shape.requestLoggingEnabled.default(
         defaultSystemSettings.requestLoggingEnabled,
       ),
+    messageCompressionTokens:
+      systemSettingsSchema.shape.messageCompressionTokens.default(
+        defaultSystemSettings.messageCompressionTokens,
+      ),
     e2bDesktopEnabled:
       systemSettingsSchema.shape.e2bDesktopEnabled.default(false),
     e2bDesktopApiUrl: systemSettingsSchema.shape.e2bDesktopApiUrl.default(''),

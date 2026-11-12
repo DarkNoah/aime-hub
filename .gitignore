@@ -107,3 +107,6 @@ plugins/vibe-quant/**/__pycache__/
 !apps/server/src/modules/threads/browser-proxy.test.ts
 !apps/server/src/modules/threads/browser-close.test.ts
 !scripts/browser-close-input.test.mjs
+
+!scripts/system-settings.test.ts
+!apps/server/src/modules/threads/context-compaction.test.ts
