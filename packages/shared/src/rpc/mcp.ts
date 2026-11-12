@@ -7,10 +7,31 @@ import {
   mcpStatusSchema,
   type McpServer,
   type McpToolDefinition,
+  type McpAuthorization,
 } from '../mcp.js';
 
 const params = z.object({ id });
 export const mcpContract = {
+  authorize: procedure
+    .route({
+      method: 'POST',
+      path: '/admin/mcp/{id}/oauth/authorize',
+      inputStructure: 'detailed',
+    })
+    .input(
+      z.object({ params, body: z.object({ revision: z.string().uuid() }) }),
+    )
+    .output(type<{ authorizationUrl: string }>()),
+  disconnectOAuth: procedure
+    .route({
+      method: 'POST',
+      path: '/admin/mcp/{id}/oauth/disconnect',
+      inputStructure: 'detailed',
+    })
+    .input(
+      z.object({ params, body: z.object({ revision: z.string().uuid() }) }),
+    )
+    .output(type<McpServer>()),
   load: procedure
     .route({
       method: 'POST',
@@ -82,4 +103,30 @@ export const mcpContract = {
       z.object({ params, query: z.object({ revision: z.string().uuid() }) }),
     )
     .output(type<void>()),
+};
+
+export const mcpAuthContract = {
+  list: procedure
+    .route({
+      method: 'GET',
+      path: '/mcp/authorizations',
+      inputStructure: 'detailed',
+    })
+    .output(type<McpAuthorization[]>()),
+  get: procedure
+    .route({
+      method: 'GET',
+      path: '/mcp/authorizations/{id}',
+      inputStructure: 'detailed',
+    })
+    .input(z.object({ params }))
+    .output(type<McpAuthorization>()),
+  authorize: procedure
+    .route({
+      method: 'POST',
+      path: '/mcp/authorizations/{id}',
+      inputStructure: 'detailed',
+    })
+    .input(z.object({ params, body: z.object({ returnTo: z.string() }) }))
+    .output(type<{ authorizationUrl: string }>()),
 };

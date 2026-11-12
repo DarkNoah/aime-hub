@@ -17,7 +17,7 @@ import { requestLogsContract } from './request-logs.js';
 import { toolsContract } from './tools.js';
 import { agentsContract } from './agents.js';
 import { localAgentsContract } from './local-agents.js';
-import { mcpContract } from './mcp.js';
+import { mcpContract, mcpAuthContract } from './mcp.js';
 import { automationsContract } from './automations.js';
 import { notificationsContract } from './notifications.js';
 import { assetsContract } from './assets.js';
@@ -43,6 +43,7 @@ export const apiContract = {
   agents: agentsContract,
   localAgents: localAgentsContract,
   mcp: mcpContract,
+  mcpAuth: mcpAuthContract,
   automations: automationsContract,
   notifications: notificationsContract,
   assets: assetsContract,

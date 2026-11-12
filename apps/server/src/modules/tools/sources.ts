@@ -26,7 +26,12 @@ export class McpTools extends BaseTool<ToolDependencies> {
     _config: ToolDefaultConfigs,
     dependencies: ToolDependencies,
   ) {
-    return toolArray((await dependencies.mcpTools?.()) ?? {});
+    const userId = dependencies.context?.requestContext?.get('userId');
+    return toolArray(
+      (await dependencies.mcpTools?.(
+        typeof userId === 'string' ? userId : undefined,
+      )) ?? {},
+    );
   }
 }
 

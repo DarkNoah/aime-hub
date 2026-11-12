@@ -4,6 +4,7 @@ import { isCompletedIntelligentUiPart } from '@aime/shared/intelligent-ui';
 import {
   hasChatTurnDetails,
   isCompletedAskUserPart,
+  isCompletedAuthorizationPart,
   isSubagentTool,
   type ChatSubagentSummary,
   type ChatTurnSummary,
@@ -126,7 +127,11 @@ export function summarizeTurn(
         assistantMessage ??= message;
         overview.push(image);
       }
-      if (isCompletedIntelligentUiPart(part) || isCompletedAskUserPart(part)) {
+      if (
+        isCompletedIntelligentUiPart(part) ||
+        isCompletedAskUserPart(part) ||
+        isCompletedAuthorizationPart(part)
+      ) {
         assistantMessage ??= message;
         overview.push(part);
       }

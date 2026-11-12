@@ -1,5 +1,6 @@
 import { createProviderInstance } from '../../mastra/providers/registry.js';
 import type { ResolveIssues } from '../../mastra/tools/issue.js';
+import type { McpService } from '../mcp/service.js';
 import type { KnowledgeService } from '../knowledge/service.js';
 import type { AudioService } from '../audio/service.js';
 import type { ResolveAutomations } from '../../mastra/tools/automations.js';
@@ -61,7 +62,10 @@ export class ToolService {
       'getProvider' | 'getDefaults' | 'getModel' | 'getProviderInstance'
     >,
     private readonly assets?: Pick<AssetService, 'record'>,
-    private readonly mcp?: { getTools(): Promise<ToolsInput> },
+    private readonly mcp?: {
+      getTools(userId?: string): Promise<ToolsInput>;
+      authorizations?: McpService['authorizations'];
+    },
     private readonly plugins?: PluginService,
     private readonly knowledge?: KnowledgeService,
     private readonly automations?: ResolveAutomations,
@@ -351,7 +355,10 @@ export class ToolService {
           this.plugins?.tools(defaults, dependencies, options) ??
           Promise.resolve({}),
         ownsPluginTool: (id) => this.plugins?.ownsTool(id) ?? false,
-        mcpTools: () => this.mcp?.getTools() ?? Promise.resolve({}),
+        mcpTools: (userId) => this.mcp?.getTools(userId) ?? Promise.resolve({}),
+        mcpAuthorization: this.mcp?.authorizations
+          ? { authorizations: this.mcp.authorizations.bind(this.mcp) }
+          : undefined,
         loadConfig: (id) => this.loadConfig(id),
         searchProvider: (id, timeoutMs) => this.searchProvider(id, timeoutMs),
         fetchProvider: (id, timeoutMs) => this.fetchProvider(id, timeoutMs),

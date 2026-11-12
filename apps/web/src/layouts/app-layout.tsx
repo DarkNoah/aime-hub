@@ -6,6 +6,7 @@ import { ChevronRight, Menu } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
+import { LanguageToggle } from '@/components/language-toggle';
 import {
   Sheet,
   SheetContent,
@@ -186,6 +187,7 @@ function LayoutContent() {
               <span className="size-1.5 rounded-full bg-primary" aria-hidden />
               {t('nav.initialVersion')}
             </Badge>
+            <LanguageToggle />
             <ThemeToggle />
           </div>
         </header>

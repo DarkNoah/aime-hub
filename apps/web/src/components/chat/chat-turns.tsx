@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import {
   hasChatTurnDetails,
+  isCompletedAuthorizationPart,
   type ChatTurnDetail,
   type ChatTurnSummary,
 } from '@aime/shared/chat-turns';
@@ -231,6 +232,19 @@ const ChatTurnRow = memo(function ChatTurnRow({
             ))}
         </div>
       )}
+      {detailsExpanded &&
+        turn.assistant?.parts.some(isCompletedAuthorizationPart) && (
+          <ChatMessage
+            message={{
+              ...turn.assistant,
+              parts: turn.assistant.parts.filter(isCompletedAuthorizationPart),
+            }}
+            threadId={threadId}
+            streaming={false}
+            showReasoning={false}
+            hideToolDetails
+          />
+        )}
       {detailsExpanded && detail ? (
         <div className="min-w-0 space-y-6" data-chat-turn-detail={turn.id}>
           <ChatMessages
@@ -247,6 +261,7 @@ const ChatTurnRow = memo(function ChatTurnRow({
                       isToolUIPart(part) &&
                       pendingToolCallIds.has(part.toolCallId)
                     ) &&
+                    !isCompletedAuthorizationPart(part) &&
                     (!isIntelligentUiPart(part) ||
                       isCompletedIntelligentUiPart(part)),
                 ),

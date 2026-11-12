@@ -2,6 +2,18 @@ import { isToolUIPart, type UIMessage, type ToolUIPart } from 'ai';
 import { getMessageCompression } from './message-compression.js';
 import type { ThreadSnapshot } from './threads.js';
 import { isIntelligentUiPart } from './intelligent-ui.js';
+import { MCP_AUTHORIZATION_TOOL } from './mcp.js';
+
+export function isCompletedAuthorizationPart(part: UIMessage['parts'][number]) {
+  return (
+    isToolUIPart(part) &&
+    (part.type === 'dynamic-tool' ? part.toolName : part.type.slice(5)) ===
+      MCP_AUTHORIZATION_TOOL &&
+    (part.state === 'output-available' ||
+      part.state === 'output-error' ||
+      part.state === 'output-denied')
+  );
+}
 
 export function isSubagentTool(
   name: string | undefined,
@@ -35,7 +47,11 @@ export function hasChatTurnDetails(messages: readonly UIMessage[]) {
         if (part.type === 'text') return !!part.text.trim() && ++textCount > 1;
         if (part.type === 'reasoning') return !!part.text.trim();
         if (isToolUIPart(part))
-          return !isIntelligentUiPart(part) && !isCompletedAskUserPart(part);
+          return (
+            !isIntelligentUiPart(part) &&
+            !isCompletedAskUserPart(part) &&
+            !isCompletedAuthorizationPart(part)
+          );
         if (part.type === 'file') return part.mediaType.startsWith('image/');
         if (part.type === 'data-background-task-completed') {
           const data = part.data;

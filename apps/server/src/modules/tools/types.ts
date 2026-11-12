@@ -1,4 +1,5 @@
 import type { ResolveIssues } from '../../mastra/tools/issue.js';
+import type { McpService } from '../mcp/service.js';
 import type { ToolsInput } from '@mastra/core/agent';
 import type {
   RegisteredTool,
@@ -37,7 +38,8 @@ export type ToolDependencies = SharedToolDependencies & {
   issues?: ResolveIssues;
   knowledgeSearch?: KnowledgeService['searchContext'];
   knowledge?: KnowledgeService;
-  mcpTools?: () => Promise<ToolsInput>;
+  mcpTools?: (userId?: string) => Promise<ToolsInput>;
+  mcpAuthorization?: Pick<McpService, 'authorizations'>;
   pluginTools?: (
     config: ToolDefaultConfigs,
     dependencies: ToolDependencies,

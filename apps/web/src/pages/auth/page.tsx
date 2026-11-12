@@ -16,6 +16,7 @@ import { useAuthSession } from '@/features/auth/session-context';
 import { useRegistrationStatus } from '@/features/auth/use-registration-status';
 import { Brand } from '@/components/brand';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
+import { LanguageToggle } from '@/components/language-toggle';
 import { Button } from '@/components/ui/button';
 import { PasswordInput } from '@/components/password-input';
 import { Input } from '@/components/ui/input';
@@ -134,6 +135,7 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
           <span className="hidden rounded-full border bg-card/70 px-3 py-1 text-xs text-muted-foreground sm:inline-flex">
             {t('auth.tagline')}
           </span>
+          <LanguageToggle />
           <ThemeToggle />
         </div>
       </header>

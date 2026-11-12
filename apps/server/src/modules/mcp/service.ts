@@ -14,9 +14,11 @@ import {
   type McpUpdate,
   type McpStatus,
   type McpToolDefinition,
+  type McpAuthorization,
 } from '@aime/shared/mcp';
 import { McpError } from './errors.js';
 import { createMcpClient, mcpDiscoveryTimeout } from './client.js';
+import { McpOAuth, oauthBinding } from './oauth.js';
 
 const marker = { managedBy: 'admin-mcp', configVersion: 1 };
 const metadataSchema = mcpInputSchema.extend({ revision: z.string().uuid() });
@@ -34,12 +36,14 @@ export class McpService {
     { revision: string; status: 'loading' | 'error' }
   >();
   private stopping = false;
+  private authEpochs = new Map<string, number>();
   constructor(
     private readonly store: MCPClientsStorage,
     private readonly clientFactory = createMcpClient,
+    private readonly oauth?: McpOAuth,
   ) {}
 
-  private view(row: StorageMCPClientType): McpServer {
+  private view(row: StorageMCPClientType, userId?: string): McpServer {
     const { name, config, revision } = metadataSchema.parse({
       name: row.metadata?.name,
       config: row.metadata?.config,
@@ -51,26 +55,38 @@ export class McpService {
       config,
       revision,
       status: row.status,
-      ...this.runtimeState({ id: row.id, revision, status: row.status }),
+      ...this.runtimeState(
+        { id: row.id, revision, status: row.status, config },
+        userId,
+      ),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
   }
 
   private runtimeState(
-    server: Pick<McpServer, 'id' | 'revision' | 'status'>,
+    server: Pick<McpServer, 'id' | 'revision' | 'status' | 'config'>,
+    userId?: string,
   ): Pick<McpServer, 'connectionStatus' | 'toolCount'> {
     if (server.status !== 'published') return { connectionStatus: 'unloaded' };
-    const state = this.loadStates.get(server.id);
+    const key = this.connectionKey(server, userId);
+    const state = this.loadStates.get(key);
     if (state?.revision === server.revision)
       return { connectionStatus: state.status };
-    const connection = this.connections.get(server.id);
+    const connection = this.connections.get(key);
     return connection?.revision === server.revision
       ? {
           connectionStatus: 'loaded',
           toolCount: Object.keys(connection.tools).length,
         }
       : { connectionStatus: 'unloaded' };
+  }
+
+  private connectionKey(
+    server: Pick<McpServer, 'id' | 'config'>,
+    userId?: string,
+  ) {
+    return server.config.oauth ? `${server.id}:${userId ?? ''}` : server.id;
   }
 
   private async record(id: string) {
@@ -84,21 +100,38 @@ export class McpService {
     return row;
   }
 
-  async get(id: string) {
-    return this.view(await this.record(id));
+  async get(id: string, userId?: string) {
+    return this.withAuthStatus(
+      this.view(await this.record(id), userId),
+      userId,
+    );
   }
 
-  async list(): Promise<McpServer[]> {
+  private async withAuthStatus(
+    server: McpServer,
+    userId?: string,
+  ): Promise<McpServer> {
+    if (!server.config.oauth) return server;
+    return {
+      ...server,
+      authStatus: (await this.oauth?.status(server, userId)) ?? 'required',
+    };
+  }
+
+  async list(userId?: string): Promise<McpServer[]> {
     // Mastra's default list only includes published records. The editor also needs drafts.
     const pages = await Promise.all(
       (['draft', 'published', 'archived'] as const).map((status) =>
         this.store.list({ status, metadata: marker, perPage: false }),
       ),
     );
-    return pages
+    const servers = pages
       .flatMap((page) => page.mcpClients)
-      .map((row) => this.view(row))
+      .map((row) => this.view(row, userId))
       .sort((a, b) => a.name.localeCompare(b.name));
+    return Promise.all(
+      servers.map((server) => this.withAuthStatus(server, userId)),
+    );
   }
 
   create(authorId: string, input: McpCreate) {
@@ -138,7 +171,7 @@ export class McpService {
     });
   }
 
-  update(id: string, input: McpUpdate) {
+  update(id: string, input: McpUpdate, userId?: string) {
     return this.exclusive(async () => {
       const { revision, ...server } = mcpUpdateSchema.parse(input);
       const row = await this.record(id);
@@ -150,43 +183,45 @@ export class McpService {
       )
         throw new McpError('MCP_NAME_CONFLICT', 409);
       const nextRevision = randomUUID();
+      const previous = this.view(row);
+      const authChanged =
+        oauthBinding(previous.config) !== oauthBinding(server.config);
       const candidate =
-        row.status === 'published'
+        row.status === 'published' && !server.config.oauth
           ? await this.probe({
               ...this.view(row),
               ...server,
               revision: nextRevision,
             })
           : undefined;
-      let updated;
       try {
         // Replace the nested config as a whole: changing transport must clear the old fields.
-        updated = this.view(
-          await this.store.update({
-            id,
-            metadata: {
-              ...row.metadata,
-              ...server,
-              revision: nextRevision,
-            },
-          }),
-        );
+        await this.store.update({
+          id,
+          metadata: {
+            ...row.metadata,
+            ...server,
+            revision: nextRevision,
+          },
+        });
       } catch (error) {
         if (candidate) await this.disconnect(candidate);
         throw error;
       }
-      await this.replace(id, candidate);
-      return { ...updated, ...this.runtimeState(updated) };
+      if (authChanged) await this.oauth?.remove(id);
+      await this.invalidate(id);
+      if (candidate) await this.replace(id, candidate);
+      return this.get(id, userId);
     });
   }
 
-  setStatus(id: string, input: McpStatus) {
+  setStatus(id: string, input: McpStatus, userId?: string) {
     return this.exclusive(async () => {
       const { status, revision } = mcpStatusSchema.parse(input);
       const row = await this.record(id);
       this.checkRevision(row, revision);
       const server = this.view(row);
-      if (server.status === status) return server;
+      if (server.status === status) return this.get(id, userId);
       const version =
         status === 'published'
           ? await this.store.getLatestVersion(id)
@@ -194,27 +229,25 @@ export class McpService {
       if (status === 'published' && !version)
         throw new McpError('MCP_CONFIG_INVALID', 409);
       const nextRevision = randomUUID();
-      // Discovery must finish successfully before the native publication state changes.
+      // OAuth connections are published for everyone; each user authorizes independently.
       const candidate =
-        status === 'published'
+        status === 'published' && !server.config.oauth
           ? await this.probe({ ...server, revision: nextRevision })
           : undefined;
-      let updated;
       try {
-        updated = this.view(
-          await this.store.update({
-            id,
-            status,
-            ...(version ? { activeVersionId: version.id } : {}),
-            metadata: { ...row.metadata, revision: nextRevision },
-          }),
-        );
+        await this.store.update({
+          id,
+          status,
+          ...(version ? { activeVersionId: version.id } : {}),
+          metadata: { ...row.metadata, revision: nextRevision },
+        });
       } catch (error) {
         if (candidate) await this.disconnect(candidate);
         throw error;
       }
-      await this.replace(id, candidate);
-      return { ...updated, ...this.runtimeState(updated) };
+      await this.invalidate(id);
+      if (candidate) await this.replace(id, candidate);
+      return this.get(id, userId);
     });
   }
 
@@ -223,7 +256,8 @@ export class McpService {
       const row = await this.record(id);
       this.checkRevision(row, revision);
       await this.store.delete(id);
-      await this.replace(id);
+      await this.oauth?.remove(id);
+      await this.invalidate(id);
     });
   }
 
@@ -245,7 +279,9 @@ export class McpService {
 
   /** Run after HTTP starts; each server probes independently without holding the mutation queue. */
   async initialize() {
-    const servers = await this.published();
+    const servers = (await this.published()).filter(
+      (server) => !server.config.oauth,
+    );
     const results = await Promise.allSettled(
       servers.map(async (server) => {
         if (this.connections.get(server.id)?.revision === server.revision)
@@ -264,12 +300,31 @@ export class McpService {
   }
 
   /** Agents share the process-owned clients. Constructing an Agent never creates a client. */
-  async getTools(): Promise<ToolMap> {
+  async getTools(userId?: string): Promise<ToolMap> {
     if (this.stopping) throw new McpError('MCP_UNAVAILABLE', 503);
     const servers = await this.published();
     const tools: ToolMap = {};
     for (const server of servers) {
-      const connection = this.connections.get(server.id);
+      if (server.config.oauth) {
+        if (
+          !userId ||
+          (await this.oauth?.status(server, userId)) !== 'authorized'
+        )
+          continue;
+        if (
+          this.connections.get(this.connectionKey(server, userId))?.revision !==
+          server.revision
+        ) {
+          try {
+            await this.load(server.id, userId);
+          } catch {
+            continue;
+          }
+        }
+      }
+      const connection = this.connections.get(
+        this.connectionKey(server, userId),
+      );
       // Read only: slow admin connection checks must not stall ongoing chats.
       // Missing connections are recovered by startup or an explicit connection test.
       if (connection?.revision === server.revision) {
@@ -284,10 +339,12 @@ export class McpService {
   }
 
   /** Read the native catalog over the resident client; serialize reads with connection replacement. */
-  listTools(id: string): Promise<McpToolDefinition[]> {
+  listTools(id: string, userId?: string): Promise<McpToolDefinition[]> {
     return this.exclusive(async () => {
       const [server] = await this.published([id]);
-      const connection = this.connections.get(id);
+      const connection = this.connections.get(
+        this.connectionKey(server, userId),
+      );
       if (!connection || connection.revision !== server.revision)
         throw new McpError('MCP_UNAVAILABLE', 503);
       try {
@@ -312,39 +369,51 @@ export class McpService {
     });
   }
 
-  async testConnection(id: string) {
-    const server = await this.load(id);
+  async testConnection(id: string, userId?: string) {
+    const server = await this.load(id, userId);
     return { toolCount: server.toolCount ?? 0 };
   }
 
   /** Discover first, then activate. Concurrent startup/UI requests share the same probe. */
-  async load(id: string): Promise<McpServer> {
+  async load(id: string, userId?: string): Promise<McpServer> {
     if (this.stopping) throw new McpError('MCP_UNAVAILABLE', 503);
     const [server] = await this.published([id]);
     if (this.stopping) throw new McpError('MCP_UNAVAILABLE', 503);
-    const key = `${id}:${server.revision}`;
+    const connectionKey = this.connectionKey(server, userId);
+    const epoch = this.authEpochs.get(connectionKey) ?? 0;
+    const key = `${connectionKey}:${server.revision}:${epoch}`;
     const pending = this.loads.get(key);
     if (pending) return pending;
-    const previous = this.connections.get(id);
-    this.loadStates.set(id, { revision: server.revision, status: 'loading' });
+    const previous = this.connections.get(connectionKey);
+    this.loadStates.set(connectionKey, {
+      revision: server.revision,
+      status: 'loading',
+    });
     const result = (async () => {
       let candidate: Connection | undefined;
       try {
         candidate =
           previous?.revision === server.revision
             ? previous
-            : await this.probe(server);
+            : await this.probe(server, userId);
         const tools =
           candidate === previous
-            ? this.guardedTools(server, await this.discover(candidate.client))
+            ? this.guardedTools(
+                server,
+                await this.discover(candidate.client, server, userId),
+                userId,
+              )
             : candidate.tools;
         return await this.exclusive(async () => {
           const [current] = await this.published([id]);
-          if (current.revision !== server.revision)
+          if (
+            current.revision !== server.revision ||
+            (this.authEpochs.get(connectionKey) ?? 0) !== epoch
+          )
             throw new McpError('MCP_CONFLICT', 409);
           candidate!.tools = tools;
-          await this.replace(id, candidate);
-          return { ...current, ...this.runtimeState(current) };
+          await this.replace(connectionKey, candidate);
+          return this.get(id, userId);
         });
       } catch (error) {
         if (candidate && candidate !== previous)
@@ -354,11 +423,13 @@ export class McpService {
           const current = await this.get(id);
           if (
             current.status !== 'published' ||
-            current.revision !== server.revision
+            current.revision !== server.revision ||
+            (this.authEpochs.get(connectionKey) ?? 0) !== epoch
           )
             return;
-          if (this.connections.get(id) === previous) await this.replace(id);
-          this.loadStates.set(id, {
+          if (this.connections.get(connectionKey) === previous)
+            await this.replace(connectionKey);
+          this.loadStates.set(connectionKey, {
             revision: server.revision,
             status: 'error',
           });
@@ -374,7 +445,7 @@ export class McpService {
     }
   }
 
-  private async discover(client: Client) {
+  private async discover(client: Client, server?: McpServer, userId?: string) {
     try {
       const { tools, errors } = await client.listToolsWithErrors({
         perServerTimeoutMs: mcpDiscoveryTimeout,
@@ -383,19 +454,33 @@ export class McpService {
         throw new McpError('MCP_CONNECTION_FAILED', 502);
       return tools;
     } catch {
+      if (
+        server?.config.oauth &&
+        (await this.oauth?.status(server, userId)) === 'required'
+      )
+        throw new McpError('MCP_AUTH_REQUIRED', 401);
       // Remote errors can contain credentials, process arguments and local paths.
       throw new McpError('MCP_CONNECTION_FAILED', 502);
     }
   }
 
-  private async probe(server: McpServer): Promise<Connection> {
-    const client = this.clientFactory([server]);
+  private async probe(server: McpServer, userId?: string): Promise<Connection> {
+    if (
+      server.config.oauth &&
+      (!userId || (await this.oauth?.status(server, userId)) !== 'authorized')
+    )
+      throw new McpError('MCP_AUTH_REQUIRED', 401);
+    const provider =
+      server.config.oauth && userId
+        ? await this.oauth?.provider(server, userId)
+        : undefined;
+    const client = this.clientFactory([server], { [server.name]: provider });
     try {
-      const tools = await this.discover(client);
+      const tools = await this.discover(client, server, userId);
       return {
         client,
         revision: server.revision,
-        tools: this.guardedTools(server, tools),
+        tools: this.guardedTools(server, tools, userId),
       };
     } catch (error) {
       await this.disconnect({ client });
@@ -403,7 +488,112 @@ export class McpService {
     }
   }
 
-  private guardedTools(server: McpServer, tools: ToolMap): ToolMap {
+  startOAuth(
+    id: string,
+    userId: string,
+    origin: string,
+    revision: string,
+    returnTo = '/admin/mcp',
+    allowDraft = true,
+  ) {
+    return this.exclusive(async () => {
+      const row = await this.record(id);
+      this.checkRevision(row, revision);
+      if (!allowDraft && row.status !== 'published')
+        throw new McpError('MCP_NOT_PUBLISHED', 409);
+      if (!this.oauth) throw new McpError('MCP_OAUTH_NOT_ENABLED');
+      return this.oauth.begin(this.view(row), userId, origin, returnTo);
+    });
+  }
+
+  async authorizations(
+    userId: string,
+    id?: string,
+  ): Promise<McpAuthorization[]> {
+    const servers = id ? await this.published([id]) : await this.published();
+    return Promise.all(
+      servers
+        .filter((server) => server.config.oauth)
+        .map(async (server) => ({
+          id: server.id,
+          name: server.name,
+          authStatus: (await this.oauth?.status(server, userId)) ?? 'required',
+          connectionStatus: this.runtimeState(server, userId).connectionStatus,
+        })),
+    );
+  }
+
+  async startUserOAuth(
+    id: string,
+    userId: string,
+    origin: string,
+    returnTo: string,
+  ) {
+    const [server] = await this.published([id]);
+    return this.startOAuth(
+      id,
+      userId,
+      origin,
+      server.revision,
+      returnTo,
+      false,
+    );
+  }
+
+  finishOAuth(
+    userId: string,
+    query: { state?: string; code?: string; error?: string; iss?: string },
+    allowDraft = false,
+  ) {
+    return this.exclusive(async () => {
+      if (!this.oauth) throw new McpError('MCP_OAUTH_NOT_ENABLED');
+      const result = await this.oauth.complete(userId, query, async (id) => {
+        const server = await this.get(id, userId);
+        if (!allowDraft && server.status !== 'published')
+          throw new McpError('MCP_NOT_PUBLISHED', 409);
+        return server;
+      });
+      if (result.outcome !== 'success') return result;
+      const server = await this.get(result.serverId, userId);
+      const key = this.connectionKey(server, userId);
+      this.authEpochs.set(key, (this.authEpochs.get(key) ?? 0) + 1);
+      await this.replace(key);
+      if (server.status === 'published') {
+        try {
+          await this.replace(key, await this.probe(server, userId));
+        } catch {
+          this.loadStates.set(key, {
+            revision: server.revision,
+            status: 'error',
+          });
+          return { ...result, outcome: 'connection-failed' as const };
+        }
+      }
+      return result;
+    });
+  }
+
+  disconnectOAuth(id: string, revision: string, userId: string) {
+    return this.exclusive(async () => {
+      const row = await this.record(id);
+      this.checkRevision(row, revision);
+      const server = this.view(row);
+      if (!server.config.oauth) throw new McpError('MCP_OAUTH_NOT_ENABLED');
+      const key = this.connectionKey(server, userId);
+      this.authEpochs.set(key, (this.authEpochs.get(key) ?? 0) + 1);
+      await this.oauth?.remove(id, userId);
+      await this.replace(key);
+      return this.get(id, userId);
+    });
+  }
+
+  private guardedTools(
+    server: McpServer,
+    tools: ToolMap,
+    userId?: string,
+  ): ToolMap {
+    const key = this.connectionKey(server, userId);
+    const epoch = this.authEpochs.get(key) ?? 0;
     const names = new Set<string>();
     return Object.fromEntries(
       Object.entries(tools).map(([nativeName, tool]) => {
@@ -424,13 +614,18 @@ export class McpService {
             id: name,
             execute: execute
               ? async (...args: Parameters<typeof execute>) => {
-                  const current = await this.get(server.id);
+                  if (
+                    server.config.oauth &&
+                    args[1]?.requestContext?.get('userId') !== userId
+                  )
+                    throw new McpError('FORBIDDEN', 403);
+                  const current = await this.get(server.id, userId);
                   if (this.stopping || current.status !== 'published')
                     throw new McpError('MCP_NOT_PUBLISHED', 409);
                   if (
                     current.revision !== server.revision ||
-                    this.connections.get(server.id)?.revision !==
-                      server.revision
+                    (this.authEpochs.get(key) ?? 0) !== epoch ||
+                    this.connections.get(key)?.revision !== server.revision
                   )
                     throw new McpError('MCP_CONFLICT', 409);
                   return execute(...args);
@@ -439,6 +634,18 @@ export class McpService {
           },
         ];
       }),
+    );
+  }
+
+  private async invalidate(id: string) {
+    const keys = new Set([
+      ...this.connections.keys(),
+      ...this.loadStates.keys(),
+    ]);
+    await Promise.all(
+      [...keys]
+        .filter((key) => key === id || key.startsWith(`${id}:`))
+        .map((key) => this.replace(key)),
     );
   }
 

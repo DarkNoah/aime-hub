@@ -5,6 +5,7 @@ import {
   type ToolResponse,
 } from '@aime/shared/threads';
 import { ThreadError } from './errors.js';
+import { MCP_AUTHORIZATION_TOOL } from '@aime/shared/mcp';
 import {
   INTELLIGENT_UI_TOOL,
   parseIntelligentUiResponse,
@@ -14,7 +15,15 @@ import {
 export function validateToolResponse(
   interaction: ToolInteraction,
   response: ToolResponse,
+  userId?: string,
 ) {
+  if (interaction.toolName === MCP_AUTHORIZATION_TOOL) {
+    const payload = z
+      .object({ userId: z.string() })
+      .safeParse(interaction.suspendPayload);
+    if (!userId || !payload.success || payload.data.userId !== userId)
+      throw new ThreadError('FORBIDDEN', 403);
+  }
   if (interaction.toolName === 'ask_user' && response.action === 'decline')
     return;
   if ((interaction.kind === 'suspended') !== (response.action === 'resume'))

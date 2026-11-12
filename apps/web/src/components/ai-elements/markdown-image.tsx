@@ -37,7 +37,7 @@ export function MarkdownImage({
         alt={alt}
         title={title}
         referrerPolicy="no-referrer"
-        containerClassName="my-2"
+        containerClassName="mx-0 my-2 block"
         className={cn(imageClassName, className)}
       />
     );
@@ -125,7 +125,7 @@ function WorkspaceMarkdownImage({
   return (
     <span
       ref={container}
-      className="my-2 inline-block max-w-full align-middle"
+      className="my-2 block max-w-full"
       data-workspace-image={path}
     >
       {url && !unavailable ? (

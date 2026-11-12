@@ -1,4 +1,5 @@
 import { IssueTool } from './issue.js';
+import { AuthorizationTool } from './request_authorization.js';
 import {
   askUserTool as nativeAskUser,
   taskWriteTool as nativeTaskWrite,
@@ -67,3 +68,4 @@ export const automation_run = new AutomationTool('automation_run');
 export const automation_history = new AutomationTool('automation_history');
 
 export const issue = new IssueTool();
+export const requestAuthorization = new AuthorizationTool();

@@ -768,6 +768,45 @@ export const en = {
   'mcp.nameHint':
     '1–100 letters, numbers, underscores or hyphens. Names must be unique.',
   'mcp.transport': 'Transport',
+  'chat.authorization.title': 'MCP sign-in',
+  'chat.authorization.private':
+    'Authorization is private to your account. Credentials are never shared in the conversation.',
+  'chat.authorization.ownerOnly':
+    'Only the user who started this request can authorize it.',
+  'chat.authorization.check': 'I have signed in',
+  'chat.authorization.cancelled': 'Cancelled',
+  'chat.authorization.finished': 'Finished',
+  'mcp.oauth.enable': 'OAuth browser authorization',
+  'mcp.oauth.hint':
+    'Save the configuration. Each user signs in independently; their tokens are encrypted and refreshed automatically.',
+  'mcp.oauth.clientId': 'Client ID (optional)',
+  'mcp.oauth.clientIdHint': 'Leave blank to register automatically',
+  'mcp.oauth.scope': 'Scopes (optional)',
+  'mcp.oauth.callback': 'Callback URL',
+  'mcp.oauth.scopeHint': 'Use the scopes advertised by the server',
+  'mcp.oauth.authorize': 'Sign in',
+  'mcp.oauth.reauthorize': 'Sign in again',
+  'mcp.oauth.disconnect': 'Clear saved authorization',
+  'mcp.oauth.disconnected': 'Saved authorization credentials cleared.',
+  'mcp.oauth.authorized': 'OAuth authorized',
+  'mcp.oauth.required': 'OAuth sign-in required',
+  'mcp.oauth.requiredHint':
+    'This MCP requires OAuth. Select Sign in to authorize it.',
+  'mcp.oauth.notEnabled':
+    'Enable OAuth for this HTTP / SSE connection and save first.',
+  'mcp.oauth.success':
+    'OAuth credentials saved. Publish the server if it is still a draft.',
+  'mcp.oauth.denied':
+    'OAuth authorization was cancelled or denied. You can sign in again.',
+  'mcp.oauth.failed':
+    'OAuth authorization failed. Check the server OAuth configuration and Client ID, then retry.',
+  'mcp.oauth.expired': 'Authorization expired. Please sign in again.',
+  'mcp.oauth.storageFailed':
+    'Saved credentials could not be read. Clear saved authorization and sign in again.',
+  'mcp.oauth.connectionFailed':
+    'OAuth credentials saved, but tools could not be loaded. Select Load tools to retry.',
+  'mcp.oauthConfigInvalid':
+    'OAuth requires HTTP / SSE and cannot be combined with an Authorization header.',
   'mcp.argsHint':
     'One argument per line. Blank lines are ignored; quotes are passed literally.',
   'mcp.envHint':
@@ -1436,6 +1475,11 @@ export const en = {
   'tools.refresh': 'Refresh tools',
   'tools.retry': 'Retry',
   'providers.webSearch': 'Web search',
+  'language.title': 'Language',
+  'language.change': 'Change language ({{language}})',
+  'language.system': 'Follow system',
+  'language.saveFailed':
+    'Language changed, but your browser could not save this preference.',
   'theme.title': 'Appearance',
   'theme.change': 'Change theme ({{theme}})',
   'theme.light': 'Light',

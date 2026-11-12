@@ -2107,7 +2107,7 @@ export class ThreadService {
         runtime.data.status === 'pending'
       )
         throw new ThreadError('THREAD_BUSY', 409);
-      validateToolResponse(interaction, response);
+      validateToolResponse(interaction, response, userId);
       const session = await this.session(
         runtime,
         interaction.settings,

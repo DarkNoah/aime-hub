@@ -8,11 +8,14 @@ import {
 import { getToolName, isSpecialTool, type SpecialToolName } from './registry';
 import { SubmitPlan } from './submit-plan';
 import { IntelligentUI } from './intelligent-ui';
+import { AuthorizationCard } from './authorization';
+import { MCP_AUTHORIZATION_TOOL } from '@aime/shared/mcp';
 
 const renderers: Record<
   SpecialToolName,
   ComponentType<ToolInteractionProps>
 > = {
+  [MCP_AUTHORIZATION_TOOL]: AuthorizationCard,
   issue: IssueToolResult,
   ask_user: ChatToolInteraction,
   submit_plan: SubmitPlan,

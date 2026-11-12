@@ -62,7 +62,8 @@ import { realtimeRoutes } from './modules/realtime/routes.js';
 import { assetRouter } from './modules/assets/rpc.js';
 import type { AssetService } from './modules/assets/service.js';
 import type { McpService } from './modules/mcp/service.js';
-import { mcpRouter } from './modules/mcp/rpc.js';
+import { mcpRouter, mcpAuthRouter } from './modules/mcp/rpc.js';
+import { mcpOAuthRoutes } from './modules/mcp/oauth-routes.js';
 import type { SystemSettingsService } from './modules/system-settings/service.js';
 import { systemSettingsRouter } from './modules/system-settings/rpc.js';
 import { audioRoutes } from './modules/audio/routes.js';
@@ -141,6 +142,7 @@ export function createApp(
   });
   if (chat?.localApi)
     app.route('/api/local-api', localApiRoutes(chat.localApi));
+  if (mcp) app.route('/api/mcp/oauth', mcpOAuthRoutes(auth, mcp.service));
   if (plugins)
     app.route('/api/plugins', pluginRoutes(auth, plugins, webOrigins));
   if (audio) app.route('/api/audio', audioRoutes(auth, audio, webOrigins));
@@ -165,6 +167,7 @@ export function createApp(
     agents: agentRouter(agents?.service),
     localAgents: localAgentRouter(agents?.local),
     mcp: mcpRouter(mcp?.service),
+    mcpAuth: mcpAuthRouter(mcp?.service),
     systemSettings: systemSettingsRouter(systemSettings?.service),
     automations: automationRouter(automations?.service),
     issues: issueRouter(chat?.issues),

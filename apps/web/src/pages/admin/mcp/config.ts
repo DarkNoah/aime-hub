@@ -16,6 +16,9 @@ export type McpForm = {
   url: string;
   headers: string;
   env: string;
+  oauth: boolean;
+  clientId: string;
+  scope: string;
 };
 
 export class McpFormError extends Error {
@@ -68,7 +71,19 @@ export function formToInput(form: McpForm): McpInput {
               .split(/\r?\n/)
               .filter((arg) => arg.trim().length > 0),
           }
-        : { url: form.url.trim() }),
+        : {
+            url: form.url.trim(),
+            ...(form.oauth
+              ? {
+                  oauth: {
+                    ...(form.clientId.trim()
+                      ? { clientId: form.clientId.trim() }
+                      : {}),
+                    ...(form.scope.trim() ? { scope: form.scope.trim() } : {}),
+                  },
+                }
+              : {}),
+          }),
       ...(Object.keys(headers).length ? { headers } : {}),
       ...(Object.keys(env).length ? { env } : {}),
     },
@@ -90,6 +105,9 @@ export function inputToForm(input?: McpInput): McpForm {
     url: config?.url ?? '',
     headers: pairs(config?.headers),
     env: pairs(config?.env),
+    oauth: !!config?.oauth,
+    clientId: config?.oauth?.clientId ?? '',
+    scope: config?.oauth?.scope ?? '',
   };
 }
 

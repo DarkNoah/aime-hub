@@ -13,6 +13,11 @@ const errorKeys = {
   MCP_CONFIG_INVALID: 'mcp.configInvalid',
   MCP_IMPORT_INCOMPLETE: 'mcp.importIncomplete',
   MCP_CONNECTION_FAILED: 'mcp.connectionFailed',
+  MCP_AUTH_REQUIRED: 'mcp.oauth.requiredHint',
+  MCP_OAUTH_NOT_ENABLED: 'mcp.oauth.notEnabled',
+  MCP_OAUTH_FAILED: 'mcp.oauth.failed',
+  MCP_OAUTH_INVALID_STATE: 'mcp.oauth.expired',
+  MCP_OAUTH_STORAGE_FAILED: 'mcp.oauth.storageFailed',
   MCP_UNAVAILABLE: 'mcp.unavailable',
   VALIDATION_ERROR: 'mcp.configInvalid',
   UNAUTHORIZED: 'errors.sessionExpired',
@@ -39,6 +44,7 @@ export function mcpFormError(error: unknown, t: TFunction): string {
       'mcp.headersStdioInvalid': 'mcp.headersStdioInvalid',
       'mcp.duplicateKey': 'mcp.duplicateKey',
       'mcp.duplicateName': 'mcp.duplicateName',
+      'mcp.oauthConfigInvalid': 'mcp.oauthConfigInvalid',
     } as const;
     const field = issue.path.at(-1);
     const message =

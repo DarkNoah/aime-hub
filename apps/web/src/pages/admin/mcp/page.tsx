@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Globe,
+  LogIn,
+  Unplug,
   Pencil,
   Plug,
   Plus,
@@ -51,6 +53,26 @@ export function AdminMcpPage() {
   const createButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
+    const url = new URL(window.location.href);
+    const outcome = url.searchParams.get('mcp_oauth');
+    if (!outcome) return;
+    url.searchParams.delete('mcp_oauth');
+    url.searchParams.delete('server');
+    window.history.replaceState(window.history.state, '', url);
+    if (outcome === 'success') toast.success(t('mcp.oauth.success'));
+    else
+      toast.error(
+        t(
+          outcome === 'denied'
+            ? 'mcp.oauth.denied'
+            : outcome === 'connection-failed'
+              ? 'mcp.oauth.connectionFailed'
+              : 'mcp.oauth.failed',
+        ),
+      );
+  }, [t]);
+
+  useEffect(() => {
     const controller = new AbortController();
     void api.mcp.list(undefined, { signal: controller.signal }).then(
       (data) => {
@@ -72,7 +94,8 @@ export function AdminMcpPage() {
     const waiting = servers?.filter(
       (server) =>
         server.status === 'published' &&
-        ['unloaded', 'loading'].includes(server.connectionStatus),
+        (server.connectionStatus === 'loading' ||
+          (!server.config.oauth && server.connectionStatus === 'unloaded')),
     );
     if (!waiting?.length) return;
     const controller = new AbortController();
@@ -137,6 +160,41 @@ export function AdminMcpPage() {
         }),
       ]);
       toast.success(t(published ? 'mcp.published' : 'mcp.unpublished'));
+    } catch (cause) {
+      toast.error(t(mcpErrorKey(cause)));
+    } finally {
+      submitting.current = false;
+      setPending(undefined);
+    }
+  }
+  async function authorize(server: McpServer) {
+    if (submitting.current) return;
+    submitting.current = true;
+    setPending(server.id);
+    try {
+      const result = await api.mcp.authorize({
+        params: { id: server.id },
+        body: { revision: server.revision },
+      });
+      window.location.assign(result.authorizationUrl);
+    } catch (cause) {
+      toast.error(t(mcpErrorKey(cause)));
+      submitting.current = false;
+      setPending(undefined);
+    }
+  }
+  async function disconnectOAuth(server: McpServer) {
+    if (submitting.current) return;
+    submitting.current = true;
+    setPending(server.id);
+    try {
+      saved([
+        await api.mcp.disconnectOAuth({
+          params: { id: server.id },
+          body: { revision: server.revision },
+        }),
+      ]);
+      toast.success(t('mcp.oauth.disconnected'));
     } catch (cause) {
       toast.error(t(mcpErrorKey(cause)));
     } finally {
@@ -279,6 +337,21 @@ export function AdminMcpPage() {
                               ? 'Stdio'
                               : 'Streamable HTTP / SSE'}
                           </Badge>
+                          {server.config.oauth ? (
+                            <Badge
+                              variant={
+                                server.authStatus === 'authorized'
+                                  ? 'secondary'
+                                  : 'outline'
+                              }
+                            >
+                              {t(
+                                server.authStatus === 'authorized'
+                                  ? 'mcp.oauth.authorized'
+                                  : 'mcp.oauth.required',
+                              )}
+                            </Badge>
+                          ) : null}
                           {server.status === 'published' ? (
                             <Badge
                               variant={
@@ -308,6 +381,33 @@ export function AdminMcpPage() {
                       </div>
                     </div>
                     <div className="flex shrink-0 flex-wrap items-center justify-end gap-1 sm:gap-2">
+                      {server.config.oauth ? (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => void authorize(server)}
+                          >
+                            <LogIn />
+                            {t(
+                              server.authStatus === 'authorized'
+                                ? 'mcp.oauth.reauthorize'
+                                : 'mcp.oauth.authorize',
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            disabled={busy}
+                            aria-label={t('mcp.oauth.disconnect')}
+                            title={t('mcp.oauth.disconnect')}
+                            onClick={() => void disconnectOAuth(server)}
+                          >
+                            <Unplug />
+                          </Button>
+                        </>
+                      ) : null}
                       <Button
                         variant="outline"
                         size="sm"

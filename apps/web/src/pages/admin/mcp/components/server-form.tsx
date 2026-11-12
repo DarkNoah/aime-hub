@@ -1,7 +1,9 @@
 import { useTranslation } from 'react-i18next';
+import { mcpOAuthCallbackPath } from '@aime/shared/mcp';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import {
   Select,
   SelectContent,
@@ -143,6 +145,62 @@ export function ServerForm({
             >
               {t('mcp.headersHint')}
             </p>
+          </div>
+          <div className="space-y-4 rounded-lg border p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-1">
+                <Label htmlFor={`${id}-oauth`}>{t('mcp.oauth.enable')}</Label>
+                <p className="text-xs text-muted-foreground">
+                  {t('mcp.oauth.hint')}
+                </p>
+              </div>
+              <Switch
+                id={`${id}-oauth`}
+                checked={value.oauth}
+                disabled={disabled}
+                onCheckedChange={(oauth) => change({ oauth })}
+              />
+            </div>
+            {value.oauth ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor={`${id}-callback`}>
+                    {t('mcp.oauth.callback')}
+                  </Label>
+                  <Input
+                    id={`${id}-callback`}
+                    readOnly
+                    value={`${window.location.origin}${mcpOAuthCallbackPath}`}
+                    className="font-mono text-xs"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor={`${id}-client-id`}>
+                    {t('mcp.oauth.clientId')}
+                  </Label>
+                  <Input
+                    id={`${id}-client-id`}
+                    value={value.clientId}
+                    disabled={disabled}
+                    autoComplete="off"
+                    onChange={(event) =>
+                      change({ clientId: event.target.value })
+                    }
+                    placeholder={t('mcp.oauth.clientIdHint')}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor={`${id}-scope`}>{t('mcp.oauth.scope')}</Label>
+                  <Input
+                    id={`${id}-scope`}
+                    value={value.scope}
+                    disabled={disabled}
+                    onChange={(event) => change({ scope: event.target.value })}
+                    placeholder={t('mcp.oauth.scopeHint')}
+                  />
+                </div>
+              </div>
+            ) : null}
           </div>
         </>
       )}

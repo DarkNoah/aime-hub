@@ -1,5 +1,15 @@
 import { z } from 'zod';
 
+export const mcpOAuthCallbackPath = '/api/mcp/oauth/callback';
+export const MCP_AUTHORIZATION_TOOL = 'request_authorization';
+export const mcpAuthorizationSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  authStatus: z.enum(['required', 'authorized']),
+  connectionStatus: z.enum(['unloaded', 'loading', 'loaded', 'error']),
+});
+export type McpAuthorization = z.infer<typeof mcpAuthorizationSchema>;
+
 const singleLine = z
   .string()
   .max(16384)
@@ -43,8 +53,26 @@ export const mcpConfigSchema = z
       .optional(),
     headers: z.record(headerName, singleLine).optional(),
     env: z.record(envName, singleLine).optional(),
+    oauth: z
+      .strictObject({
+        clientId: z.string().trim().optional(),
+        scope: z.string().trim().optional(),
+      })
+      .optional(),
   })
   .superRefine((config, ctx) => {
+    if (
+      config.oauth &&
+      (!config.url ||
+        Object.keys(config.headers ?? {}).some(
+          (key) => key.toLowerCase() === 'authorization',
+        ))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['oauth'],
+        message: 'mcp.oauthConfigInvalid',
+      });
     if (Boolean(config.command) === Boolean(config.url)) {
       ctx.addIssue({
         code: 'custom',
@@ -127,6 +155,7 @@ export type McpServer = McpInput & {
   status: 'draft' | 'published' | 'archived';
   revision: string;
   connectionStatus: 'unloaded' | 'loading' | 'loaded' | 'error';
+  authStatus?: 'required' | 'authorized';
   toolCount?: number;
   createdAt: string;
   updatedAt: string;

@@ -48,6 +48,10 @@ node "$APP_API_SCRIPT" call agents.available "$(node -e 'console.log(JSON.string
 
 这些描述负责解释用途和流程，接口字段不在此重复维护。需要其他能力时先 `list` 查找，不要求手改脚本增加命令。
 
+## MCP 管理入口
+
+创建、修改、删除 MCP 服务见 [MCP 管理](mcp.md)。`mcp.*` 是管理员接口，当前未开放给本机 API 脚本；`list mcp` 不会列出这些管理操作，管理员聊天中的短期令牌也不能调用。使用“后台管理 → MCP”页面；不要把普通管理 API 的存在当成脚本已获授权。
+
 ## 自动认证
 
 每次聊天运行时启动 `exec_command` 时，自动注入 `APP_API_URL`（`http://127.0.0.1:<实际端口>/api`）、当前消息发送者的 `APP_API_TOKEN`、`APP_THREAD_ID` 和 `APP_PROJECT_ID`（个人会话为空）。共享项目随消息发送者切换身份。

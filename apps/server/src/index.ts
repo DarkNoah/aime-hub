@@ -43,6 +43,8 @@ import { projectAgentMounts } from './modules/threads/workspace.js';
 import { ToolService } from './modules/tools/service.js';
 import { AgentService } from './modules/agents/service.js';
 import { McpService } from './modules/mcp/service.js';
+import { McpOAuth } from './modules/mcp/oauth.js';
+import { PgMcpOAuthStore } from './modules/mcp/oauth-store.js';
 import { initializeMcpAfterListen } from './modules/mcp/startup.js';
 import { agentSettingsStore } from './modules/agents/settings.js';
 import { createAutomationRuntime } from './modules/automations/runtime.js';
@@ -197,7 +199,14 @@ const agentStore = await storage.getStore('agents');
 if (!agentStore) throw new Error('Mastra agents storage is required');
 const mcpStore = await storage.getStore('mcpClients');
 if (!mcpStore) throw new Error('Mastra MCP clients storage is required');
-const mcp = new McpService(mcpStore);
+const mcp = new McpService(
+  mcpStore,
+  undefined,
+  new McpOAuth(
+    new PgMcpOAuthStore(pool, env.BETTER_AUTH_SECRET),
+    env.WEB_ORIGINS,
+  ),
+);
 const knowledgeVectors = new PgVector({
   id: 'knowledge',
   connectionString: env.DATABASE_URL,

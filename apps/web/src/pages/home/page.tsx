@@ -12,6 +12,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Brand } from '@/components/brand';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
+import { LanguageToggle } from '@/components/language-toggle';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -107,6 +108,7 @@ export function HomePage() {
           </a>
         </nav>
         <div className="flex items-center gap-2">
+          <LanguageToggle />
           <ThemeToggle />
           <Button asChild size="sm" className="hidden sm:inline-flex">
             <Link to="/login">

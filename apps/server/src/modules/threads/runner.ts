@@ -80,6 +80,7 @@ import {
   ContextCompactionProcessor,
 } from './context-compaction.js';
 import type { ObservationalMemoryConfig } from '@mastra/memory/processors';
+import { MCP_AUTHORIZATION_TOOL } from '@aime/shared/mcp';
 
 function latestInputMetadata(
   messageList: MessageList,
@@ -1022,8 +1023,18 @@ export function createChatRunner(
           cancelQueued: (id) => pending.remove(id),
           async respond(interaction, response, next) {
             await refreshMessages();
+            // Project sessions may be owned by a different user. The reply has
+            // already been checked against this server-generated owner payload.
+            const authorizationActor =
+              interaction.toolName === MCP_AUTHORIZATION_TOOL &&
+              interaction.suspendPayload &&
+              typeof interaction.suspendPayload === 'object' &&
+              'userId' in interaction.suspendPayload &&
+              typeof interaction.suspendPayload.userId === 'string'
+                ? interaction.suspendPayload.userId
+                : undefined;
             const options = {
-              ...(await optionsFor(next)),
+              ...(await optionsFor(next, authorizationActor)),
               runId: interaction.runId,
               toolCallId: interaction.toolCallId,
             };
