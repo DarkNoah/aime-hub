@@ -312,6 +312,19 @@ export function SkillsManager({ scope }: { scope: SkillScope }) {
             key={`${scope}:${preview.path}`}
             scope={scope}
             skill={preview}
+            root={catalog?.root ?? ''}
+            onUpdated={(skill) => {
+              setCatalog((current) =>
+                current
+                  ? {
+                      ...current,
+                      skills: current.skills.map((item) =>
+                        item.path === skill.path ? skill : item,
+                      ),
+                    }
+                  : current,
+              );
+            }}
             onClose={() => setPreview(undefined)}
           />
         </Suspense>

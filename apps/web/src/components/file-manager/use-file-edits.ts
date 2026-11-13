@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import type { FilePreview } from '@aime/shared/files';
 import { fileErrorKey } from './api';
 import { withinPath } from './state';
-import type { WorkspaceFileClient } from './workspace-client';
+import type { FilePreviewClient } from './workspace-client';
 
 export type FileEdit = {
   base: FilePreview;
@@ -18,7 +18,7 @@ function findDraft(drafts: Record<string, FileEdit>, path: string) {
   return Object.hasOwn(drafts, path) ? drafts[path] : undefined;
 }
 
-export function useFileEdits(client: WorkspaceFileClient) {
+export function useFileEdits(client: Pick<FilePreviewClient, 'save'>) {
   const { t } = useTranslation();
   const [drafts, setDrafts] = useState<Record<string, FileEdit>>({});
   const pending = useRef(new Set<string>());

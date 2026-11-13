@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { InstalledSkill, SkillContent } from '@aime/shared/skills';
-import type { TranslationKey } from '@/i18n/config';
-import { Button } from '@/components/ui/button';
+import type { InstalledSkill } from '@aime/shared/skills';
+import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -10,109 +9,127 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { getSkillApi, skillErrorKey, type SkillScope } from './api';
-import { SkillMarkdown } from './skill-markdown';
+import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from '@/components/ui/resizable';
+import { FileTree } from '@/components/file-manager/file-tree';
+import { FilePreview } from '@/components/file-manager/file-preview';
+import { DiscardEditsDialog } from '@/components/file-manager/discard-edits-dialog';
+import { useFileEdits } from '@/components/file-manager/use-file-edits';
+import type { SkillScope } from './api';
+import { createSkillFileClient } from './file-client';
+import { useSkillFiles } from './use-skill-files';
 
 export function SkillPreviewDialog({
   scope,
   skill,
+  root,
+  onUpdated,
   onClose,
 }: {
   scope: SkillScope;
   skill: InstalledSkill;
+  root: string;
+  onUpdated: (skill: InstalledSkill) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const client = getSkillApi(scope);
-  const [data, setData] = useState<SkillContent>();
-  const [error, setError] = useState<TranslationKey>();
-  const [revision, setRevision] = useState(0);
+  const [client] = useState(() =>
+    createSkillFileClient(scope, skill.path, onUpdated),
+  );
+  const state = useSkillFiles(client);
+  const edits = useFileEdits(client);
+  const [closing, setClosing] = useState(false);
+  const [stacked, setStacked] = useState(
+    () => window.matchMedia('(max-width: 639px)').matches,
+  );
   useEffect(() => {
-    const controller = new AbortController();
-    void client
-      .read({ query: { path: skill.path } }, { signal: controller.signal })
-      .then(
-        (result) => {
-          if (!controller.signal.aborted) setData(result);
-        },
-        (cause) => {
-          if (!controller.signal.aborted) setError(skillErrorKey(cause));
-        },
-      );
-    return () => controller.abort();
-  }, [client, skill.path, revision]);
+    const media = window.matchMedia('(max-width: 639px)');
+    const update = () => setStacked(media.matches);
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  const dirtyCount = Object.keys(edits.drafts).filter(edits.isDirty).length;
+  const saving = Object.keys(edits.drafts).some(edits.isSaving);
+  function close() {
+    if (saving) return;
+    if (dirtyCount) setClosing(true);
+    else onClose();
+  }
   return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-    >
-      <DialogContent className="flex h-[min(85dvh,56rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl">
-        <DialogHeader className="border-b px-5 py-5 pr-14 sm:px-6">
-          <DialogTitle className="break-all">{skill.name}</DialogTitle>
-          <DialogDescription className="break-all">
-            {skill.path ? `${skill.path}/` : ''}SKILL.md
-          </DialogDescription>
-        </DialogHeader>
-        {error ? (
-          <div role="alert" className="space-y-4 p-6 text-sm">
-            <p className="text-destructive">{t(error)}</p>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setError(undefined);
-                setRevision((value) => value + 1);
-              }}
-            >
-              {t('skills.retry')}
-            </Button>
-          </div>
-        ) : data ? (
-          <Tabs defaultValue="preview" className="min-h-0 flex-1 gap-0">
-            <TabsList className="mx-5 my-3 shrink-0 self-start sm:mx-6">
-              <TabsTrigger value="preview">{t('skills.preview')}</TabsTrigger>
-              <TabsTrigger value="source">
-                {t('skills.sourceContent')}
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="preview" className="min-h-0 flex-1">
-              <ScrollArea
-                className="h-full"
-                viewportProps={{ className: '[&>div]:block!' }}
-              >
-                <div className="min-w-0 space-y-5 px-5 pb-6 sm:px-6">
-                  <SkillMarkdown content={data.content} />
-                </div>
-              </ScrollArea>
-            </TabsContent>
-            <TabsContent value="source" className="min-h-0 flex-1">
-              <ScrollArea
-                className="h-full"
-                viewportProps={{ className: '[&>div]:block!' }}
-              >
-                <pre className="px-5 pb-6 font-mono text-xs leading-6 break-words whitespace-pre-wrap sm:px-6">
-                  {data.content}
-                </pre>
-              </ScrollArea>
-            </TabsContent>
-          </Tabs>
-        ) : (
-          <div
-            role="status"
-            aria-label={t('skills.loadingContent')}
-            className="space-y-4 p-6"
+    <>
+      <Dialog
+        open
+        onOpenChange={(open) => {
+          if (!open) close();
+        }}
+      >
+        <DialogContent
+          className="flex h-[90dvh] w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl"
+          showCloseButton={!saving}
+        >
+          <DialogHeader className="shrink-0 border-b px-5 py-4 pr-14 text-left">
+            <div className="flex flex-wrap items-center gap-2">
+              <DialogTitle className="break-all">{skill.name}</DialogTitle>
+              {dirtyCount > 0 && (
+                <Badge variant="outline">
+                  {t('skills.unsavedFiles', { count: dirtyCount })}
+                </Badge>
+              )}
+            </div>
+            <DialogDescription className="break-all font-mono text-xs">
+              {root}/{skill.path ? `${skill.path}/` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <ResizablePanelGroup
+            orientation={stacked ? 'vertical' : 'horizontal'}
+            className="flex-1"
           >
-            <Skeleton className="h-6 w-1/3" />
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-4/5" />
-            <Skeleton className="h-4 w-3/5" />
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
+            <ResizablePanel
+              defaultSize={stacked ? '28%' : '24%'}
+              minSize={stacked ? 80 : 180}
+              maxSize="55%"
+              className="flex min-h-0 min-w-0 flex-col bg-muted/20"
+            >
+              <div className="flex h-10 shrink-0 items-center border-b px-4 text-xs font-medium">
+                {t('skills.packageFiles')}
+              </div>
+              <ScrollArea
+                className="min-h-0 flex-1"
+                viewportProps={{ className: '[&>div]:!block' }}
+              >
+                <FileTree state={state} />
+                <ScrollBar orientation="horizontal" />
+              </ScrollArea>
+            </ResizablePanel>
+            <ResizableHandle
+              aria-label={t(
+                stacked ? 'files.resizeTreeHeight' : 'files.resizeTreeWidth',
+              )}
+            />
+            <ResizablePanel
+              minSize={stacked ? 180 : 320}
+              className="min-h-0 min-w-0"
+            >
+              <FilePreview
+                key={state.selected}
+                client={client}
+                path={state.selected}
+                revision={0}
+                edits={edits}
+              />
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </DialogContent>
+      </Dialog>
+      <DiscardEditsDialog
+        open={closing}
+        onCancel={() => setClosing(false)}
+        onDiscard={onClose}
+      />
+    </>
   );
 }

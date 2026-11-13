@@ -2,6 +2,11 @@ import { type } from '@orpc/contract';
 import { z } from 'zod';
 import { procedure } from './base.js';
 import {
+  fileSaveSchema,
+  type FileListing,
+  type FilePreview,
+} from '../files.js';
+import {
   scanSkillsSchema,
   installSkillsSchema,
   removeSkillSchema,
@@ -16,6 +21,45 @@ import {
 
 function createSkillsContract(basePath: '/admin/skills' | '/skills') {
   return {
+    files: {
+      list: procedure
+        .route({
+          method: 'GET',
+          path: `${basePath}/files`,
+          inputStructure: 'detailed',
+        })
+        .input(
+          z.object({
+            query: z.object({ skill: z.string(), path: z.string() }),
+          }),
+        )
+        .output(type<FileListing>()),
+      preview: procedure
+        .route({
+          method: 'GET',
+          path: `${basePath}/files/preview`,
+          inputStructure: 'detailed',
+        })
+        .input(
+          z.object({
+            query: z.object({ skill: z.string(), path: z.string() }),
+          }),
+        )
+        .output(type<FilePreview>()),
+      save: procedure
+        .route({
+          method: 'PUT',
+          path: `${basePath}/files/content`,
+          inputStructure: 'detailed',
+        })
+        .input(
+          z.object({
+            query: z.object({ skill: z.string() }),
+            body: fileSaveSchema,
+          }),
+        )
+        .output(type<{ file: FilePreview; skill: InstalledSkill }>()),
+    },
     list: procedure
       .route({ method: 'GET', path: basePath, inputStructure: 'detailed' })
       .output(type<InstalledSkills>()),

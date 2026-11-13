@@ -58,6 +58,10 @@ export const filesApi = {
 export function fileErrorKey(error: unknown) {
   if (apiErrorCode(error)) {
     switch (apiErrorCode(error)) {
+      case 'SKILL_NOT_FOUND':
+        return 'skills.notFound';
+      case 'SKILL_UNSAFE_PATH':
+        return 'skills.unsafePath';
       case 'FILE_CHANGED':
         return 'files.changed';
       case 'FILE_NOT_EDITABLE':

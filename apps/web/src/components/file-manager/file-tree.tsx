@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import type { ComponentProps } from 'react';
 import { HardDrive } from 'lucide-react';
 import {
   FileTree as ElementsFileTree,
@@ -11,16 +12,46 @@ import { EntryActions, type EntryAction } from './entry-actions';
 import { parentPath } from './state';
 import type { FileManagerState } from './use-file-manager';
 
+export type FileTreeState = Pick<
+  FileManagerState,
+  | 'directories'
+  | 'expanded'
+  | 'selected'
+  | 'changeExpanded'
+  | 'toggle'
+  | 'openFile'
+  | 'loadDirectory'
+  | 'scope'
+> & { client: Pick<FileManagerState['client'], 'raw'> };
+
+function OptionalEntryActions({
+  onAction,
+  onUpload,
+  children,
+  ...props
+}: Omit<ComponentProps<typeof EntryActions>, 'onAction' | 'onUpload'> & {
+  onAction?: (action: EntryAction) => void;
+  onUpload?: (directory: string) => void;
+}) {
+  return onAction && onUpload ? (
+    <EntryActions {...props} onAction={onAction} onUpload={onUpload}>
+      {children}
+    </EntryActions>
+  ) : (
+    children
+  );
+}
+
 export function FileTree({
   state,
   onAction,
   onUpload,
-  dropTarget,
+  dropTarget = null,
 }: {
-  state: FileManagerState;
-  onAction: (action: EntryAction) => void;
-  onUpload: (directory: string) => void;
-  dropTarget: string | null;
+  state: FileTreeState;
+  onAction?: (action: EntryAction) => void;
+  onUpload?: (directory: string) => void;
+  dropTarget?: string | null;
 }) {
   const { t } = useTranslation();
   return (
@@ -83,9 +114,9 @@ function Directory({
   depth,
 }: {
   path: string;
-  state: FileManagerState;
-  onAction: (action: EntryAction) => void;
-  onUpload: (directory: string) => void;
+  state: FileTreeState;
+  onAction?: (action: EntryAction) => void;
+  onUpload?: (directory: string) => void;
   dropTarget: string | null;
   depth: number;
 }) {
@@ -174,7 +205,7 @@ function Directory({
             name={entry.isMount ? `${entry.path}` : entry.name}
             className="min-w-0 rounded outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             renderRow={(row) => (
-              <EntryActions
+              <OptionalEntryActions
                 entry={entry}
                 scope={state.scope}
                 onAction={onAction}
@@ -192,7 +223,7 @@ function Directory({
                     {/* {t('files.mountPoint')} */}
                   </Badge>
                 )}
-              </EntryActions>
+              </OptionalEntryActions>
             )}
             {...nodeProps}
           >
@@ -210,7 +241,7 @@ function Directory({
             )}
           </FileTreeFolder>
         ) : (
-          <EntryActions
+          <OptionalEntryActions
             key={entry.path}
             entry={entry}
             scope={state.scope}
@@ -224,7 +255,7 @@ function Directory({
               className="h-8 min-w-0 flex-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               {...nodeProps}
             />
-          </EntryActions>
+          </OptionalEntryActions>
         );
       })}
       {directory.truncated && (

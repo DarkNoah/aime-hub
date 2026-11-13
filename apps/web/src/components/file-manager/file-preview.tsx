@@ -17,7 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { fileErrorKey } from './api';
 import { FilePreviewContent } from './preview/file-preview-content';
 import { PreviewLoading } from './preview/preview-loading';
-import type { WorkspaceFileClient } from './workspace-client';
+import type { FilePreviewClient } from './workspace-client';
 import type { FileEdits } from './use-file-edits';
 import { DiscardEditsDialog } from './discard-edits-dialog';
 import { useFileWrap } from './use-file-wrap';
@@ -34,7 +34,7 @@ export function FilePreview({
   revision,
   edits,
 }: {
-  client: WorkspaceFileClient;
+  client: FilePreviewClient;
   path: string;
   line?: number;
   navigation?: number;

@@ -33,3 +33,8 @@ export function createWorkspaceFileClient(
   };
 }
 export type WorkspaceFileClient = ReturnType<typeof createWorkspaceFileClient>;
+/** Capabilities shared by workspace files and installed skill packages. */
+export type FilePreviewClient = Pick<
+  WorkspaceFileClient,
+  'preview' | 'save' | 'raw'
+>;

@@ -69,6 +69,7 @@ import { systemSettingsRouter } from './modules/system-settings/rpc.js';
 import { audioRoutes } from './modules/audio/routes.js';
 import type { AudioService } from './modules/audio/service.js';
 import type { AvatarService } from './modules/profile/avatars.js';
+import { skillFileRoutes } from './modules/skills/routes.js';
 import {
   avatarResourceRoutes,
   profileRoutes,
@@ -148,6 +149,16 @@ export function createApp(
   if (audio) app.route('/api/audio', audioRoutes(auth, audio, webOrigins));
   if (avatars)
     app.route('/api/profile', profileRoutes(auth, avatars.service, webOrigins));
+  if (skills) {
+    app.route(
+      '/api/admin/skills/files',
+      skillFileRoutes(auth, skills.service, 'global'),
+    );
+    app.route(
+      '/api/skills/files',
+      skillFileRoutes(auth, skills.service, 'personal'),
+    );
+  }
   if (chat?.groupChats)
     app.route('/api/a2a/rooms', groupChatA2aRoutes(chat.groupChats));
   const router = rpc.router({

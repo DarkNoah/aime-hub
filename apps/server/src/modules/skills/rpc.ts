@@ -1,5 +1,7 @@
 import { rpc, required } from '../../rpc/context.js';
 import type { SkillService } from './service.js';
+import { listFiles, previewFile } from '../files/service.js';
+import { saveWorkspaceFile } from '../files/save.js';
 
 export function skillRouter(service?: SkillService) {
   return createSkillRouter(rpc.skills, () => required(service));
@@ -16,6 +18,28 @@ function createSkillRouter(
   skills: (userId: string) => SkillService,
 ) {
   return p.router({
+    files: {
+      list: p.files.list.handler(({ context, input }) =>
+        skills(context.userId).withFiles(input.query.skill, (root) =>
+          listFiles(root, input.query.path),
+        ),
+      ),
+      preview: p.files.preview.handler(({ context, input }) =>
+        skills(context.userId).withFiles(input.query.skill, (root) =>
+          previewFile(root, input.query.path),
+        ),
+      ),
+      save: p.files.save.handler(({ context, input }) => {
+        const service = skills(context.userId);
+        return service.withFiles(input.query.skill, async (root) => {
+          const file = await saveWorkspaceFile(root, input.body);
+          const skill = (await service.list()).skills.find(
+            (skill) => skill.path === input.query.skill,
+          )!;
+          return { file, skill };
+        });
+      }),
+    },
     list: p.list.handler(({ context }) => skills(context.userId).list()),
     read: p.read.handler(({ context, input }) =>
       skills(context.userId).read(input.query.path),

@@ -24,6 +24,8 @@ coverage/
 apps/server/src/modules/plugins/bundled-skills/
 
 !scripts/chat-image-edit-browser.test.mjs
+!scripts/skill-files.test.ts
+!scripts/skill-files-browser.test.mjs
 !scripts/chat-voice-input.test.ts
 !scripts/sensevoice-browser.test.mjs
 plugins/vibe-quant/**/__pycache__/

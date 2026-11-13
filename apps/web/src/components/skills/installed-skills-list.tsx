@@ -2,6 +2,7 @@ import { useId } from 'react';
 import {
   ChevronRight,
   Folder,
+  Pencil,
   ExternalLink,
   RefreshCw,
   Sparkles,
@@ -218,16 +219,31 @@ export function InstalledSkillsList(props: Props) {
                     </p>
                   </div>
                   {props.mode === 'manage' ? (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="relative z-10"
-                      disabled={!skill.path || props.disabled}
-                      aria-label={t('skills.removeNamed', { name: skill.name })}
-                      onClick={() => props.onRemove(skill)}
-                    >
-                      <Trash2 className="text-muted-foreground" />
-                    </Button>
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="relative z-10"
+                        disabled={props.disabled}
+                        aria-label={t('skills.editNamed', { name: skill.name })}
+                        title={t('skills.editNamed', { name: skill.name })}
+                        onClick={() => props.onPreview(skill)}
+                      >
+                        <Pencil className="text-muted-foreground" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="relative z-10"
+                        disabled={!skill.path || props.disabled}
+                        aria-label={t('skills.removeNamed', {
+                          name: skill.name,
+                        })}
+                        onClick={() => props.onRemove(skill)}
+                      >
+                        <Trash2 className="text-muted-foreground" />
+                      </Button>
+                    </>
                   ) : null}
                 </article>
               ))}

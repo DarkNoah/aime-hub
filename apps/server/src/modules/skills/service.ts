@@ -24,6 +24,7 @@ import type {
   SkillContent,
 } from '@aime/shared/skills';
 import { SkillError } from './errors.js';
+import { fileError } from '../files/paths.js';
 import { userDirectory } from '../threads/workspace.js';
 import {
   normalizeSkillSource,
@@ -453,6 +454,25 @@ export class SkillService {
     } finally {
       await this.releaseScan(id);
     }
+  }
+
+  /** Resolve an installed package under this user's scope and serialize against updates/removal. */
+  withFiles<T>(path: string, action: (root: string) => Promise<T>): Promise<T> {
+    return this.exclusive(async () => {
+      if (path && !safeRepositoryPath(path))
+        throw new SkillError('SKILL_UNSAFE_PATH', 403);
+      const directory = await this.directory(path ? path.split('/') : []);
+      if (
+        !directory ||
+        !(await this.list()).skills.some((skill) => skill.path === path)
+      )
+        throw new SkillError('SKILL_NOT_FOUND', 404);
+      try {
+        return await action(directory);
+      } catch (error) {
+        fileError(error);
+      }
+    });
   }
 
   read(path: string): Promise<SkillContent> {
