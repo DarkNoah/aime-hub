@@ -1,9 +1,13 @@
-import { Fragment, memo, useMemo } from 'react';
+import { Fragment, memo, useMemo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { LoaderCircle, ScanText } from 'lucide-react';
 import { isToolUIPart, type UIMessage } from 'ai';
 import type { ToolInteraction, ToolResponse } from '@aime/shared/threads';
-import { isSubagentTool } from '@aime/shared/chat-turns';
+import {
+  isSubagentTool,
+  isChatToolGroupPart,
+  type ChatToolGroup,
+} from '@aime/shared/chat-turns';
 import {
   ChainOfThought,
   ChainOfThoughtContent,
@@ -36,8 +40,9 @@ import { ChatMessageAttachments } from './chat-message-attachments';
 import { splitMessageAttachments } from './message-attachments';
 import { ChatMessageCompression } from './chat-message-compression';
 import { ChatToolAttachments } from './chat-tool-attachments';
+import { getToolAttachments } from './tool-attachments';
 import { ChatToolRenderer } from './tool-renderers';
-import { getToolName } from './tool-renderers/registry';
+import { getToolName, isSpecialTool } from './tool-renderers/registry';
 import { SubagentBadge } from './subagent-badge';
 import { useMessagePreview } from './message-preview/context';
 import {
@@ -56,6 +61,8 @@ export function ChatMessages({
   disabled,
   showAllReasoning = false,
   hideUserMessages = false,
+  toolGroupsExpanded = false,
+  hideReasoningTrigger = false,
 }: {
   messages: UIMessage[];
   threadId?: string;
@@ -69,6 +76,8 @@ export function ChatMessages({
   disabled?: boolean;
   showAllReasoning?: boolean;
   hideUserMessages?: boolean;
+  toolGroupsExpanded?: boolean;
+  hideReasoningTrigger?: boolean;
 }) {
   const rows = groupChatMessages(
     messages,
@@ -104,6 +113,8 @@ export function ChatMessages({
             toolInteractions={toolInteractions}
             onToolResponse={onToolResponse}
             disabled={disabled}
+            toolGroupsExpanded={toolGroupsExpanded}
+            hideReasoningTrigger={hideReasoningTrigger}
           />
         ))}
       {toolInteractions
@@ -135,6 +146,9 @@ export const ChatMessage = memo(function ChatMessage({
   disabled,
   showAllReasoning = false,
   hideToolDetails = false,
+  toolGroupsExpanded = false,
+  hideReasoningTrigger = false,
+  renderToolGroup,
 }: {
   message: UIMessage;
   threadId?: string;
@@ -151,6 +165,9 @@ export const ChatMessage = memo(function ChatMessage({
   disabled?: boolean;
   showAllReasoning?: boolean;
   hideToolDetails?: boolean;
+  toolGroupsExpanded?: boolean;
+  hideReasoningTrigger?: boolean;
+  renderToolGroup?: (group: ChatToolGroup) => ReactNode;
 }) {
   const { t } = useTranslation();
   const openPreview = useMessagePreview();
@@ -198,67 +215,123 @@ export const ChatMessage = memo(function ChatMessage({
             if (item.type === 'tools') {
               if (hideToolDetails)
                 return (
-                  <ChatToolAttachments
-                    key={item.id}
-                    tools={item.tools}
-                    threadId={threadId}
+                  <Fragment key={item.id}>
+                    {item.tools
+                      .filter(
+                        (tool) =>
+                          ['image_gen', 'speech'].includes(
+                            getToolName(tool) ?? '',
+                          ) &&
+                          getToolAttachments([tool], threadId).length === 0,
+                      )
+                      .map((tool) => (
+                        <Tool
+                          key={`${tool.toolCallId}:${tool.state.startsWith('output-') ? 'result' : 'pending'}`}
+                          defaultOpen={tool.state.startsWith('output-')}
+                          className="my-3"
+                        >
+                          <ToolHeader
+                            {...(tool.type === 'dynamic-tool'
+                              ? { type: tool.type, toolName: tool.toolName }
+                              : { type: tool.type })}
+                            state={tool.state}
+                          />
+                          <ToolContent>
+                            <ToolOutput
+                              output={tool.output}
+                              errorText={tool.errorText}
+                            />
+                          </ToolContent>
+                        </Tool>
+                      ))}
+                    <ChatToolAttachments
+                      tools={item.tools}
+                      threadId={threadId}
+                    />
+                  </Fragment>
+                );
+              const tools = item.tools.map((tool) => {
+                const content = (
+                  <Tool
+                    key={tool.toolCallId}
+                    defaultOpen={false}
+                    className={
+                      toolGroupsExpanded ? 'mb-0 rounded-none border-0' : 'mb-0'
+                    }
+                  >
+                    <ToolHeader
+                      {...(tool.type === 'dynamic-tool'
+                        ? { type: tool.type, toolName: tool.toolName }
+                        : { type: tool.type })}
+                      state={tool.state}
+                      compact={toolGroupsExpanded}
+                      onPreview={
+                        openPreview ? () => openPreview(tool) : undefined
+                      }
+                    />
+                    <ToolContent
+                      className={
+                        toolGroupsExpanded
+                          ? 'border-t border-border/60 px-2 py-3 motion-reduce:animate-none'
+                          : undefined
+                      }
+                    >
+                      {tool.input !== undefined && (
+                        <ToolInput input={tool.input} />
+                      )}
+                      <ToolOutput
+                        output={tool.output}
+                        errorText={tool.errorText}
+                      />
+                    </ToolContent>
+                  </Tool>
+                );
+                return toolGroupsExpanded ? (
+                  content
+                ) : (
+                  <ChainOfThoughtStep
+                    key={tool.toolCallId}
+                    status={
+                      tool.state.startsWith('output-')
+                        ? 'complete'
+                        : tool.state === 'input-streaming'
+                          ? 'pending'
+                          : 'active'
+                    }
+                    label={content}
                   />
                 );
+              });
               return (
                 <Fragment key={item.id}>
-                  <ChainOfThought
-                    // Reset the default only when the message becomes history.
-                    key={`${item.id}:${isLastMessage ? 'last-message' : 'history'}`}
-                    defaultOpen={false}
-                    className="min-w-0"
-                  >
-                    <ChainOfThoughtHeader>
-                      {t('chat.toolGroup', { count: item.tools.length })}
-                    </ChainOfThoughtHeader>
-                    <ChainOfThoughtContent>
-                      {item.tools.map((tool) => (
-                        <ChainOfThoughtStep
-                          key={tool.toolCallId}
-                          status={
-                            tool.state.startsWith('output-')
-                              ? 'complete'
-                              : tool.state === 'input-streaming'
-                                ? 'pending'
-                                : 'active'
-                          }
-                          label={
-                            <Tool defaultOpen={false} className="mb-0">
-                              <ToolHeader
-                                {...(tool.type === 'dynamic-tool'
-                                  ? { type: tool.type, toolName: tool.toolName }
-                                  : { type: tool.type })}
-                                state={tool.state}
-                                onPreview={
-                                  openPreview
-                                    ? () => openPreview(tool)
-                                    : undefined
-                                }
-                              />
-                              <ToolContent>
-                                {tool.input !== undefined && (
-                                  <ToolInput input={tool.input} />
-                                )}
-                                <ToolOutput
-                                  output={tool.output}
-                                  errorText={tool.errorText}
-                                />
-                              </ToolContent>
-                            </Tool>
-                          }
-                        />
-                      ))}
-                    </ChainOfThoughtContent>
-                  </ChainOfThought>
+                  {toolGroupsExpanded ? (
+                    <div className="min-w-0 divide-y divide-border/60">
+                      {tools}
+                    </div>
+                  ) : (
+                    <ChainOfThought
+                      // Reset the default only when the message becomes history.
+                      key={`${item.id}:${isLastMessage ? 'last-message' : 'history'}`}
+                      defaultOpen={false}
+                      className="min-w-0"
+                    >
+                      <ChainOfThoughtHeader>
+                        {t('chat.toolGroup', { count: item.tools.length })}
+                      </ChainOfThoughtHeader>
+                      <ChainOfThoughtContent>{tools}</ChainOfThoughtContent>
+                    </ChainOfThought>
+                  )}
                   <ChatToolAttachments tools={item.tools} threadId={threadId} />
                 </Fragment>
               );
             }
             const { part, index } = item;
+            if (isChatToolGroupPart(part))
+              return (
+                <Fragment key={`tool-group:${part.data.id}`}>
+                  {renderToolGroup?.(part.data)}
+                </Fragment>
+              );
             if (isToolUIPart(part)) {
               const interaction = toolInteractions.find(
                 (item) => item.toolCallId === part.toolCallId,
@@ -277,6 +350,30 @@ export const ChatMessage = memo(function ChatMessage({
                       openPreview ? () => openPreview(part) : undefined
                     }
                   />
+                );
+              if (!interaction && !isSpecialTool(name))
+                return (
+                  <Tool key={part.toolCallId} defaultOpen className="my-3">
+                    <ToolHeader
+                      {...(part.type === 'dynamic-tool'
+                        ? { type: part.type, toolName: part.toolName }
+                        : { type: part.type })}
+                      state={part.state}
+                      onPreview={
+                        openPreview ? () => openPreview(part) : undefined
+                      }
+                    />
+                    <ToolContent>
+                      {part.input !== undefined && (
+                        <ToolInput input={part.input} />
+                      )}
+                      <ToolOutput
+                        output={part.output}
+                        errorText={part.errorText}
+                      />
+                    </ToolContent>
+                    <ChatToolAttachments tools={[part]} threadId={threadId} />
+                  </Tool>
                 );
               return (
                 <div
@@ -323,10 +420,7 @@ export const ChatMessage = memo(function ChatMessage({
             }
             // Aborted streams may never send text-end. Their partial text still
             // belongs in the stopped conversation instead of remaining hidden.
-            if (
-              part.type === 'text' &&
-              (part.state !== 'streaming' || !streaming)
-            )
+            if (part.type === 'text')
               return message.role === 'user' ? (
                 <p key={index} className="whitespace-pre-wrap">
                   {part.text}
@@ -354,18 +448,24 @@ export const ChatMessage = memo(function ChatMessage({
                   // Reset expansion for a new stream or completed history, not for every text delta.
                   key={`reasoning-${index}-${isReasoningStreaming ? 'streaming' : 'complete'}`}
                   isStreaming={isReasoningStreaming}
-                  defaultOpen={isReasoningStreaming}
+                  open={hideReasoningTrigger ? true : undefined}
+                  defaultOpen={toolGroupsExpanded || isReasoningStreaming}
                 >
-                  <ReasoningTrigger
-                    getThinkingMessage={(active) =>
-                      active ? (
-                        <Shimmer duration={1}>{t('chat.thinking')}</Shimmer>
-                      ) : (
-                        t('chat.reasoning')
-                      )
-                    }
-                  />
-                  <ReasoningContent maxHeight={100}>
+                  {!hideReasoningTrigger && (
+                    <ReasoningTrigger
+                      getThinkingMessage={(active) =>
+                        active ? (
+                          <Shimmer duration={1}>{t('chat.thinking')}</Shimmer>
+                        ) : (
+                          t('chat.reasoning')
+                        )
+                      }
+                    />
+                  )}
+                  <ReasoningContent
+                    maxHeight={100}
+                    className={hideReasoningTrigger ? 'mt-0' : undefined}
+                  >
                     {part.text}
                   </ReasoningContent>
                 </Reasoning>

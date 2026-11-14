@@ -14,11 +14,15 @@ import {
   type ChatSkill,
   type ThreadList,
   type ThreadSummary,
-  type ThreadSnapshot,
   type MessagePage,
 } from '../threads.js';
 import type { UIMessage } from 'ai';
-import type { ChatTurnDetail, ChatTurnPage } from '../chat-turns.js';
+import type {
+  ChatTurnDetail,
+  ChatTurnPage,
+  ChatTurnSnapshot,
+  ChatToolGroupDetail,
+} from '../chat-turns.js';
 import { browserContract } from './browser.js';
 
 export const threadsContract = {
@@ -83,11 +87,11 @@ export const threadsContract = {
       method: 'GET',
       path: '/threads/{threadId}',
       summary:
-        '读取线程状态和最近最多 30 条消息，较早消息通过 history 分页读取',
+        '读取线程状态和最近 20 轮展示消息，保留全部用户消息和助手文本，工具组展开时通过 toolGroup 加载详情；较早轮次通过 history 的 summary 视图读取',
       inputStructure: 'detailed',
     })
     .input(z.object({ params: z.object({ threadId }) }))
-    .output(type<ThreadSnapshot<UIMessage>>()),
+    .output(type<ChatTurnSnapshot>()),
   summary: procedure
     .meta({ localApi: true })
     .route({
@@ -184,6 +188,21 @@ export const threadsContract = {
       }),
     )
     .output(type<ChatTurnDetail>()),
+  toolGroup: procedure
+    .meta({ localApi: true })
+    .route({
+      method: 'GET',
+      path: '/threads/{threadId}/turns/{turnId}/groups/{groupId}',
+      summary: '按需分页读取连续工具组的详情，每页最多 20 个内容块',
+      inputStructure: 'detailed',
+    })
+    .input(
+      z.object({
+        params: z.object({ threadId, turnId: id, groupId: z.string() }),
+        query: z.object({ cursor: z.string().optional(), page }),
+      }),
+    )
+    .output(type<ChatToolGroupDetail>()),
   run: procedure
     .meta({ localApi: true })
     .route({

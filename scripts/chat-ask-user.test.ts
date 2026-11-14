@@ -32,13 +32,13 @@ test('answered ask_user cards remain in the overview in order without adding emp
         { id: 'final', role: 'assistant', parts: [final] },
       ];
       const summary = summarizeTurn({ id: 'turn', messages });
-      assert.deepEqual(summary.assistant?.parts, [ask, final]);
+      assert.deepEqual(summary.assistant?.parts, [{ ...ask, forceRender: true }, final]);
       assert.equal(summary.hasDetails, false);
       assert.equal(summary.toolCount, 1);
       assert.deepEqual(
         summarizeTurn({ id: 'ask-only', messages: [messages[0]] }).assistant
           ?.parts,
-        [ask],
+        [{ ...ask, forceRender: true }],
         'an answered question is visible even before the next assistant text',
       );
     }
@@ -54,9 +54,10 @@ test('answered ask_user cards remain in the overview in order without adding emp
         },
       ],
     };
-    assert.equal(
-      summarizeTurn({ id: 'turn', messages: [pending] }).assistant,
-      null,
+    assert.deepEqual(
+      summarizeTurn({ id: 'turn', messages: [pending] }).assistant?.parts,
+      [{ ...pending.parts[0], forceRender: true }],
+      'pending forced tools remain in the overview; the UI deduplicates actionable cards',
     );
   }
 });

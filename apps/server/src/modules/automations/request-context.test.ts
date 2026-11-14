@@ -12,7 +12,7 @@ import {
   until,
 } from './test-fixture.js';
 
-test('scheduled knowledge tools receive the creator and project on concurrent and repeated runs', async (t) => {
+test('scheduled tools retain their workspace with toolCall=false and receive the creator and project on concurrent and repeated runs', async (t) => {
   const model = createMockModel({ mockText: 'Done', version: 'v2' });
   assert.equal(model.specificationVersion, 'v2');
   const steps = new Map<string, number>();
@@ -62,9 +62,15 @@ test('scheduled knowledge tools receive the creator and project on concurrent an
       return [];
     },
   } as unknown as KnowledgeService;
+  const knowledgeTool = createKnowledgeTools(knowledge).knowledge_list;
+  const execute = knowledgeTool.execute!;
+  knowledgeTool.execute = async (...args) => {
+    assert.ok(args[1]?.workspace?.filesystem);
+    return execute(...args);
+  };
   const { service, mastra } = await fixture(t, {
     model,
-    tools: { knowledge_list: createKnowledgeTools(knowledge).knowledge_list },
+    tools: { knowledge_list: knowledgeTool },
   });
   const tasks = [
     await service.create('alice', personal, input),

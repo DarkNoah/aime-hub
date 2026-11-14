@@ -24,8 +24,19 @@ import type {
   ChatTurnDetail,
   ChatTurnPage,
   ChatTurnSnapshot,
+  ChatToolGroupDetail,
 } from '@aime/shared/chat-turns';
-import { groupTurns, summarizeTurn } from './turns.js';
+import {
+  groupTurns,
+  summarizeTurn,
+  getTurnToolGroup,
+  type ChatTurn,
+} from './turns.js';
+import {
+  projectUserMedia,
+  readThreadMedia,
+  type ThreadMediaLocator,
+} from './overview-media.js';
 import {
   readTurnPage,
   readTurnDetail,
@@ -136,6 +147,7 @@ type Runtime = {
 };
 
 export interface ChatRunner {
+  isToolForceRendered?(name: string): boolean;
   browsers?: ThreadBrowsers;
   resolveSettings?(
     settings: ChatSettings,
@@ -683,7 +695,11 @@ export class ThreadService {
         (item) => !item.response,
       ),
       turns: turns.map((turn) =>
-        summarizeTurn(turn, runtime.turnLocators.get(turn.id)),
+        this.summarizeTurn(
+          runtime.thread.id,
+          turn,
+          runtime.turnLocators.get(turn.id),
+        ),
       ),
       removedTurnIds: snapshot.removedMessageIds,
       activeTurnId:
@@ -1469,6 +1485,27 @@ export class ThreadService {
     });
   }
 
+  /** Public reads share the same lightweight projection as the chat stream. */
+  getThreadOverview(userId: string, id: string): Promise<ChatTurnSnapshot> {
+    return this.scopeLocked(userId, id, async () => {
+      const runtime = await this.runtime(userId, id);
+      await this.hydrateTurnHistory(runtime);
+      await this.accessible(userId, id);
+      return this.turnSnapshot(runtime, this.snapshot(runtime), true);
+    });
+  }
+
+  private summarizeTurn(threadId: string, turn: ChatTurn, cursor?: string) {
+    const summary = summarizeTurn(turn, cursor, {
+      threadId,
+      forceRender: this.runner.isToolForceRendered,
+    });
+    return {
+      ...summary,
+      user: projectUserMedia(summary.user, threadId, turn.id, cursor),
+    };
+  }
+
   /** Validate provenance without opening a session or accepting public metadata. */
   async getIssueSourceThread(userId: string, id: string, projectId?: string) {
     const thread = await this.accessible(userId, id);
@@ -1807,7 +1844,7 @@ export class ThreadService {
     await this.accessible(userId, id);
     return {
       turns: groupTurns(page.messages).map((turn) =>
-        summarizeTurn(turn, page.locators.get(turn.id)),
+        this.summarizeTurn(id, turn, page.locators.get(turn.id)),
       ),
       cursor: page.cursor,
       hasMore: page.hasMore,
@@ -1820,6 +1857,69 @@ export class ThreadService {
     turnId: string,
     cursor?: string,
   ): Promise<ChatTurnDetail> {
+    const messages = await this.readTurnMessages(userId, id, turnId, cursor);
+    return {
+      id: turnId,
+      messages,
+      revision: summarizeTurn({ id: turnId, messages }).revision,
+    };
+  }
+
+  async toolGroupDetail(
+    userId: string,
+    id: string,
+    turnId: string,
+    groupId: string,
+    cursor?: string,
+    page = 0,
+  ): Promise<ChatToolGroupDetail> {
+    if (!Number.isSafeInteger(page) || page < 0)
+      throw new ThreadError('VALIDATION_ERROR');
+    const messages = await this.readTurnMessages(userId, id, turnId, cursor);
+    const group = getTurnToolGroup({ id: turnId, messages }, groupId, {
+      threadId: id,
+      forceRender: this.runner.isToolForceRendered,
+    });
+    if (!group) throw new ThreadError('TOOL_GROUP_NOT_FOUND', 404);
+    // Page by parts: one model message can contain thousands of tool calls.
+    const parts = group.messages.flatMap((message) =>
+      message.parts.map((part) => ({ ...message, parts: [part] })),
+    );
+    const selected = parts.slice(page * 20, (page + 1) * 20);
+    const pageMessages: UIMessage[] = [];
+    for (const message of selected) {
+      const previous = pageMessages.at(-1);
+      if (previous?.id === message.id) previous.parts.push(...message.parts);
+      else pageMessages.push(message);
+    }
+    return {
+      id: group.summary.id,
+      revision: group.summary.revision,
+      messages: pageMessages,
+      page,
+      hasMore: (page + 1) * 20 < parts.length,
+    };
+  }
+
+  async getTurnMedia(
+    userId: string,
+    id: string,
+    turnId: string,
+    locator: ThreadMediaLocator,
+    cursor?: string,
+  ) {
+    return readThreadMedia(
+      await this.readTurnMessages(userId, id, turnId, cursor),
+      locator,
+    );
+  }
+
+  private async readTurnMessages(
+    userId: string,
+    id: string,
+    turnId: string,
+    cursor?: string,
+  ): Promise<UIMessage[]> {
     const thread = await this.accessible(userId, id);
     const scope = { threadId: id, resourceId: thread.resourceId };
     const runtime = this.runtimes.get(id);
@@ -1848,11 +1948,7 @@ export class ThreadService {
         : live.messages;
     if (!messages) throw new ThreadError('TURN_NOT_FOUND', 404);
     await this.accessible(userId, id);
-    return {
-      id: turnId,
-      messages,
-      revision: summarizeTurn({ id: turnId, messages }).revision,
-    };
+    return messages;
   }
 
   updateThread(
@@ -2372,6 +2468,27 @@ export class ThreadService {
     });
   }
 
+  private async hydrateTurnHistory(runtime: Runtime) {
+    if (runtime.turnHistoryCurrent) return;
+    // Reconnect/public overview reads must start at complete user turns.
+    const page = await readTurnPage(this.memory, {
+      threadId: runtime.thread.id,
+      resourceId: runtime.thread.resourceId,
+    });
+    const turns = groupTurns(
+      mergeThreadMessages(page.messages, runtime.messages),
+    );
+    const visible = turns.slice(-TURN_PAGE_SIZE);
+    runtime.messages = visible.flatMap((turn) => turn.messages);
+    runtime.turnLocators = new Map([...runtime.turnLocators, ...page.locators]);
+    runtime.historyCursor =
+      turns.length > visible.length
+        ? (runtime.turnLocators.get(visible[0]!.id) ?? page.cursor)
+        : page.cursor;
+    runtime.turnHistoryCurrent = true;
+    runtime.partialTurnId = undefined;
+  }
+
   subscribe(
     userId: string,
     id: string,
@@ -2382,28 +2499,7 @@ export class ThreadService {
   ) {
     return this.scopeLocked(userId, id, async () => {
       const runtime = await this.runtime(userId, id);
-      if (turnListener && !runtime.turnHistoryCurrent) {
-        // Refresh persisted boundaries on reconnect, then overlay unsaved live parts.
-        const page = await readTurnPage(this.memory, {
-          threadId: id,
-          resourceId: runtime.thread.resourceId,
-        });
-        const turns = groupTurns(
-          mergeThreadMessages(page.messages, runtime.messages),
-        );
-        const visible = turns.slice(-TURN_PAGE_SIZE);
-        runtime.messages = visible.flatMap((turn) => turn.messages);
-        runtime.turnLocators = new Map([
-          ...runtime.turnLocators,
-          ...page.locators,
-        ]);
-        runtime.historyCursor =
-          turns.length > visible.length
-            ? (runtime.turnLocators.get(visible[0]!.id) ?? page.cursor)
-            : page.cursor;
-        runtime.turnHistoryCurrent = true;
-        runtime.partialTurnId = undefined;
-      }
+      if (turnListener) await this.hydrateTurnHistory(runtime);
       clearTimeout(runtime.expiry);
       const subscription: Subscription = {
         userId,

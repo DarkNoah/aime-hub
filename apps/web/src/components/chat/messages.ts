@@ -28,9 +28,10 @@ export type ChatMessagePart =
 
 function isGroupingMetadata(part: UIMessage['parts'][number]) {
   return (
-    part.type.startsWith('data-') ||
-    part.type.startsWith('step-') ||
-    part.type == 'reasoning'
+    part.type !== 'data-tool-group' &&
+    (part.type.startsWith('data-') ||
+      part.type.startsWith('step-') ||
+      part.type === 'reasoning')
   );
 }
 
@@ -46,6 +47,11 @@ export function groupMessageParts(
       isToolUIPart(part) &&
       !isSpecialTool(getToolName(part)) &&
       !isSubagentTool(getToolName(part)) &&
+      !(
+        'forceRender' in part &&
+        part.forceRender === true &&
+        !['image_gen', 'speech'].includes(getToolName(part) ?? '')
+      ) &&
       !interactiveToolIds?.has(part.toolCallId)
     ) {
       if (toolGroup) toolGroup.tools.push(part);

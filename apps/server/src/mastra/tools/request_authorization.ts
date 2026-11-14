@@ -103,6 +103,8 @@ export function createAuthorizationTool(
 }
 
 export class AuthorizationTool extends BuiltinTool {
+  override readonly forceRender = true;
+
   constructor() {
     super(createAuthorizationTool());
   }

@@ -42,6 +42,7 @@ export type ToolHeaderProps = {
   title?: string;
   className?: string;
   onPreview?: () => void;
+  compact?: boolean;
 } & (
   | { type: ToolUIPart['type']; state: ToolUIPart['state']; toolName?: never }
   | {
@@ -61,12 +62,21 @@ const statusIcons: Record<ToolPart['state'], ReactNode> = {
   'output-error': <XCircleIcon className="size-4 text-red-600" />,
 };
 
-const ToolStatusBadge = ({ status }: { status: ToolPart['state'] }) => {
+const ToolStatusBadge = ({
+  status,
+  compact = false,
+}: {
+  status: ToolPart['state'];
+  compact?: boolean;
+}) => {
   const { t } = useTranslation();
   return (
     <Badge
-      className="shrink-0 gap-1.5 rounded-full text-xs"
-      variant="secondary"
+      className={cn(
+        'shrink-0 gap-1.5 rounded-full text-xs',
+        compact && 'px-1 font-normal text-muted-foreground',
+      )}
+      variant={compact ? 'ghost' : 'secondary'}
     >
       {statusIcons[status]}
       {t(toolStatusLabels[status])}
@@ -85,6 +95,7 @@ export const ToolHeader = ({
   state,
   toolName,
   onPreview,
+  compact = false,
   ...props
 }: ToolHeaderProps) => {
   const derivedName =
@@ -97,24 +108,31 @@ export const ToolHeader = ({
       onClick={onPreview}
       className={cn(
         'flex w-full items-center justify-between gap-4 rounded-md p-3 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring',
+        compact && 'min-h-11 gap-2 px-2 py-2 focus-visible:ring-inset sm:gap-3',
         className,
       )}
       {...props}
     >
-      <div className="flex min-w-0 items-center gap-2">
+      <div
+        className={cn('flex min-w-0 items-center gap-2', compact && 'flex-1')}
+      >
         <WrenchIcon className="size-4 shrink-0 text-muted-foreground" />
-        <span className="truncate font-medium text-sm">
+        <span
+          className="truncate font-medium text-sm"
+          title={title ?? derivedName}
+        >
           {title ?? derivedName}
         </span>
-        {getStatusBadge(state)}
+        {!compact && getStatusBadge(state)}
       </div>
+      {compact && <ToolStatusBadge status={state} compact />}
       {onPreview ? (
         <ChevronRightIcon
           className="size-4 shrink-0 text-muted-foreground"
           aria-hidden="true"
         />
       ) : (
-        <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+        <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180 motion-reduce:transition-none" />
       )}
     </Trigger>
   );

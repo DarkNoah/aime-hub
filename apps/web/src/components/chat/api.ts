@@ -82,6 +82,18 @@ export const chatApi = {
       { params: { threadId, turnId }, query: { cursor } },
       { signal },
     ),
+  toolGroup: (
+    threadId: string,
+    turnId: string,
+    groupId: string,
+    cursor?: string,
+    page = 0,
+    signal?: AbortSignal,
+  ) =>
+    api.threads.toolGroup(
+      { params: { threadId, turnId, groupId }, query: { cursor, page } },
+      { signal },
+    ),
   stopSpeech: (threadId: string) =>
     api.threads.stopSpeech({ params: { threadId } }),
   abort: (threadId: string) => api.threads.abort({ params: { threadId } }),

@@ -114,15 +114,20 @@ import {ThemeProvider} from '/src/components/theme/theme-provider';
 import {useTheme} from '/src/components/theme/context';
 import {initializeI18n} from '/src/i18n';
 import '/src/index.css';
-const panels=${JSON.stringify(panels)};
+// Match the overview projection, which omits null optional input fields.
+const panels=${JSON.stringify(panels)}.map(({id,...input})=>({id,...Object.fromEntries(Object.entries(input).filter(([,value])=>value!==null))}));
 panels.find(panel=>panel.id==='links').html=panels.find(panel=>panel.id==='links').html.replace('https://example.test/thumbnail.svg',location.origin+'/thumbnail.svg');
 const ChatTurns=React.lazy(()=>import('/src/components/chat/chat-turns').then(module=>({default:module.ChatTurns})));
-const orderedPanel={type:'tool-'+INTELLIGENT_UI_TOOL,toolCallId:'ordered',state:'output-available',input:{title:'顺序检查',tips:null,waitForResponse:false,html:'<p>这是图表内容</p>'},output:{rendered:true}};
+const orderedPanel={type:'tool-'+INTELLIGENT_UI_TOOL,toolCallId:'ordered',state:'output-available',forceRender:true,input:{title:'顺序检查',waitForResponse:false,html:'<p>这是图表内容</p>'},output:{rendered:true}};
+const preparingText={type:'text',text:'正在准备图表',state:'done'};
 const finalText={type:'text',text:'这是图表后的最终说明',state:'done'};
 const orderedUser={id:'order-turn',role:'user',parts:[{type:'text',text:'展示图表并说明'}]};
-const orderedSummary={id:'order-turn',user:orderedUser,assistant:{id:'order-assistant',role:'assistant',parts:[orderedPanel,finalText]},hasDetails:true,toolCount:1,revision:'order-revision',assetRevision:''};
-const orderedDetail={id:'order-turn',revision:'order-revision',messages:[orderedUser,{id:'order-assistant',role:'assistant',parts:[{type:'text',text:'正在准备图表'},orderedPanel,finalText]}]};
-function TurnOrder(){const [details,setDetails]=React.useState(new Map());return <ChatTurns turns={[orderedSummary]} details={details} loadDetails={async()=>{setDetails(new Map([['order-turn',orderedDetail]]));return orderedDetail;}} threadId="test-thread" running={false} activeTurnId={null} activeMessageId={null} toolInteractions={[]} onToolResponse={async()=>{}} disabled={false}/>;}
+const orderedGroup={id:'chart-tools',count:1,revision:'chart-tools-v1',state:'completed',reasoningIndex:0};
+const orderedSummary={id:'order-turn',user:orderedUser,assistant:{id:'order-assistant',role:'assistant',parts:[preparingText,{type:'data-tool-group',data:orderedGroup},orderedPanel,finalText]},hasDetails:true,toolCount:2,revision:'order-revision',assetRevision:''};
+const orderedDetail={id:'chart-tools',revision:'chart-tools-v1',messages:[{id:'order-tools',role:'assistant',parts:[{type:'reasoning',text:'检查图表数据。',state:'done'},{type:'tool-read_file',toolCallId:'chart-data',state:'output-available',input:{path:'chart.csv'},output:'x=1, y=2'}]}],page:0,hasMore:false};
+window.groupReads=[];
+function TurnOrder(){const [groupDetails,setGroupDetails]=React.useState(new Map());return <ChatTurns turns={[orderedSummary]} groupDetails={groupDetails} loadGroupDetails={async(turn,group,page=0)=>{window.groupReads.push({turnId:turn.id,groupId:group.id,page});setGroupDetails(new Map([[turn.id+':'+group.id,{...orderedDetail,summaryRevision:group.revision}]]));return orderedDetail;}} threadId="test-thread" running={false} activeTurnId={null} activeMessageId={null} toolInteractions={[]} onToolResponse={async()=>{}} disabled={false}/>;}
+
 window.records=[]; window.failFirst=true;
 function App(){const {setTheme}=useTheme(); return <main style={{maxWidth:760,margin:'24px auto',padding:16}}><button id="theme" onClick={()=>setTheme('dark')}>深色主题</button>{panels.map(({id,...input})=><div key={id} data-panel={id}><IntelligentUI tool={{type:'tool-'+INTELLIGENT_UI_TOOL,toolCallId:id,input,state:input.waitForResponse?'input-available':'output-available',...(input.waitForResponse?{}:{output:{rendered:true}})}} interaction={input.waitForResponse?{id,toolCallId:id,toolName:INTELLIGENT_UI_TOOL,kind:'suspended',runId:'run',input}:undefined} onRespond={async (interactionId,response)=>{window.records.push({interactionId,...response}); await new Promise(r=>setTimeout(r,80)); if(interactionId==='form'&&window.failFirst){window.failFirst=false;throw new Error('Connection lost');}}}/></div>)}</main>}
 await initializeI18n();createRoot(document.getElementById('root')).render(<ThemeProvider>{location.search==='?turn'?<main style={{maxWidth:760,margin:'24px auto',padding:16}}><React.Suspense fallback="加载中"><TurnOrder/></React.Suspense></main>:<App/>}</ThemeProvider>);`;
@@ -164,7 +169,7 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
           },
         },
       ],
-      server: { host: '127.0.0.1', port: 5189 },
+      server: { host: '127.0.0.1', port: 0 },
     });
     await vite.listen();
     const port = vite.httpServer.address().port;
@@ -199,7 +204,8 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       assert.equal(
         await page.locator('[data-panel=' + id + '] iframe').count(),
         1,
-        id + ' renders HTML even when optional fields are null',
+        id +
+          ' renders HTML after overview normalization of null optional fields',
       );
       frames[id] = await (
         await page.locator('[data-panel=' + id + '] iframe').elementHandle()
@@ -544,16 +550,31 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       );
     };
     await assertTurnOrder();
+    await page.getByText('正在准备图表', { exact: true }).waitFor();
     assert.equal(
-      await page.getByText('正在准备图表', { exact: true }).count(),
+      await page.getByText('检查图表数据。', { exact: true }).count(),
       0,
     );
-    await page.getByRole('button', { name: '查看详情', exact: true }).click();
-    await page.locator('[data-chat-turn-detail="order-turn"]').waitFor();
+    assert.deepEqual(await page.evaluate(() => window.groupReads), []);
+    const group = page.locator('[data-chat-tool-group="chart-tools"]');
+    const groupDetail = group.locator(
+      '[data-chat-tool-group-detail="chart-tools"]',
+    );
+    await group.locator('button[aria-expanded]').first().click();
+    await groupDetail.waitFor();
+    await page.getByText('检查图表数据。', { exact: true }).waitFor();
+    await assertTurnOrder();
+    assert.equal(
+      await page.getByText('正在准备图表', { exact: true }).count(),
+      1,
+    );
+    await group.locator('button[aria-expanded]').first().click();
+    await groupDetail.waitFor({ state: 'hidden' });
+    await assertTurnOrder();
     await page.getByText('正在准备图表', { exact: true }).waitFor();
-    await assertTurnOrder();
-    await page.getByRole('button', { name: '收起详情', exact: true }).click();
-    await assertTurnOrder();
+    assert.deepEqual(await page.evaluate(() => window.groupReads), [
+      { turnId: 'order-turn', groupId: 'chart-tools', page: 0 },
+    ]);
     assert.deepEqual(errors, []);
   },
 );

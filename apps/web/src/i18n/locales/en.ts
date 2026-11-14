@@ -2642,6 +2642,9 @@ export const en = {
   'chat.errors.toolNotPending':
     'This request has already been handled or is no longer available.',
   'chat.toolGroup': 'Tool calls · {{count}}',
+  'chat.toolGroup.loadMore': 'Load more tool details',
+  'chat.toolGroup.updating': 'Updating tool details…',
+  'chat.toolGroup.loadFailed': 'Could not load tool details',
   'chat.backgroundTask': '{{toolName}} background task',
   'chat.backgroundTasks': 'Background tasks',
   'chat.commandSessions.title': 'Command processes',

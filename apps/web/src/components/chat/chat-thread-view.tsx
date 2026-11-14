@@ -54,8 +54,8 @@ export function ChatThreadView({
       )}
       <ChatTurns
         turns={chat.turns}
-        details={chat.details}
-        loadDetails={chat.loadDetails}
+        groupDetails={chat.groupDetails}
+        loadGroupDetails={chat.loadGroupDetails}
         activeTurnId={chat.activeTurnId}
         threadId={threadId}
         running={running}

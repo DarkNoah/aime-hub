@@ -46,7 +46,7 @@ export function threadRouter(
       threads().createThread(context.userId, input.body),
     ),
     get: p.get.handler(({ context, input }) =>
-      threads().getThread(context.userId, input.params.threadId),
+      threads().getThreadOverview(context.userId, input.params.threadId),
     ),
     summary: p.summary.handler(({ context, input }) =>
       threads().getThreadSummary(context.userId, input.params.threadId),
@@ -86,6 +86,16 @@ export function threadRouter(
         input.params.threadId,
         input.params.turnId,
         input.query.cursor,
+      ),
+    ),
+    toolGroup: p.toolGroup.handler(({ context, input }) =>
+      threads().toolGroupDetail(
+        context.userId,
+        input.params.threadId,
+        input.params.turnId,
+        input.params.groupId,
+        input.query.cursor,
+        input.query.page,
       ),
     ),
     run: p.run.handler(({ context, input }) =>

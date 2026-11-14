@@ -48,6 +48,8 @@ Make the panel visually polished and responsive: clear typography, balanced spac
 });
 
 export class IntelligentUITool extends BuiltinTool {
+  override readonly forceRender = true;
+
   constructor() {
     super(intelligentUI);
   }

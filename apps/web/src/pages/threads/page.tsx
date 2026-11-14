@@ -26,8 +26,8 @@ function ThreadPageSession({ threadId }: { threadId?: string }) {
     if (!threadId) return;
     const controller = new AbortController();
     void chatApi
-      .get(threadId, controller.signal)
-      .then(({ thread }) => {
+      .summary(threadId, controller.signal)
+      .then((thread) => {
         if (controller.signal.aborted) return;
         if (thread.projectId)
           void navigate({

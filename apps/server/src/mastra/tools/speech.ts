@@ -361,6 +361,8 @@ export function createSpeechTool(
 export const speech = createSpeechTool();
 
 export class SpeechTool extends BuiltinTool<'speech'> {
+  override readonly forceRender = true;
+
   constructor() {
     super(speech, 'speech');
   }

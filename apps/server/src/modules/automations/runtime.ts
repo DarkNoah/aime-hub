@@ -401,10 +401,8 @@ export function createAutomationRuntime({
         undefined,
         (await execution(requestContext)).config.disabledTools,
       ),
-    workspace: async ({ requestContext }) => {
-      const run = await execution(requestContext);
-      return run.model.toolCall ? run.workspace : undefined;
-    },
+    workspace: async ({ requestContext }) =>
+      (await execution(requestContext)).workspace,
     defaultOptions: async ({ requestContext }) => {
       const run = await execution(requestContext);
       // Tool permissions use the creator revalidated by service.prepare(), even

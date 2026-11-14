@@ -68,6 +68,7 @@ import type { RunInput } from '@aime/shared/threads';
 import { GOAL_MAX_RUNS, readThreadGoal } from './goals.js';
 import { compactMemory } from './compact-memory.js';
 import { buildTools, type ToolService } from '../tools/service.js';
+import { isToolForceRendered } from '../tools/registry.js';
 import { CommandSandbox } from '../../mastra/tools/command/sandbox.js';
 import { agentEnvironment } from './agent-environment.js';
 import { AgentsMDProcessor } from '../../mastra/processors/agents-md.js';
@@ -115,7 +116,8 @@ export function createChatRunner(
   environmentVariables?: Pick<EnvironmentVariableService, 'getEnv'>,
   getMemoryConfig?: ResolveMemoryConfig,
   localApi?: LocalApiAccess,
-  plugins?: Pick<PluginService, 'workspaceDirectory' | 'access'>,
+  plugins?: Pick<PluginService, 'workspaceDirectory' | 'access'> &
+    Partial<Pick<PluginService, 'isToolForceRendered'>>,
   groupChats?: GroupChatService,
   getMessageCompressionTokens: () => Promise<number> = async () =>
     defaultSystemSettings.messageCompressionTokens,
@@ -187,6 +189,9 @@ export function createChatRunner(
     return createProjectFilesystem(directory, config);
   };
   return {
+    isToolForceRendered: (name) =>
+      isToolForceRendered(name) ||
+      (plugins?.isToolForceRendered?.(name) ?? false),
     browsers,
     resolveSettings: async (settings, userId, projectId, roomRole) => ({
       ...settings,
@@ -509,8 +514,7 @@ export function createChatRunner(
                   (await childModel()).reference,
                 ),
               model: async () => (await childModel()).model,
-              workspace: async () =>
-                (await childModel()).toolCall ? workspace : undefined,
+              workspace,
               defaultOptions: async ({ requestContext }) => {
                 const selection = await childModel();
                 const author = String(requestContext.get('userId') ?? userId);
@@ -581,14 +585,7 @@ export function createChatRunner(
               : built;
           },
           memory,
-          workspace: async ({ requestContext }) => {
-            const selected =
-              chatSettingsSchema.safeParse(requestContext.get('chatSettings'))
-                .data ?? settings;
-            return (await sessionModel(selected)).toolCall
-              ? workspace
-              : undefined;
-          },
+          workspace,
         };
         if (roomBinding && !groupChats)
           throw new ThreadError('THREAD_NOT_FOUND', 404);

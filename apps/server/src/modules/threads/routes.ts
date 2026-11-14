@@ -17,6 +17,74 @@ export function threadRoutes(
     streamThreadNavigation(auth, service, c.req.raw, c.get('userId')),
   );
   router.route('/:threadId/files', fileRoutes(auth, service, webOrigins));
+  router.get(
+    '/:threadId/turns/:turnId/media',
+    requireSession(auth),
+    async (c) => {
+      const index = (name: string) => {
+        const value = c.req.query(name);
+        if (value === undefined) return undefined;
+        const parsed = Number(value);
+        if (!Number.isSafeInteger(parsed) || parsed < 0)
+          throw new ThreadError('VALIDATION_ERROR');
+        return parsed;
+      };
+      const media = await service.getTurnMedia(
+        c.get('userId'),
+        c.req.param('threadId'),
+        c.req.param('turnId'),
+        {
+          messageId: c.req.query('messageId') ?? '',
+          partIndex: index('partIndex'),
+          toolCallId: c.req.query('toolCallId'),
+          contentIndex: index('contentIndex'),
+        },
+        c.req.query('cursor'),
+      );
+      const headers = new Headers({
+        'Content-Type': /^[\w.+-]+\/[\w.+-]+$/.test(media.mediaType)
+          ? media.mediaType
+          : 'application/octet-stream',
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': "sandbox; default-src 'none'",
+        'Accept-Ranges': 'bytes',
+      });
+      // Native media elements can request a byte range when seeking legacy audio.
+      const range = c.req.header('Range');
+      if (range) {
+        const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+        const length = media.data.length;
+        const start = match?.[1]
+          ? Number(match[1])
+          : Math.max(0, length - Number(match?.[2]));
+        const end =
+          match?.[1] && match[2]
+            ? Math.min(Number(match[2]), length - 1)
+            : length - 1;
+        if (
+          !match ||
+          (!match[1] && !match[2]) ||
+          !Number.isSafeInteger(start) ||
+          !Number.isSafeInteger(end) ||
+          start < 0 ||
+          start > end ||
+          start >= length
+        ) {
+          headers.set('Content-Range', `bytes */${length}`);
+          return new Response(null, { status: 416, headers });
+        }
+        headers.set('Content-Range', `bytes ${start}-${end}/${length}`);
+        headers.set('Content-Length', String(end - start + 1));
+        return new Response(
+          new Uint8Array(media.data.subarray(start, end + 1)),
+          { status: 206, headers },
+        );
+      }
+      headers.set('Content-Length', String(media.data.length));
+      return new Response(new Uint8Array(media.data), { headers });
+    },
+  );
   router.get('/:threadId/browser/events', requireSession(auth), async (c) => {
     const userId = c.get('userId');
     const threadId = c.req.param('threadId');

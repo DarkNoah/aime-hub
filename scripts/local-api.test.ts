@@ -344,7 +344,8 @@ test('skill scripts use existing APIs with scoped identity, ownership, paging an
   );
   const client = createAppApi({ env, fetchImpl });
   const catalog = await client.list();
-  assert.equal(catalog.length, 21);
+  assert.equal(catalog.length, 22);
+  assert.ok(catalog.some((operation: { operationId: string }) => operation.operationId === 'threads.toolGroup'));
   assert.ok(
     catalog.some(
       (operation: { operationId: string }) =>

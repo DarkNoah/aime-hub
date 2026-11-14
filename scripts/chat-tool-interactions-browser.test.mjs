@@ -45,31 +45,36 @@ import {ChatTurns} from '/src/components/chat/chat-turns';
 import {ThemeProvider} from '/src/components/theme/theme-provider';
 import {initializeI18n} from '/src/i18n';
 import '/src/index.css';
-window.records=[];
+window.records=[];window.groupReads=[];
 const askInput={question:'请选择回测口径',options:[{label:'日线点数回测'},{label:'1分钟点数回测'}],selectionMode:'single_select'};
-const askPart={...(location.search.includes('dynamic')?{type:'dynamic-tool',toolName:'ask_user'}:{type:'tool-ask_user'}),toolCallId:'pending-ask',state:'input-available',input:askInput};
+const askPart={...(location.search.includes('dynamic')?{type:'dynamic-tool',toolName:'ask_user'}:{type:'tool-ask_user'}),toolCallId:'pending-ask',state:'input-available',input:askInput,forceRender:true};
 const askUser={id:'ask-turn',role:'user',parts:[{type:'text',text:'创建并回测策略'}]};
-const askText={type:'text',text:'请确认回测口径。'};
-const finalText={type:'text',text:'已按所选口径继续。'};
+const askText={type:'text',text:'请确认回测口径。',state:'done'};
+const finalText={type:'text',text:'已按所选口径继续。',state:'done'};
 const reasoning={type:'reasoning',text:'核对回测参数。',state:'done'};
-const askAssistant={id:'ask-assistant',role:'assistant',parts:[reasoning,askText,askPart]};
-const askSummary={id:'ask-turn',user:askUser,assistant:{...askAssistant,parts:[askText]},hasDetails:true,toolCount:1,revision:'pending',assetRevision:''};
-const askDetail={id:'ask-turn',revision:'pending',messages:[askUser,askAssistant]};
+const readPart={type:'tool-read_file',toolCallId:'read-parameters',state:'output-available',input:{path:'parameters.txt'},output:'period=day'};
+const askGroup={id:'ask-tools',count:1,revision:'ask-tools-v1',state:'completed'};
+const previousGroup={...askGroup,id:'previous-tools',revision:'previous-tools-v1'};
+const groupPart=group=>({type:'data-tool-group',data:group});
+const askAssistant={id:'ask-assistant',role:'assistant',parts:[groupPart(askGroup),askText,askPart]};
+const askSummary={id:'ask-turn',user:askUser,assistant:askAssistant,hasDetails:true,toolCount:2,revision:'pending',assetRevision:''};
 const previousAsk={...askPart,toolCallId:'previous-ask',state:'output-available',output:'此前答案'};
-const previousSummary={...askSummary,id:'previous-turn',user:{...askUser,id:'previous-turn'},assistant:{id:'previous-assistant',role:'assistant',parts:[previousAsk]},revision:'previous'};
-const previousDetail={id:'previous-turn',revision:'previous',messages:[{id:'previous-assistant',role:'assistant',parts:[reasoning,previousAsk]}]};
+const previousSummary={...askSummary,id:'previous-turn',user:{...askUser,id:'previous-turn'},assistant:{id:'previous-assistant',role:'assistant',parts:[groupPart(previousGroup),previousAsk]},revision:'previous'};
 function AskTurn(){
   const [answer,setAnswer]=React.useState(null);
-  const [details,setDetails]=React.useState(new Map());
+  const [groupDetails,setGroupDetails]=React.useState(new Map());
   const [interactions,setInteractions]=React.useState([{id:'pending-interaction',toolCallId:'pending-ask',toolName:'ask_user',kind:'suspended',runId:'ask-run',input:askInput,suspendPayload:askInput}]);
   const completedAsk={...askPart,state:'output-available',output:answer};
-  const completedDetail={...askDetail,revision:'answered',messages:[askUser,{...askAssistant,parts:[reasoning,askText,completedAsk,finalText]}]};
-  const summary=answer===null?askSummary:{...askSummary,revision:'answered',assistant:{...askAssistant,parts:[completedAsk,finalText]}};
-  return <ChatTurns turns={[previousSummary,summary]} details={details} loadDetails={async(turn)=>{const detail=turn.id==='previous-turn'?previousDetail:answer===null?askDetail:completedDetail;setDetails(current=>new Map(current).set(turn.id,detail));return detail;}} threadId="ask-test" running={false} activeTurnId={null} activeMessageId={null} toolInteractions={interactions} onToolResponse={async(interactionId,response)=>{
+  const summary=answer===null?askSummary:{...askSummary,revision:'answered',assistant:{...askAssistant,parts:[groupPart(askGroup),askText,completedAsk,finalText]}};
+  return <ChatTurns turns={[previousSummary,summary]} groupDetails={groupDetails} loadGroupDetails={async(turn,group,page=0)=>{
+    window.groupReads.push({turnId:turn.id,groupId:group.id,page});
+    const detail={id:group.id,revision:group.revision,messages:[{id:turn.id+'-tools',role:'assistant',parts:[reasoning,{...readPart,toolCallId:group.id+'-read'}]}],page:0,hasMore:false};
+    setGroupDetails(current=>new Map(current).set(turn.id+':'+group.id,{...detail,summaryRevision:group.revision}));
+    return detail;
+  }} threadId="ask-test" running={false} activeTurnId={null} activeMessageId={null} toolInteractions={interactions} onToolResponse={async(interactionId,response)=>{
     window.records.push({interactionId,...response});
     setInteractions(current=>current.map(item=>({...item,response})));
     setAnswer(response.data);
-    setDetails(current=>new Map(current).set('ask-turn',{...completedDetail,messages:[askUser,{...askAssistant,parts:[reasoning,askText,{...completedAsk,output:response.data},finalText]}]}));
   }} disabled={false}/>;
 }
 
@@ -124,7 +129,7 @@ createRoot(document.getElementById('root')).render(<ThemeProvider><AskTurn/></Th
     page.on('pageerror', (error) => errors.push(error.message));
     for (const query of ['?ask', '?ask-dynamic']) {
       await t.test(
-        `pending ask renders once with expanded details (${query})`,
+        `pending ask renders once with expanded tool groups (${query})`,
         async () => {
           await page.goto('http://127.0.0.1:' + port + '/' + query);
           const question = page.getByRole('group', {
@@ -133,14 +138,26 @@ createRoot(document.getElementById('root')).render(<ThemeProvider><AskTurn/></Th
           });
           const currentTurn = page.locator('[data-chat-turn="ask-turn"]');
           const previousTurn = page.locator('[data-chat-turn="previous-turn"]');
+          const currentGroup = currentTurn.locator(
+            '[data-chat-tool-group="ask-tools"]',
+          );
+          const previousGroup = previousTurn.locator(
+            '[data-chat-tool-group="previous-tools"]',
+          );
+          const currentDetail = currentGroup.locator(
+            '[data-chat-tool-group-detail="ask-tools"]',
+          );
           await question.getByRole('textbox').waitFor();
           await previousTurn.getByText('此前答案', { exact: true }).waitFor();
           assert.equal(await question.count(), 2);
+          assert.deepEqual(
+            await page.evaluate(() => window.groupReads),
+            [],
+            'closed groups do not fetch details',
+          );
           await question.getByRole('textbox').fill('浏览器回归答案');
-          await currentTurn
-            .getByRole('button', { name: '查看详情', exact: true })
-            .click();
-          await currentTurn.locator('[data-chat-turn-detail]').waitFor();
+          await currentGroup.locator('button[aria-expanded]').first().click();
+          await currentDetail.waitFor();
           assert.equal(
             await question.count(),
             2,
@@ -151,21 +168,19 @@ createRoot(document.getElementById('root')).render(<ThemeProvider><AskTurn/></Th
             '浏览器回归答案',
           );
           assert.equal(await question.getByRole('textbox').isEnabled(), true);
-          await currentTurn
-            .getByRole('button', { name: '收起详情', exact: true })
-            .click();
+          await currentGroup.locator('button[aria-expanded]').first().click();
+          await currentDetail.waitFor({ state: 'hidden' });
           assert.equal(await question.count(), 2);
           assert.equal(
             await question.getByRole('textbox').inputValue(),
             '浏览器回归答案',
           );
-          await currentTurn
-            .getByRole('button', { name: '查看详情', exact: true })
-            .click();
-          await currentTurn.locator('[data-chat-turn-detail]').waitFor();
-          await previousTurn
-            .getByRole('button', { name: '查看详情', exact: true })
-            .click();
+          await currentGroup.locator('button[aria-expanded]').first().click();
+          await currentDetail.waitFor();
+          await previousGroup.locator('button[aria-expanded]').first().click();
+          await previousGroup
+            .locator('[data-chat-tool-group-detail]')
+            .waitFor();
           await previousTurn.getByText('此前答案', { exact: true }).waitFor();
           assert.equal(
             await question.count(),
@@ -180,12 +195,11 @@ createRoot(document.getElementById('root')).render(<ThemeProvider><AskTurn/></Th
           assert.equal(
             await question.count(),
             2,
-            'each answered call appears only once in its details',
+            'each answered call appears only once alongside its tool group',
           );
           assert.equal(await question.getByRole('textbox').count(), 0);
-          await currentTurn
-            .getByRole('button', { name: '收起详情', exact: true })
-            .click();
+          await currentGroup.locator('button[aria-expanded]').first().click();
+          await currentDetail.waitFor({ state: 'hidden' });
           await currentTurn
             .getByText('浏览器回归答案', { exact: true })
             .waitFor();
@@ -197,18 +211,21 @@ createRoot(document.getElementById('root')).render(<ThemeProvider><AskTurn/></Th
             2,
             'answered questions remain visible when collapsed',
           );
-          assert.equal(
-            await currentTurn.locator('[data-chat-turn-detail]').count(),
-            0,
-          );
-          await currentTurn
-            .getByRole('button', { name: '查看详情', exact: true })
-            .click();
-          await currentTurn.locator('[data-chat-turn-detail]').waitFor();
+          assert.equal(await currentDetail.count(), 0);
+          await currentGroup.locator('button[aria-expanded]').first().click();
+          await currentDetail.waitFor();
           assert.equal(
             await question.count(),
             2,
-            'expanding answered turns must not duplicate the overview',
+            'expanding answered tool groups must not duplicate the overview',
+          );
+          assert.deepEqual(
+            await page.evaluate(() => window.groupReads),
+            [
+              { turnId: 'ask-turn', groupId: 'ask-tools', page: 0 },
+              { turnId: 'previous-turn', groupId: 'previous-tools', page: 0 },
+            ],
+            'reopening groups and answering a question reuse unchanged details',
           );
           assert.deepEqual(
             await page.evaluate(() =>

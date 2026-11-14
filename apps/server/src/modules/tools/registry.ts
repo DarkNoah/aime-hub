@@ -47,6 +47,12 @@ export function registerTools(tools: Record<string, ToolDefinition>) {
   return registry;
 }
 const registry = registerTools(applicationTools);
+
+/** Display policy applies to persisted calls even when execution is disabled. */
+export function isToolForceRendered(name: string): boolean {
+  return registry.get(normalizeToolId(name))?.forceRender === true;
+}
+
 export const registeredToolIds: readonly string[] = [...registry.values()]
   .filter((tool) => !tool.hidden)
   .map((tool) => tool.id);

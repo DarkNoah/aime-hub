@@ -240,6 +240,8 @@ export function createImageGenTool(
 export const imageGen = createImageGenTool();
 
 export class ImageGenTool extends BuiltinTool<'image_gen'> {
+  override readonly forceRender = true;
+
   constructor() {
     super(imageGen, 'image_gen');
   }

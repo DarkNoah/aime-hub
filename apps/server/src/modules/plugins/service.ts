@@ -525,6 +525,15 @@ export class PluginService {
     );
   }
 
+  /** Persisted cards remain visible independently of current execution settings. */
+  isToolForceRendered(id: string): boolean {
+    return [...this.servers.values()].some((server) =>
+      server.tools?.some(
+        (tool) => tool.id === id && !tool.hidden && tool.forceRender,
+      ),
+    );
+  }
+
   async toolConfigs(defaults: ToolDefaultConfigs = {}): Promise<ToolConfig[]> {
     const states = await this.list();
     const rows = await this.database.query<

@@ -14,12 +14,15 @@ import type {
 } from '@aime/shared/threads';
 import { chatApi, ChatApiError } from './api';
 import type {
-  ChatTurnDetail,
+  ChatToolGroup,
+  ChatToolGroupDetail,
   ChatTurnPage,
   ChatTurnSnapshot,
   ChatTurnSummary,
 } from '@aime/shared/chat-turns';
 import { mergeTurns } from './turns';
+import { appendToolGroupPage } from './tool-group-pages';
+import type { LoadedChatToolGroup } from './chat-tool-group';
 import { useAuthSession } from '@/features/auth/session-context';
 import { SharedEventSource } from '@/components/realtime/event-source';
 
@@ -76,22 +79,21 @@ export function useThreadChat(
     }
   }, []);
   const [turns, setTurns] = useState<ChatTurnSummary[]>([]);
-  const [details, setDetails] = useState<Map<string, ChatTurnDetail>>(
-    () => new Map(),
+  const [groupDetails, setGroupDetails] = useState(
+    () => new Map<string, LoadedChatToolGroup>(),
   );
-  const detailCache = useRef(new Map<string, ChatTurnDetail>());
-  const detailRequests = useRef(new Map<string, Promise<ChatTurnDetail>>());
+  const groupCache = useRef(new Map<string, LoadedChatToolGroup>());
+  const groupRequests = useRef(new Map<string, Promise<ChatToolGroupDetail>>());
+  const groupRevisions = useRef(new Map<string, string>());
   // Workspace previews can resolve complete tool parts only after the user opens details.
   const messages = useMemo(
-    () =>
-      turns.flatMap(
-        (turn) =>
-          details.get(turn.id)?.messages ??
-          [turn.user, turn.assistant].filter(
-            (item): item is UIMessage => !!item,
-          ),
+    () => [
+      ...turns.flatMap((turn) =>
+        [turn.user, turn.assistant].filter((item): item is UIMessage => !!item),
       ),
-    [turns, details],
+      ...[...groupDetails.values()].flatMap((group) => group.messages),
+    ],
+    [turns, groupDetails],
   );
   const [submitting, setSubmitting] = useState(false);
 
@@ -145,8 +147,9 @@ export function useThreadChat(
       stopSpeech();
       setConnected(false);
       setTurns([]);
-      setDetails(new Map());
-      detailCache.current.clear();
+      setGroupDetails(new Map());
+      groupCache.current.clear();
+      groupRevisions.current.clear();
       setThread(null);
       setUsage(null);
       setGoal(null);
@@ -186,26 +189,58 @@ export function useThreadChat(
     listenToSpeech,
   ]);
 
-  const loadDetails = useCallback(
-    async (turn: ChatTurnSummary) => {
-      const cached = detailCache.current.get(turn.id);
-      if (cached?.revision === turn.revision) return cached;
-      const pending = detailRequests.current.get(turn.id);
+  const loadGroupDetails = useCallback(
+    async (turn: ChatTurnSummary, group: ChatToolGroup, page = 0) => {
+      const key = `${turn.id}:${group.id}`;
+      const cached = groupCache.current.get(key);
+      const current = cached?.summaryRevision === group.revision;
+      if (current && page <= cached.page) return cached;
+      // A changed group starts a fresh page sequence, so pages never mix revisions.
+      const nextPage = current && page === cached.page + 1 ? page : 0;
+      const requestKey = `${key}:${group.revision}:${nextPage}`;
+      const pending = groupRequests.current.get(requestKey);
       if (pending) return pending;
       const controller = session.current;
       if (!controller || controller.signal.aborted)
         throw new Error('Chat is closed');
-      const request = chatApi
-        .turn(threadId, turn.id, turn.cursor, controller.signal)
-        .then((detail) => {
-          if (!controller.signal.aborted) {
-            detailCache.current.set(turn.id, detail);
-            setDetails((current) => new Map(current).set(turn.id, detail));
-          }
-          return detail;
-        })
-        .finally(() => detailRequests.current.delete(turn.id));
-      detailRequests.current.set(turn.id, request);
+      groupRevisions.current.set(key, group.revision);
+      const request = (async () => {
+        let result = await chatApi.toolGroup(
+          threadId,
+          turn.id,
+          group.id,
+          turn.cursor,
+          nextPage,
+          controller.signal,
+        );
+        // A live tool can change between pages even before the summary arrives.
+        if (nextPage > 0 && result.revision !== cached?.revision)
+          result = await chatApi.toolGroup(
+            threadId,
+            turn.id,
+            group.id,
+            turn.cursor,
+            0,
+            controller.signal,
+          );
+        const loaded: LoadedChatToolGroup = {
+          ...result,
+          summaryRevision: group.revision,
+          messages:
+            result.page > 0 && cached
+              ? appendToolGroupPage(cached.messages, result.messages)
+              : result.messages,
+        };
+        if (
+          !controller.signal.aborted &&
+          groupRevisions.current.get(key) === group.revision
+        ) {
+          groupCache.current.set(key, loaded);
+          setGroupDetails((existing) => new Map(existing).set(key, loaded));
+        }
+        return loaded;
+      })().finally(() => groupRequests.current.delete(requestKey));
+      groupRequests.current.set(requestKey, request);
       return request;
     },
     [threadId],
@@ -262,8 +297,8 @@ export function useThreadChat(
     },
     messages,
     turns,
-    details,
-    loadDetails,
+    groupDetails,
+    loadGroupDetails,
     canContinue,
     activeTurnId,
     connected,

@@ -27,6 +27,47 @@ export type ChatSubagentSummary = {
   state: ToolUIPart['state'];
 };
 
+/** A consecutive group of tool/reasoning parts; payloads are loaded on expansion. */
+export type ChatToolGroup = {
+  id: string;
+  count: number;
+  revision: string;
+  state: 'running' | 'completed' | 'failed';
+  /** Position of the final reasoning part in this group's flattened detail parts. */
+  reasoningIndex?: number;
+  /** Allows the overview to omit older thinking without hiding tools or other details. */
+  reasoningOnly?: boolean;
+};
+
+export type ChatToolGroupPart = {
+  type: 'data-tool-group';
+  data: ChatToolGroup;
+};
+
+export function isChatToolGroupPart(
+  part: UIMessage['parts'][number],
+): part is ChatToolGroupPart {
+  if (part.type !== 'data-tool-group') return false;
+  const data = part.data as Partial<ChatToolGroup> | undefined;
+  return (
+    !!data &&
+    typeof data.id === 'string' &&
+    typeof data.count === 'number' &&
+    typeof data.revision === 'string' &&
+    (data.state === 'running' ||
+      data.state === 'completed' ||
+      data.state === 'failed')
+  );
+}
+
+export type ChatToolGroupDetail = {
+  id: string;
+  revision: string;
+  messages: UIMessage[];
+  page: number;
+  hasMore: boolean;
+};
+
 /** Answered questions remain visible when the rest of a turn is collapsed. */
 export function isCompletedAskUserPart(part: UIMessage['parts'][number]) {
   return (
@@ -72,7 +113,7 @@ export function hasChatTurnDetails(messages: readonly UIMessage[]) {
 export type ChatTurnSummary = {
   id: string;
   user: UIMessage | null;
-  /** Final text, generated images, completed panels, and answered questions in order. */
+  /** All assistant text, collapsed tool groups and forced display parts, in order. */
   assistant: UIMessage | null;
   /** Whether details add visible content beyond the final assistant text. */
   hasDetails?: boolean;
