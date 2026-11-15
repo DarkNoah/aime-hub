@@ -24,6 +24,7 @@ import type {
   SkillContent,
 } from '@aime/shared/skills';
 import { SkillError } from './errors.js';
+import { readSkillArchive } from './archive.js';
 import { fileError } from '../files/paths.js';
 import { userDirectory } from '../threads/workspace.js';
 import type { EnvironmentVariableService } from '../environment-variables/service.js';
@@ -39,13 +40,14 @@ import {
   isRegularFile,
   parseGitHubRepository,
   safeRepositoryPath,
+  type GitHubRepository,
   type RepositoryFile,
   type RepositorySnapshot,
 } from './github.js';
 
 const SCAN_TTL = 15 * 60_000;
 type CachedScan = {
-  source: SkillSource;
+  source?: SkillSource;
   result: SkillScan;
   snapshot: RepositorySnapshot;
   timer: NodeJS.Timeout;
@@ -207,12 +209,51 @@ export class SkillService {
     legacyPaths?: Set<string>,
   ): Promise<SkillScan> {
     const repository = parseGitHubRepository(input);
-    let snapshot: RepositorySnapshot | undefined;
+    const snapshot = await this.download(repository, signal, original, {
+      ...process.env,
+      ...(await this.environmentVariables?.getEnv(this.userId)),
+    });
+    return this.scanSnapshot(
+      repository,
+      snapshot,
+      input,
+      signal,
+      original,
+      legacyPaths,
+    );
+  }
+
+  async scanArchive(
+    filename: string,
+    data: Buffer,
+    signal?: AbortSignal,
+  ): Promise<SkillScan> {
+    const snapshot = await readSkillArchive(filename, data, signal);
+    return this.scanSnapshot(
+      {
+        owner: '@local',
+        repo: slug(filename.replace(/\.(zip|skill)$/i, '')),
+        url: '',
+      },
+      snapshot,
+      undefined,
+      signal,
+      undefined,
+      undefined,
+      filename,
+    );
+  }
+
+  private async scanSnapshot(
+    repository: GitHubRepository,
+    snapshot: RepositorySnapshot,
+    input?: string,
+    signal?: AbortSignal,
+    original?: SkillSource,
+    legacyPaths?: Set<string>,
+    filename?: string,
+  ): Promise<SkillScan> {
     try {
-      snapshot = await this.download(repository, signal, original, {
-        ...process.env,
-        ...(await this.environmentVariables?.getEnv(this.userId)),
-      });
       if (signal?.aborted) throw new SkillError('SKILL_DOWNLOAD_FAILED', 502);
       // Resolve names across the whole repository so scoped and full scans use identical destinations.
       const manifests = snapshot.files.filter(
@@ -328,6 +369,7 @@ export class SkillService {
       const result: SkillScan = {
         id: randomUUID(),
         ...repository,
+        ...(filename ? { sourceType: 'archive' as const, filename } : {}),
         commit: snapshot.commit,
         scope: snapshot.scopePath ?? '',
         ref: snapshot.ref ?? null,
@@ -343,12 +385,14 @@ export class SkillService {
         result,
         snapshot,
         timer,
-        source: {
-          url: normalizeSkillSource(input),
-          ref: snapshot.ref ?? null,
-          scope: snapshot.scopePath ?? '',
-          installation,
-        },
+        source: input
+          ? {
+              url: normalizeSkillSource(input),
+              ref: snapshot.ref ?? null,
+              scope: snapshot.scopePath ?? '',
+              installation,
+            }
+          : undefined,
       });
       return result;
     } catch (error) {
@@ -404,7 +448,7 @@ export class SkillService {
           throw new SkillError('SKILL_CONFLICT', 409);
       }
       const parent = (await this.directory([owner, repo], true))!;
-      const sources = await readSkillSources(parent);
+      const sources = cached.source ? await readSkillSources(parent) : [];
       for (const skill of selected) {
         if (await stat(join(parent, skill.name)))
           throw new SkillError('SKILL_CONFLICT', 409);
@@ -414,11 +458,12 @@ export class SkillService {
       );
       const installed: string[] = [];
       try {
-        await writeFile(
-          join(staging, SKILL_SOURCES_FILE),
-          serializeSkillSources([...sources, cached.source]),
-          { flag: 'wx' },
-        );
+        if (cached.source)
+          await writeFile(
+            join(staging, SKILL_SOURCES_FILE),
+            serializeSkillSources([...sources, cached.source]),
+            { flag: 'wx' },
+          );
         for (const skill of selected) {
           const target = join(staging, skill.name);
           await mkdir(target);
@@ -442,10 +487,11 @@ export class SkillService {
           await rename(join(staging, skill.name), target);
           installed.push(target);
         }
-        await rename(
-          join(staging, SKILL_SOURCES_FILE),
-          join(parent, SKILL_SOURCES_FILE),
-        );
+        if (cached.source)
+          await rename(
+            join(staging, SKILL_SOURCES_FILE),
+            join(parent, SKILL_SOURCES_FILE),
+          );
       } catch (error) {
         await Promise.all(
           installed.map((path) => rm(path, { recursive: true, force: true })),
@@ -558,7 +604,7 @@ export class SkillService {
             });
         staging = await mkdtemp(join(dirname(this.root), '.skill-update-'));
         const resolvedSources = scans.map(
-          (scan) => this.scans.get(scan.id)!.source,
+          (scan) => this.scans.get(scan.id)!.source!,
         );
         const saved = join(staging, 'previous');
         await rename(directory, saved);

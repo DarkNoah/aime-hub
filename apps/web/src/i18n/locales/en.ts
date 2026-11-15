@@ -623,7 +623,7 @@ export const en = {
   'home.agentsTitle': 'Make workflows reusable',
   'home.agentsDescription':
     'Create agents, import Skills, and reuse established workflows in your conversations.',
-  'home.agentsDetail': 'Agent publishing · Skills from GitHub',
+  'home.agentsDetail': 'Agent publishing · Skill imports',
   'home.toolsTitle': 'Connect the tools you need',
   'home.toolsDescription':
     'Use web search and page reading, and connect additional services through MCP.',
@@ -1690,7 +1690,7 @@ export const en = {
     'Manage skills for your personal chats. Personal skills take priority over global skills with the same name.',
   'skills.personalRemoveHint':
     '“{{name}}” and its bundled files will be deleted from your personal skill directory. Future personal conversations will use the global version if one exists with the same name.',
-  'skills.import': 'Import from GitHub',
+  'skills.import': 'Import skills',
   'skills.openRepository': 'Open GitHub repository {{name}}',
   'skills.updateGroup': 'Update skill group',
   'skills.updateGroupNamed': 'Update {{name}}',
@@ -1713,10 +1713,29 @@ export const en = {
   'skills.sourceContent': 'Source',
   'skills.loadingContent': 'Loading skill content…',
   'skills.importHint':
-    'Repositories with a root entry install as complete packages; collections allow individual selection.',
+    'Import from GitHub or a local archive. Complete packages stay together; collections allow individual selection.',
+  'skills.archiveTab': 'Archive file',
+  'skills.chooseArchive': 'Choose archive',
+  'skills.replaceArchive': 'Replace archive',
+  'skills.archiveDropHint': 'Drop a skill archive here or choose a file',
+  'skills.archiveHint':
+    '.zip and .skill files, up to {{size}} MiB. Scans automatically after selection.',
+  'skills.archiveScanning': 'Uploading and reading the skill archive…',
+  'skills.startArchiveScan': 'Choose an archive to review available skills',
+  'skills.archiveStructureHint':
+    'Accepts a single package with SKILL.md or multiple skill folders, preserving scripts and bundled resources.',
+  'skills.archiveGroup': 'Local archive / {{name}}',
+  'skills.archiveInvalid':
+    'Could not read this skill archive. Choose a valid .zip or .skill file containing SKILL.md.',
+  'skills.archiveTooLarge':
+    'The archive exceeds 100 MiB, 512 MiB unpacked, or 10,000 entries. Split the package and try again.',
+  'skills.archiveUnsafe':
+    'The archive contains unsafe paths, duplicate filenames, or unsupported links and cannot be imported.',
+  'skills.archiveCancelled': 'Skill archive import cancelled.',
+  'skills.singleArchive': 'Choose one skill archive at a time.',
   'skills.completePackage': 'Complete package',
   'skills.packageHint':
-    'Preserves directories, bundled skills and shared resources, including on updates.',
+    'Preserves directories, bundled skills and shared resources.',
   'skills.bundledSkills': 'View {{count}} bundled entries',
   'skills.source': 'GitHub source',
   'skills.sourceHint':
@@ -1749,7 +1768,7 @@ export const en = {
   'skills.noMatches': 'No skills match your search.',
   'skills.empty': 'No skills installed yet',
   'skills.emptyHint':
-    'Import skills from GitHub to make their instructions, scripts, and reference files available to conversations.',
+    'Import skills from GitHub or .zip and .skill archives to make their instructions, scripts, and reference files available to conversations.',
   'skills.storage': 'Skill directory',
   'skills.localGroup': 'Local skills',
   'skills.refresh': 'Refresh skills',

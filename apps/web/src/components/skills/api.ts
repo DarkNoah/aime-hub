@@ -1,5 +1,6 @@
 import type { TranslationKey } from '@/i18n/config';
 import { api } from '@/lib/rpc';
+import { SKILL_ARCHIVE_MAX_BYTES, type SkillScan } from '@aime/shared/skills';
 
 export type SkillScope = 'global' | 'personal';
 const clients = { global: api.skills, personal: api.personalSkills };
@@ -21,10 +22,43 @@ const errorKeys = {
   SKILL_CONFLICT: 'skills.conflict',
   SKILL_NOT_FOUND: 'skills.notFound',
   SKILL_GROUP_CHANGED: 'skills.groupChanged',
+  SKILL_ARCHIVE_INVALID: 'skills.archiveInvalid',
+  SKILL_ARCHIVE_TOO_LARGE: 'skills.archiveTooLarge',
+  SKILL_ARCHIVE_UNSAFE: 'skills.archiveUnsafe',
+  ABORTED: 'skills.archiveCancelled',
   VALIDATION_ERROR: 'skills.invalidUrl',
   UNAUTHORIZED: 'errors.sessionExpired',
   FORBIDDEN: 'errors.forbidden',
 } as const satisfies Record<string, TranslationKey>;
+
+export async function uploadSkillArchive(
+  scope: SkillScope,
+  file: File,
+  signal: AbortSignal,
+): Promise<SkillScan> {
+  if (!/\.(zip|skill)$/i.test(file.name) || !file.size)
+    throw { code: 'SKILL_ARCHIVE_INVALID' };
+  if (file.size > SKILL_ARCHIVE_MAX_BYTES)
+    throw { code: 'SKILL_ARCHIVE_TOO_LARGE' };
+  const body = new FormData();
+  body.set('file', file);
+  const response = await fetch(
+    scope === 'global' ? '/api/admin/skills/archives' : '/api/skills/archives',
+    { method: 'POST', credentials: 'same-origin', body, signal },
+  );
+  const result = await response.json().catch(() => null);
+  if (!response.ok)
+    throw {
+      code:
+        result?.code ??
+        (response.status === 413
+          ? 'SKILL_ARCHIVE_TOO_LARGE'
+          : 'SKILL_ARCHIVE_INVALID'),
+    };
+  if (!result || typeof result.id !== 'string' || !Array.isArray(result.skills))
+    throw new Error('Invalid archive scan response');
+  return result as SkillScan;
+}
 
 export function skillErrorKey(error: unknown): TranslationKey {
   if (error instanceof TypeError) return 'errors.network';

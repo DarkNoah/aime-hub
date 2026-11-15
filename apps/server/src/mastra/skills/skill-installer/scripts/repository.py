@@ -144,10 +144,17 @@ class Snapshot:
     scope: str
     files: list[dict]
 
+    def read(self, file: dict) -> bytes:
+        return git(["cat-file", "blob", file["oid"]], self.folder)
+
+    def copy_file(self, file: dict, output: Path):
+        with output.open("xb") as stream:
+            git(["cat-file", "blob", file["oid"]], self.folder, stream)
+
     def candidates(self) -> list[dict]:
         manifests = [file for file in self.files if file["path"].split("/")[-1] == "SKILL.md"]
         names = [slug(PurePosixPath(file["path"]).parent.name or
-                      manifest_name(git(["cat-file", "blob", file["oid"]], self.folder).decode("utf-8")) or
+                      manifest_name(self.read(file).decode("utf-8")) or
                       self.source.repo) for file in manifests]
         counts = Counter(names)
         result = []
@@ -211,8 +218,7 @@ class Snapshot:
                 continue
             output = target / file["path"][len(prefix):]
             output.parent.mkdir(parents=True, exist_ok=True)
-            with output.open("xb") as stream:
-                git(["cat-file", "blob", file["oid"]], self.folder, stream)
+            self.copy_file(file, output)
             output.chmod(0o755 if file["mode"] == "100755" else 0o644)
 
 

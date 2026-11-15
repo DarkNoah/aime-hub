@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install repository skills into the current workspace's SKILL_HOME."""
+"""Install repository or local archive skills into the current workspace's SKILL_HOME."""
 from __future__ import annotations
 
 import argparse
@@ -11,6 +11,7 @@ import sys
 import tempfile
 
 from repository import SkillError, directory, handle_termination, parse_source, repository, skill_home
+from archive import archive
 
 
 SOURCES_FILE = ".skill-sources.json"
@@ -76,25 +77,29 @@ def install(root: Path, snapshot, paths: list[str] | None) -> list[Path]:
         raise SkillError("Another install is active for this group. Try again when it finishes.") from exc
     written = []
     try:
-        sources = {source["url"]: source for source in read_sources(group)}
-        for scope in scopes:
-            origin = snapshot.origin(scope)
-            sources[origin["url"]] = origin
+        sources = None
+        if snapshot.source.kind != "archive":
+            sources = {source["url"]: source for source in read_sources(group)}
+            for scope in scopes:
+                origin = snapshot.origin(scope)
+                sources[origin["url"]] = origin
         with tempfile.TemporaryDirectory(prefix=".skill-install-", dir=group) as staging:
             staged = Path(staging)
             for skill in selected:
                 snapshot.copy(skill, staged / skill["name"])
-            (staged / SOURCES_FILE).write_text(
-                json.dumps({"version": 2, "sources": list(sources.values())}, indent=2) + "\n",
-                encoding="utf-8",
-            )
+            if sources is not None:
+                (staged / SOURCES_FILE).write_text(
+                    json.dumps({"version": 2, "sources": list(sources.values())}, indent=2) + "\n",
+                    encoding="utf-8",
+                )
             try:
                 for skill, target in zip(selected, targets):
                     if target.exists() or target.is_symlink():
                         raise SkillError(f"Skill already exists: {target}")
                     (staged / skill["name"]).rename(target)
                     written.append(target)
-                (staged / SOURCES_FILE).replace(group / SOURCES_FILE)
+                if sources is not None:
+                    (staged / SOURCES_FILE).replace(group / SOURCES_FILE)
             except BaseException:
                 for target in reversed(written):
                     shutil.rmtree(target)
@@ -109,12 +114,16 @@ def main(argv: list[str]) -> int:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--repo", help="owner/repository")
     source.add_argument("--url", help="Original repository or scoped HTTPS URL")
-    parser.add_argument("--path", nargs="+", help="Repository-relative skill paths or parent directories")
+    source.add_argument("--archive", help="Local .zip or .skill package path")
+    parser.add_argument("--path", nargs="+", help="Source-relative skill paths or parent directories")
     parser.add_argument("--ref", help="Branch, tag, or full commit SHA (default: repository default branch)")
     args = parser.parse_args(argv)
     try:
         root = skill_home()
-        with repository(parse_source(args.repo or args.url, args.ref)) as snapshot:
+        if args.archive and args.ref is not None:
+            raise SkillError("--ref cannot be used with a local archive.")
+        source = archive(args.archive) if args.archive else repository(parse_source(args.repo or args.url, args.ref))
+        with source as snapshot:
             targets = install(root, snapshot, args.path)
         for target in targets:
             print(f"Installed {target.name}: {target}")

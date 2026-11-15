@@ -66,7 +66,9 @@ export function InstalledSkillsList(props: Props) {
       : skills;
     if (!visibleSkills.length) return null;
     const repositoryUrl = skillGroupRepositoryUrl(group);
-    const label = group || t('skills.localGroup');
+    const label = group.startsWith('@local/')
+      ? t('skills.archiveGroup', { name: group.slice('@local/'.length) })
+      : group || t('skills.localGroup');
     const heading = (
       <>
         <Folder

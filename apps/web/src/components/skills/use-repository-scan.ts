@@ -8,20 +8,20 @@ import {
   type SkillScope,
 } from './api';
 
-export function useRepositoryScan(scope: SkillScope) {
+export function useRepositoryScan(scope: SkillScope, enabled = true) {
   const client = getSkillApi(scope);
   const [input, setInput] = useState('');
   const [revision, setRevision] = useState(0);
   const url = input.trim();
   const valid = isSkillSourceInput(url);
-  const key = JSON.stringify([url, revision]);
+  const key = JSON.stringify([url, revision, enabled]);
   const [result, setResult] = useState<{
     key: string;
     data?: SkillScan;
     error?: TranslationKey;
   }>();
   useEffect(() => {
-    if (!valid) return;
+    if (!enabled || !valid) return;
     const controller = new AbortController();
     let scanId: string | undefined;
     const discard = (id: string) => {
@@ -48,15 +48,16 @@ export function useRepositoryScan(scope: SkillScope) {
       controller.abort();
       if (scanId) discard(scanId);
     };
-  }, [client, url, valid, key]);
+  }, [client, url, valid, key, enabled]);
 
   return {
     input,
     setInput,
-    loading: valid && result?.key !== key,
-    scan: result?.key === key ? result.data : undefined,
-    error:
-      url && !valid
+    loading: enabled && valid && result?.key !== key,
+    scan: enabled && result?.key === key ? result.data : undefined,
+    error: !enabled
+      ? undefined
+      : url && !valid
         ? ('skills.invalidUrl' as const)
         : result?.key === key
           ? result.error

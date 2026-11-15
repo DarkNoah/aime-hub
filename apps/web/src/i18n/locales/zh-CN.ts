@@ -573,7 +573,7 @@ export const zhCN = {
   'home.agentsTitle': '把经验变成能力',
   'home.agentsDescription':
     '创建专属 Agent，导入与管理 Skills，在对话中复用成熟的工作方法。',
-  'home.agentsDetail': 'Agent 发布 · GitHub 技能导入',
+  'home.agentsDetail': 'Agent 发布 · 技能导入',
   'home.toolsTitle': '连接工作所需的工具',
   'home.toolsDescription':
     '使用网页搜索、内容读取等工具，通过 MCP 连接更多外部服务。',
@@ -1551,7 +1551,7 @@ export const zhCN = {
     '管理你个人聊天中使用的技能；同名个人技能优先于全局技能。',
   'skills.personalRemoveHint':
     '将从你的个人技能目录删除「{{name}}」及其附带文件。若有同名全局技能，后续个人会话将恢复使用全局版本。',
-  'skills.import': '从 GitHub 导入',
+  'skills.import': '导入技能',
   'skills.openRepository': '打开 GitHub 项目 {{name}}',
   'skills.updateGroup': '更新技能组',
   'skills.updateGroupNamed': '一键更新 {{name}}',
@@ -1571,10 +1571,29 @@ export const zhCN = {
   'skills.preview': '预览',
   'skills.sourceContent': '源文件',
   'skills.loadingContent': '正在加载技能内容…',
-  'skills.importHint': '含根入口的仓库按完整技能包安装；技能合集可按项勾选。',
+  'skills.importHint':
+    '从 GitHub 或本地压缩包导入；完整技能包整体安装，技能合集可按项勾选。',
+  'skills.archiveTab': '本地压缩包',
+  'skills.chooseArchive': '选择压缩包',
+  'skills.replaceArchive': '更换压缩包',
+  'skills.archiveDropHint': '拖放技能压缩包，或选择文件',
+  'skills.archiveHint':
+    '支持 .zip、.skill，最大 {{size}} MiB。选择后自动解析。',
+  'skills.archiveScanning': '正在上传并解析技能包…',
+  'skills.startArchiveScan': '选择压缩包，查看可安装的技能',
+  'skills.archiveStructureHint':
+    '支持包含 SKILL.md 的单个技能包或多个技能文件夹，保留脚本和附带资源。',
+  'skills.archiveGroup': '本地包 / {{name}}',
+  'skills.archiveInvalid':
+    '无法解析此技能包。请选择包含 SKILL.md 的有效 .zip 或 .skill 文件。',
+  'skills.archiveTooLarge':
+    '压缩包超过 100 MiB，或解压后超过 512 MiB / 10,000 个条目。请拆分后重试。',
+  'skills.archiveUnsafe':
+    '压缩包包含不安全路径、重复文件名或不支持的链接，无法导入。',
+  'skills.archiveCancelled': '已取消技能包导入。',
+  'skills.singleArchive': '请每次选择一个技能压缩包。',
   'skills.completePackage': '完整技能包',
-  'skills.packageHint':
-    '保留包内目录结构、子技能及共享资源，更新时保持完整安装。',
+  'skills.packageHint': '保留包内目录结构、子技能及共享资源。',
   'skills.bundledSkills': '查看包含的 {{count}} 个子入口',
   'skills.source': 'GitHub 来源',
   'skills.sourceHint':
@@ -1605,7 +1624,7 @@ export const zhCN = {
   'skills.noMatches': '没有匹配的技能。',
   'skills.empty': '还没有安装技能',
   'skills.emptyHint':
-    '从 GitHub 导入技能，让会话可以使用其中的指令、脚本和参考文件。',
+    '从 GitHub 或 .zip、.skill 压缩包导入技能，让会话可以使用其中的指令、脚本和参考文件。',
   'skills.storage': '技能存放目录',
   'skills.localGroup': '本地技能',
   'skills.refresh': '刷新技能列表',

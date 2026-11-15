@@ -1,6 +1,6 @@
 ---
 name: skill-installer
-description: Search for suitable skills by keyword or install skills from a specified repository into the current chat scope. Use for finding skills, listing installed skills, and installing one or more skill directories. Does not enable agents, publish configuration, or modify other users' skills.
+description: Search for suitable skills by keyword or install skills from a specified repository or local .zip/.skill package into the current chat scope. Use for finding skills, listing installed skills, and installing one or more skill directories. Does not enable agents, publish configuration, or modify other users' skills.
 metadata:
   short-description: Find and install skills in the current chat scope
 ---
@@ -8,6 +8,8 @@ metadata:
 # Skill Installer
 
 Find skills through keyword searches or a user-specified repository. Use the bundled scripts to install packages containing `SKILL.md`. Do not assume a default vendor repository or a fixed recommendation list.
+
+Local `.zip` and `.skill` files are also supported; `.skill` uses the ZIP format. Use `--archive` with the actual local file path supplied by the user or returned by the attachment tools.
 
 ## Installation Location
 
@@ -23,6 +25,8 @@ Global skills reside in `WORKSPACE_ROOT/.agents/skills` and are maintained throu
 Check `SKILL_HOME` first. If it is missing or is not an absolute path, stop writing and explain that the runtime has not supplied an installation location. Do not guess an account, project, user home, or session directory. A personal session's dated directory is not the personal skill root. Do not change `SKILL_HOME` to target another user, another project, or the global directory.
 
 Skills are installed at `$SKILL_HOME/<owner>/<repo>/<skill-name>/SKILL.md`. Skill names use normalized package directory names; a repository-root package uses its manifest name, falling back to the repository name. Bundled scripts, references, and assets are preserved. The group's `.skill-sources.json` records the source and installation mode so management-page updates retain the original branch, path, and package boundary.
+
+Local archive packages are installed at `$SKILL_HOME/@local/<archive-filename-without-extension>/<skill-name>/SKILL.md`, with normalized directory names. They have no GitHub source record or automatic upstream update. Existing destinations are never overwritten.
 
 ## Workflow
 
@@ -96,3 +100,20 @@ Without a root entry, the repository is a collection. Select the requested packa
 - Updates preserve the saved installation mode. Complete packages retain their entry and installation directory, never expanding into separate child installs. If the entry disappears or becomes invalid, keep the previous package. Collections refresh their original scope as collections. Source records from older installs remain readable.
 - Clean up download and installation staging directories after success, failure, or cancellation.
 - The scripts check that each package contains a regular `SKILL.md` file. The runtime remains responsible for full skill-format and usability validation.
+
+## Local Archive Packages
+
+List or preview the package before choosing entries, then install the requested skills:
+
+```sh
+python3 "$BUILTIN_SKILLS_ROOT/skill-installer/scripts/list-skills.py" --archive "/path/to/package.skill" --format json
+python3 "$BUILTIN_SKILLS_ROOT/skill-installer/scripts/list-skills.py" --archive "/path/to/package.zip" --path skills/chosen-skill --preview
+python3 "$BUILTIN_SKILLS_ROOT/skill-installer/scripts/install-skill.py" --archive "/path/to/package.skill"
+python3 "$BUILTIN_SKILLS_ROOT/skill-installer/scripts/install-skill.py" --archive "/path/to/package.zip" --path skills/chosen-skill
+```
+
+`--archive` is mutually exclusive with `--repo` and `--url`; `--ref` is not supported for local files. Listing, previewing, and installing archives require Python but do not require Git or a network connection. Relative paths are resolved from the command's working directory; prefer the actual absolute attachment path.
+
+The package may contain `SKILL.md` at its root, inside an outer directory, or in multiple skill directories. Paths in `--path` are the original archive-relative paths, including any outer directory. The existing complete-package rules apply: a root or parent `SKILL.md` includes its nested resources and manifests as one skill. Scripts, references, binary assets, and executable file modes are preserved without executing them.
+
+Archives are limited to 100 MiB compressed, 512 MiB expanded, and 10,000 entries. ZIP entries must use store or deflate compression. Encrypted, corrupted, unsafe, duplicate/conflicting paths, symbolic links, and special files are rejected before installation. `.git`, `__MACOSX`, `.DS_Store`, and AppleDouble `._*` metadata are omitted. Staging directories are cleaned after success, failure, or cancellation; failed batches preserve prior installations.

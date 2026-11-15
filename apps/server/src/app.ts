@@ -69,7 +69,10 @@ import { systemSettingsRouter } from './modules/system-settings/rpc.js';
 import { audioRoutes } from './modules/audio/routes.js';
 import type { AudioService } from './modules/audio/service.js';
 import type { AvatarService } from './modules/profile/avatars.js';
-import { skillFileRoutes } from './modules/skills/routes.js';
+import {
+  skillArchiveRoutes,
+  skillFileRoutes,
+} from './modules/skills/routes.js';
 import {
   avatarResourceRoutes,
   profileRoutes,
@@ -150,6 +153,14 @@ export function createApp(
   if (avatars)
     app.route('/api/profile', profileRoutes(auth, avatars.service, webOrigins));
   if (skills) {
+    app.route(
+      '/api/admin/skills',
+      skillArchiveRoutes(auth, skills.service, 'global', webOrigins),
+    );
+    app.route(
+      '/api/skills',
+      skillArchiveRoutes(auth, skills.service, 'personal', webOrigins),
+    );
     app.route(
       '/api/admin/skills/files',
       skillFileRoutes(auth, skills.service, 'global'),

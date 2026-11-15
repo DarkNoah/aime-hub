@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""List installed skills or inspect candidates in a supplied repository."""
+"""List installed skills or inspect candidates in a repository or local archive."""
 from __future__ import annotations
 
 import argparse
 import json
 import sys
 
-from repository import SkillError, directory, git, handle_termination, installed, parse_source, repository, skill_home
+from repository import SkillError, directory, handle_termination, installed, parse_source, repository, skill_home
+from archive import archive
 
 
 def main(argv: list[str]) -> int:
@@ -14,21 +15,25 @@ def main(argv: list[str]) -> int:
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--repo", help="owner/repository")
     source.add_argument("--url", help="Original repository or scoped HTTPS URL")
-    parser.add_argument("--path", nargs="+", help="Repository-relative skill paths or parent directories")
+    source.add_argument("--archive", help="Local .zip or .skill package path")
+    parser.add_argument("--path", nargs="+", help="Source-relative skill paths or parent directories")
     parser.add_argument("--ref", help="Branch, tag, or full commit SHA")
     parser.add_argument("--format", choices=["text", "json"], default="text")
     parser.add_argument("--preview", action="store_true", help="Read one selected SKILL.md without installing")
     args = parser.parse_args(argv)
     try:
         root = skill_home()
-        if args.repo or args.url:
-            with repository(parse_source(args.repo or args.url, args.ref)) as snapshot:
+        if args.repo or args.url or args.archive:
+            if args.archive and args.ref is not None:
+                raise SkillError("--ref cannot be used with a local archive.")
+            source = archive(args.archive) if args.archive else repository(parse_source(args.repo or args.url, args.ref))
+            with source as snapshot:
                 rows, _ = snapshot.select(args.path)
                 if args.preview:
                     if len(rows) != 1:
                         raise SkillError("Preview requires a path selecting exactly one skill.")
                     file = next(file for file in snapshot.files if file["path"] == rows[0]["manifest"])
-                    print(git(["cat-file", "blob", file["oid"]], snapshot.folder).decode("utf-8"))
+                    print(snapshot.read(file).decode("utf-8"))
                     return 0
                 group = directory(root, [snapshot.source.owner, snapshot.source.repo])
                 for row in rows:
@@ -38,7 +43,7 @@ def main(argv: list[str]) -> int:
                     row["conflict"] = target.exists() or target.is_symlink()
         else:
             if args.path or args.ref or args.preview:
-                raise SkillError("--path, --ref and --preview require a repository source.")
+                raise SkillError("--path, --ref and --preview require a source.")
             rows = installed(root)
         if args.format == "json":
             print(json.dumps(rows, ensure_ascii=False, indent=2))

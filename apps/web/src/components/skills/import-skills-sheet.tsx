@@ -1,6 +1,12 @@
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Download, FolderGit2, Loader2, Search } from 'lucide-react';
+import {
+  Download,
+  FileArchive,
+  FolderGit2,
+  Loader2,
+  Search,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import type { InstalledSkill, RepositorySkill } from '@aime/shared/skills';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +15,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Sheet,
   SheetContent,
@@ -24,6 +31,8 @@ import {
   toggleSkills,
 } from './selection';
 import { useRepositoryScan } from './use-repository-scan';
+import { useArchiveScan } from './use-archive-scan';
+import { SkillArchiveInput } from './skill-archive-input';
 import { SkillFolderContents } from './skill-folder';
 
 export function ImportSkillsSheet({
@@ -36,7 +45,10 @@ export function ImportSkillsSheet({
   onInstalled: (skills: InstalledSkill[]) => void;
 }) {
   const { t } = useTranslation();
-  const source = useRepositoryScan(scope);
+  const [mode, setMode] = useState<'github' | 'archive'>('github');
+  const repository = useRepositoryScan(scope, mode === 'github');
+  const archive = useArchiveScan(scope);
+  const source = mode === 'github' ? repository : archive;
   const client = getSkillApi(scope);
   const [search, setSearch] = useState('');
   const [selection, setSelection] = useState<{
@@ -56,6 +68,25 @@ export function ImportSkillsSheet({
         .includes(query),
     ) ?? [];
   const tree = skillFolders(visible);
+  function changeMode(value: string) {
+    if (
+      submitting.current ||
+      value === mode ||
+      (value !== 'github' && value !== 'archive')
+    )
+      return;
+    archive.clearScan();
+    repository.clearScan();
+    repository.rescan();
+    setSearch('');
+    setMode(value);
+  }
+  async function upload(file: File) {
+    if (submitting.current) return;
+    setSearch('');
+    const error = await archive.upload(file);
+    if (error) toast.error(t(error));
+  }
   function select(skills: RepositorySkill[], checked: boolean) {
     setSelection({
       id: scan?.id,
@@ -100,48 +131,77 @@ export function ImportSkillsSheet({
           <SheetDescription>{t('skills.importHint')}</SheetDescription>
         </div>
         <div className="space-y-3 border-b px-5 py-4 sm:px-6">
-          <form
-            className="space-y-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              source.rescan();
-            }}
-          >
-            <Label htmlFor="skill-source">{t('skills.source')}</Label>
-            <div className="flex gap-2">
-              <Input
-                id="skill-source"
-                autoFocus
-                autoComplete="off"
-                spellCheck={false}
-                value={source.input}
-                disabled={pending}
-                placeholder="owner/repo · https://github.com/owner/repo"
-                aria-describedby="skill-source-hint"
-                aria-invalid={!!source.error}
-                onChange={(event) => source.setInput(event.target.value)}
-              />
-              <Button
-                variant="outline"
-                type="submit"
-                disabled={pending || source.loading || !source.input.trim()}
+          <Tabs value={mode} onValueChange={changeMode}>
+            <TabsList className="w-full">
+              <TabsTrigger value="github" disabled={pending}>
+                <FolderGit2 />
+                GitHub
+              </TabsTrigger>
+              <TabsTrigger value="archive" disabled={pending}>
+                <FileArchive />
+                {t('skills.archiveTab')}
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="github" className="pt-2">
+              <form
+                className="space-y-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  repository.rescan();
+                }}
               >
-                {source.loading ? (
-                  <Loader2 className="animate-spin" />
-                ) : (
-                  <Search />
-                )}
-                <span className="hidden sm:inline">{t('skills.scan')}</span>
-                <span className="sr-only sm:hidden">{t('skills.scan')}</span>
-              </Button>
-            </div>
-            <p
-              id="skill-source-hint"
-              className="text-xs leading-5 text-muted-foreground"
-            >
-              {t('skills.sourceHint')}
-            </p>
-          </form>
+                <Label htmlFor="skill-source">{t('skills.source')}</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="skill-source"
+                    autoFocus
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={repository.input}
+                    disabled={pending}
+                    placeholder="owner/repo · https://github.com/owner/repo"
+                    aria-describedby="skill-source-hint"
+                    aria-invalid={!!repository.error}
+                    onChange={(event) =>
+                      repository.setInput(event.target.value)
+                    }
+                  />
+                  <Button
+                    variant="outline"
+                    type="submit"
+                    disabled={
+                      pending || repository.loading || !repository.input.trim()
+                    }
+                  >
+                    {repository.loading ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <Search />
+                    )}
+                    <span className="hidden sm:inline">{t('skills.scan')}</span>
+                    <span className="sr-only sm:hidden">
+                      {t('skills.scan')}
+                    </span>
+                  </Button>
+                </div>
+                <p
+                  id="skill-source-hint"
+                  className="text-xs leading-5 text-muted-foreground"
+                >
+                  {t('skills.sourceHint')}
+                </p>
+              </form>
+            </TabsContent>
+            <TabsContent value="archive" className="pt-2">
+              <SkillArchiveInput
+                filename={archive.filename}
+                loading={archive.loading}
+                disabled={pending}
+                onFile={(file) => void upload(file)}
+                onCancel={archive.clearScan}
+              />
+            </TabsContent>
+          </Tabs>
           {source.error ? (
             <p role="alert" className="text-sm text-destructive">
               {t(source.error)}
@@ -149,21 +209,32 @@ export function ImportSkillsSheet({
           ) : null}
           {scan ? (
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <a
-                href={scan.url}
-                target="_blank"
-                rel="noreferrer"
-                className="font-medium text-foreground hover:underline"
-              >
-                {scan.owner}/{scan.repo}
-              </a>
-              <Badge variant="outline">
-                {scan.ref ?? t('skills.defaultBranch')} ·{' '}
-                {scan.commit.slice(0, 7)}
-              </Badge>
-              <span className="break-all">
-                {scan.scope || t('skills.repositoryRoot')}
-              </span>
+              {scan.sourceType === 'archive' ? (
+                <>
+                  <span className="break-all font-medium text-foreground">
+                    {scan.filename}
+                  </span>
+                  <Badge variant="outline">{t('skills.archiveTab')}</Badge>
+                </>
+              ) : (
+                <>
+                  <a
+                    href={scan.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-foreground hover:underline"
+                  >
+                    {scan.owner}/{scan.repo}
+                  </a>
+                  <Badge variant="outline">
+                    {scan.ref ?? t('skills.defaultBranch')} ·{' '}
+                    {scan.commit.slice(0, 7)}
+                  </Badge>
+                  <span className="break-all">
+                    {scan.scope || t('skills.repositoryRoot')}
+                  </span>
+                </>
+              )}
             </div>
           ) : null}
         </div>
@@ -198,7 +269,13 @@ export function ImportSkillsSheet({
         >
           <div className="px-3 py-4 sm:px-4">
             {source.loading ? (
-              <LoadingState label={t('skills.scanning')} />
+              <LoadingState
+                label={t(
+                  mode === 'archive'
+                    ? 'skills.archiveScanning'
+                    : 'skills.scanning',
+                )}
+              />
             ) : scan ? (
               visible.length ? (
                 <SkillFolderContents
@@ -216,10 +293,24 @@ export function ImportSkillsSheet({
               )
             ) : !source.error ? (
               <div className="space-y-3 px-4 py-12 text-center">
-                <FolderGit2 className="mx-auto size-7 text-muted-foreground" />
-                <p className="text-sm font-medium">{t('skills.startScan')}</p>
+                {mode === 'archive' ? (
+                  <FileArchive className="mx-auto size-7 text-muted-foreground" />
+                ) : (
+                  <FolderGit2 className="mx-auto size-7 text-muted-foreground" />
+                )}
+                <p className="text-sm font-medium">
+                  {t(
+                    mode === 'archive'
+                      ? 'skills.startArchiveScan'
+                      : 'skills.startScan',
+                  )}
+                </p>
                 <p className="mx-auto max-w-sm text-xs leading-5 text-muted-foreground">
-                  {t('skills.scanHint')}
+                  {t(
+                    mode === 'archive'
+                      ? 'skills.archiveStructureHint'
+                      : 'skills.scanHint',
+                  )}
                 </p>
               </div>
             ) : null}

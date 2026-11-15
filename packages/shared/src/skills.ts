@@ -1,5 +1,9 @@
 import { z } from 'zod';
 
+export const SKILL_ARCHIVE_MAX_BYTES = 100 * 1024 * 1024;
+export const SKILL_ARCHIVE_MAX_UNPACKED_BYTES = 512 * 1024 * 1024;
+export const SKILL_ARCHIVE_MAX_ENTRIES = 10_000;
+
 export const scanSkillsSchema = z
   .object({ url: z.string().trim().min(1) })
   .strict();
@@ -52,6 +56,8 @@ export type RepositorySkill = {
 };
 
 export type SkillScan = {
+  sourceType?: 'github' | 'archive';
+  filename?: string;
   id: string;
   owner: string;
   repo: string;
