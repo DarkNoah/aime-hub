@@ -26,6 +26,7 @@ import type {
 import { SkillError } from './errors.js';
 import { fileError } from '../files/paths.js';
 import { userDirectory } from '../threads/workspace.js';
+import type { EnvironmentVariableService } from '../environment-variables/service.js';
 import {
   normalizeSkillSource,
   readSkillSources,
@@ -101,6 +102,7 @@ export class SkillService {
     private workspaceRoot: string,
     private download = downloadGitHubRepository,
     private userId?: string,
+    private environmentVariables?: Pick<EnvironmentVariableService, 'getEnv'>,
   ) {
     this.workspaceRoot = resolve(workspaceRoot);
     const directory =
@@ -113,7 +115,12 @@ export class SkillService {
   forUser(userId: string): SkillService {
     let service = this.personalServices.get(userId);
     if (!service) {
-      service = new SkillService(this.workspaceRoot, this.download, userId);
+      service = new SkillService(
+        this.workspaceRoot,
+        this.download,
+        userId,
+        this.environmentVariables,
+      );
       this.personalServices.set(userId, service);
     }
     return service;
@@ -202,7 +209,10 @@ export class SkillService {
     const repository = parseGitHubRepository(input);
     let snapshot: RepositorySnapshot | undefined;
     try {
-      snapshot = await this.download(repository, signal, original);
+      snapshot = await this.download(repository, signal, original, {
+        ...process.env,
+        ...(await this.environmentVariables?.getEnv(this.userId)),
+      });
       if (signal?.aborted) throw new SkillError('SKILL_DOWNLOAD_FAILED', 502);
       // Resolve names across the whole repository so scoped and full scans use identical destinations.
       const manifests = snapshot.files.filter(

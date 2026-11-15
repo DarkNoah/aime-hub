@@ -89,6 +89,7 @@ Without a root entry, the repository is a collection. Select the requested packa
 ## Installation Behavior
 
 - Accept only public HTTPS repository sources. Read files from a fixed commit snapshot without executing downloaded scripts or installing repository dependencies.
+- Forward `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and their lowercase equivalents from the current command environment to Git, preserving empty values. Personal chats use global plus personal settings; project chats use global plus project settings. The same proxy settings apply to the original source and both fallback sources. Never print proxy credentials.
 - Try the original source first. After a network transfer failure, retry with `https://githubproxy.cc/` and then `https://ghfast.top/` as transport prefixes. Stop after success and retain the original source URL in the records. If the original path is missing, report an error instead of falling back to the repository root.
 - Apply no limits to repository size, file count, skill count, or individual file size. Skip symbolic links and submodules, reject paths that escape the allowed scope, and exclude the repository's `.git` directory from installed packages.
 - Do not overwrite existing skill directories. Check batch destinations and resources before writing. On failure, roll back the current additions and preserve previously installed skills. Use the management page's update action for updates or replacements instead of deleting existing directories before attempting a download.

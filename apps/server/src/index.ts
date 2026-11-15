@@ -194,7 +194,12 @@ const { mastra, storage, memory } = createMastraRuntime(
   await getMemoryConfig(),
 );
 await storage.init();
-const skills = new SkillService(workspaceRoot);
+const skills = new SkillService(
+  workspaceRoot,
+  undefined,
+  undefined,
+  environmentVariables,
+);
 const agentStore = await storage.getStore('agents');
 if (!agentStore) throw new Error('Mastra agents storage is required');
 const mcpStore = await storage.getStore('mcpClients');

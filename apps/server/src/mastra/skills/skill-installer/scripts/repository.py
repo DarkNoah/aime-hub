@@ -119,6 +119,11 @@ def parse_source(value: str, ref: str | None = None) -> Source:
 def git(args: list[str], cwd: Path | None = None, output=None) -> bytes:
     env = {"PATH": os.environ.get("PATH", ""), "GIT_CONFIG_NOSYSTEM": "1",
            "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": ""}
+    # Keep scoped proxy settings, including empty overrides, without inheriting Git config or secrets.
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+                "http_proxy", "https_proxy", "all_proxy", "no_proxy"):
+        if key in os.environ:
+            env[key] = os.environ[key]
     try:
         result = subprocess.run(["git", "-c", "credential.helper=", "-c", "core.hooksPath=/dev/null",
                                  "-c", "protocol.allow=never", "-c", "protocol.https.allow=always",

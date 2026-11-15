@@ -86,7 +86,22 @@ async function git(
   cwd?: string,
   signal?: AbortSignal,
   output?: Writable,
+  environment: NodeJS.ProcessEnv = process.env,
 ) {
+  // Forward only transport settings; never inherit credentials or Git configuration.
+  const proxyEnv: NodeJS.ProcessEnv = {};
+  for (const key of [
+    'HTTP_PROXY',
+    'HTTPS_PROXY',
+    'ALL_PROXY',
+    'NO_PROXY',
+    'http_proxy',
+    'https_proxy',
+    'all_proxy',
+    'no_proxy',
+  ]) {
+    if (environment[key] !== undefined) proxyEnv[key] = environment[key];
+  }
   const child = spawn(
     'git',
     [
@@ -108,6 +123,7 @@ async function git(
       stdio: ['ignore', 'pipe', 'pipe'],
       // Do not inherit Git configs, credential helpers, or repository variables.
       env: {
+        ...proxyEnv,
         PATH: process.env.PATH,
         GIT_CONFIG_NOSYSTEM: '1',
         GIT_CONFIG_GLOBAL: '/dev/null',
@@ -223,6 +239,7 @@ export async function downloadGitHubRepository(
   repository: GitHubRepository,
   signal?: AbortSignal,
   original?: { ref: string | null; scope: string },
+  environment: NodeJS.ProcessEnv = process.env,
 ): Promise<RepositorySnapshot> {
   const source = `${repository.url}.git`;
   const remotes = [
@@ -232,7 +249,13 @@ export async function downloadGitHubRepository(
   ];
   for (const [index, remote] of remotes.entries()) {
     try {
-      return await downloadRepository(repository, remote, signal, original);
+      return await downloadRepository(
+        repository,
+        remote,
+        signal,
+        original,
+        environment,
+      );
     } catch (error) {
       if (
         signal?.aborted ||
@@ -252,18 +275,23 @@ async function downloadRepository(
   remote: string,
   signal?: AbortSignal,
   original?: { ref: string | null; scope: string },
+  environment?: NodeJS.ProcessEnv,
 ): Promise<RepositorySnapshot> {
+  const runGit = (args: string[], cwd?: string) =>
+    git(args, cwd, signal, undefined, environment);
   const directory = await mkdtemp(join(tmpdir(), 'skill-repository-'));
   const dispose = () => rm(directory, { recursive: true, force: true });
   try {
     let ref: string | undefined = original?.ref ?? undefined;
     let scopePath: string | undefined = original?.scope;
     if (repository.refPath && !original) {
-      const refs = await git(
-        ['ls-remote', '--heads', '--tags', '--', remote],
-        undefined,
-        signal,
-      );
+      const refs = await runGit([
+        'ls-remote',
+        '--heads',
+        '--tags',
+        '--',
+        remote,
+      ]);
       ({ ref, scopePath } = resolveRepositoryScope(
         repository.refPath,
         refs.stdout.toString('utf8'),
@@ -272,25 +300,21 @@ async function downloadRepository(
     const checkout = join(directory, 'repo');
     let revision = 'HEAD';
     if (ref && /^[a-f0-9]{40}$/.test(ref)) {
-      await git(['init', '--', checkout], undefined, signal);
-      await git(['fetch', '--depth=1', '--', remote, ref], checkout, signal);
+      await runGit(['init', '--', checkout]);
+      await runGit(['fetch', '--depth=1', '--', remote, ref], checkout);
       revision = 'FETCH_HEAD';
     } else {
-      await git(
-        [
-          'clone',
-          '--depth=1',
-          '--single-branch',
-          '--no-tags',
-          '--no-checkout',
-          ...(ref ? ['--branch', ref] : []),
-          '--',
-          remote,
-          checkout,
-        ],
-        undefined,
-        signal,
-      );
+      await runGit([
+        'clone',
+        '--depth=1',
+        '--single-branch',
+        '--no-tags',
+        '--no-checkout',
+        ...(ref ? ['--branch', ref] : []),
+        '--',
+        remote,
+        checkout,
+      ]);
     }
     const snapshot = await readGitSnapshot(checkout, revision, signal);
     if (repository.kind === 'blob') {
