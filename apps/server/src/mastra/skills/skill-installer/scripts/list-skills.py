@@ -8,7 +8,7 @@ import sys
 
 from repository import SkillError, directory, handle_termination, installed, parse_source, repository, skill_home
 from archive import archive
-from project import PROJECT_FILE, PROJECT_ROOT, project_snapshot, read_project
+from project import check_ancestors, group_parts, locate_project, project_snapshot, read_project
 
 
 def main(argv: list[str]) -> int:
@@ -31,7 +31,8 @@ def main(argv: list[str]) -> int:
             source = archive(args.archive) if args.archive else repository(parse_source(args.repo or args.url, args.ref))
             with source as snapshot:
                 if args.whole_project:
-                    snapshot = project_snapshot(snapshot)
+                    group, project = locate_project(root, snapshot)
+                    snapshot = project_snapshot(snapshot, project)
                 rows = snapshot.select_project(args.path) if args.whole_project else snapshot.select(args.path)[0]
                 if args.preview:
                     if len(rows) != 1:
@@ -39,18 +40,22 @@ def main(argv: list[str]) -> int:
                     file = next(file for file in snapshot.files if file["path"] == rows[0]["manifest"])
                     print(snapshot.read(file).decode("utf-8"))
                     return 0
-                group = directory(root, [snapshot.source.owner, snapshot.source.repo])
-                project = read_project(group)
+                parts = group_parts(snapshot, args.whole_project)
+                check_ancestors(root, parts)
+                if not args.whole_project:
+                    group = directory(root, parts)
+                    project = read_project(group, legacy=len(parts) == 2)
                 for row in rows:
-                    target = group / PROJECT_ROOT / row["path"] if args.whole_project else group / row["name"]
+                    project_root = group / (project["root"] if project else ".")
+                    target = project_root / row["path"] if args.whole_project else group / row["name"]
                     row["destination"] = str(target)
                     if args.whole_project:
-                        row["projectRoot"] = str(group / PROJECT_ROOT)
+                        row["projectRoot"] = str(project_root)
                         row["installed"] = project is not None and any(entry["path"] == row["manifest"] for entry in project["entries"])
                         row["conflict"] = group.exists() or group.is_symlink()
                     else:
                         row["installed"] = project is None and target.is_dir() and not target.is_symlink() and (target / "SKILL.md").is_file()
-                        row["conflict"] = (group / PROJECT_FILE).exists() or target.exists() or target.is_symlink()
+                        row["conflict"] = project is not None or target.exists() or target.is_symlink()
         else:
             if args.path or args.ref or args.preview or args.whole_project:
                 raise SkillError("--path, --ref, --preview and --whole-project require a source.")

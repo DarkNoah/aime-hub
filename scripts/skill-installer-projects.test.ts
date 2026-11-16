@@ -8,6 +8,7 @@ import {
   mkdir,
   readFile,
   readdir,
+  rename,
   rm,
   stat,
   symlink,
@@ -19,6 +20,7 @@ import { SkillService } from '../apps/server/src/modules/skills/service.js';
 import { readSkillProject } from '../apps/server/src/modules/skills/project.js';
 import { readSkillSources } from '../apps/server/src/modules/skills/sources.js';
 import { readGitSnapshot } from '../apps/server/src/modules/skills/github.js';
+import { readSkillArchive } from '../apps/server/src/modules/skills/archive.js';
 
 const exec = promisify(execFile);
 const scripts = resolve(
@@ -90,8 +92,16 @@ async function fixture(t: test.TestContext) {
     },
     clean: async (owner = '@local') => {
       assert.deepEqual(await readdir(temporary), []);
-      const contents = await readdir(join(home, owner)).catch(() => []);
-      assert.ok(contents.every((path) => !path.startsWith('.')));
+      for (const path of [home, join(home, owner)]) {
+        const contents = await readdir(path).catch(() => []);
+        assert.ok(
+          contents.every(
+            (name) =>
+              !name.endsWith('.skill-install.lock') &&
+              !name.startsWith('.skill-project-'),
+          ),
+        );
+      }
     },
   };
 }
@@ -131,7 +141,7 @@ test('whole-project archive imports unwrap one project root and keep siblings an
   ]);
   assert.equal(
     available.find((row) => row.name === 'rea-toon')?.destination,
-    join(f.home, '@local/rea-toon/project/skills/rea-toon'),
+    join(f.home, 'rea-toon/skills/rea-toon'),
   );
   assert.equal(
     (
@@ -145,35 +155,35 @@ test('whole-project archive imports unwrap one project root and keep siblings an
     manifest('rea-toon').trim(),
   );
   await f.run('install-skill.py', [...args, '--path', 'skills/rea-toon']);
-  const group = join(f.home, '@local/rea-toon');
+  const group = join(f.home, 'rea-toon');
   assert.deepEqual(await readSkillProject(group), {
-    version: 1,
-    root: 'project',
+    version: 2,
+    root: '.',
     entries: [{ path: 'skills/rea-toon/SKILL.md', name: 'rea-toon' }],
   });
   assert.deepEqual((await readdir(group)).sort(), [
-    '.skill-project.json',
-    'project',
+    '.env.example',
+    '.skill-meta',
+    'pyproject.toml',
+    'rea_toon',
+    'skills',
   ]);
+  await assert.rejects(stat(join(f.home, '@local')), { code: 'ENOENT' });
   for (const file of projectFiles)
-    assert.equal(
-      await readFile(join(group, 'project', file.path), 'utf8'),
-      file.content,
-    );
-  await assert.rejects(stat(join(group, 'project/rea-toon-main')), {
+    assert.equal(await readFile(join(group, file.path), 'utf8'), file.content);
+  await assert.rejects(stat(join(group, 'rea-toon-main')), {
     code: 'ENOENT',
   });
   assert.equal(
-    (await stat(join(group, 'project/skills/rea-toon/examples/run.py'))).mode &
-      0o777,
+    (await stat(join(group, 'skills/rea-toon/examples/run.py'))).mode & 0o777,
     0o755,
   );
   const listing = await f.rows();
   assert.deepEqual(
     listing.map((row) => row.path),
-    ['@local/rea-toon/project/skills/rea-toon'],
+    ['rea-toon/skills/rea-toon'],
   );
-  assert.equal(listing[0].projectRoot, '@local/rea-toon/project');
+  assert.equal(listing[0].projectRoot, 'rea-toon');
   const rescanned = await f.rows(args);
   assert.equal(
     rescanned.find((row) => row.name === 'rea-toon')?.installed,
@@ -199,16 +209,12 @@ test('whole-project archive imports unwrap one project root and keep siblings an
   );
   await f.run('install-skill.py', nestedArgs);
   assert.equal(
-    await readFile(
-      join(f.home, '@local/nested/project/inner/pyproject.toml'),
-      'utf8',
-    ),
+    await readFile(join(f.home, 'nested/inner/pyproject.toml'), 'utf8'),
     projectFiles.find((file) => file.path === 'pyproject.toml')!.content,
   );
-  await assert.rejects(
-    stat(join(f.home, '@local/nested/project/pyproject.toml')),
-    { code: 'ENOENT' },
-  );
+  await assert.rejects(stat(join(f.home, 'nested/pyproject.toml')), {
+    code: 'ENOENT',
+  });
   await f.clean();
 });
 
@@ -228,7 +234,7 @@ test('whole-project roots suppress bundled entries and hidden or duplicate paths
     roots.map((row) => row.name),
     ['root-name'],
   );
-  assert.equal(roots[0].destination, join(f.home, '@local/root/project'));
+  assert.equal(roots[0].destination, join(f.home, 'root'));
   await assert.rejects(
     f.run('install-skill.py', [...rootArgs, '--path', 'skills/rea-toon']),
     /independent skill entry/,
@@ -236,10 +242,7 @@ test('whole-project roots suppress bundled entries and hidden or duplicate paths
   await f.run('install-skill.py', rootArgs);
   assert.equal((await f.rows()).length, 1);
   assert.equal(
-    await readFile(
-      join(f.home, '@local/root/project/rea_toon/__init__.py'),
-      'utf8',
-    ),
+    await readFile(join(f.home, 'root/rea_toon/__init__.py'), 'utf8'),
     '# sibling implementation\n',
   );
   const paths = [
@@ -262,26 +265,23 @@ test('whole-project roots suppress bundled entries and hidden or duplicate paths
   await f.run('install-skill.py', hiddenArgs);
   assert.deepEqual(
     (await f.rows())
-      .filter((row) => row.path.startsWith('@local/hidden/'))
+      .filter((row) => row.path.startsWith('hidden/'))
       .map((row) => row.path)
       .sort(),
-    paths.map((path) => `@local/hidden/project/${dirname(path)}`).sort(),
+    paths.map((path) => `hidden/${dirname(path)}`).sort(),
   );
   await f.clean();
 });
 
-test('whole projects and ordinary packages cannot mix and empty destinations or shared locks are conflicts', async (t) => {
+test('flat archive projects reject existing destinations and share locks while ordinary archive groups retain their layout', async (t) => {
   const f = await fixture(t);
   const archive = await f.archive('conflict.zip', projectFiles);
   const args = ['--archive', archive];
   await f.run('install-skill.py', [...args, '--path', 'skills/rea-toon']);
-  await assert.rejects(
-    f.run('install-skill.py', [...args, '--whole-project']),
-    /group already exists/,
-  );
-  const group = join(f.home, '@local/conflict');
-  assert.deepEqual(await readdir(group), ['rea-toon']);
-  await rm(group, { recursive: true });
+  assert.deepEqual(await readdir(join(f.home, '@local/conflict')), [
+    'rea-toon',
+  ]);
+  const group = join(f.home, 'conflict');
   await mkdir(group);
   await assert.rejects(
     f.run('install-skill.py', [...args, '--whole-project']),
@@ -289,14 +289,10 @@ test('whole projects and ordinary packages cannot mix and empty destinations or 
   );
   assert.deepEqual(await readdir(group), []);
   await rm(group, { recursive: true });
-  const lock = join(f.home, '@local/.conflict.skill-install.lock');
+  const lock = join(f.home, '.conflict.skill-install.lock');
   await mkdir(lock);
   await assert.rejects(
     f.run('install-skill.py', [...args, '--whole-project']),
-    /Another install is active/,
-  );
-  await assert.rejects(
-    f.run('install-skill.py', args),
     /Another install is active/,
   );
   const service = new SkillService(f.workspace);
@@ -317,14 +313,22 @@ test('whole projects and ordinary packages cannot mix and empty destinations or 
   );
   await rm(lock, { recursive: true });
   await f.run('install-skill.py', [...args, '--whole-project']);
-  const saved = await readFile(join(group, '.skill-project.json'), 'utf8');
-  await assert.rejects(f.run('install-skill.py', args), /whole project/);
+  const saved = await readFile(
+    join(group, '.skill-meta/.skill-project.json'),
+    'utf8',
+  );
+  // Ordinary archives keep their established @local/<archive>/<skill> layout.
+  await f.run('install-skill.py', [...args, '--path', 'skills/other']);
+  assert.deepEqual((await readdir(join(f.home, '@local/conflict'))).sort(), [
+    'other',
+    'rea-toon',
+  ]);
   await assert.rejects(
     f.run('install-skill.py', [...args, '--whole-project']),
     /group already exists/,
   );
   assert.equal(
-    await readFile(join(group, '.skill-project.json'), 'utf8'),
+    await readFile(join(group, '.skill-meta/.skill-project.json'), 'utf8'),
     saved,
   );
   await f.clean();
@@ -364,10 +368,10 @@ with archive(sys.argv[2]) as snapshot:
 `;
   for (const failure of ['copy', 'rename']) {
     await f.python(['-c', script, scripts, archive, failure]);
-    await assert.rejects(stat(join(f.home, '@local/rollback')), {
+    await assert.rejects(stat(join(f.home, 'rollback')), {
       code: 'ENOENT',
     });
-    assert.deepEqual(await readdir(join(f.home, '@local')), []);
+    assert.deepEqual(await readdir(f.home), []);
     await f.clean();
   }
   await f.run('install-skill.py', ['--archive', archive, '--whole-project']);
@@ -396,7 +400,7 @@ test('management and chat whole-project imports share metadata, hidden entry loa
       skill.path,
       skill.projectRoot,
     ]),
-    [['@local/shared/project/.agents/skills/hidden', '@local/shared/project']],
+    [['shared/.agents/skills/hidden', 'shared']],
   );
   const scan = await personal.scanArchive(
     'managed.skill',
@@ -407,20 +411,17 @@ test('management and chat whole-project imports share metadata, hidden entry loa
   const selected = scan.skills.find(
     (skill) => skill.path === 'skills/rea-toon/SKILL.md',
   )!;
-  assert.equal(selected.destination, '@local/managed/project/skills/rea-toon');
+  assert.equal(selected.destination, 'managed/skills/rea-toon');
   await personal.install(scan.id, [selected.path]);
   assert.deepEqual(
     (await f.rows()).map((row) => [row.path, row.projectRoot]).sort(),
     [
-      ['@local/managed/project/skills/rea-toon', '@local/managed/project'],
-      ['@local/shared/project/.agents/skills/hidden', '@local/shared/project'],
+      ['managed/skills/rea-toon', 'managed'],
+      ['shared/.agents/skills/hidden', 'shared'],
     ],
   );
   assert.equal(
-    await readFile(
-      join(f.home, '@local/managed/project/rea_toon/__init__.py'),
-      'utf8',
-    ),
+    await readFile(join(f.home, 'managed/rea_toon/__init__.py'), 'utf8'),
     '# sibling implementation\n',
   );
   const managedArchive = await f.archive('managed.skill', wrapped);
@@ -441,6 +442,14 @@ test('scoped GitHub whole-project imports retain the complete requested branch a
     await mkdir(dirname(join(repo, file.path)), { recursive: true });
     await writeFile(join(repo, file.path), file.content);
   }
+  await writeFile(
+    join(repo, '.skill-project.json'),
+    '{"source":"project-marker"}',
+  );
+  await writeFile(
+    join(repo, '.skill-sources.json'),
+    '{"source":"source-marker"}',
+  );
   await symlink('/etc/passwd', join(repo, 'unsafe-link'));
   const git = (...args: string[]) =>
     exec('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd: repo });
@@ -490,12 +499,19 @@ process.exit(result.status ?? 1);
   assert.equal((await f.rows(args)).length, 2);
   await f.run('install-skill.py', [...args, '--path', 'skills/rea-toon']);
   const group = join(f.home, 'owner/repo');
+  await assert.rejects(
+    f.run(
+      'install-skill.py',
+      args.filter((arg) => arg !== '--whole-project'),
+    ),
+    /whole project/,
+  );
   assert.equal(
-    await readFile(join(group, 'project/branch-only.txt'), 'utf8'),
+    await readFile(join(group, 'branch-only.txt'), 'utf8'),
     'requested branch',
   );
   assert.equal(
-    await readFile(join(group, 'project/rea_toon/__init__.py'), 'utf8'),
+    await readFile(join(group, 'rea_toon/__init__.py'), 'utf8'),
     '# sibling implementation\n',
   );
   assert.deepEqual(await readSkillSources(group), [
@@ -510,7 +526,7 @@ process.exit(result.status ?? 1);
     },
   ]);
   for (const path of ['.git', 'unsafe-link'])
-    await assert.rejects(stat(join(group, 'project', path)), {
+    await assert.rejects(stat(join(group, path)), {
       code: 'ENOENT',
     });
   await git('switch', 'feature/skills');
@@ -544,17 +560,25 @@ process.exit(result.status ?? 1);
   const updated = await service.forUser('alice').updateGroup('owner/repo');
   assert.deepEqual(
     updated.map((skill) => skill.path),
-    ['owner/repo/project/skills/rea-toon'],
+    ['owner/repo/skills/rea-toon'],
   );
   assert.equal(
-    await readFile(join(group, 'project/rea_toon/__init__.py'), 'utf8'),
+    await readFile(join(group, 'rea_toon/__init__.py'), 'utf8'),
     '# updated sibling\n',
   );
   assert.deepEqual(
     (await f.rows()).map((row) => row.path),
-    ['owner/repo/project/skills/rea-toon'],
+    ['owner/repo/skills/rea-toon'],
   );
   assert.equal((await readSkillSources(group))[0].ref, 'feature/skills');
+  assert.equal(
+    await readFile(join(group, '.skill-project.json'), 'utf8'),
+    '{"source":"project-marker"}',
+  );
+  assert.equal(
+    await readFile(join(group, '.skill-sources.json'), 'utf8'),
+    '{"source":"source-marker"}',
+  );
   await f.clean('owner');
 });
 
@@ -562,22 +586,22 @@ test('installed project metadata rejects malformed or escaping entries without f
   const f = await fixture(t);
   const archive = await f.archive('invalid.zip', projectFiles);
   await f.run('install-skill.py', ['--archive', archive, '--whole-project']);
-  const group = join(f.home, '@local/invalid');
-  const marker = join(group, '.skill-project.json');
+  const group = join(f.home, 'invalid');
+  const marker = join(group, '.skill-meta/.skill-project.json');
   for (const record of [
     {
       version: true,
-      root: 'project',
+      root: '.',
       entries: [{ path: 'skills/rea-toon/SKILL.md', name: 'rea-toon' }],
     },
     {
-      version: 1,
+      version: 2,
       root: '..',
       entries: [{ path: 'skills/rea-toon/SKILL.md', name: 'rea-toon' }],
     },
     {
-      version: 1,
-      root: 'project',
+      version: 2,
+      root: '.',
       entries: [{ path: '../SKILL.md', name: 'escape' }],
     },
   ]) {
@@ -590,14 +614,225 @@ test('installed project metadata rejects malformed or escaping entries without f
   await writeFile(
     marker,
     JSON.stringify({
-      version: 1,
-      root: 'project',
+      version: 2,
+      root: '.',
       entries: [{ path: 'skills/rea-toon/SKILL.md', name: 'rea-toon' }],
     }),
   );
-  const target = join(group, 'project/skills/rea-toon');
+  const target = join(group, 'skills/rea-toon');
   await rm(target, { recursive: true });
-  await symlink(join(group, 'project/skills/other'), target);
+  await symlink(join(group, 'skills/other'), target);
   await assert.rejects(f.rows(), /symbolic link/);
   await f.clean();
+});
+
+test('flat project metadata preserves source root markers and rejects reserved source metadata without publication', async (t) => {
+  const f = await fixture(t);
+  const sourceMarkers = [
+    {
+      path: '.skill-project.json',
+      content: '{"source":"keep-project-marker"}',
+    },
+    { path: '.skill-sources.json', content: '{"source":"keep-source-marker"}' },
+  ];
+  const archive = await f.archive('source-markers.skill', [
+    ...projectFiles,
+    ...sourceMarkers,
+  ]);
+  await f.run('install-skill.py', [
+    '--archive',
+    archive,
+    '--whole-project',
+    '--path',
+    'skills/rea-toon',
+  ]);
+  const group = join(f.home, 'source-markers');
+  for (const file of sourceMarkers)
+    assert.equal(await readFile(join(group, file.path), 'utf8'), file.content);
+  assert.deepEqual(await readSkillSources(group), []);
+  const readSources = `import importlib.util, pathlib, json, sys
+sys.path.insert(0, sys.argv[1])
+spec = importlib.util.spec_from_file_location("installer", pathlib.Path(sys.argv[1]) / "install-skill.py")
+installer = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(installer)
+print(json.dumps(installer.read_sources(pathlib.Path(sys.argv[2]))))
+`;
+  assert.equal(
+    (await f.python(['-c', readSources, scripts, group])).stdout.trim(),
+    '[]',
+  );
+  const service = new SkillService(f.workspace);
+  t.after(() => service.dispose());
+  const personal = service.forUser('alice');
+  assert.deepEqual(
+    (await personal.list()).skills.map((skill) => skill.path),
+    ['source-markers/skills/rea-toon'],
+  );
+  assert.equal(
+    (await personal.read('source-markers/skills/rea-toon')).skill.projectRoot,
+    'source-markers',
+  );
+  for (const reserved of ['.skill-meta', '.SKILL-META']) {
+    const blocked = await f.archive('blocked.zip', [
+      ...projectFiles,
+      { path: `${reserved}/info.json`, content: 'source metadata' },
+    ]);
+    await assert.rejects(
+      f.run('install-skill.py', ['--archive', blocked, '--whole-project']),
+      /reserved .skill-meta/,
+    );
+    await assert.rejects(stat(join(f.home, 'blocked')), { code: 'ENOENT' });
+    const empty = await f.archive('blocked-empty.zip', [
+      ...projectFiles,
+      {
+        path: `${reserved}/`,
+        content: '',
+        mode: 0o40755,
+      },
+    ]);
+    await assert.rejects(
+      f.run('install-skill.py', ['--archive', empty, '--whole-project']),
+      /reserved .skill-meta/,
+    );
+    await assert.rejects(stat(join(f.home, 'blocked-empty')), {
+      code: 'ENOENT',
+    });
+    const disguised = await f.archive('blocked-wrapper.zip', [
+      { path: `${reserved}/SKILL.md`, content: manifest('disguised') },
+    ]);
+    await assert.rejects(
+      f.run('install-skill.py', ['--archive', disguised, '--whole-project']),
+      /reserved .skill-meta/,
+    );
+    await assert.rejects(stat(join(f.home, 'blocked-wrapper')), {
+      code: 'ENOENT',
+    });
+  }
+  const marker = join(group, '.skill-meta/.skill-project.json');
+  const saved = await readFile(marker, 'utf8');
+  await rm(marker);
+  await assert.rejects(f.rows(), /Invalid project installation record/);
+  await writeFile(marker, saved);
+  await f.clean();
+});
+
+test('legacy archive project groups stay readable at their original paths and block duplicate flat imports', async (t) => {
+  const f = await fixture(t);
+  const legacyFiles = projectFiles.map((file) => ({
+    ...file,
+    path: `legacy-main/${file.path}`,
+  }));
+  const archive = await f.archive('legacy.zip', legacyFiles);
+  const group = join(f.home, '@local/legacy');
+  for (const file of legacyFiles) {
+    const target = join(group, 'project', file.path);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, file.content);
+  }
+  await writeFile(
+    join(group, '.skill-project.json'),
+    JSON.stringify({
+      version: 1,
+      root: 'project',
+      entries: [
+        { path: 'legacy-main/skills/rea-toon/SKILL.md', name: 'rea-toon' },
+      ],
+    }),
+  );
+  const args = ['--archive', archive, '--whole-project'];
+  const rows = await f.rows(args);
+  assert.equal(
+    rows.find((row) => row.name === 'rea-toon')?.destination,
+    join(group, 'project/legacy-main/skills/rea-toon'),
+  );
+  assert.equal(rows.find((row) => row.name === 'rea-toon')?.installed, true);
+  assert.equal(rows.find((row) => row.name === 'other')?.installed, false);
+  assert.deepEqual(
+    (await f.rows()).map((row) => [row.path, row.projectRoot]),
+    [
+      [
+        '@local/legacy/project/legacy-main/skills/rea-toon',
+        '@local/legacy/project',
+      ],
+    ],
+  );
+  await assert.rejects(f.run('install-skill.py', args), /group already exists/);
+  await assert.rejects(stat(join(f.home, 'legacy')), { code: 'ENOENT' });
+  const service = new SkillService(f.workspace);
+  t.after(() => service.dispose());
+  const personal = service.forUser('alice');
+  assert.deepEqual(
+    (await personal.list()).skills.map((skill) => skill.path),
+    ['@local/legacy/project/legacy-main/skills/rea-toon'],
+  );
+  const scan = await personal.scanArchive(
+    'legacy.zip',
+    await readFile(archive),
+    undefined,
+    'project',
+  );
+  assert.equal(
+    scan.skills.find((skill) => skill.name === 'rea-toon')?.destination,
+    '@local/legacy/project/legacy-main/skills/rea-toon',
+  );
+  await assert.rejects(
+    personal.install(scan.id, ['legacy-main/skills/rea-toon/SKILL.md']),
+    /SKILL_CONFLICT/,
+  );
+  const lock = join(f.home, '.@local.skill-install.lock');
+  await mkdir(lock);
+  const saved = join(f.root, 'legacy-update-backup');
+  await rename(group, saved);
+  await assert.rejects(
+    f.run('install-skill.py', args),
+    /Another install is active/,
+  );
+  await assert.rejects(stat(join(f.home, 'legacy')), { code: 'ENOENT' });
+  await rename(saved, group);
+  await rm(lock, { recursive: true });
+  await f.clean();
+});
+
+test('single-directory archive projects cannot become GitHub owner containers in either import mode', async (t) => {
+  const f = await fixture(t);
+  const archive = await f.archive('owner.zip', projectFiles);
+  await f.run('install-skill.py', ['--archive', archive, '--whole-project']);
+  const original = await readFile(
+    join(f.home, 'owner/.skill-meta/.skill-project.json'),
+    'utf8',
+  );
+  const script = `import importlib.util, pathlib, sys
+sys.path.insert(0, sys.argv[1])
+from archive import archive
+from repository import Source, skill_home, SkillError
+spec = importlib.util.spec_from_file_location("installer", pathlib.Path(sys.argv[1]) / "install-skill.py")
+installer = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(installer)
+with archive(sys.argv[2]) as snapshot:
+    snapshot.source = Source("owner", "repo", "https://github.com/owner/repo")
+    for whole in [False, True]:
+        try: installer.install(skill_home(), snapshot, None, whole)
+        except SkillError as error:
+            assert "parent directory contains a whole project" in str(error)
+        else: raise AssertionError("Nested project installation must fail")
+`;
+  await f.python(['-c', script, scripts, archive]);
+  const service = new SkillService(f.workspace, async () =>
+    readSkillArchive('source.zip', await readFile(archive)),
+  );
+  t.after(() => service.dispose());
+  for (const mode of ['skills', 'project'] as const)
+    await assert.rejects(
+      service.forUser('alice').scan('owner/repo', undefined, mode),
+      /SKILL_CONFLICT/,
+    );
+  await assert.rejects(stat(join(f.home, 'owner/repo')), { code: 'ENOENT' });
+  assert.equal(
+    await readFile(
+      join(f.home, 'owner/.skill-meta/.skill-project.json'),
+      'utf8',
+    ),
+    original,
+  );
+  await f.clean('owner');
 });

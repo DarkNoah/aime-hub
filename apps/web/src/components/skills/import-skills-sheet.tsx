@@ -14,14 +14,8 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Sheet,
@@ -73,7 +67,13 @@ export function ImportSkillsSheet({
   const submitting = useRef(false);
   const scan = source.scan;
   const selected =
-    selection.id === scan?.id ? selection.paths : new Set<string>();
+    selection.id === scan?.id
+      ? selection.paths
+      : new Set(
+          scan?.importMode === 'project'
+            ? selectableSkills(scan.skills).map((skill) => skill.path)
+            : [],
+        );
   const query = search.trim().toLocaleLowerCase();
   const visible =
     scan?.skills.filter((skill) =>
@@ -171,31 +171,43 @@ export function ImportSkillsSheet({
         <div className="space-y-3 border-b px-5 py-4 sm:px-6">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <Label htmlFor="skill-import-mode">
+              <span
+                id="skill-import-mode-label"
+                className="text-sm font-medium"
+              >
                 {t('skills.importMode')}
-              </Label>
-              <Select
+              </span>
+              <RadioGroup
                 value={importMode}
                 onValueChange={changeImportMode}
                 disabled={pending}
+                orientation="horizontal"
+                aria-labelledby="skill-import-mode-label"
+                aria-describedby="skill-import-mode-hint"
+                className="flex flex-wrap items-center gap-x-5 gap-y-3"
               >
-                <SelectTrigger
-                  id="skill-import-mode"
-                  aria-label={t('skills.importMode')}
-                  aria-describedby="skill-import-mode-hint"
-                  className="w-44"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="skills">
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem id="skill-import-by-skill" value="skills" />
+                  <Label
+                    htmlFor="skill-import-by-skill"
+                    className="cursor-pointer"
+                  >
                     {t('skills.importBySkill')}
-                  </SelectItem>
-                  <SelectItem value="project">
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem
+                    id="skill-import-whole-project"
+                    value="project"
+                  />
+                  <Label
+                    htmlFor="skill-import-whole-project"
+                    className="cursor-pointer"
+                  >
                     {t('skills.importWholeProject')}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                  </Label>
+                </div>
+              </RadioGroup>
             </div>
             <p
               id="skill-import-mode-hint"

@@ -75,6 +75,7 @@ test('tool groups page within a single assistant message and retain authorizatio
   await f.save([user('u1'), { id: 'a1', role: 'assistant', parts: Array.from({ length: 45 }, (_, i) => tool(`call-${i}`)) }]);
   const overview = await f.service.getThreadOverview('alice', f.thread.id);
   const group = overview.turns[0].assistant!.parts.find(isChatToolGroupPart)!.data;
+  assert.deepEqual(group.statusCounts, { success: 45, failed: 0, running: 0 });
   const pages = await Promise.all([0, 1, 2].map((page) => f.service.toolGroupDetail('alice', f.thread.id, 'u1', group.id, undefined, page)));
   assert.deepEqual(pages.map((p) => p.messages.flatMap((m) => m.parts).length), [20, 20, 5]);
   assert.deepEqual(pages.map((p) => p.hasMore), [true, true, false]);

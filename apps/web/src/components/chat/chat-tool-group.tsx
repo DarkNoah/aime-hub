@@ -8,6 +8,7 @@ import {
   LoaderCircle,
   RotateCcwIcon,
   WrenchIcon,
+  type LucideIcon,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -39,6 +40,70 @@ export type LoadChatToolGroup = (
   group: ChatToolGroup,
   page?: number,
 ) => Promise<ChatToolGroupDetail>;
+
+function ToolGroupStatusBadge({
+  status,
+  count,
+  icon: Icon,
+}: {
+  status: 'success' | 'failed' | 'running';
+  count: number;
+  icon: LucideIcon;
+}) {
+  const { t } = useTranslation();
+  const badge = useRef<HTMLSpanElement>(null);
+  const previousCount = useRef(count);
+
+  useEffect(() => {
+    const increased = count > previousCount.current;
+    previousCount.current = count;
+    if (
+      !increased ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      return;
+    }
+    const animation = badge.current?.animate(
+      [
+        { transform: 'translateY(2px) scale(0.94)', opacity: 0.6 },
+        { transform: 'translateY(0) scale(1)', opacity: 1 },
+      ],
+      { duration: 240, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
+    );
+    return () => animation?.cancel();
+  }, [count]);
+
+  return (
+    <Badge
+      ref={badge}
+      variant="secondary"
+      data-tool-group-status={status}
+      className={cn(
+        'gap-1 font-normal motion-reduce:transition-none',
+        count === 0
+          ? 'text-muted-foreground'
+          : status === 'success'
+            ? 'bg-primary/10 text-primary'
+            : status === 'failed'
+              ? 'bg-destructive/10 text-destructive'
+              : 'bg-blue-500/10 text-blue-700 dark:text-blue-300',
+      )}
+    >
+      <Icon
+        className={cn(
+          status === 'running' &&
+            count > 0 &&
+            'animate-spin motion-reduce:animate-none',
+        )}
+        aria-hidden
+      />
+      {t(`chat.toolGroup.${status}`)}
+      <span className="min-w-[1ch] text-center font-medium tabular-nums">
+        {count}
+      </span>
+    </Badge>
+  );
+}
 
 export const ChatToolGroupRow = memo(function ChatToolGroupRow({
   turn,
@@ -126,10 +191,10 @@ export const ChatToolGroupRow = memo(function ChatToolGroupRow({
         setExpanded(open);
         setFailed(false);
       }}
-      className="group/tool-group not-prose my-2 min-w-0 rounded-lg border border-border/80"
+      className="group/tool-group @container/tool-group not-prose my-2 min-w-0 rounded-lg border border-border/80"
       data-chat-tool-group={group.id}
     >
-      <CollapsibleTrigger className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm outline-none transition-colors duration-150 hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-[state=open]:rounded-b-none data-[state=open]:bg-muted/40 motion-reduce:transition-none sm:gap-3">
+      <CollapsibleTrigger className="grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5 rounded-lg px-3 py-2 text-left text-sm outline-none transition-colors duration-150 hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-[state=open]:rounded-b-none data-[state=open]:bg-muted/40 motion-reduce:transition-none @[30rem]/tool-group:grid-cols-[auto_minmax(0,1fr)_auto_auto] @[30rem]/tool-group:gap-x-3">
         {group.reasoningOnly ? (
           <BrainIcon
             className="size-4 shrink-0 text-muted-foreground"
@@ -146,34 +211,59 @@ export const ChatToolGroupRow = memo(function ChatToolGroupRow({
             ? t('chat.toolGroup', { count: group.count })
             : t(group.reasoningOnly ? 'chat.reasoning' : 'chat.turns.details')}
         </span>
-        <Badge
-          variant="secondary"
+        {/* Keep zero-count badges mounted so the first tool added to reasoning animates. */}
+        <span
           className={cn(
-            'gap-1 font-normal',
-            group.state === 'failed' && 'bg-destructive/10 text-destructive',
-            group.state === 'running' && 'bg-primary/10 text-primary',
+            'col-span-2 col-start-1 row-start-2 flex-wrap justify-end gap-1.5 justify-self-end @[30rem]/tool-group:col-span-1 @[30rem]/tool-group:col-start-3 @[30rem]/tool-group:row-start-1',
+            group.count > 0 ? 'flex' : 'hidden',
           )}
         >
-          {group.state === 'running' || loading ? (
-            <LoaderCircle
-              className="animate-spin motion-reduce:animate-none"
-              aria-hidden
-            />
-          ) : group.state === 'failed' ? (
-            <CircleAlertIcon aria-hidden />
-          ) : (
-            <CheckIcon aria-hidden />
-          )}
-          {t(
-            group.state === 'completed'
-              ? 'chat.status.success'
-              : group.state === 'failed'
-                ? 'chat.status.failed'
-                : 'chat.status.running',
-          )}
-        </Badge>
+          <ToolGroupStatusBadge
+            status="success"
+            count={group.statusCounts.success}
+            icon={CheckIcon}
+          />
+          <ToolGroupStatusBadge
+            status="failed"
+            count={group.statusCounts.failed}
+            icon={CircleAlertIcon}
+          />
+          <ToolGroupStatusBadge
+            status="running"
+            count={group.statusCounts.running}
+            icon={LoaderCircle}
+          />
+        </span>
+        {group.count === 0 && (
+          <Badge
+            variant="secondary"
+            className={cn(
+              'col-span-2 col-start-1 row-start-2 gap-1 justify-self-end font-normal @[30rem]/tool-group:col-span-1 @[30rem]/tool-group:col-start-3 @[30rem]/tool-group:row-start-1',
+              group.state === 'failed' && 'bg-destructive/10 text-destructive',
+              group.state === 'running' && 'bg-primary/10 text-primary',
+            )}
+          >
+            {group.state === 'running' || loading ? (
+              <LoaderCircle
+                className="animate-spin motion-reduce:animate-none"
+                aria-hidden
+              />
+            ) : group.state === 'failed' ? (
+              <CircleAlertIcon aria-hidden />
+            ) : (
+              <CheckIcon aria-hidden />
+            )}
+            {t(
+              group.state === 'completed'
+                ? 'chat.status.success'
+                : group.state === 'failed'
+                  ? 'chat.status.failed'
+                  : 'chat.status.running',
+            )}
+          </Badge>
+        )}
         <ChevronDownIcon
-          className="size-4 shrink-0 text-muted-foreground transition-transform duration-150 group-data-[state=open]/tool-group:rotate-180 motion-reduce:transition-none"
+          className="col-start-3 row-start-1 size-4 shrink-0 text-muted-foreground transition-transform duration-150 group-data-[state=open]/tool-group:rotate-180 motion-reduce:transition-none @[30rem]/tool-group:col-start-4"
           aria-hidden
         />
       </CollapsibleTrigger>

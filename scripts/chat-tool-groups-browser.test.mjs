@@ -39,7 +39,7 @@ import {SessionContext} from '/src/features/auth/session-context';
 import {ThemeProvider} from '/src/components/theme/theme-provider';
 import {initializeI18n} from '/src/i18n';
 import '/src/index.css';
-const group=(id,count,display={})=>({type:'data-tool-group',data:{id,count,revision:id+'-v1',state:'completed',...display}});
+const group=(id,count,display={})=>({type:'data-tool-group',data:{id,count,statusCounts:{success:count,failed:0,running:0},revision:id+'-v1',state:'completed',...display}});
 const longToolName='mcp__workspace__inspect_cross_project_dependency_and_permission_graph__'.repeat(3);
 window.longToolName=longToolName;
 const tool=(id)=>({...(id==='step_07'?{type:'dynamic-tool',toolName:longToolName}:{type:'tool-'+id}),toolCallId:id,state:'output-available',input:{path:id+'.txt'},output:'Result '+id});
@@ -61,8 +61,8 @@ chatApi.toolGroup=async(threadId,turnId,groupId,cursor,page=0)=>{
  const all=groupId==='first'?Array.from({length:22},(_,i)=>tool('step_'+String(i).padStart(2,'0'))):groupId==='second'?[reasoning('中途推理应隐藏'),tool('second_tool')]:groupId==='history-tools'?[reasoning('历史混合思考应隐藏'),tool('history_tool')]:groupId==='reasoning'?[reasoning('同组较早思考应隐藏'),reasoning('核对推理信息')]:groupId==='next-reasoning'?[reasoning('新回复思考')]:[reasoning('较早思考应隐藏')];
  return {id:groupId,revision:group.revision,messages:[{id:'source-'+groupId,role:'assistant',parts:all.slice(page*20,(page+1)*20)}],page,hasMore:(page+1)*20<all.length};
 };
-window.update=(groupId,revision)=>{
- window.snapshot={...window.snapshot,turns:window.snapshot.turns.map(turn=>({...turn,revision:turn.revision+'x',assistant:{...turn.assistant,parts:turn.assistant.parts.map(part=>part.type==='data-tool-group'&&part.data.id===groupId?{...part,data:{...part.data,revision}}:part)}}))};
+window.update=(groupId,revision,display={})=>{
+ window.snapshot={...window.snapshot,turns:window.snapshot.turns.map(turn=>({...turn,revision:turn.revision+'x',assistant:{...turn.assistant,parts:turn.assistant.parts.map(part=>part.type==='data-tool-group'&&part.data.id===groupId?{...part,data:{...part.data,revision,...display}}:part)}}))};
  window.source.dispatchEvent(new MessageEvent('update',{data:JSON.stringify({...window.snapshot,history:undefined})}));
 };
 function App(){const chat=useThreadChat('thread',undefined,{receiveSpeech:false});window.chat=chat;return <main style={{maxWidth:760,margin:'24px auto',padding:16}}><MessagePreviewContext.Provider value={part=>{window.previewed=part;}}><ChatTurns turns={chat.turns} groupDetails={chat.groupDetails} loadGroupDetails={chat.loadGroupDetails} threadId="thread" running activeTurnId={chat.activeTurnId} activeMessageId={chat.activeMessageId} toolInteractions={chat.toolInteractions} onToolResponse={chat.respondToTool} disabled={false}/></MessagePreviewContext.Provider></main>;}
@@ -96,6 +96,15 @@ createRoot(document.getElementById('root')).render(<SessionContext.Provider valu
   await vite.listen();
   browser = await playwright.chromium.launch({ headless: true, executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' });
   const page = await browser.newPage({ viewport: { width: 1100, height: 1000 }, locale: 'zh-CN', reducedMotion: 'reduce' });
+  await page.addInitScript(() => {
+    window.badgeAnimations=[];
+    const animate=Element.prototype.animate;
+    Element.prototype.animate=function(...args){
+      const status=this.getAttribute('data-tool-group-status');
+      if(status)window.badgeAnimations.push(status);
+      return animate.apply(this,args);
+    };
+  });
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   const resetViewportForScreenshot=async()=>{
     await page.locator('[data-chat-tool-group] [data-slot="scroll-area-viewport"]').evaluateAll(viewports=>viewports.forEach(viewport=>{viewport.scrollTop=0;}));
@@ -116,6 +125,9 @@ createRoot(document.getElementById('root')).render(<SessionContext.Provider valu
   assert.equal(await page.locator('[data-chat-tool-group="earlier-reasoning"]').count(),0,'earlier reasoning groups in the latest turn stay hidden');
   assert.equal(await page.locator('[data-chat-tool-group="history-tools"]').count(),1,'hiding reasoning must not remove historical tool groups');
   const firstToggle=first.locator('button[aria-expanded]').first();
+  const statusBadges=firstToggle.locator('[data-tool-group-status]');
+  assert.deepEqual(await statusBadges.allTextContents(),['成功22','失败0','运行中0']);
+  assert.deepEqual(await page.evaluate(()=>window.badgeAnimations),[],'initial counts do not animate');
   assert.equal(await firstToggle.getAttribute('aria-expanded'),'false');
   assert.ok((await firstToggle.boundingBox()).height>=44,'group headers keep a usable touch target');
   await resetViewportForScreenshot();
@@ -123,6 +135,7 @@ createRoot(document.getElementById('root')).render(<SessionContext.Provider valu
   await firstToggle.focus();
   await firstToggle.press('Enter');
   await first.getByText('step_19',{exact:true}).waitFor();
+  assert.deepEqual(await statusBadges.allTextContents(),['成功22','失败0','运行中0'],'counts cover the entire group before the next detail page is loaded');
   assert.equal(await firstToggle.getAttribute('aria-expanded'),'true');
   assert.equal(await firstToggle.evaluate(trigger=>{
     const controls=trigger.getAttribute('aria-controls');
@@ -170,6 +183,37 @@ createRoot(document.getElementById('root')).render(<SessionContext.Provider valu
   await page.waitForTimeout(450);
   assert.equal(await page.evaluate(()=>window.calls.length),2);
   await firstToggle.click();
+  await page.emulateMedia({reducedMotion:'no-preference'});
+  const updateCounts=async(statusCounts)=>{
+    await page.evaluate(statusCounts=>window.update('first','counts-'+JSON.stringify(statusCounts),{
+      count:Object.values(statusCounts).reduce((total,count)=>total+count,0),
+      statusCounts,
+      state:statusCounts.running?'running':statusCounts.failed?'failed':'completed',
+    }),statusCounts);
+    await page.waitForFunction(statusCounts=>Object.entries(statusCounts).every(([status,count])=>
+      document.querySelector('[data-chat-tool-group="first"] [data-tool-group-status="'+status+'"]')?.textContent.endsWith(String(count))
+    ),statusCounts);
+  };
+  await updateCounts({success:22,failed:0,running:1});
+  await page.waitForFunction(()=>window.badgeAnimations.length===1);
+  await updateCounts({success:22,failed:0,running:2});
+  await page.waitForFunction(()=>window.badgeAnimations.length===2);
+  await updateCounts({success:22,failed:1,running:1});
+  await page.waitForFunction(()=>window.badgeAnimations.length===3);
+  assert.deepEqual(await statusBadges.allTextContents(),['成功22','失败1','运行中1']);
+  await first.screenshot({path:'/tmp/chat-tool-group-status-counts.png'});
+  await updateCounts({success:23,failed:1,running:0});
+  await page.waitForFunction(()=>window.badgeAnimations.length===4);
+  assert.deepEqual(await page.evaluate(()=>window.badgeAnimations),['running','running','failed','success'],'only increasing counts animate, including rapid successive additions');
+  await updateCounts({success:22,failed:0,running:0});
+  await page.waitForTimeout(280);
+  assert.equal(await page.evaluate(()=>window.badgeAnimations.length),4,'decreasing counts do not animate');
+  await page.emulateMedia({reducedMotion:'reduce'});
+  await updateCounts({success:22,failed:0,running:1});
+  await page.waitForTimeout(280);
+  assert.equal(await page.evaluate(()=>window.badgeAnimations.length),4,'reduced motion disables count animations');
+  await updateCounts({success:22,failed:0,running:0});
+  assert.equal(await page.evaluate(()=>window.calls.length),2,'live count changes do not fetch collapsed details');
   await page.evaluate(()=>window.update('first','first-v2'));
   await page.waitForTimeout(450);
   assert.equal(await page.evaluate(()=>window.calls.length),2);
@@ -243,13 +287,22 @@ createRoot(document.getElementById('root')).render(<SessionContext.Provider valu
   assert.equal(await page.getByText('思考过程',{exact:true}).count(),0);
   assert.equal(await second.getByText('second_tool',{exact:true}).count(),1,'already expanded tool details remain available');
   await page.evaluate(()=>{
-    window.snapshot={...window.snapshot,turns:window.snapshot.turns.map(turn=>turn.id!=='next-turn'?turn:{...turn,revision:'next-reasoning',assistant:{...turn.assistant,parts:[...turn.assistant.parts,{type:'data-tool-group',data:{id:'next-reasoning',count:0,revision:'next-v1',state:'completed',reasoningIndex:0,reasoningOnly:true}}]}})};
+    window.snapshot={...window.snapshot,turns:window.snapshot.turns.map(turn=>turn.id!=='next-turn'?turn:{...turn,revision:'next-reasoning',assistant:{...turn.assistant,parts:[...turn.assistant.parts,{type:'data-tool-group',data:{id:'next-reasoning',count:0,statusCounts:{success:0,failed:0,running:0},revision:'next-v1',state:'completed',reasoningIndex:0,reasoningOnly:true}}]}})};
     window.source.dispatchEvent(new MessageEvent('update',{data:JSON.stringify({...window.snapshot,history:undefined})}));
   });
   await page.locator('[data-chat-tool-group="next-reasoning"] button[aria-expanded]').first().click();
   await page.getByText('新回复思考',{exact:true}).waitFor();
   assert.equal(await page.getByText('思考过程',{exact:true}).count(),1);
   assert.equal(await page.getByText('核对推理信息',{exact:true}).count(),0);
+  await page.emulateMedia({reducedMotion:'no-preference'});
+  await page.evaluate(()=>{
+    window.badgeAnimations=[];
+    window.update('next-reasoning','first-tool',{
+      count:1,statusCounts:{success:0,failed:0,running:1},state:'running',reasoningOnly:false,
+    });
+  });
+  await page.waitForFunction(()=>window.badgeAnimations.length===1);
+  assert.deepEqual(await page.evaluate(()=>window.badgeAnimations),['running'],'the first tool added to an existing reasoning group animates');
   assert.equal(await page.evaluate(()=>window.wholeTurnCalls),0);
   assert.deepEqual(errors,[]);
 });

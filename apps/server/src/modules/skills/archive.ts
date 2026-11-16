@@ -304,6 +304,9 @@ export async function readSkillArchive(
     return {
       commit: createHash('sha256').update(data).digest('hex'),
       files,
+      directories: archive
+        .filter((entry) => entry.directory && !entry.ignored)
+        .map((entry) => entry.path),
       read: (file) => readFile(resource(file)),
       async write(file, output) {
         await copyFile(resource(file), output, constants.COPYFILE_EXCL);

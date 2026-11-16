@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { isToolUIPart, type UIMessage } from 'ai';
-import type { ChatToolGroup } from '@aime/shared/chat-turns';
+import {
+  isChatToolGroupPart,
+  type ChatToolGroup,
+} from '@aime/shared/chat-turns';
 import { getTurnToolGroup, groupTurns, summarizeTurn } from './turns.js';
 import { isToolForceRendered } from '../tools/registry.js';
 
@@ -96,7 +99,14 @@ test('group identity survives appended tools and revisions ignore other groups a
   assert.equal(initial.state, 'running');
   assert.equal(initial.reasoningOnly, true);
   assert.equal(initial.reasoningIndex, 0);
-  const twoThoughts = groups(summarizeTurn({ id: 'turn', messages: [assistant('a', [thinking, { ...thinking, text: 'Latest thought' }])] }).assistant!.parts)[0];
+  const twoThoughts = groups(
+    summarizeTurn({
+      id: 'turn',
+      messages: [
+        assistant('a', [thinking, { ...thinking, text: 'Latest thought' }]),
+      ],
+    }).assistant!.parts,
+  )[0];
   assert.equal(twoThoughts.reasoningIndex, 1);
   assert.equal(twoThoughts.reasoningOnly, true);
   const finishedThinking: Part = { ...thinking, state: 'done' };
@@ -115,7 +125,11 @@ test('group identity survives appended tools and revisions ignore other groups a
   assert.equal(first.id, initial.id);
   assert.notEqual(first.revision, initial.revision);
   assert.equal(first.state, 'completed');
-  assert.equal(first.reasoningOnly, undefined, 'adding a tool preserves the group even when its reasoning is hidden');
+  assert.equal(
+    first.reasoningOnly,
+    undefined,
+    'adding a tool preserves the group even when its reasoning is hidden',
+  );
   const changed = {
     ...next,
     messages: [
@@ -163,6 +177,119 @@ test('tool states aggregate without leaking error or approval payloads', () => {
     JSON.stringify(snapshot([failed, pending])),
     /private error|secret|hidden/,
   );
+});
+
+test('tool group counts classify mixed results before any detail is loaded', () => {
+  const completed = (
+    id: string,
+    output: unknown,
+  ): UIMessage['parts'][number] => ({
+    type: 'tool-read_file',
+    toolCallId: id,
+    state: 'output-available',
+    input: {},
+    output,
+  });
+  const summary = summarizeTurn({
+    id: 'turn',
+    messages: [
+      {
+        id: 'assistant',
+        role: 'assistant',
+        parts: [
+          { type: 'reasoning', text: 'Still considering', state: 'streaming' },
+          completed('success', { ok: true }),
+          {
+            type: 'dynamic-tool',
+            toolName: 'read_remote_file',
+            toolCallId: 'dynamic-success',
+            state: 'output-available',
+            input: {},
+            output: 'Done',
+          },
+          completed('object-error', { ok: false }),
+          completed('json-error', JSON.stringify({ isError: true })),
+          {
+            type: 'tool-read_file',
+            toolCallId: 'thrown-error',
+            state: 'output-error',
+            input: {},
+            errorText: 'private failure detail',
+          },
+          {
+            type: 'tool-read_file',
+            toolCallId: 'denied',
+            state: 'output-denied',
+            input: {},
+            approval: { id: 'approval', approved: false },
+          },
+          {
+            type: 'tool-read_file',
+            toolCallId: 'preparing',
+            state: 'input-streaming',
+            input: {},
+          },
+          {
+            type: 'tool-read_file',
+            toolCallId: 'executing',
+            state: 'input-available',
+            input: {},
+          },
+        ],
+      },
+    ],
+  });
+  const group = summary.assistant!.parts.find(isChatToolGroupPart)!.data;
+  assert.deepEqual(group.statusCounts, { success: 2, failed: 4, running: 2 });
+  assert.equal(group.count, 8);
+  assert.equal(group.state, 'running');
+  assert.doesNotMatch(
+    JSON.stringify(summary),
+    /private failure detail|Still considering/,
+  );
+});
+
+test('tool group counts use the latest state once per call and exclude reasoning', () => {
+  const pending: UIMessage['parts'][number] = {
+    type: 'tool-read_file',
+    toolCallId: 'same-call',
+    state: 'input-available',
+    input: {},
+  };
+  const reasoning: UIMessage['parts'][number] = {
+    type: 'reasoning',
+    text: 'Thinking',
+    state: 'streaming',
+  };
+  const groupFor = (parts: UIMessage['parts']) =>
+    summarizeTurn({
+      id: 'turn',
+      messages: [{ id: 'assistant', role: 'assistant', parts }],
+    }).assistant!.parts.find(isChatToolGroupPart)!.data;
+  assert.deepEqual(groupFor([pending]).statusCounts, {
+    success: 0,
+    failed: 0,
+    running: 1,
+  });
+  const completed = groupFor([
+    pending,
+    { ...pending, state: 'output-available', output: 'Finished' },
+  ]);
+  assert.equal(completed.count, 1);
+  assert.equal(completed.state, 'completed');
+  assert.deepEqual(completed.statusCounts, {
+    success: 1,
+    failed: 0,
+    running: 0,
+  });
+  const thinking = groupFor([reasoning]);
+  assert.equal(thinking.state, 'running');
+  assert.equal(thinking.reasoningOnly, true);
+  assert.deepEqual(thinking.statusCounts, {
+    success: 0,
+    failed: 0,
+    running: 0,
+  });
 });
 
 test('force-rendered cards split tool groups and retain required interaction data', () => {

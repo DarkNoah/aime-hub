@@ -49,6 +49,11 @@ const projectFiles = (version = 1) => ({
   'skills/beta/SKILL.md': manifest('beta'),
   ...(version > 1 ? { 'skills/gamma/SKILL.md': manifest('gamma') } : {}),
 });
+const rootProjectFiles = (version = 1) => ({
+  'SKILL.md': manifest('root-project', `Root version ${version}`),
+  'README.md': 'Root project instructions\n',
+  'src/main.py': `print("root project version ${version}")\n`,
+});
 
 test(
   'whole-project imports preserve shared sources, selected entries, scope isolation and project updates',
@@ -66,7 +71,10 @@ test(
       workspace,
       async (repository, _signal, original) => {
         downloads.push({ repository, original });
-        const contents = projectFiles(version);
+        const contents =
+          repository.repo === 'root-project'
+            ? rootProjectFiles(version)
+            : projectFiles(version);
         return {
           commit: String(version).repeat(40),
           ref: 'main',
@@ -209,18 +217,18 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><RouterProv
     };
     const selectMode = async (dialog, name) => {
       await dialog
-        .getByRole('combobox', { name: 'Import mode', exact: true })
-        .click();
-      await page.getByRole('option', { name, exact: true }).click();
+        .getByRole('radiogroup', { name: 'Import mode', exact: true })
+        .getByRole('radio', { name, exact: true })
+        .check();
     };
-    const upload = (dialog, name) =>
+    const upload = (dialog, name, files = projectFiles()) =>
       dialog.getByTestId('skill-archive-input').setInputFiles({
         name,
         mimeType: 'application/zip',
         buffer: Buffer.from(
           zipSync(
             Object.fromEntries(
-              Object.entries(projectFiles()).map(([name, value]) => [
+              Object.entries(files).map(([name, value]) => [
                 `repository/${name}`,
                 Buffer.from(value),
               ]),
@@ -245,7 +253,7 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><RouterProv
         exact: true,
       });
     const installProject = async (dialog, name) => {
-      await entry(dialog, name).check();
+      assert.equal(await entry(dialog, name).isChecked(), true);
       await dialog
         .getByRole('button', { name: 'Import project', exact: true })
         .click();
@@ -280,23 +288,75 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><RouterProv
     ) => {
       for (const [name, value] of Object.entries(projectFiles(currentVersion)))
         assert.deepEqual(
-          await readFile(
-            path.join(root, group, 'project', archivePrefix, name),
-          ),
+          await readFile(path.join(root, group, archivePrefix, name)),
           Buffer.from(value),
           name,
         );
     };
+    const assertProjectMetadata = async (root, group, sourceType) => {
+      const metadata = path.join(root, group, '.skill-meta');
+      assert.equal((await stat(metadata)).isDirectory(), true);
+      const marker = JSON.parse(
+        await readFile(path.join(metadata, '.skill-project.json'), 'utf8'),
+      );
+      assert.equal(marker.root, '.');
+      await assert.rejects(stat(path.join(root, group, 'project')), {
+        code: 'ENOENT',
+      });
+      for (const name of ['.skill-project.json', '.skill-sources.json'])
+        await assert.rejects(stat(path.join(root, group, name)), {
+          code: 'ENOENT',
+        });
+      if (sourceType === 'github')
+        assert.equal(
+          (await stat(path.join(metadata, '.skill-sources.json'))).isFile(),
+          true,
+        );
+      else
+        await assert.rejects(stat(path.join(metadata, '.skill-sources.json')), {
+          code: 'ENOENT',
+        });
+    };
 
-    // Switching import modes reuses the chosen file, clears selections and disposes each old scan.
+    // Ordinary imports start empty; switching to project mode selects every available entry.
     let dialog = await openImport();
-    assert.equal(
-      await dialog.getByRole('combobox', { name: 'Import mode' }).innerText(),
-      'By skill',
-    );
+    const importModes = dialog.getByRole('radiogroup', {
+      name: 'Import mode',
+      exact: true,
+    });
+    const bySkill = importModes.getByRole('radio', {
+      name: 'By skill',
+      exact: true,
+    });
+    const wholeProject = importModes.getByRole('radio', {
+      name: 'Whole project',
+      exact: true,
+    });
+    assert.equal(await bySkill.isChecked(), true);
+    assert.equal(await wholeProject.isChecked(), false);
+    await bySkill.focus();
+    await page.keyboard.down('ArrowRight');
+    await importModes
+      .getByRole('radio', { name: 'Whole project', exact: true, checked: true })
+      .waitFor();
+    await page.keyboard.up('ArrowRight');
+    await page.keyboard.down('ArrowLeft');
+    await importModes
+      .getByRole('radio', { name: 'By skill', exact: true, checked: true })
+      .waitFor();
+    await page.keyboard.up('ArrowLeft');
     let response = archiveResponse('personal');
     await upload(dialog, 'personal-project.zip');
     const ordinary = await (await response).json();
+    await entry(dialog, 'alpha').waitFor();
+    assert.equal(await entry(dialog, 'alpha').isChecked(), false);
+    assert.equal(await entry(dialog, 'beta').isChecked(), false);
+    assert.equal(
+      await dialog
+        .getByRole('button', { name: 'Install selected', exact: true })
+        .isDisabled(),
+      true,
+    );
     await entry(dialog, 'alpha').check();
     response = archiveResponse('personal');
     const discarded = page.waitForResponse((response) =>
@@ -307,16 +367,18 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><RouterProv
     await discarded;
     await entry(dialog, 'alpha').waitFor();
     assert.equal(personalScan.importMode, 'project');
+    assert.equal(personalScan.project.destination, 'personal-project');
     assert.equal(
       personalScan.project.fileCount,
       Object.keys(projectFiles()).length,
     );
-    assert.equal(await entry(dialog, 'alpha').isChecked(), false);
+    assert.equal(await entry(dialog, 'alpha').isChecked(), true);
+    assert.equal(await entry(dialog, 'beta').isChecked(), true);
     assert.equal(
       await dialog
         .getByRole('button', { name: 'Import project', exact: true })
         .isDisabled(),
-      true,
+      false,
     );
     assert.equal(
       await dialog.getByText('personal-project.zip', { exact: true }).count(),
@@ -326,6 +388,26 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><RouterProv
       service.forUser('admin').install(ordinary.id, [ordinary.skills[0].path]),
       { code: 'SKILL_SCAN_EXPIRED' },
     );
+    // A fresh archive scan resets a manual exclusion to the project default.
+    await entry(dialog, 'alpha').uncheck();
+    assert.equal(await entry(dialog, 'alpha').isChecked(), false);
+    response = archiveResponse('personal');
+    const projectDiscarded = page.waitForResponse((response) =>
+      response.url().includes('/api/rpc/personalSkills/discard'),
+    );
+    await upload(dialog, 'personal-project.zip');
+    const refreshedScan = await (await response).json();
+    await projectDiscarded;
+    await entry(dialog, 'alpha').waitFor();
+    assert.notEqual(refreshedScan.id, personalScan.id);
+    assert.equal(await entry(dialog, 'alpha').isChecked(), true);
+    assert.equal(await entry(dialog, 'beta').isChecked(), true);
+    await assert.rejects(
+      service
+        .forUser('admin')
+        .install(personalScan.id, [personalScan.skills[0].path]),
+      { code: 'SKILL_SCAN_EXPIRED' },
+    );
     const personalLists = requests.filter(
       (url) => url === '/api/rpc/personalSkills/list',
     ).length;
@@ -333,20 +415,34 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><RouterProv
       path: '/tmp/skill-projects-desktop.png',
       fullPage: true,
     });
+    await entry(dialog, 'beta').uncheck();
+    assert.equal(await entry(dialog, 'beta').isChecked(), false);
     await installProject(dialog, 'alpha');
     assert.equal(
       requests.filter((url) => url === '/api/rpc/personalSkills/list').length,
       personalLists,
     );
-    const personalGroup = '@local/personal-project';
+    const personalGroup = 'personal-project';
     assert.deepEqual(
       (await service.forUser('admin').list()).skills.map((skill) => [
         skill.path,
         skill.projectRoot,
+        skill.sourceType,
       ]),
-      [[`${personalGroup}/project/skills/alpha`, `${personalGroup}/project`]],
+      [[`${personalGroup}/skills/alpha`, personalGroup, 'archive']],
     );
     await assertProjectFiles(service.forUser('admin').root, personalGroup, 1);
+    await assertProjectMetadata(
+      service.forUser('admin').root,
+      personalGroup,
+      'archive',
+    );
+    await page
+      .getByRole('region', {
+        name: 'Local archive / personal-project',
+        exact: true,
+      })
+      .waitFor();
     assert.equal((await service.list()).skills.length, 0);
     assert.equal(
       await page
@@ -355,7 +451,18 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><RouterProv
       0,
     );
     assert.equal(
-      await page.getByRole('button', { name: /Update.*@local/ }).count(),
+      await page
+        .getByRole('button', { name: `Update ${personalGroup}`, exact: true })
+        .count(),
+      0,
+    );
+    assert.equal(
+      await page
+        .getByRole('link', {
+          name: `Open GitHub repository ${personalGroup}`,
+          exact: true,
+        })
+        .count(),
       0,
     );
 
@@ -368,8 +475,11 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><RouterProv
     await upload(dialog, 'team-project.skill');
     const globalScan = await (await response).json();
     assert.equal(globalScan.importMode, 'project');
+    assert.equal(globalScan.project.destination, 'team-project');
     await entry(dialog, 'beta').waitFor();
-    await entry(dialog, 'beta').check();
+    assert.equal(await entry(dialog, 'alpha').isChecked(), true);
+    assert.equal(await entry(dialog, 'beta').isChecked(), true);
+    await entry(dialog, 'alpha').uncheck();
     await page
       .locator('[data-sonner-toast]')
       .first()
@@ -385,12 +495,19 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><RouterProv
       true,
     );
     await installProject(dialog, 'beta');
-    const globalGroup = '@local/team-project';
+    const globalGroup = 'team-project';
     assert.deepEqual(
       (await service.list()).skills.map((skill) => skill.path),
-      [`${globalGroup}/project/skills/beta`],
+      [`${globalGroup}/skills/beta`],
     );
     await assertProjectFiles(service.root, globalGroup, 1);
+    await assertProjectMetadata(service.root, globalGroup, 'archive');
+    await page
+      .getByRole('region', {
+        name: 'Local archive / team-project',
+        exact: true,
+      })
+      .waitFor();
     assert.equal(
       await page
         .getByRole('button', { name: 'Remove beta', exact: true })
@@ -411,10 +528,25 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><RouterProv
       .fill('https://github.com/fixture/project/tree/main/skills/alpha');
     await entry(dialog, 'alpha').waitFor();
     assert.equal(await entry(dialog, 'beta').count(), 0);
+    assert.equal(await entry(dialog, 'alpha').isChecked(), false);
     await selectMode(dialog, 'Whole project');
     await entry(dialog, 'beta').waitFor();
+    assert.equal(await entry(dialog, 'alpha').isChecked(), true);
+    assert.equal(await entry(dialog, 'beta').isChecked(), true);
+    await entry(dialog, 'beta').uncheck();
+    // The explicit GitHub rescan also starts with every project entry selected.
+    const githubRescan = page.waitForResponse((response) =>
+      response.url().includes('/api/rpc/skills/scan'),
+    );
+    await dialog.getByRole('button', { name: 'Scan', exact: true }).click();
+    await githubRescan;
+    await entry(dialog, 'beta').waitFor();
+    assert.equal(await entry(dialog, 'alpha').isChecked(), true);
+    assert.equal(await entry(dialog, 'beta').isChecked(), true);
+    await entry(dialog, 'beta').uncheck();
     await installProject(dialog, 'alpha');
     await assertProjectFiles(service.root, 'fixture/project');
+    await assertProjectMetadata(service.root, 'fixture/project', 'github');
     assert.equal(
       await page
         .getByRole('button', { name: 'Remove alpha', exact: true })
@@ -434,24 +566,123 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><RouterProv
       globalLists,
     );
     assert.deepEqual(
-      (await service.list()).skills.map((skill) => [skill.path, skill.group]),
-      [['fixture/project/project/skills/alpha', 'fixture/project']],
+      (await service.list()).skills.map((skill) => [
+        skill.path,
+        skill.group,
+        skill.projectRoot,
+        skill.sourceType,
+      ]),
+      [
+        [
+          'fixture/project/skills/alpha',
+          'fixture/project',
+          'fixture/project',
+          'github',
+        ],
+      ],
     );
     await assertProjectFiles(service.root, 'fixture/project', 2);
-    assert.equal(downloads.length, 3);
+    await assertProjectMetadata(service.root, 'fixture/project', 'github');
+    assert.equal(downloads.length, 4);
     assert.deepEqual(
       downloads.map(({ repository }) => repository.refPath),
-      ['main/skills/alpha', 'main/skills/alpha', undefined],
+      [
+        'main/skills/alpha',
+        'main/skills/alpha',
+        'main/skills/alpha',
+        undefined,
+      ],
     );
-    assert.equal(downloads[2].original.ref, 'main');
-    assert.equal(downloads[2].original.scope, '');
-    assert.deepEqual(downloads[2].original.installation.entries, [
+    assert.equal(downloads[3].original.ref, 'main');
+    assert.equal(downloads[3].original.scope, '');
+    assert.deepEqual(downloads[3].original.installation.entries, [
       { path: 'skills/alpha/SKILL.md', name: 'alpha' },
     ]);
     await deleteProject('fixture/project');
     await assert.rejects(stat(path.join(service.root, 'fixture/project')), {
       code: 'ENOENT',
     });
+    // Root-entry projects expose source files in the editor, while app metadata stays hidden.
+    dialog = await openImport();
+    await selectMode(dialog, 'Whole project');
+    response = archiveResponse('global');
+    await upload(dialog, 'root-project.zip', rootProjectFiles());
+    const rootScan = await (await response).json();
+    assert.equal(rootScan.project.destination, 'root-project');
+    await entry(dialog, 'root-project').waitFor();
+    assert.equal(await entry(dialog, 'root-project').isChecked(), true);
+    await installProject(dialog, 'root-project');
+    await assertProjectMetadata(service.root, 'root-project', 'archive');
+    assert.equal(
+      await readFile(
+        path.join(service.root, 'root-project', 'src/main.py'),
+        'utf8',
+      ),
+      'print("root project version 1")\n',
+    );
+    await page
+      .getByRole('button', { name: 'Edit skill root-project', exact: true })
+      .click();
+    const preview = page.getByRole('dialog', {
+      name: 'root-project',
+      exact: true,
+    });
+    await preview
+      .getByRole('treeitem', { name: 'README.md', exact: true })
+      .waitFor();
+    await preview.getByRole('treeitem', { name: 'src', exact: true }).waitFor();
+    for (const name of [
+      '.skill-meta',
+      '.skill-project.json',
+      '.skill-sources.json',
+    ])
+      assert.equal(
+        await preview.getByRole('treeitem', { name, exact: true }).count(),
+        0,
+      );
+    await preview.getByRole('button', { name: 'Close', exact: true }).click();
+    await preview.waitFor({ state: 'hidden' });
+    await deleteProject('root-project');
+    await assert.rejects(stat(path.join(service.root, 'root-project')), {
+      code: 'ENOENT',
+    });
+    // Updating a root entry replaces its row too, even though its path is exactly the group.
+    version = 1;
+    dialog = await openImport(false);
+    await selectMode(dialog, 'Whole project');
+    await dialog
+      .getByRole('textbox', { name: 'GitHub source', exact: true })
+      .fill('fixture/root-project');
+    await entry(dialog, 'root-project').waitFor();
+    await installProject(dialog, 'root-project');
+    version = 2;
+    await page
+      .getByRole('button', { name: 'Update fixture/root-project', exact: true })
+      .click();
+    await page.getByText('Root version 2', { exact: true }).waitFor();
+    assert.equal(
+      await page
+        .getByRole('button', { name: 'Edit skill root-project', exact: true })
+        .count(),
+      1,
+    );
+    assert.deepEqual(
+      (await service.list()).skills.map((skill) => skill.path),
+      ['fixture/root-project'],
+    );
+    await assertProjectMetadata(service.root, 'fixture/root-project', 'github');
+    assert.equal(
+      await readFile(
+        path.join(service.root, 'fixture/root-project/src/main.py'),
+        'utf8',
+      ),
+      'print("root project version 2")\n',
+    );
+    await deleteProject('fixture/root-project');
+    await assert.rejects(
+      stat(path.join(service.root, 'fixture/root-project')),
+      { code: 'ENOENT' },
+    );
     await page
       .getByRole('button', { name: 'Use personal', exact: true })
       .click();

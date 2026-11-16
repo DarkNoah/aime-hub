@@ -23,6 +23,8 @@ export type RepositoryFile = {
 export type RepositorySnapshot = {
   commit: string;
   files: RepositoryFile[];
+  /** Explicit archive directory entries, used to protect reserved project metadata paths. */
+  directories?: string[];
   scopePath?: string;
   fileOnly?: boolean;
   ref?: string;

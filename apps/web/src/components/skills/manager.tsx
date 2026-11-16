@@ -158,9 +158,7 @@ export function SkillsManager({ scope }: { scope: SkillScope }) {
         ? {
             ...current,
             skills: [
-              ...current.skills.filter(
-                (skill) => !skill.path.startsWith(`${group}/`),
-              ),
+              ...current.skills.filter((skill) => skill.group !== group),
               ...skills,
             ].sort((a, b) => a.path.localeCompare(b.path)),
           }

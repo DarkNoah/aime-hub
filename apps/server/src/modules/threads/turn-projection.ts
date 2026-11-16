@@ -211,40 +211,50 @@ function failedToolOutput(output: unknown) {
 }
 
 function toolGroup(parts: HiddenPart[]): ProjectedToolGroup {
-  const calls = new Set<string>();
-  let running = false;
-  let failed = false;
+  const calls = new Map<string, keyof ChatToolGroup['statusCounts']>();
+  let reasoningRunning = false;
   let reasoningIndex: number | undefined;
   const messages: UIMessage[] = [];
   const revision = createHash('sha256');
   for (const [index, { message, part }] of parts.entries()) {
     revision.update(JSON.stringify([message.id, partRevision(part)]));
     if (isToolUIPart(part)) {
-      calls.add(part.toolCallId);
-      running ||= ![
-        'output-available',
-        'output-error',
-        'output-denied',
-      ].includes(part.state);
-      failed ||=
+      const failed =
         part.state === 'output-error' ||
         part.state === 'output-denied' ||
         (part.state === 'output-available' && failedToolOutput(part.output));
+      // Repeated snapshots of a call contribute only its latest state.
+      calls.set(
+        part.toolCallId,
+        failed
+          ? 'failed'
+          : part.state === 'output-available'
+            ? 'success'
+            : 'running',
+      );
     } else if (part.type === 'reasoning') {
       reasoningIndex = index;
-      running ||= part.state === 'streaming';
+      reasoningRunning ||= part.state === 'streaming';
     }
     if (messages.at(-1)?.id === message.id) messages.at(-1)!.parts.push(part);
     else messages.push({ ...message, parts: [part] });
   }
+  const statusCounts = { success: 0, failed: 0, running: 0 };
+  for (const state of calls.values()) statusCounts[state]++;
   return {
     summary: {
       id: isToolUIPart(parts[0].part)
         ? parts[0].part.toolCallId
         : `${parts[0].message.id}:${parts[0].index}`,
       count: calls.size,
+      statusCounts,
       revision: revision.digest('hex'),
-      state: running ? 'running' : failed ? 'failed' : 'completed',
+      state:
+        reasoningRunning || statusCounts.running > 0
+          ? 'running'
+          : statusCounts.failed > 0
+            ? 'failed'
+            : 'completed',
       ...(reasoningIndex !== undefined ? { reasoningIndex } : {}),
       ...(parts.every(({ part }) => part.type === 'reasoning')
         ? { reasoningOnly: true }

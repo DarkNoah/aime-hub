@@ -281,8 +281,11 @@ async function discover(root: string): Promise<DiscoveredSkill[]> {
   const rootPath: string = canonicalRoot;
   async function visit(directory: string) {
     const group = relative(root, directory);
-    if (group.split(/[\\/]/).length === 2) {
-      const project = await readSkillProject(directory);
+    const depth = group ? group.split(/[\\/]/).length : 0;
+    if (depth === 1 || depth === 2) {
+      const project = await readSkillProject(directory, {
+        legacy: depth === 2,
+      });
       if (project) {
         for (const entry of project.entries)
           result.push({

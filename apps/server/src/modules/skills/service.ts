@@ -27,6 +27,7 @@ import { SkillError } from './errors.js';
 import { readSkillArchive } from './archive.js';
 import {
   readSkillProject,
+  SKILL_META_DIRECTORY,
   SKILL_PROJECT_FILE,
   skillProjectSchema,
   type SkillProject,
@@ -54,6 +55,8 @@ import {
 const SCAN_TTL = 15 * 60_000;
 type CachedScan = {
   source?: SkillSource;
+  projectGroup?: string;
+  projectVersion?: 1 | 2;
   result: SkillScan;
   snapshot: RepositorySnapshot;
   timer: NodeJS.Timeout;
@@ -160,12 +163,26 @@ export class SkillService {
     return current;
   }
 
+  private async assertImportAncestors(parts: string[], manifests = true) {
+    for (let depth = 0; depth < parts.length; depth++) {
+      const directory = await this.directory(parts.slice(0, depth));
+      if (!directory) break;
+      if (
+        (manifests && (await stat(join(directory, 'SKILL.md')))) ||
+        (depth > 0 &&
+          depth <= 2 &&
+          (await readSkillProject(directory, { legacy: depth === 2 })))
+      )
+        throw new SkillError('SKILL_CONFLICT', 409);
+    }
+  }
+
   async list(): Promise<InstalledSkills> {
     const skills: InstalledSkill[] = [];
     const enabled = await enabledPluginSkills(this.workspaceRoot);
     if (!(await this.directory([]))) return { root: this.root, skills };
     const visit = async (directory: string, path: string) => {
-      const parts = path.split('/');
+      const parts = path ? path.split('/') : [];
       if (
         !this.userId &&
         parts[0] === 'plugins' &&
@@ -174,12 +191,13 @@ export class SkillService {
       )
         return;
       const entries = await readdir(directory, { withFileTypes: true });
-      if (
-        parts.length === 2 &&
-        entries.some((entry) => entry.name === SKILL_PROJECT_FILE)
-      ) {
-        const project = await readSkillProject(directory);
-        if (!project) return;
+      const project =
+        parts.length === 1 || parts.length === 2
+          ? await readSkillProject(directory, { legacy: parts.length === 2 })
+          : undefined;
+      if (project) {
+        const projectRoot =
+          project.root === '.' ? path : `${path}/${project.root}`;
         for (const entry of project.entries) {
           const metadata = describe(
             await readFile(join(directory, project.root, entry.path), 'utf8'),
@@ -187,12 +205,16 @@ export class SkillService {
           );
           const entryDirectory = dirname(entry.path);
           skills.push({
-            path: `${path}/${project.root}${entryDirectory === '.' ? '' : `/${entryDirectory}`}`,
+            path: `${projectRoot}${entryDirectory === '.' ? '' : `/${entryDirectory}`}`,
             name: entry.name,
             description: metadata.description,
             valid: metadata.valid,
             group: path,
-            projectRoot: `${path}/${project.root}`,
+            projectRoot,
+            sourceType:
+              parts.length === 1 || parts[0] === '@local'
+                ? 'archive'
+                : 'github',
           });
         }
         return;
@@ -242,6 +264,7 @@ export class SkillService {
     legacyPaths?: Set<string>,
     mode: 'skills' | 'project' = 'skills',
     resolveRef = false,
+    projectVersion: 1 | 2 = 2,
   ): Promise<SkillScan> {
     const repository = parseGitHubRepository(input);
     const snapshot = await this.download(
@@ -262,6 +285,7 @@ export class SkillService {
       legacyPaths,
       undefined,
       mode,
+      projectVersion,
     );
   }
 
@@ -272,23 +296,52 @@ export class SkillService {
     mode: 'skills' | 'project' = 'skills',
   ): Promise<SkillScan> {
     const snapshot = await readSkillArchive(filename, data, signal);
-    if (mode === 'project') {
+    const repo = slug(filename.replace(/\.(zip|skill)$/i, ''));
+    let preserveArchivePaths = false;
+    try {
+      if (mode === 'project' && !(await this.directory([repo]))) {
+        const legacyDirectory = await this.directory(['@local', repo]);
+        const legacy = legacyDirectory
+          ? await readSkillProject(legacyDirectory, { legacy: true })
+          : undefined;
+        // Early archive projects kept the ZIP wrapper. Their already-installed
+        // entry locations must not be rewritten merely by scanning the archive again.
+        preserveArchivePaths =
+          legacy?.version === 1 &&
+          legacy.entries.every((entry) =>
+            snapshot.files.some((file) => file.path === entry.path),
+          );
+      }
+    } catch (error) {
+      await snapshot.dispose();
+      throw error;
+    }
+    if (mode === 'project' && !preserveArchivePaths) {
       const regular = snapshot.files.filter(isRegularFile);
       const prefix = `${regular[0]?.path.split('/')[0]}/`;
       if (
         regular.length &&
         regular.every((file) => file.path.startsWith(prefix))
-      )
+      ) {
+        if (prefix.slice(0, -1).toLowerCase() === SKILL_META_DIRECTORY) {
+          await snapshot.dispose();
+          throw new SkillError('SKILL_CONFLICT', 409);
+        }
         // Archive resources use immutable oids for I/O; only their project-relative paths change.
         snapshot.files = snapshot.files.map((file) => ({
           ...file,
           path: file.path.slice(prefix.length),
         }));
+        snapshot.directories = snapshot.directories
+          ?.filter((path) => path.startsWith(prefix))
+          .map((path) => path.slice(prefix.length))
+          .filter(Boolean);
+      }
     }
     return this.scanSnapshot(
       {
         owner: '@local',
-        repo: slug(filename.replace(/\.(zip|skill)$/i, '')),
+        repo,
         url: '',
       },
       snapshot,
@@ -310,16 +363,51 @@ export class SkillService {
     legacyPaths?: Set<string>,
     filename?: string,
     mode: 'skills' | 'project' = 'skills',
+    projectVersion: 1 | 2 = 2,
   ): Promise<SkillScan> {
     try {
       if (signal?.aborted) throw new SkillError('SKILL_DOWNLOAD_FAILED', 502);
       const projectMode =
         mode === 'project' || original?.installation?.mode === 'project';
-      const parent = await this.directory([repository.owner, repository.repo]);
+      let group =
+        projectMode && filename
+          ? repository.repo
+          : `${repository.owner}/${repository.repo}`;
+      if (!this.userId && projectMode && ['plugins', 'builtin'].includes(group))
+        throw new SkillError('SKILL_UNSAFE_PATH', 403);
+      let parent = await this.directory(group.split('/'));
+      if (projectMode && filename && !parent) {
+        const legacyGroup = `@local/${repository.repo}`;
+        const legacyDirectory = await this.directory(legacyGroup.split('/'));
+        if (
+          legacyDirectory &&
+          (await readSkillProject(legacyDirectory, { legacy: true }))
+            ?.version === 1
+        ) {
+          group = legacyGroup;
+          parent = legacyDirectory;
+          projectVersion = 1;
+        }
+      }
+      await this.assertImportAncestors(group.split('/'), false);
+      if (
+        projectMode &&
+        projectVersion === 2 &&
+        [
+          ...snapshot.files.map((file) => file.path),
+          ...(snapshot.directories ?? []),
+        ].some((path) => {
+          const top = path.split('/')[0].toLowerCase();
+          return top === SKILL_META_DIRECTORY;
+        })
+      )
+        throw new SkillError('SKILL_CONFLICT', 409);
       if (
         !projectMode &&
         parent &&
-        (await stat(join(parent, SKILL_PROJECT_FILE)))
+        (await readSkillProject(parent, {
+          legacy: group.split('/').length === 2,
+        }))
       )
         throw new SkillError('SKILL_CONFLICT', 409);
       // Resolve names across the whole repository so scoped and full scans use identical destinations.
@@ -377,7 +465,7 @@ export class SkillService {
               return { ...candidate, name: entry.name };
             })
           : roots;
-        const projectRoot = `${repository.owner}/${repository.repo}/project`;
+        const projectRoot = projectVersion === 1 ? `${group}/project` : group;
         const regular = snapshot.files.filter(isRegularFile);
         const skills = enabled.map(
           ({ file, content, name }): RepositorySkill => {
@@ -433,6 +521,8 @@ export class SkillService {
           result,
           snapshot,
           timer,
+          projectGroup: group,
+          projectVersion,
           source: input
             ? {
                 url: repository.url,
@@ -596,7 +686,7 @@ export class SkillService {
         throw error;
       }
       return this.withGroupLock(
-        `${scan.result.owner}/${scan.result.repo}`,
+        scan.projectGroup ?? `${scan.result.owner}/${scan.result.repo}`,
         () => this.installScan(id, paths),
       );
     });
@@ -623,17 +713,25 @@ export class SkillService {
     const parts = group.split('/');
     if (!this.userId && parts[0] === 'plugins')
       throw new SkillError('SKILL_UNSAFE_PATH', 403);
-    if (parts.length !== 2 || !safeRepositoryPath(group)) return action();
-    const owner = (await this.directory([parts[0]], true))!;
-    const lock = join(owner, `.${parts[1]}.skill-install.lock`);
-    await mkdir(lock).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'EEXIST') throw new SkillError('SKILL_CONFLICT', 409);
-      throw error;
-    });
+    if (parts.length > 2 || !safeRepositoryPath(group)) return action();
+    const locks: string[] = [];
     try {
+      for (let depth = 0; depth < parts.length; depth++) {
+        // Holding each parent lock prevents a single-directory archive project from
+        // being published while a GitHub owner directory is being created beneath it.
+        await this.assertImportAncestors(parts.slice(0, depth + 1));
+        const parent = (await this.directory(parts.slice(0, depth), true))!;
+        const lock = join(parent, `.${parts[depth]}.skill-install.lock`);
+        await mkdir(lock).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'EEXIST')
+            throw new SkillError('SKILL_CONFLICT', 409);
+          throw error;
+        });
+        locks.push(lock);
+      }
       return await action();
     } finally {
-      await rmdir(lock);
+      for (const lock of locks.reverse()) await rmdir(lock);
     }
   }
 
@@ -648,10 +746,11 @@ export class SkillService {
         throw new SkillError('SKILL_UNSAFE_PATH', 403);
       if (cached.result.importMode === 'project')
         return await this.installProject(cached, selected);
+      await this.assertImportAncestors([owner, repo]);
       const existingGroup = await this.directory([owner, repo]);
       if (
         existingGroup &&
-        (await stat(join(existingGroup, SKILL_PROJECT_FILE)))
+        (await readSkillProject(existingGroup, { legacy: true }))
       )
         throw new SkillError('SKILL_CONFLICT', 409);
       // An existing manifest on an ancestor would hide all installed children at runtime.
@@ -729,18 +828,28 @@ export class SkillService {
     cached: CachedScan,
     selected: RepositorySkill[],
   ): Promise<InstalledSkill[]> {
-    const { owner, repo } = cached.result;
-    for (const parts of [[], [owner]]) {
-      const parent = await this.directory(parts, true);
-      if (await stat(join(parent!, 'SKILL.md')))
+    const groupPath = cached.projectGroup!;
+    const parts = groupPath.split('/');
+    if (!this.userId && ['plugins', 'builtin'].includes(groupPath))
+      throw new SkillError('SKILL_UNSAFE_PATH', 403);
+    if (cached.result.sourceType === 'archive' && cached.projectVersion === 2) {
+      // An old archive group can be temporarily absent while an earlier layout is updated.
+      if (await stat(join(this.root, '.@local.skill-install.lock')))
+        throw new SkillError('SKILL_CONFLICT', 409);
+      const legacy = await this.directory(['@local', cached.result.repo]);
+      if (
+        legacy &&
+        (await readSkillProject(legacy, { legacy: true }))?.version === 1
+      )
         throw new SkillError('SKILL_CONFLICT', 409);
     }
-    const ownerDirectory = (await this.directory([owner]))!;
-    const destination = join(ownerDirectory, repo);
+    await this.assertImportAncestors(parts);
+    const parentDirectory = (await this.directory(parts.slice(0, -1), true))!;
+    const destination = join(parentDirectory, parts.at(-1)!);
     if (await stat(destination)) throw new SkillError('SKILL_CONFLICT', 409);
     const project: SkillProject = skillProjectSchema.parse({
-      version: 1,
-      root: 'project',
+      version: cached.projectVersion ?? 2,
+      root: cached.projectVersion === 1 ? 'project' : '.',
       entries: selected.map((skill) => ({
         path: skill.path,
         name: skill.name,
@@ -755,8 +864,11 @@ export class SkillService {
       await mkdir(root, { recursive: true });
       for (const file of cached.snapshot.files.filter(isRegularFile))
         await this.writeResource(root, file.path, file, cached.snapshot);
+      const metadata =
+        project.version === 1 ? group : join(group, SKILL_META_DIRECTORY);
+      await mkdir(metadata, { recursive: true });
       await writeFile(
-        join(group, SKILL_PROJECT_FILE),
+        join(metadata, SKILL_PROJECT_FILE),
         JSON.stringify(project, null, 2),
         { flag: 'wx' },
       );
@@ -767,12 +879,12 @@ export class SkillService {
           installation: { mode: 'project', entries: project.entries },
         };
         await writeFile(
-          join(group, SKILL_SOURCES_FILE),
+          join(metadata, SKILL_SOURCES_FILE),
           serializeSkillSources([source]),
           { flag: 'wx' },
         );
       }
-      await this.directory([owner]);
+      await this.assertImportAncestors(parts);
       if (await stat(destination)) throw new SkillError('SKILL_CONFLICT', 409);
       await rename(group, destination);
     } finally {
@@ -783,24 +895,28 @@ export class SkillService {
       name: skill.name,
       description: skill.description,
       valid: true,
-      group: `${owner}/${repo}`,
-      projectRoot: `${owner}/${repo}/project`,
+      group: groupPath,
+      projectRoot:
+        project.root === '.' ? groupPath : `${groupPath}/${project.root}`,
+      sourceType: cached.result.sourceType === 'archive' ? 'archive' : 'github',
     }));
   }
 
   /** Resolve an installed package under this user's scope and serialize against updates/removal. */
-  withFiles<T>(path: string, action: (root: string) => Promise<T>): Promise<T> {
+  withFiles<T>(
+    path: string,
+    action: (root: string, skill: InstalledSkill) => Promise<T>,
+  ): Promise<T> {
     return this.exclusive(async () => {
       if (path && !safeRepositoryPath(path))
         throw new SkillError('SKILL_UNSAFE_PATH', 403);
       const directory = await this.directory(path ? path.split('/') : []);
-      if (
-        !directory ||
-        !(await this.list()).skills.some((skill) => skill.path === path)
-      )
-        throw new SkillError('SKILL_NOT_FOUND', 404);
+      const skill = (await this.list()).skills.find(
+        (skill) => skill.path === path,
+      );
+      if (!directory || !skill) throw new SkillError('SKILL_NOT_FOUND', 404);
       try {
-        return await action(directory);
+        return await action(directory, skill);
       } catch (error) {
         fileError(error);
       }
@@ -837,9 +953,10 @@ export class SkillService {
         );
         if (!directory || !current.length)
           throw new SkillError('SKILL_NOT_FOUND', 404);
+        const depth = group.split('/').length;
         const project =
-          group.split('/').length === 2
-            ? await readSkillProject(directory)
+          depth <= 2
+            ? await readSkillProject(directory, { legacy: depth === 2 })
             : undefined;
         if (project)
           return this.updateProject(group, directory, project, source);
@@ -955,6 +1072,7 @@ export class SkillService {
         undefined,
         'project',
         !!input,
+        project.version,
       );
     } catch (error) {
       if (
@@ -1056,7 +1174,9 @@ export class SkillService {
         )
           throw new SkillError('SKILL_GROUP_CHANGED', 409);
         if (skills.some((skill) => skill.projectRoot)) {
-          const project = await readSkillProject(groupDirectory);
+          const project = await readSkillProject(groupDirectory, {
+            legacy: group.split('/').length === 2,
+          });
           if (!project) throw new SkillError('SKILL_PROJECT_INVALID', 409);
           const staging = await mkdtemp(
             join(dirname(this.root), '.skill-project-remove-'),

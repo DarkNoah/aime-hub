@@ -40,16 +40,27 @@ async function project(
   root: string,
   repo: string,
   entries: Array<{ path: string; name: string }>,
+  options: { archive?: boolean; legacy?: boolean } = {},
 ) {
-  const group = join(root, '.agents/skills/demo', repo);
+  const group = join(
+    root,
+    '.agents/skills',
+    options.archive ? '' : 'demo',
+    repo,
+  );
+  const projectRoot = options.legacy ? join(group, 'project') : group;
   for (const entry of entries)
-    await write(group, `project/${entry.path}`, manifest(entry.name));
+    await write(projectRoot, entry.path, manifest(entry.name));
   await write(
     group,
-    '.skill-project.json',
-    JSON.stringify({ version: 1, root: 'project', entries }),
+    options.legacy ? '.skill-project.json' : '.skill-meta/.skill-project.json',
+    JSON.stringify({
+      version: options.legacy ? 1 : 2,
+      root: options.legacy ? 'project' : '.',
+      entries,
+    }),
   );
-  return join(group, 'project');
+  return projectRoot;
 }
 
 test('whole projects load selected original paths, stable names, shared code and native resources', async (t) => {
@@ -186,7 +197,7 @@ test('project entries participate in personal overrides and exact custom selecti
     await resolveAgentSkillPaths(root, 'alice', {
       source: 'database',
       skillsMode: 'custom',
-      skillPaths: ['demo/one/project/skills/shared'],
+      skillPaths: ['demo/one/skills/shared'],
     }),
     [join(global, 'skills/shared')],
   );
@@ -206,4 +217,78 @@ test('project discovery rejects malformed or symlinked entries and ignores unsel
     join(projectRoot, 'selected/SKILL.md'),
   );
   await assert.rejects(discoverInstalledSkills(root), /SKILL_PROJECT_INVALID/);
+});
+
+test('single-level archive projects load root and hidden entries alongside legacy installations', async (t) => {
+  const root = await fixture(t);
+  const local = await project(
+    root,
+    'local-project',
+    [{ path: '.agents/skills/Local_Name/SKILL.md', name: 'local-entry' }],
+    { archive: true },
+  );
+  const localRoot = await project(
+    root,
+    'root-project',
+    [{ path: 'SKILL.md', name: 'root-entry' }],
+    { archive: true },
+  );
+  const legacy = await project(
+    root,
+    'legacy',
+    [{ path: 'skills/legacy/SKILL.md', name: 'legacy' }],
+    { legacy: true },
+  );
+  // Source files may use the old metadata names; hidden v2 records take precedence.
+  await write(local, '.skill-project.json', '{"upstream": true}');
+  await write(local, '.skill-sources.json', '{"upstream": true}');
+  await write(
+    local,
+    'unselected/.skill-meta/.skill-project.json',
+    '{"not": "app metadata"}',
+  );
+  await write(local, 'unselected/SKILL.md', manifest('unselected'));
+  assert.deepEqual(
+    (await listChatSkills(root, 'alice')).map(({ name, group }) => ({
+      name,
+      group,
+    })),
+    [
+      { name: 'legacy', group: 'demo/legacy' },
+      { name: 'local-entry', group: 'local-project' },
+      { name: 'root-entry', group: 'root-project' },
+    ],
+  );
+  const paths = await resolveAgentSkillPaths(root, 'alice', {
+    source: 'database',
+    skillsMode: 'custom',
+    skillPaths: [
+      'local-project/.agents/skills/Local_Name',
+      'root-project',
+      'demo/legacy/project/skills/legacy',
+    ],
+  });
+  assert.deepEqual(paths, [
+    join(local, '.agents/skills/Local_Name'),
+    localRoot,
+    join(legacy, 'skills/legacy'),
+  ]);
+  const workspace = getWorkspace(
+    root,
+    'alice',
+    await createPersonalWorkspace(root, 'alice'),
+    undefined,
+    paths,
+  );
+  t.after(() => workspace.destroy());
+  for (const [name, projectRoot] of [
+    ['local-entry', local],
+    ['root-entry', localRoot],
+    ['legacy', legacy],
+  ]) {
+    const skill = await workspace.skills!.get(name);
+    assert.ok(skill);
+    assert.ok(skill.instructions.includes(JSON.stringify(projectRoot)));
+    assert.ok(!skill.path.includes('.skill-entry'));
+  }
 });

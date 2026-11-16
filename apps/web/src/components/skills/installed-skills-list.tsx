@@ -65,10 +65,14 @@ export function InstalledSkillsList(props: Props) {
         )
       : skills;
     if (!visibleSkills.length) return null;
-    const repositoryUrl = skillGroupRepositoryUrl(group);
     const projectRoot = skills.find((skill) => skill.projectRoot)?.projectRoot;
-    const label = group.startsWith('@local/')
-      ? t('skills.archiveGroup', { name: group.slice('@local/'.length) })
+    const archive =
+      skills.some((skill) => skill.sourceType === 'archive') ||
+      group.startsWith('@local/') ||
+      (!!projectRoot && !group.includes('/'));
+    const repositoryUrl = archive ? null : skillGroupRepositoryUrl(group);
+    const label = archive
+      ? t('skills.archiveGroup', { name: group.replace(/^@local\//, '') })
       : group || t('skills.localGroup');
     const heading = (
       <>

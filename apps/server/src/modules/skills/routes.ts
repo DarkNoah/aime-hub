@@ -10,6 +10,7 @@ import { filePath } from '../files/paths.js';
 import { previewFile } from '../files/service.js';
 import type { SkillService } from './service.js';
 import { SkillError } from './errors.js';
+import { assertSkillFilePath } from './files.js';
 
 export function skillArchiveRoutes(
   auth: Auth,
@@ -95,8 +96,9 @@ export function skillFileRoutes(
       return c.json({ code: 'FORBIDDEN' }, 403);
     const target =
       scope === 'personal' ? service.forUser(session.user.id) : service;
-    return target.withFiles(c.req.query('skill') ?? '', async (root) => {
+    return target.withFiles(c.req.query('skill') ?? '', async (root, skill) => {
       const path = c.req.query('path') ?? '';
+      assertSkillFilePath(skill, path);
       const info = await previewFile(root, path);
       const absolute = await filePath(root, path);
       c.header('Content-Type', info.mime);

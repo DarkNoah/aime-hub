@@ -175,6 +175,9 @@ def archive(value: str):
                     finally:
                         if output is not None:
                             output.close()
-                yield ArchiveSnapshot(Source("@local", slug(path.stem), "", kind="archive"), folder, "", "", files)
+                snapshot = ArchiveSnapshot(Source("@local", slug(path.stem), "", kind="archive"), folder, "", "", files)
+                snapshot.directories = [archive_path(entry.orig_filename) for entry in entries
+                                        if entry.is_dir() and not ignored(archive_path(entry.orig_filename))]
+                yield snapshot
     except (zipfile.BadZipFile, zipfile.LargeZipFile, RuntimeError, NotImplementedError, EOFError, zlib.error) as exc:
         raise SkillError("The archive is damaged, encrypted, or uses an unsupported ZIP format.") from exc

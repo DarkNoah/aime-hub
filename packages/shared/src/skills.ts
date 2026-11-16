@@ -33,6 +33,7 @@ export const updateSkillGroupSchema = z
   .strict();
 
 export type InstalledSkill = {
+  sourceType?: 'github' | 'archive';
   projectRoot?: string;
   path: string;
   name: string;

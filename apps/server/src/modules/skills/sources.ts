@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { SkillError } from './errors.js';
 import { parseGitHubRepository } from './github.js';
-import { skillProjectEntriesSchema } from './project.js';
+import { SKILL_META_DIRECTORY, skillProjectEntriesSchema } from './project.js';
 
 export const SKILL_SOURCES_FILE = '.skill-sources.json';
 const installationSchema = z.discriminatedUnion('mode', [
@@ -47,7 +47,20 @@ export function normalizeSkillSource(source: string, group?: string) {
 export async function readSkillSources(
   directory: string,
 ): Promise<SkillSource[]> {
-  const path = join(directory, SKILL_SOURCES_FILE);
+  const metadata = join(directory, SKILL_META_DIRECTORY);
+  const metadataInfo = await lstat(metadata).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    },
+  );
+  if (
+    metadataInfo &&
+    (!metadataInfo.isDirectory() || metadataInfo.isSymbolicLink())
+  )
+    throw new SkillError('SKILL_UNSAFE_PATH', 403);
+  // A new archive project has no managed source. Its upstream root files are never metadata.
+  const path = join(metadataInfo ? metadata : directory, SKILL_SOURCES_FILE);
   const info = await lstat(path).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return null;
     throw error;

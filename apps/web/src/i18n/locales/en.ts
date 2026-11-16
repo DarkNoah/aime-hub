@@ -2688,6 +2688,9 @@ export const en = {
   'chat.errors.toolNotPending':
     'This request has already been handled or is no longer available.',
   'chat.toolGroup': 'Tool calls · {{count}}',
+  'chat.toolGroup.success': 'Success',
+  'chat.toolGroup.failed': 'Failed',
+  'chat.toolGroup.running': 'Running',
   'chat.toolGroup.loadMore': 'Load more tool details',
   'chat.toolGroup.updating': 'Updating tool details…',
   'chat.toolGroup.loadFailed': 'Could not load tool details',

@@ -195,29 +195,34 @@ class DirectorySkillSource extends LocalSkillSource {
         const offset = directory.indexOf(marker);
         if (offset < 0) return path;
         const parts = directory.slice(offset + marker.length).split(sep);
-        if (parts.length < 3) return path;
-        const group = resolve(
-          directory.slice(0, offset + marker.length),
-          ...parts.slice(0, 2),
-        );
-        let pending = projects.get(group);
-        if (!pending) {
-          pending = readSkillProject(group);
-          projects.set(group, pending);
+        // Archives live directly under the skill root; GitHub projects retain
+        // owner/repo grouping. Never interpret metadata deeper in source files.
+        for (const depth of [1, 2]) {
+          if (parts.length < depth) break;
+          const group = resolve(
+            directory.slice(0, offset + marker.length),
+            ...parts.slice(0, depth),
+          );
+          let pending = projects.get(group);
+          if (!pending) {
+            pending = readSkillProject(group, { legacy: depth === 2 });
+            projects.set(group, pending);
+          }
+          const project = await pending;
+          if (!project) continue;
+          const root = resolve(group, project.root);
+          const entry = project.entries.find(
+            (entry) => dirname(resolve(root, entry.path)) === directory,
+          );
+          if (!entry) throw new Error('SKILL_PROJECT_ENTRY_UNAVAILABLE');
+          // Mastra validates name against its discovery directory. An in-memory
+          // alias keeps that identity stable without moving or rewriting the project.
+          const alias = resolve(directory, '.skill-entry', entry.name);
+          this.projects.set(directory, { alias, root });
+          this.names.set(resolve(directory, 'SKILL.md'), entry.name);
+          return alias;
         }
-        const project = await pending;
-        if (!project) return path;
-        const root = resolve(group, project.root);
-        const entry = project.entries.find(
-          (entry) => dirname(resolve(root, entry.path)) === directory,
-        );
-        if (!entry) throw new Error('SKILL_PROJECT_ENTRY_UNAVAILABLE');
-        // Mastra validates name against its discovery directory. An in-memory
-        // alias keeps that identity stable without moving or rewriting the project.
-        const alias = resolve(directory, '.skill-entry', entry.name);
-        this.projects.set(directory, { alias, root });
-        this.names.set(resolve(directory, 'SKILL.md'), entry.name);
-        return alias;
+        return path;
       }),
     );
   }

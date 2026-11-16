@@ -6,12 +6,13 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rm,
   symlink,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 import type { Auth } from '@aime/auth';
 import { scanSkillsSchema } from '@aime/shared/skills';
@@ -19,6 +20,7 @@ import { createApp } from '../apps/server/src/app.js';
 import { SkillService } from '../apps/server/src/modules/skills/service.js';
 import {
   readSkillProject,
+  SKILL_META_DIRECTORY,
   SKILL_PROJECT_FILE,
   skillProjectSchema,
 } from '../apps/server/src/modules/skills/project.js';
@@ -43,7 +45,9 @@ const main = 'skills/rea-toon/SKILL.md';
 const hidden = '.claude/skills/hidden/SKILL.md';
 
 async function fixture(t: test.TestContext) {
-  const workspace = await mkdtemp(join(tmpdir(), 'skill-projects-'));
+  const workspace = await realpath(
+    await mkdtemp(join(tmpdir(), 'skill-projects-')),
+  );
   const files = new Map([
     [main, manifest('rea-toon')],
     ['skills/rea-toon/references/setup.md', 'Install from project root.'],
@@ -54,6 +58,7 @@ async function fixture(t: test.TestContext) {
     ['assets/图片.bin', '\u0000\u00ff'],
     ['.github/workflows/build.yml', 'name: build'],
     ['.skill-project.json', '{"untrusted":"upstream-file"}'],
+    ['.skill-sources.json', '{"untrusted":"upstream-source"}'],
   ]);
   const requests: { ref?: string | null; scope?: string }[] = [];
   let failCopy = false;
@@ -128,6 +133,44 @@ async function fixture(t: test.TestContext) {
   };
 }
 
+async function legacyProject(
+  f: Awaited<ReturnType<typeof fixture>>,
+  group = 'owner/repo',
+  withSource = true,
+) {
+  const directory = join(f.service.root, group);
+  for (const [path, content] of f.files) {
+    const output = join(directory, 'project', path);
+    await mkdir(dirname(output), { recursive: true });
+    await writeFile(output, content);
+  }
+  const metadata = {
+    version: 1,
+    root: 'project',
+    entries: [{ path: main, name: 'rea-toon' }],
+  };
+  await writeFile(
+    join(directory, SKILL_PROJECT_FILE),
+    JSON.stringify(metadata),
+  );
+  if (withSource)
+    await writeFile(
+      join(directory, SKILL_SOURCES_FILE),
+      JSON.stringify({
+        version: 2,
+        sources: [
+          {
+            url,
+            ref: 'main',
+            scope: '',
+            installation: { mode: 'project', entries: metadata.entries },
+          },
+        ],
+      }),
+    );
+  return directory;
+}
+
 test('whole project import preserves all siblings, hidden files and original paths while enabling only selected entries', async (t) => {
   const f = await fixture(t);
   f.skipLink();
@@ -139,7 +182,7 @@ test('whole project import preserves all siblings, hidden files and original pat
   assert.equal(scan.importMode, 'project');
   assert.equal(scan.scope, '');
   assert.equal(scan.ref, 'main');
-  assert.equal(scan.project?.destination, 'owner/repo/project');
+  assert.equal(scan.project?.destination, 'owner/repo');
   assert.equal(scan.project?.fileCount, f.files.size);
   assert.equal(scan.project?.skippedFiles, 1);
   assert.deepEqual(
@@ -148,19 +191,19 @@ test('whole project import preserves all siblings, hidden files and original pat
   );
   const installed = await f.service.install(scan.id, [main, hidden]);
   const group = join(f.service.root, 'owner/repo');
-  assert.deepEqual((await readdir(group)).sort(), [
+  assert.ok((await readdir(group)).includes(SKILL_META_DIRECTORY));
+  assert.deepEqual((await readdir(join(group, SKILL_META_DIRECTORY))).sort(), [
     SKILL_PROJECT_FILE,
     SKILL_SOURCES_FILE,
-    'project',
   ]);
   for (const [path, content] of f.files)
-    assert.equal(await readFile(join(group, 'project', path), 'utf8'), content);
-  await assert.rejects(readFile(join(group, 'project/linked/SKILL.md')), {
+    assert.equal(await readFile(join(group, path), 'utf8'), content);
+  await assert.rejects(readFile(join(group, 'linked/SKILL.md')), {
     code: 'ENOENT',
   });
   assert.deepEqual(await readSkillProject(group), {
-    version: 1,
-    root: 'project',
+    version: 2,
+    root: '.',
     entries: [
       { path: main, name: 'rea-toon' },
       { path: hidden, name: 'hidden' },
@@ -180,7 +223,8 @@ test('whole project import preserves all siblings, hidden files and original pat
   assert.deepEqual((await f.service.list()).skills, installed);
   for (const skill of installed) {
     assert.equal(skill.group, 'owner/repo');
-    assert.equal(skill.projectRoot, 'owner/repo/project');
+    assert.equal(skill.projectRoot, 'owner/repo');
+    assert.equal(skill.sourceType, 'github');
     assert.equal((await f.service.read(skill.path)).skill.name, skill.name);
     assert.equal(
       await f.service.withFiles(skill.path, (root) =>
@@ -197,7 +241,7 @@ test('whole project import preserves all siblings, hidden files and original pat
     { code: 'SKILL_GROUP_CHANGED' },
   );
   assert.equal(
-    await readFile(join(group, 'project/rea_toon/cli.py'), 'utf8'),
+    await readFile(join(group, 'rea_toon/cli.py'), 'utf8'),
     '# original application',
   );
   assert.deepEqual(
@@ -218,7 +262,7 @@ test('root project packages keep nested manifests bundled and duplicate entry na
     scan.skills.map((skill) => skill.path),
     ['SKILL.md'],
   );
-  assert.equal(scan.skills[0].destination, 'owner/repo/project');
+  assert.equal(scan.skills[0].destination, 'owner/repo');
   assert.equal(scan.skills[0].bundledSkills?.length, 3);
   await assert.rejects(f.service.install(scan.id, [main]), {
     code: 'SKILL_INVALID_SELECTION',
@@ -255,7 +299,7 @@ test('project updates replace the complete tree and preserve the selected entrie
   const updated = await f.service.updateGroup('owner/repo');
   assert.deepEqual(updated, installed);
   assert.deepEqual(f.requests.at(-1), { ref: 'main', scope: '' });
-  const project = join(f.service.root, 'owner/repo/project');
+  const project = join(f.service.root, 'owner/repo');
   assert.equal(
     await readFile(join(project, 'rea_toon/cli.py'), 'utf8'),
     '# updated application',
@@ -270,7 +314,12 @@ test('project updates replace the complete tree and preserve the selected entrie
   assert.equal((await f.service.list()).skills.length, 2);
   const metadata = JSON.parse(
     await readFile(
-      join(f.service.root, 'owner/repo', SKILL_SOURCES_FILE),
+      join(
+        f.service.root,
+        'owner/repo',
+        SKILL_META_DIRECTORY,
+        SKILL_SOURCES_FILE,
+      ),
       'utf8',
     ),
   );
@@ -284,7 +333,7 @@ test('project updates replace the complete tree and preserve the selected entrie
 test('missing or invalid enabled entries and failed copy leave the previous project complete', async (t) => {
   const f = await fixture(t);
   const installed = await f.install();
-  const project = join(f.service.root, 'owner/repo/project');
+  const project = join(f.service.root, 'owner/repo');
   f.files.delete(main);
   await assert.rejects(f.service.updateGroup('owner/repo'), {
     code: 'SKILL_UPDATE_SOURCE_NOT_FOUND',
@@ -360,7 +409,7 @@ test('a failed initial update rename never removes the original project', async 
     await assert.rejects(f.service.updateGroup('owner/repo'), /rename denied/);
     assert.deepEqual((await f.service.list()).skills, installed);
     assert.equal(
-      await readFile(join(directory, 'project/rea_toon/cli.py'), 'utf8'),
+      await readFile(join(directory, 'rea_toon/cli.py'), 'utf8'),
       '# original application',
     );
   } finally {
@@ -410,21 +459,19 @@ test('archives preserve the complete project without inventing GitHub update sou
     'project',
   );
   assert.equal(scan.sourceType, 'archive');
-  assert.equal(scan.project?.destination, '@local/whole-project/project');
+  assert.equal(scan.project?.destination, 'whole-project');
   const [installed] = await personal.install(scan.id, [main]);
-  assert.equal(installed.path, '@local/whole-project/project/skills/rea-toon');
+  assert.equal(installed.path, 'whole-project/skills/rea-toon');
+  assert.equal(installed.sourceType, 'archive');
   assert.equal(
-    await readFile(
-      join(personal.root, '@local/whole-project/project/pyproject.toml'),
-      'utf8',
-    ),
+    await readFile(join(personal.root, 'whole-project/pyproject.toml'), 'utf8'),
     f.files.get('pyproject.toml'),
   );
   assert.deepEqual(
-    await readSkillSources(join(personal.root, '@local/whole-project')),
+    await readSkillSources(join(personal.root, 'whole-project')),
     [],
   );
-  await assert.rejects(personal.updateGroup('@local/whole-project'), {
+  await assert.rejects(personal.updateGroup('whole-project'), {
     code: 'SKILL_SOURCE_UNKNOWN',
   });
   assert.deepEqual((await f.service.list()).skills, []);
@@ -488,7 +535,7 @@ test('project archives unwrap one packaging directory and retain actual project 
     for (const resource of resources)
       assert.ok((await readFile(join(root, resource))).length);
     assert.deepEqual(
-      (await readSkillProject(join(f.service.root, '@local', name)))?.entries,
+      (await readSkillProject(join(f.service.root, name)))?.entries,
       [{ path, name: installed.name }],
     );
   }
@@ -520,10 +567,16 @@ test('metadata fails closed on malformed entries, missing files and symlinks', a
     }).success,
     false,
   );
-  await writeFile(join(group, SKILL_PROJECT_FILE), '{broken');
+  await writeFile(
+    join(group, SKILL_META_DIRECTORY, SKILL_PROJECT_FILE),
+    '{broken',
+  );
   await assert.rejects(f.service.list(), { code: 'SKILL_PROJECT_INVALID' });
-  await writeFile(join(group, SKILL_PROJECT_FILE), JSON.stringify(metadata));
-  const entry = join(group, 'project', main);
+  await writeFile(
+    join(group, SKILL_META_DIRECTORY, SKILL_PROJECT_FILE),
+    JSON.stringify(metadata),
+  );
+  const entry = join(group, main);
   await rm(entry);
   await assert.rejects(readSkillProject(group), {
     code: 'SKILL_PROJECT_INVALID',
@@ -533,8 +586,8 @@ test('metadata fails closed on malformed entries, missing files and symlinks', a
   await assert.rejects(readSkillProject(group), {
     code: 'SKILL_PROJECT_INVALID',
   });
-  await rm(join(group, 'project/skills/rea-toon'), { recursive: true });
-  await symlink(f.workspace, join(group, 'project/skills/rea-toon'));
+  await rm(join(group, 'skills/rea-toon'), { recursive: true });
+  await symlink(f.workspace, join(group, 'skills/rea-toon'));
   await assert.rejects(readSkillProject(group), {
     code: 'SKILL_PROJECT_INVALID',
   });
@@ -554,6 +607,351 @@ test('group locks serialize installer mutations and release after failed imports
   await assert.rejects(f.service.install(scan.id, [main]), /copy failure/);
   assert.deepEqual(await readdir(owner), []);
   assert.equal(f.disposed(), 1);
+});
+
+test('legacy projects retain their version, physical paths and source metadata across updates and removal', async (t) => {
+  const f = await fixture(t);
+  const directory = await legacyProject(f);
+  assert.equal(await readSkillProject(directory), undefined);
+  assert.equal(
+    (await readSkillProject(directory, { legacy: true }))?.version,
+    1,
+  );
+  const installed = (await f.service.list()).skills;
+  assert.equal(installed[0].path, 'owner/repo/project/skills/rea-toon');
+  assert.equal(installed[0].projectRoot, 'owner/repo/project');
+  f.files.set('rea_toon/cli.py', '# new legacy application');
+  f.files.set(
+    '.skill-meta/config.txt',
+    'upstream metadata remains inside legacy project',
+  );
+  assert.deepEqual(await f.service.updateGroup('owner/repo'), installed);
+  assert.equal(
+    await readFile(join(directory, 'project/rea_toon/cli.py'), 'utf8'),
+    '# new legacy application',
+  );
+  assert.equal(
+    await readFile(join(directory, 'project/.skill-meta/config.txt'), 'utf8'),
+    f.files.get('.skill-meta/config.txt'),
+  );
+  assert.deepEqual((await readdir(directory)).sort(), [
+    SKILL_PROJECT_FILE,
+    SKILL_SOURCES_FILE,
+    'project',
+  ]);
+  await f.service.removeGroup(
+    'owner/repo',
+    installed.map((skill) => skill.path),
+  );
+  await assert.rejects(readdir(directory), { code: 'ENOENT' });
+});
+
+test('legacy archive projects prevent duplicate imports under the new single-directory destination', async (t) => {
+  const f = await fixture(t);
+  const data = Buffer.from(
+    zipSync(
+      Object.fromEntries(
+        [...f.files].map(([path, content]) => [path, Buffer.from(content)]),
+      ),
+    ),
+  );
+  const stale = await f.service.scanArchive(
+    'archive.zip',
+    data,
+    undefined,
+    'project',
+  );
+  await legacyProject(f, '@local/archive', false);
+  await assert.rejects(f.service.install(stale.id, [main]), {
+    code: 'SKILL_CONFLICT',
+  });
+  const scan = await f.service.scanArchive(
+    'archive.zip',
+    data,
+    undefined,
+    'project',
+  );
+  assert.equal(scan.project?.destination, '@local/archive/project');
+  assert.ok(scan.skills.every((skill) => skill.installed));
+  await assert.rejects(f.service.install(scan.id, [main]), {
+    code: 'SKILL_CONFLICT',
+  });
+  await assert.rejects(readdir(join(f.service.root, 'archive')), {
+    code: 'ENOENT',
+  });
+  const installed = (await f.service.list()).skills;
+  assert.equal(installed[0].sourceType, 'archive');
+  await f.service.removeGroup(
+    '@local/archive',
+    installed.map((skill) => skill.path),
+  );
+  const next = await f.service.scanArchive(
+    'archive.zip',
+    data,
+    undefined,
+    'project',
+  );
+  assert.equal(next.project?.destination, 'archive');
+  const legacyLock = join(f.service.root, '.@local.skill-install.lock');
+  await mkdir(legacyLock);
+  await assert.rejects(f.service.install(next.id, [main]), {
+    code: 'SKILL_CONFLICT',
+  });
+  await rm(legacyLock, { recursive: true });
+  const retry = await f.service.scanArchive(
+    'archive.zip',
+    data,
+    undefined,
+    'project',
+  );
+  await f.service.install(retry.id, [main]);
+  assert.equal(
+    (await f.service.list()).skills[0].path,
+    'archive/skills/rea-toon',
+  );
+});
+
+test('legacy archive scans preserve an existing ZIP wrapper in entry locations', async (t) => {
+  const f = await fixture(t);
+  const mainPath = `repo-main/${main}`;
+  const group = join(f.service.root, '@local/wrapped');
+  await mkdir(dirname(join(group, 'project', mainPath)), { recursive: true });
+  await writeFile(join(group, 'project', mainPath), manifest('rea-toon'));
+  await writeFile(
+    join(group, SKILL_PROJECT_FILE),
+    JSON.stringify({
+      version: 1,
+      root: 'project',
+      entries: [{ path: mainPath, name: 'rea-toon' }],
+    }),
+  );
+  const data = Buffer.from(
+    zipSync({
+      [mainPath]: Buffer.from(manifest('rea-toon')),
+      'repo-main/pyproject.toml': Buffer.from('config'),
+    }),
+  );
+  const scan = await f.service.scanArchive(
+    'wrapped.zip',
+    data,
+    undefined,
+    'project',
+  );
+  assert.equal(scan.skills[0].path, mainPath);
+  assert.equal(
+    scan.skills[0].destination,
+    '@local/wrapped/project/repo-main/skills/rea-toon',
+  );
+  assert.equal(scan.skills[0].installed, true);
+  await assert.rejects(f.service.install(scan.id, [mainPath]), {
+    code: 'SKILL_CONFLICT',
+  });
+});
+
+test('single-directory projects cannot become GitHub owners, including stale scans and shared parent locks', async (t) => {
+  const f = await fixture(t);
+  const ordinary = await f.service.scan(url);
+  const project = await f.service.scan(url, undefined, 'project');
+  const data = Buffer.from(
+    zipSync({
+      'SKILL.md': Buffer.from(manifest('archive-owner')),
+      'pyproject.toml': Buffer.from('shared'),
+    }),
+  );
+  const scan = await f.service.scanArchive(
+    'owner.zip',
+    data,
+    undefined,
+    'project',
+  );
+  const installed = await f.service.install(scan.id, ['SKILL.md']);
+  assert.equal(installed[0].path, 'owner');
+  await assert.rejects(f.service.install(ordinary.id, [main]), {
+    code: 'SKILL_CONFLICT',
+  });
+  await assert.rejects(f.service.install(project.id, [main]), {
+    code: 'SKILL_CONFLICT',
+  });
+  await assert.rejects(f.service.scan(url), { code: 'SKILL_CONFLICT' });
+  await assert.rejects(f.service.scan(url, undefined, 'project'), {
+    code: 'SKILL_CONFLICT',
+  });
+  await assert.rejects(readdir(join(f.service.root, 'owner/repo')), {
+    code: 'ENOENT',
+  });
+  assert.equal(
+    await readFile(join(f.service.root, 'owner/pyproject.toml'), 'utf8'),
+    'shared',
+  );
+  await f.service.removeGroup('owner', ['owner']);
+  const retry = await f.service.scan(url);
+  const parentLock = join(f.service.root, '.owner.skill-install.lock');
+  await mkdir(parentLock);
+  await assert.rejects(f.service.install(retry.id, [main]), {
+    code: 'SKILL_CONFLICT',
+  });
+  await assert.rejects(readdir(join(f.service.root, 'owner')), {
+    code: 'ENOENT',
+  });
+  await rm(parentLock, { recursive: true });
+  await f.service.install(retry.id, [main]);
+  const conflicting = await f.service.scanArchive(
+    'owner.zip',
+    data,
+    undefined,
+    'project',
+  );
+  await assert.rejects(f.service.install(conflicting.id, ['SKILL.md']), {
+    code: 'SKILL_CONFLICT',
+  });
+  assert.equal((await f.service.list()).skills[0].path, 'owner/repo/rea-toon');
+  assert.deepEqual(await readdir(f.service.root), ['owner']);
+});
+
+test('new projects reject reserved metadata source files, directories and case variants', async (t) => {
+  const f = await fixture(t);
+  for (const path of [
+    '.skill-meta',
+    '.skill-meta/config.json',
+    '.SKILL-META/private.json',
+  ]) {
+    f.files.set(path, 'upstream');
+    await assert.rejects(f.service.scan(url, undefined, 'project'), {
+      code: 'SKILL_CONFLICT',
+    });
+    f.files.delete(path);
+  }
+  for (const wrapper of ['.skill-meta', '.SKILL-META']) {
+    const data = Buffer.from(
+      zipSync({ [`${wrapper}/SKILL.md`]: Buffer.from(manifest('reserved')) }),
+    );
+    await assert.rejects(
+      f.service.scanArchive('reserved.zip', data, undefined, 'project'),
+      { code: 'SKILL_CONFLICT' },
+    );
+  }
+  for (const wrapper of ['', 'repo-main/']) {
+    for (const path of [
+      '.skill-meta/',
+      '.SKILL-META/',
+      '.skill-meta',
+      '.skill-meta/config.json',
+    ]) {
+      const data = Buffer.from(
+        zipSync({
+          [`${wrapper}SKILL.md`]: Buffer.from(manifest('reserved')),
+          [`${wrapper}${path}`]: Buffer.from(
+            path.endsWith('/') ? '' : 'reserved',
+          ),
+        }),
+      );
+      await assert.rejects(
+        f.service.scanArchive('reserved.zip', data, undefined, 'project'),
+        { code: 'SKILL_CONFLICT' },
+      );
+    }
+  }
+  const archive = Buffer.from(
+    zipSync({ 'SKILL.md': Buffer.from(manifest('reserved')) }),
+  );
+  for (const name of ['plugins', 'builtin']) {
+    await assert.rejects(
+      f.service.scanArchive(`${name}.zip`, archive, undefined, 'project'),
+      { code: 'SKILL_UNSAFE_PATH' },
+    );
+    await assert.rejects(readdir(join(f.service.root, name)), {
+      code: 'ENOENT',
+    });
+  }
+});
+
+test('project root file APIs hide and protect managed metadata while preserving upstream dot files', async (t) => {
+  const f = await fixture(t);
+  f.files.set('SKILL.md', manifest('root'));
+  const [global] = await f.install(['SKILL.md']);
+  const personal = f.service.forUser('admin');
+  const archive = Buffer.from(
+    zipSync(
+      Object.fromEntries(
+        [...f.files].map(([path, content]) => [path, Buffer.from(content)]),
+      ),
+    ),
+  );
+  const scan = await personal.scanArchive(
+    'root.zip',
+    archive,
+    undefined,
+    'project',
+  );
+  const [local] = await personal.install(scan.id, ['SKILL.md']);
+  const origin = 'http://localhost:5173';
+  const auth = {
+    api: { getSession: async () => ({ user: { id: 'admin', role: 'admin' } }) },
+  } as unknown as Auth;
+  const app = createApp(auth, undefined, undefined, {
+    service: f.service,
+    webOrigin: origin,
+  });
+  for (const [scope, installed] of [
+    ['admin/skills', global],
+    ['skills', local],
+  ] as const) {
+    const base = `/api/${scope}/files`;
+    const route = (suffix: string, path = '') =>
+      `${base}${suffix}?${new URLSearchParams({ skill: installed.path, path })}`;
+    const request = (url: string, options: RequestInit = {}) =>
+      app.request(url, {
+        ...options,
+        headers: { origin, 'content-type': 'application/json' },
+      });
+    const listing = await request(route(''));
+    assert.equal(listing.status, 200);
+    const entries = (await listing.json()).entries as { name: string }[];
+    assert.ok(!entries.some((entry) => entry.name === SKILL_META_DIRECTORY));
+    assert.ok(entries.some((entry) => entry.name === SKILL_PROJECT_FILE));
+    assert.equal(
+      (await request(route('/preview', SKILL_SOURCES_FILE))).status,
+      200,
+    );
+    for (const path of [
+      SKILL_META_DIRECTORY,
+      `${SKILL_META_DIRECTORY}/${SKILL_PROJECT_FILE}`,
+      `.SKILL-META/${SKILL_PROJECT_FILE}`,
+    ]) {
+      for (const suffix of ['', '/preview', '/raw'])
+        assert.equal(
+          (await request(route(suffix, path))).status,
+          403,
+          `${scope} ${suffix} ${path}`,
+        );
+      assert.equal(
+        (
+          await request(route('/content'), {
+            method: 'PUT',
+            body: JSON.stringify({ path, text: '{}', version: 'anything' }),
+          })
+        ).status,
+        403,
+      );
+      const rpc = scope === 'skills' ? 'personalSkills' : 'skills';
+      assert.equal(
+        (
+          await request(`/api/rpc/${rpc}/files/save`, {
+            method: 'POST',
+            body: JSON.stringify({
+              json: {
+                query: { skill: installed.path },
+                body: { path, text: '{}', version: 'anything' },
+              },
+            }),
+          })
+        ).status,
+        403,
+      );
+    }
+  }
+  assert.deepEqual((await f.service.list()).skills, [global]);
+  assert.deepEqual((await personal.list()).skills, [local]);
 });
 
 test('scan schemas and both upload APIs accept project mode and reject invalid mode fields', async (t) => {

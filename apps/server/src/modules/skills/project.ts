@@ -5,6 +5,7 @@ import { SkillError } from './errors.js';
 import { safeRepositoryPath } from './github.js';
 
 export const SKILL_PROJECT_FILE = '.skill-project.json';
+export const SKILL_META_DIRECTORY = '.skill-meta';
 export const skillProjectEntrySchema = z
   .object({
     path: z
@@ -33,24 +34,55 @@ export const skillProjectEntriesSchema = z
         ),
     );
   });
-export const skillProjectSchema = z
+const legacySkillProjectSchema = z
   .object({
     version: z.literal(1),
     root: z.literal('project'),
     entries: skillProjectEntriesSchema,
   })
   .strict();
+const currentSkillProjectSchema = z
+  .object({
+    version: z.literal(2),
+    root: z.literal('.'),
+    entries: skillProjectEntriesSchema.refine((entries) =>
+      entries.every(
+        (entry) =>
+          !entry.path.toLowerCase().startsWith(`${SKILL_META_DIRECTORY}/`),
+      ),
+    ),
+  })
+  .strict();
+export const skillProjectSchema = z.discriminatedUnion('version', [
+  legacySkillProjectSchema,
+  currentSkillProjectSchema,
+]);
 export type SkillProject = z.infer<typeof skillProjectSchema>;
 
-/** Read only application-owned group metadata; callers must restrict this to owner/repo groups. */
+/** Callers allow current metadata at depth 1/2, and legacy metadata only at depth 2. */
 export async function readSkillProject(
   directory: string,
+  options: { legacy?: boolean } = {},
 ): Promise<SkillProject | undefined> {
-  const marker = join(directory, SKILL_PROJECT_FILE);
+  const metadata = join(directory, SKILL_META_DIRECTORY);
+  const metadataInfo = await lstat(metadata).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined;
+      throw error;
+    },
+  );
+  if (!metadataInfo && !options.legacy) return undefined;
+  if (
+    metadataInfo &&
+    (!metadataInfo.isDirectory() || metadataInfo.isSymbolicLink())
+  )
+    throw new SkillError('SKILL_PROJECT_INVALID', 409);
+  const marker = join(metadataInfo ? metadata : directory, SKILL_PROJECT_FILE);
   const info = await lstat(marker).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return undefined;
     throw error;
   });
+  if (metadataInfo && !info) throw new SkillError('SKILL_PROJECT_INVALID', 409);
   if (!info) return undefined;
   try {
     if (!info.isFile() || info.isSymbolicLink())
@@ -58,12 +90,15 @@ export async function readSkillProject(
     const group = await lstat(directory);
     if (!group.isDirectory() || group.isSymbolicLink())
       throw new Error('Invalid group');
-    const project = skillProjectSchema.parse(
-      JSON.parse(await readFile(marker, 'utf8')),
-    );
+    const project = (
+      metadataInfo ? currentSkillProjectSchema : legacySkillProjectSchema
+    ).parse(JSON.parse(await readFile(marker, 'utf8')));
     for (const entry of project.entries) {
       let path = directory;
-      const parts = [project.root, ...entry.path.split('/')];
+      const parts = [
+        ...(project.root === '.' ? [] : [project.root]),
+        ...entry.path.split('/'),
+      ];
       for (const [index, part] of parts.entries()) {
         path = join(path, part);
         const info = await lstat(path);

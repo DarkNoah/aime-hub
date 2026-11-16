@@ -31,6 +31,8 @@ export type ChatSubagentSummary = {
 export type ChatToolGroup = {
   id: string;
   count: number;
+  /** Full-group counts of unique tool calls, independent of loaded detail pages. */
+  statusCounts: { success: number; failed: number; running: number };
   revision: string;
   state: 'running' | 'completed' | 'failed';
   /** Position of the final reasoning part in this group's flattened detail parts. */

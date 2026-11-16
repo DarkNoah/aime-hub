@@ -459,7 +459,8 @@ test('cancelling an active clone cleans it and does not start a proxy request', 
   );
   for (
     let attempt = 0;
-    attempt < 100 && !(await f.calls()).some((call) => call.remote);
+    // Allow slow process startup; the assertion below still requires an active clone.
+    attempt < 500 && !(await f.calls()).some((call) => call.remote);
     attempt++
   )
     await delay(10);

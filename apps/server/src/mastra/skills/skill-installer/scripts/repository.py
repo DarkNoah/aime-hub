@@ -83,8 +83,9 @@ def installed(root: Path) -> list[dict]:
     if not root.exists():
         return result
     def visit(folder: Path):
-        if len(folder.relative_to(root).parts) == 2:
-            project = read_project(folder)
+        depth = len(folder.relative_to(root).parts)
+        if depth in (1, 2):
+            project = read_project(folder, legacy=depth == 2)
             if project is not None:
                 for entry in project["entries"]:
                     target = folder / project["root"] / PurePosixPath(entry["path"]).parent

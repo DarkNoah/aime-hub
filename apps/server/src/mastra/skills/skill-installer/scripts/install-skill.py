@@ -12,14 +12,15 @@ import tempfile
 
 from repository import SkillError, directory, handle_termination, parse_source, repository, skill_home
 from archive import archive
-from project import PROJECT_FILE, install_project, installation_lock, project_snapshot, validate_entries
+from project import METADATA_DIR, check_ancestors, group_parts, install_project, installation_lock, locate_project, project_snapshot, read_project, validate_entries
 
 
 SOURCES_FILE = ".skill-sources.json"
 
 
 def read_sources(group: Path) -> list[dict]:
-    path = group / SOURCES_FILE
+    project = read_project(group)
+    path = group / METADATA_DIR / SOURCES_FILE if project is not None else group / SOURCES_FILE
     if path.is_symlink() or (path.exists() and not path.is_file()):
         raise SkillError("Invalid skill source record; existing contents were preserved.")
     if not path.exists():
@@ -66,16 +67,15 @@ def install(root: Path, snapshot, paths: list[str] | None, whole_project: bool =
     if whole_project:
         snapshot = project_snapshot(snapshot)
     selected = snapshot.select_project(paths) if whole_project else snapshot.select(paths)[0]
-    group = directory(root, [snapshot.source.owner, snapshot.source.repo])
-    for parent in (root, group.parent):
-        if (parent / "SKILL.md").exists() or (parent / "SKILL.md").is_symlink():
-            raise SkillError("A parent directory already contains a skill; nested installs would be hidden.")
+    parts = group_parts(snapshot, whole_project)
+    check_ancestors(root, parts)
+    group = locate_project(root, snapshot)[0] if whole_project else directory(root, parts)
     if whole_project and (group.exists() or group.is_symlink()):
         raise SkillError("The project group already exists. Remove or update the entire group first.")
-    with installation_lock(root, snapshot.source.owner, snapshot.source.repo):
+    with installation_lock(root, parts):
         if whole_project:
             return install_project(root, snapshot, selected)
-        if (group / PROJECT_FILE).exists() or (group / PROJECT_FILE).is_symlink():
+        if read_project(group, legacy=len(parts) == 2) is not None:
             raise SkillError("This group contains a whole project. Manage it as an entire project.")
         return install_skills(root, snapshot, paths)
 

@@ -1,6 +1,7 @@
 import { rpc, required } from '../../rpc/context.js';
 import type { SkillService } from './service.js';
-import { listFiles, previewFile } from '../files/service.js';
+import { previewFile } from '../files/service.js';
+import { assertSkillFilePath, listSkillFiles } from './files.js';
 import { saveWorkspaceFile } from '../files/save.js';
 
 export function skillRouter(service?: SkillService) {
@@ -20,18 +21,20 @@ function createSkillRouter(
   return p.router({
     files: {
       list: p.files.list.handler(({ context, input }) =>
-        skills(context.userId).withFiles(input.query.skill, (root) =>
-          listFiles(root, input.query.path),
+        skills(context.userId).withFiles(input.query.skill, (root, skill) =>
+          listSkillFiles(root, skill, input.query.path),
         ),
       ),
       preview: p.files.preview.handler(({ context, input }) =>
-        skills(context.userId).withFiles(input.query.skill, (root) =>
-          previewFile(root, input.query.path),
-        ),
+        skills(context.userId).withFiles(input.query.skill, (root, skill) => {
+          assertSkillFilePath(skill, input.query.path);
+          return previewFile(root, input.query.path);
+        }),
       ),
       save: p.files.save.handler(({ context, input }) => {
         const service = skills(context.userId);
-        return service.withFiles(input.query.skill, async (root) => {
+        return service.withFiles(input.query.skill, async (root, installed) => {
+          assertSkillFilePath(installed, input.body.path);
           const file = await saveWorkspaceFile(root, input.body);
           const skill = (await service.list()).skills.find(
             (skill) => skill.path === input.query.skill,

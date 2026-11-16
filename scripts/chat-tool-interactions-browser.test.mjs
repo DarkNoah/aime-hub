@@ -53,7 +53,7 @@ const askText={type:'text',text:'请确认回测口径。',state:'done'};
 const finalText={type:'text',text:'已按所选口径继续。',state:'done'};
 const reasoning={type:'reasoning',text:'核对回测参数。',state:'done'};
 const readPart={type:'tool-read_file',toolCallId:'read-parameters',state:'output-available',input:{path:'parameters.txt'},output:'period=day'};
-const askGroup={id:'ask-tools',count:1,revision:'ask-tools-v1',state:'completed'};
+const askGroup={id:'ask-tools',count:1,statusCounts:{success:1,failed:0,running:0},revision:'ask-tools-v1',state:'completed'};
 const previousGroup={...askGroup,id:'previous-tools',revision:'previous-tools-v1'};
 const groupPart=group=>({type:'data-tool-group',data:group});
 const askAssistant={id:'ask-assistant',role:'assistant',parts:[groupPart(askGroup),askText,askPart]};
