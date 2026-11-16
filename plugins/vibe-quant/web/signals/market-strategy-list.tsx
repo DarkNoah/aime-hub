@@ -13,12 +13,14 @@ const statuses = {
 
 export function MarketStrategyList({
   data,
+  filtered = false,
   loading,
   error,
   hiddenStrategyIds,
   onVisibleChange,
 }: {
   data?: MarketPositionsPage;
+  filtered?: boolean;
   loading: boolean;
   error: string;
   hiddenStrategyIds: ReadonlySet<string>;
@@ -134,9 +136,13 @@ export function MarketStrategyList({
         </ul>
       ) : !error ? (
         <div className="px-5 py-10 text-center">
-          <p className="text-sm font-medium">尚未添加策略</p>
+          <p className="text-sm font-medium">
+            {filtered ? '没有匹配的已加载策略' : '尚未添加策略'}
+          </p>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">
-            在图表上方的「策略」菜单添加后，这里会显示所有已加载策略及其运行状态。
+            {filtered
+              ? '可切换策略或选择「全部策略」查看。'
+              : '在图表上方的「策略」菜单添加后，这里会显示所有已加载策略及其运行状态。'}
           </p>
         </div>
       ) : null}

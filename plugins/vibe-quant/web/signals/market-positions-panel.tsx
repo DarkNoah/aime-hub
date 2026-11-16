@@ -1,5 +1,5 @@
 import { runVersionName } from '../../strategy-version';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Badge,
   Button,
@@ -29,6 +29,8 @@ import { dateTime, holdingDuration, number } from '../strategies/format';
 import { TradeExitBadge } from '../trade-exit-badge';
 import { useMarketPositions } from './use-market-positions';
 import { MarketStrategyList } from './market-strategy-list';
+import { MarketStrategyFilter } from './market-strategy-filter';
+import { MarketMonthlySummary } from './market-monthly-summary';
 import { positionValuation } from './position-valuation';
 
 const statuses = {
@@ -243,8 +245,13 @@ export function MarketPositionsPanel({
   onStrategyVisibleChange: (id: string, visible: boolean) => void;
 }) {
   const positions = useMarketPositions(pluginId, engine);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    viewportRef.current?.scrollTo({ top: 0 });
+  }, [positions.filterKey, positions.page]);
   const [tab, setTab] = useState('positions');
   const data = positions.data;
+  const filtered = positions.strategyIds.length > 0;
   const quoteBySymbol = new Map(quotes.map((quote) => [quote.symbol, quote]));
   const monitors = new Map(
     data?.monitors.map((monitor) => [monitor.id, monitor]),
@@ -275,7 +282,8 @@ export function MarketPositionsPanel({
         </Button>
       </div>
       <p className="px-4 pb-3 text-xs text-muted-foreground">
-        当前引擎 · 全部 {data?.monitors.length ?? '—'} 条策略 · 模拟持仓
+        当前引擎 · {filtered ? '筛选后' : '全部'} {data?.monitors.length ?? '—'}{' '}
+        条策略 · 模拟持仓
       </p>
       <Tabs
         value={activeTab}
@@ -300,6 +308,13 @@ export function MarketPositionsPanel({
             </TabsTrigger>
           )}
         </TabsList>
+        {activeTab !== 'market' && (
+          <MarketStrategyFilter
+            strategies={positions.strategies}
+            selectedIds={positions.strategyIds}
+            onChange={positions.setStrategyIds}
+          />
+        )}
         {activeTab !== 'market' && positions.error && (
           <div
             role="alert"
@@ -326,10 +341,15 @@ export function MarketPositionsPanel({
           className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
         >
           <ScrollArea
-            key={positions.page}
             className="h-[420px] xl:h-0 xl:min-h-0 xl:flex-1"
-            viewportProps={{ className: '[&>div]:block!' }}
+            viewportProps={{ ref: viewportRef, className: '[&>div]:block!' }}
           >
+            {(data || positions.loading) && (
+              <MarketMonthlySummary
+                monthly={data?.monthly}
+                loading={positions.loading}
+              />
+            )}
             {rows.length > 0 && (
               <ul aria-label="持仓记录列表" className="divide-y">
                 {rows.map((row) => {
@@ -361,12 +381,18 @@ export function MarketPositionsPanel({
               !positions.error && (
                 <div className="px-5 py-10 text-center">
                   <p className="text-sm font-medium">
-                    {!data?.monitors.length ? '尚未添加策略' : '暂无持仓记录'}
+                    {filtered
+                      ? '所选策略暂无持仓记录'
+                      : !data?.monitors.length
+                        ? '尚未添加策略'
+                        : '暂无持仓记录'}
                   </p>
                   <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                    {!data?.monitors.length
-                      ? '在图表上方的「策略」菜单添加策略后，这里会汇总各标的的持仓。'
-                      : '策略产生入场后会自动显示，离场后保留在同一列表中。'}
+                    {filtered
+                      ? '可切换策略或选择「全部策略」查看其他持仓。'
+                      : !data?.monitors.length
+                        ? '在图表上方的「策略」菜单添加策略后，这里会汇总各标的的持仓。'
+                        : '策略产生入场后会自动显示，离场后保留在同一列表中。'}
                   </p>
                 </div>
               )
@@ -420,6 +446,7 @@ export function MarketPositionsPanel({
           </p>
           <MarketStrategyList
             data={data}
+            filtered={filtered}
             loading={positions.loading}
             error={positions.error}
             hiddenStrategyIds={hiddenStrategyIds}

@@ -83,9 +83,49 @@ const trade = (index, open = false) => ({
   observed_until: start + 600,
   exit_reason: 'take_profit',
 });
+const closedPositions = Array.from({ length: 53 }, (_, index) => ({
+  monitor_id: `m${index % 2}`,
+  trade: {
+    ...trade(index),
+    exit_time:
+      index < 51 ? start + 120 : Date.parse('2026-09-30T15:00:00+08:00') / 1000,
+    net_pnl: [120, -45, 0][index % 3],
+  },
+}));
+function monthlySummary(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const month = new Date((row.trade.exit_time + 8 * 60 * 60) * 1000)
+      .toISOString()
+      .slice(0, 7);
+    const unit = row.monitor_id === 'm1' ? 'points' : 'currency';
+    const key = `${month}:${unit}`;
+    const summary = groups.get(key) ?? {
+      month,
+      unit,
+      net_pnl: 0,
+      gross_profit: 0,
+      gross_loss: 0,
+      winning_trades: 0,
+      losing_trades: 0,
+      breakeven_trades: 0,
+    };
+    const pnl = row.trade.net_pnl;
+    summary.net_pnl += pnl;
+    if (pnl > 0) {
+      summary.gross_profit += pnl;
+      summary.winning_trades++;
+    } else if (pnl < 0) {
+      summary.gross_loss += pnl;
+      summary.losing_trades++;
+    } else summary.breakeven_trades++;
+    groups.set(key, summary);
+  }
+  return [...groups.values()];
+}
 
 test(
-  'market positions: all symbols, pagination, polling, failures, book and responsive layout',
+  'market positions: strategy filters, monthly totals, pagination, polling and responsive layout',
   { timeout: 120000 },
   async (t) => {
     const fixture = await mkdtemp(
@@ -150,7 +190,8 @@ createRoot(document.getElementById('root')!).render(<main className="p-4 sm:ml-5
       count = 6,
       queries = [],
       barQueries = [],
-      lastPrice = 7010.2;
+      lastPrice = 7010.2,
+      positionsGate = null;
     await page.route('**/api/plugins/vibe-quant/**', async (route) => {
       const url = new URL(route.request().url());
       if (url.pathname.endsWith('/monitors/positions')) {
@@ -160,22 +201,35 @@ createRoot(document.getElementById('root')!).render(<main className="p-4 sm:ml-5
             status: 503,
             json: { code: 'STRATEGY_SERVICE_UNAVAILABLE' },
           });
+        const selected = url.searchParams.getAll('strategy');
+        const scopedMonitors = empty
+          ? []
+          : monitors.filter(
+              (monitor) =>
+                !selected.length || selected.includes(monitor.strategy_id),
+            );
+        const monitorIds = new Set(scopedMonitors.map((monitor) => monitor.id));
+        const scopedHistory = closedPositions.filter((row) =>
+          monitorIds.has(row.monitor_id),
+        );
+        const offset = url.searchParams.has('before') ? 50 : 0;
+        if (positionsGate) await positionsGate;
         return route.fulfill({
           json: {
-            monitors: empty ? [] : monitors,
-            open: empty
+            strategies: empty
               ? []
-              : Array.from({ length: count }, (_, index) => ({
-                  monitor_id: `m${index % 2}`,
-                  trade: trade(index, true),
+              : monitors.map((monitor) => ({
+                  id: monitor.strategy_id,
+                  name: monitor.strategy_name,
                 })),
-            history: empty
-              ? []
-              : Array.from({ length: url.search ? 1 : 50 }, (_, index) => ({
-                  monitor_id: `m${index % 2}`,
-                  trade: trade(index + (url.search ? 50 : 0)),
-                })),
-            next: url.search || empty ? null : 'older-cursor',
+            monitors: scopedMonitors,
+            open: Array.from({ length: count }, (_, index) => ({
+              monitor_id: `m${index % 2}`,
+              trade: trade(index, true),
+            })).filter((row) => monitorIds.has(row.monitor_id)),
+            history: scopedHistory.slice(offset, offset + 50),
+            next: scopedHistory.length > offset + 50 ? 'older-cursor' : null,
+            monthly: monthlySummary(scopedHistory),
           },
         });
       }
@@ -221,6 +275,28 @@ createRoot(document.getElementById('root')!).render(<main className="p-4 sm:ml-5
     const list = sidebar.getByRole('list', { name: '持仓记录列表' });
     const current = list.getByRole('listitem').filter({ hasText: '持仓中' });
     const history = list.getByRole('listitem').filter({ hasText: '已平仓' });
+    const strategies = sidebar.getByRole('list', { name: '已加载策略列表' });
+    const filter = sidebar.getByRole('button', { name: '按策略筛选' });
+    const monthly = sidebar.getByRole('region', { name: '月度盈亏汇总' });
+    const monthPicker = monthly.getByRole('combobox', { name: '统计月份' });
+    const scopeResponse = (ids) =>
+      page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname.endsWith('/monitors/positions') &&
+          !url.searchParams.has('before') &&
+          url.searchParams.getAll('strategy').sort().join(',') ===
+            [...ids].sort().join(',')
+        );
+      });
+    const clearStrategyFilter = async () => {
+      await filter.click();
+      await Promise.all([
+        scopeResponse([]),
+        page.getByRole('menuitem', { name: '全部策略', exact: true }).click(),
+      ]);
+      await current.nth(5).waitFor();
+    };
     await current.nth(5).waitFor();
     await current
       .first()
@@ -279,6 +355,37 @@ createRoot(document.getElementById('root')!).render(<main className="p-4 sm:ml-5
       3,
     );
     await history.nth(49).waitFor();
+    await monthly.waitFor();
+    assert.match(await monthPicker.innerText(), /2026.*10/);
+    const octoberSummary = await monthly.innerText();
+    const resultText = (label) =>
+      monthly.getByText(label, { exact: true }).locator('../..').innerText();
+    const currencySummary = await resultText('金额模拟');
+    assert.match(currencySummary, /已平仓 26 笔/);
+    assert.match(currencySummary, /净盈亏\s+\+720\s*元/);
+    assert.match(currencySummary, /盈利合计\s+\+1,080 元/);
+    assert.match(currencySummary, /亏损合计\s+-360 元/);
+    assert.match(currencySummary, /盈利\s+9 笔/);
+    assert.match(currencySummary, /亏损\s+8 笔/);
+    assert.match(currencySummary, /持平\s+9 笔/);
+    const pointsSummary = await resultText('点数模拟');
+    assert.match(pointsSummary, /已平仓 25 笔/);
+    assert.match(pointsSummary, /净盈亏\s+\+555\s*点/);
+    assert.match(pointsSummary, /盈利合计\s+\+960 点/);
+    assert.match(pointsSummary, /亏损合计\s+-405 点/);
+    assert.match(pointsSummary, /盈利\s+8 笔/);
+    assert.match(pointsSummary, /亏损\s+9 笔/);
+    assert.match(pointsSummary, /持平\s+8 笔/);
+    await monthPicker.click();
+    await page.getByRole('option', { name: /2026.*09|2026.*9月/ }).click();
+    const septemberSummary = await monthly.innerText();
+    assert.match(await resultText('金额模拟'), /净盈亏\s+-45\s*元/);
+    assert.match(await resultText('金额模拟'), /亏损\s+1 笔/);
+    assert.match(await resultText('点数模拟'), /净盈亏\s+\+120\s*点/);
+    assert.match(await resultText('点数模拟'), /盈利\s+1 笔/);
+    await monthPicker.click();
+    await page.getByRole('option', { name: /2026.*10/ }).click();
+    assert.equal(await monthly.innerText(), octoberSummary);
     assert.equal(await list.getByRole('listitem').count(), 56);
     assert.match(await list.getByRole('listitem').nth(5).innerText(), /持仓中/);
     assert.match(await list.getByRole('listitem').nth(6).innerText(), /已平仓/);
@@ -307,14 +414,24 @@ createRoot(document.getElementById('root')!).render(<main className="p-4 sm:ml-5
       320,
       'refresh preserves scroll',
     );
+    await monthPicker.click();
+    await page.getByRole('option', { name: /2026.*09|2026.*9月/ }).click();
     await sidebar.getByRole('button', { name: '更早持仓' }).click();
     await sidebar.getByText('历史第 2 页').waitFor();
     await page.waitForFunction(
       () =>
         [
           ...document.querySelectorAll('[aria-label="持仓记录列表"] > li'),
-        ].filter((row) => row.textContent.includes('已平仓')).length === 1,
+        ].filter((row) => row.textContent.includes('已平仓')).length === 3,
     );
+    assert.equal(
+      await monthly.innerText(),
+      septemberSummary,
+      'history pagination preserves the selected month and its totals',
+    );
+    await monthPicker.click();
+    await page.getByRole('option', { name: /2026.*10/ }).click();
+    await current.nth(5).waitFor();
     assert.equal(
       await current.count(),
       6,
@@ -329,9 +446,113 @@ createRoot(document.getElementById('root')!).render(<main className="p-4 sm:ml-5
     );
     assert.equal(await sidebar.getByText('历史第 2 页').count(), 1);
     assert(queries.at(-1).includes('before=older-cursor'));
-    await sidebar
-      .getByRole('button', { name: '最新历史', exact: true })
+    assert.equal(
+      await monthly.innerText(),
+      octoberSummary,
+      'monthly totals cover all 51 October trades and do not change with pagination',
+    );
+
+    let releasePositions;
+    positionsGate = new Promise((resolve) => {
+      releasePositions = resolve;
+    });
+    await filter.click();
+    await page
+      .getByRole('menuitemcheckbox', { name: '突破策略', exact: true })
       .click();
+    assert.equal(
+      await page.getByRole('menuitemcheckbox').count(),
+      3,
+      'all strategy options remain available while selecting',
+    );
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(
+      () =>
+        document.querySelectorAll('[aria-label="持仓记录列表"] > li').length ===
+        0,
+    );
+    assert.equal(
+      await sidebar.getByText('趋势跟随策略', { exact: true }).count(),
+      0,
+      'changing the filter immediately hides records from the previous scope',
+    );
+    const singleResponse = scopeResponse(['s0']);
+    positionsGate = null;
+    releasePositions();
+    await singleResponse;
+    await history.nth(26).waitFor();
+    assert.equal(await current.count(), 3);
+    assert.equal(await history.count(), 27);
+    assert.equal(
+      await list.getByText('趋势跟随策略', { exact: true }).count(),
+      0,
+    );
+    await sidebar.getByText('历史第 1 页').waitFor();
+    assert.match(await monthly.innerText(), /720/);
+    assert.doesNotMatch(await monthly.innerText(), /555/);
+    await sidebar.getByRole('tab', { name: /已加载策略/ }).click();
+    assert.equal(await strategies.getByRole('listitem').count(), 1);
+    await strategies.getByText('突破策略', { exact: true }).waitFor();
+
+    await filter.click();
+    assert.equal(await page.getByRole('menuitemcheckbox').count(), 3);
+    await Promise.all([
+      scopeResponse(['s0', 's1']),
+      page
+        .getByRole('menuitemcheckbox', { name: '趋势跟随策略', exact: true })
+        .click(),
+    ]);
+    assert.equal(
+      await page
+        .getByRole('menuitemcheckbox', { name: '突破策略', exact: true })
+        .getAttribute('aria-checked'),
+      'true',
+    );
+    assert.equal(
+      await page
+        .getByRole('menuitemcheckbox', { name: '趋势跟随策略', exact: true })
+        .getAttribute('aria-checked'),
+      'true',
+    );
+    await page.keyboard.press('Escape');
+    await strategies.getByRole('listitem').nth(1).waitFor();
+    assert.equal(await strategies.getByRole('listitem').count(), 2);
+    await sidebar.getByRole('tab', { name: '持仓记录', exact: true }).click();
+    await current.nth(5).waitFor();
+    assert.equal(await monthly.innerText(), octoberSummary);
+
+    await filter.click();
+    await Promise.all([
+      scopeResponse(['s1']),
+      page
+        .getByRole('menuitemcheckbox', { name: '突破策略', exact: true })
+        .click(),
+    ]);
+    await page.keyboard.press('Escape');
+    await history.nth(25).waitFor();
+    assert.equal(await current.count(), 3);
+    assert.equal(await list.getByText('突破策略', { exact: true }).count(), 0);
+    assert.match(await monthly.innerText(), /555/);
+    assert.doesNotMatch(await monthly.innerText(), /720/);
+    await clearStrategyFilter();
+    assert.equal(await monthly.innerText(), octoberSummary);
+
+    await filter.click();
+    await Promise.all([
+      scopeResponse(['s2']),
+      page
+        .getByRole('menuitemcheckbox', { name: '均值回归策略', exact: true })
+        .click(),
+    ]);
+    assert.equal(await page.getByRole('menuitemcheckbox').count(), 3);
+    await page.keyboard.press('Escape');
+    await sidebar.getByText('所选策略暂无持仓记录', { exact: true }).waitFor();
+    assert.equal(await list.getByRole('listitem').count(), 0);
+    await sidebar.getByRole('tab', { name: /已加载策略/ }).click();
+    assert.equal(await strategies.getByRole('listitem').count(), 1);
+    await strategies.getByText('均值回归策略', { exact: true }).waitFor();
+    await sidebar.getByRole('tab', { name: '持仓记录', exact: true }).click();
+    await clearStrategyFilter();
     await history.nth(49).waitFor();
     await page.screenshot({
       path: path.join(artifacts, 'history-desktop.png'),
@@ -344,7 +565,6 @@ createRoot(document.getElementById('root')!).render(<main className="p-4 sm:ml-5
       'changing the chart retains other symbols',
     );
     await sidebar.getByRole('tab', { name: /已加载策略/ }).click();
-    const strategies = sidebar.getByRole('list', { name: '已加载策略列表' });
     assert.equal(await strategies.getByRole('listitem').count(), 3);
     await strategies.getByText('已暂停', { exact: true }).waitFor();
     await strategies.getByText('异常', { exact: true }).waitFor();
@@ -431,8 +651,51 @@ createRoot(document.getElementById('root')!).render(<main className="p-4 sm:ml-5
       });
       await sidebar.getByRole('tab', { name: '持仓记录', exact: true }).click();
     }
+    failed = true;
+    await filter.click();
+    await Promise.all([
+      scopeResponse(['s2']),
+      page
+        .getByRole('menuitemcheckbox', { name: '均值回归策略', exact: true })
+        .click(),
+    ]);
+    await page.keyboard.press('Escape');
+    await sidebar.getByRole('alert').filter({ visible: true }).waitFor();
+    assert.equal(
+      await monthly.count(),
+      0,
+      'a failed new scope does not present missing monthly data as an empty month',
+    );
+    assert.equal(
+      await list.getByRole('listitem').count(),
+      0,
+      'a failed new scope never retains the previous strategy records',
+    );
+    failed = false;
+    await Promise.all([
+      scopeResponse(['s2']),
+      sidebar.getByRole('button', { name: '重试持仓加载' }).click(),
+    ]);
+    await sidebar.getByText('所选策略暂无持仓记录', { exact: true }).waitFor();
     empty = true;
-    await sidebar.getByRole('button', { name: '刷新策略持仓' }).click();
+    await Promise.all([
+      scopeResponse(['s2']),
+      sidebar.getByRole('button', { name: '刷新策略持仓' }).click(),
+    ]);
+    assert.equal(
+      await filter.isEnabled(),
+      true,
+      'a selected strategy can still be cleared after all strategy options disappear',
+    );
+    await filter.click();
+    await page
+      .getByRole('menuitemcheckbox')
+      .first()
+      .waitFor({ state: 'hidden' });
+    await Promise.all([
+      scopeResponse([]),
+      page.getByRole('menuitem', { name: '全部策略', exact: true }).click(),
+    ]);
     await sidebar
       .getByText('尚未添加策略', { exact: true })
       .filter({ visible: true })

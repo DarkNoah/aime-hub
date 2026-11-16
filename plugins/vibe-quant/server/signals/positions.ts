@@ -1,5 +1,12 @@
 import type { ClickHouseClient } from '../clickhouse-client.js';
-import type { MarketPosition } from '../../market-positions.js';
+import type {
+  MarketPosition,
+  MarketPositionMonth,
+} from '../../market-positions.js';
+import {
+  monitorExecutionModel,
+  type SignalMonitor,
+} from '../../signal-types.js';
 import type { OpenTrade, Trade } from '../../strategy-types.js';
 import { StrategyError } from '../strategies/schema.js';
 
@@ -106,4 +113,75 @@ function withoutRiskLevels<T extends OpenTrade | Trade>(trade: T): T {
   const copy = { ...trade };
   delete copy.risk_levels;
   return copy;
+}
+
+/** Aggregate the entire authorized history, independently of its page cursor. */
+export async function readMarketPositionMonths(
+  store: ClickHouseClient,
+  monitors: Pick<SignalMonitor, 'id' | 'config'>[],
+): Promise<MarketPositionMonth[]> {
+  if (!monitors.length) return [];
+  const rows = await store.rows<
+    Omit<MarketPositionMonth, 'unit'> & { monitorId: string }
+  >(
+    `SELECT monitorId,
+      formatDateTime(toDateTime64(exit_time, 3, 'Asia/Shanghai'), '%Y-%m') AS month,
+      sum(pnl) AS net_pnl,
+      sumIf(pnl, pnl > 0) AS gross_profit,
+      sumIf(pnl, pnl < 0) AS gross_loss,
+      countIf(pnl > 0) AS winning_trades,
+      countIf(pnl < 0) AS losing_trades,
+      countIf(pnl = 0) AS breakeven_trades
+    FROM (
+      SELECT monitorId,
+        JSONExtract(payload, 'exit_time', 'Nullable(Float64)') AS exit_time,
+        JSONExtract(payload, 'net_pnl', 'Nullable(Float64)') AS pnl
+      FROM ${store.table('quant_signal_history')} FINAL
+      WHERE monitorId IN (SELECT arrayJoin(JSONExtract({monitors:String}, 'Array(String)')))
+        AND kind='trade'
+    )
+    WHERE isNotNull(exit_time) AND isFinite(exit_time) AND exit_time >= 0
+      AND isNotNull(pnl) AND isFinite(pnl)
+    GROUP BY monitorId, month
+    ORDER BY month DESC, monitorId`,
+    { monitors: JSON.stringify(monitors.map((monitor) => monitor.id)) },
+  );
+  const units = new Map(
+    monitors.map(
+      (monitor) =>
+        [
+          monitor.id,
+          monitorExecutionModel(monitor.config) === 'points'
+            ? 'points'
+            : 'currency',
+        ] as const,
+    ),
+  );
+  const monthly = new Map<string, MarketPositionMonth>();
+  for (const row of rows) {
+    const unit = units.get(row.monitorId);
+    if (!unit) continue;
+    const key = `${row.month}:${unit}`;
+    const total = monthly.get(key) ?? {
+      month: row.month,
+      unit,
+      net_pnl: 0,
+      gross_profit: 0,
+      gross_loss: 0,
+      winning_trades: 0,
+      losing_trades: 0,
+      breakeven_trades: 0,
+    };
+    total.net_pnl += Number(row.net_pnl);
+    total.gross_profit += Number(row.gross_profit);
+    total.gross_loss += Number(row.gross_loss);
+    // ClickHouse JSON represents UInt64 count results as strings by default.
+    total.winning_trades += Number(row.winning_trades);
+    total.losing_trades += Number(row.losing_trades);
+    total.breakeven_trades += Number(row.breakeven_trades);
+    monthly.set(key, total);
+  }
+  return [...monthly.values()].sort(
+    (a, b) => b.month.localeCompare(a.month) || a.unit.localeCompare(b.unit),
+  );
 }

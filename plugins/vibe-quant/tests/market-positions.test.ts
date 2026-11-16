@@ -6,7 +6,10 @@ import type { MarketPositionsPage } from '../market-positions.js';
 import type { OpenTrade, Trade } from '../strategy-types.js';
 import { ClickHouseClient } from '../server/clickhouse-client.js';
 import type { QuantConfig } from '../server/config.js';
-import { readMarketPositions } from '../server/signals/positions.js';
+import {
+  readMarketPositionMonths,
+  readMarketPositions,
+} from '../server/signals/positions.js';
 import { signalRoutes } from '../server/signals/routes.js';
 import type { MonitorStore, StoredMonitor } from '../server/signals/store.js';
 import type { StrategyStore } from '../server/strategies/store.js';
@@ -61,6 +64,7 @@ test('market positions scopes all source symbols to owner/display engine and kee
   ): Promise<T[]> => {
     queries.push(query);
     assert.deepEqual(JSON.parse(params!.monitors), ['m1', 'm2']);
+    if (query.includes('GROUP BY monitorId, month')) return [];
     return (
       query.includes("kind='summary'")
         ? [
@@ -136,12 +140,246 @@ test('market positions scopes all source symbols to owner/display engine and kee
   assert.equal(data.monitors[1].replaying, true);
   assert.equal(data.open[0].monitor_id, 'm2');
   assert.equal(data.history[0].monitor_id, 'm1');
+  assert.deepEqual(data.strategies, [{ id: 's1', name: '共同策略' }]);
+  assert.deepEqual(data.monthly, []);
   assert.equal(reads, 1, 'shared strategy name is read once');
   assert.equal(
     queries.length,
-    2,
+    3,
     'history is read in batches, not once per monitor',
   );
+});
+
+test('strategy multi-select scopes positions and monthly totals before pagination while retaining all filter choices', async () => {
+  const available = [
+    monitor,
+    { ...monitor, id: 'm2' },
+    { ...monitor, id: 'm3', strategy_id: 's2' },
+    { ...monitor, id: 'm4', strategy_id: 's3' },
+    { ...monitor, id: 'deleted', strategy_id: 'deleted', deleted: true },
+    {
+      ...monitor,
+      id: 'other-engine',
+      strategy_id: 'other-engine',
+      engine: 'tdx',
+    },
+  ] as StoredMonitor[];
+  const queried: string[][] = [];
+  const history = new ClickHouseClient({
+    clickhouseDatabase: 'fixture',
+  } as QuantConfig);
+  history.rows = async <T>(
+    query: string,
+    params?: Record<string, string>,
+  ): Promise<T[]> => {
+    const ids: string[] = JSON.parse(params!.monitors);
+    queried.push(ids);
+    if (query.includes('GROUP BY monitorId, month')) {
+      assert.equal(
+        params!.time,
+        undefined,
+        'monthly totals have no page cursor',
+      );
+      assert.doesNotMatch(query, /LIMIT|\(time,monitorId,id\)</);
+      return ids.map((id) => ({
+        monitorId: id,
+        month: '2026-10',
+        net_pnl: 100,
+        gross_profit: 120,
+        gross_loss: -20,
+        winning_trades: '2',
+        losing_trades: '1',
+        breakeven_trades: '1',
+      })) as T[];
+    }
+    if (query.includes("kind='summary'"))
+      return ids.map((id) => ({
+        monitorId: id,
+        opened: JSON.stringify([opened]),
+        through: 250,
+        replaying: false,
+      })) as T[];
+    assert.match(query, /LIMIT 51/);
+    return Array.from({ length: 51 }, (_, index) => ({
+      monitorId: ids[index % ids.length],
+      id: String(index),
+      time: 200 - index,
+      payload: JSON.stringify({ ...trade, id: String(index) }),
+    })) as T[];
+  };
+  const app = new Hono<PluginHttpEnv>();
+  app.use('*', async (c, next) => {
+    c.set('userId', 'alice');
+    await next();
+  });
+  app.route(
+    '/strategies',
+    signalRoutes(() => ({
+      config: { engine: 'tqsdk' } as QuantConfig,
+      state: {} as StateStore,
+      records: {
+        storedStrategy: async (id: string) => {
+          assert.ok(['s1', 's2', 's3'].includes(id));
+          return { name: `策略 ${id}` };
+        },
+      } as unknown as StrategyStore,
+      monitors: {
+        list: async (owner: string) => {
+          assert.equal(owner, 'alice');
+          return available;
+        },
+        view: async (row: StoredMonitor) => ({ ...row, status: 'running' }),
+        history,
+      } as unknown as MonitorStore,
+      wake: () => {},
+    })),
+  );
+  const path =
+    '/strategies/monitors/positions?strategy=s1&strategy=s2&strategy=s1';
+  const response = await app.request(path);
+  assert.equal(response.status, 200);
+  const first = (await response.json()) as MarketPositionsPage;
+  assert.deepEqual(
+    first.monitors.map((row) => row.id),
+    ['m1', 'm2', 'm3'],
+  );
+  assert.deepEqual(
+    first.open.map((row) => row.monitor_id),
+    ['m3', 'm2', 'm1'],
+  );
+  assert.equal(first.history.length, 50);
+  assert.ok(first.next);
+  assert.ok(first.history.every((row) => row.monitor_id !== 'm4'));
+  assert.deepEqual(
+    first.strategies.map((row) => row.id),
+    ['s1', 's2', 's3'],
+  );
+  assert.deepEqual(first.monthly, [
+    {
+      month: '2026-10',
+      unit: 'currency',
+      net_pnl: 300,
+      gross_profit: 360,
+      gross_loss: -60,
+      winning_trades: 6,
+      losing_trades: 3,
+      breakeven_trades: 3,
+    },
+  ]);
+  const second = await app.request(`${path}&before=${first.next}`);
+  assert.equal(second.status, 200);
+  assert.deepEqual(
+    ((await second.json()) as MarketPositionsPage).monthly,
+    first.monthly,
+  );
+  assert.equal(queried.length, 6);
+  assert.ok(queried.every((ids) => JSON.stringify(ids) === '["m1","m2","m3"]'));
+
+  const unknown = await app.request(
+    '/strategies/monitors/positions?strategy=foreign&strategy=deleted&strategy=other-engine',
+  );
+  assert.equal(unknown.status, 200);
+  const empty = (await unknown.json()) as MarketPositionsPage;
+  assert.deepEqual(empty, {
+    strategies: first.strategies,
+    monitors: [],
+    open: [],
+    history: [],
+    monthly: [],
+    next: null,
+  });
+  assert.equal(
+    queried.length,
+    6,
+    'unknown selections never expand scope or query history',
+  );
+});
+
+test('monthly totals merge compatible monitors, retain separate units and normalize ClickHouse counts', async () => {
+  const store = new ClickHouseClient({
+    clickhouseDatabase: 'fixture',
+  } as QuantConfig);
+  const base = {
+    month: '2026-10',
+    net_pnl: 90,
+    gross_profit: 120,
+    gross_loss: -30,
+    winning_trades: '2',
+    losing_trades: '1',
+    breakeven_trades: '1',
+  };
+  store.rows = async <T>(
+    query: string,
+    params?: Record<string, string>,
+  ): Promise<T[]> => {
+    assert.deepEqual(JSON.parse(params!.monitors), ['m1', 'm2', 'm3']);
+    assert.match(query, /quant_signal_history`? FINAL/);
+    assert.match(
+      query,
+      /JSONExtract\(payload, 'exit_time', 'Nullable\(Float64\)'\)/,
+    );
+    assert.match(
+      query,
+      /JSONExtract\(payload, 'net_pnl', 'Nullable\(Float64\)'\)/,
+    );
+    assert.match(
+      query,
+      /toDateTime64\(exit_time, 3, 'Asia\/Shanghai'\), '%Y-%m'/,
+    );
+    assert.match(query, /isNotNull\(pnl\) AND isFinite\(pnl\)/);
+    assert.doesNotMatch(query, /LIMIT/);
+    return [
+      { ...base, monitorId: 'm1' },
+      { ...base, monitorId: 'm2' },
+      { ...base, monitorId: 'm3' },
+      { ...base, monitorId: 'm1', month: '2026-09' },
+    ] as T[];
+  };
+  const totals = await readMarketPositionMonths(store, [
+    monitor,
+    { ...monitor, id: 'm2' },
+    {
+      ...monitor,
+      id: 'm3',
+      config: { ...monitor.config, symbol: 'SSE.000852' },
+    },
+  ]);
+  assert.deepEqual(totals, [
+    {
+      month: '2026-10',
+      unit: 'currency',
+      net_pnl: 180,
+      gross_profit: 240,
+      gross_loss: -60,
+      winning_trades: 4,
+      losing_trades: 2,
+      breakeven_trades: 2,
+    },
+    {
+      month: '2026-10',
+      unit: 'points',
+      net_pnl: 90,
+      gross_profit: 120,
+      gross_loss: -30,
+      winning_trades: 2,
+      losing_trades: 1,
+      breakeven_trades: 1,
+    },
+    {
+      month: '2026-09',
+      unit: 'currency',
+      net_pnl: 90,
+      gross_profit: 120,
+      gross_loss: -30,
+      winning_trades: 2,
+      losing_trades: 1,
+      breakeven_trades: 1,
+    },
+  ]);
+  store.rows = async () => {
+    throw new Error('unexpected database read');
+  };
+  assert.deepEqual(await readMarketPositionMonths(store, []), []);
 });
 
 test('market positions has unbounded current holdings and a composite cursor for ties across strategies', async () => {

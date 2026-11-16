@@ -4,22 +4,38 @@ import type { MarketPositionsPage } from '../../market-positions';
 import { errorText } from '../strategies/format';
 
 export function useMarketPositions(pluginId: string, engine?: string) {
-  const [cursors, setCursors] = useState<string[]>([]);
+  const [{ strategyIds, cursors }, setQuery] = useState<{
+    strategyIds: string[];
+    cursors: string[];
+  }>({ strategyIds: [], cursors: [] });
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<{
+    context: string;
+    scope: string;
     path: string;
     data: MarketPositionsPage;
   }>();
-  const [error, setError] = useState('');
+  const [failure, setFailure] = useState<{
+    scope: string;
+    path: string;
+    message: string;
+  }>();
   const [loading, setLoading] = useState(true);
   const before = cursors.at(-1);
-  const path = `/strategies/monitors/positions${before ? `?before=${encodeURIComponent(before)}` : ''}`;
+  const params = new URLSearchParams();
+  for (const id of strategyIds) params.append('strategy', id);
+  if (before) params.set('before', before);
+  const path = `/strategies/monitors/positions${params.size ? `?${params}` : ''}`;
+  const context = JSON.stringify([pluginId, engine]);
+  const scope = JSON.stringify([context, strategyIds]);
+  const error =
+    failure?.scope === scope && failure.path === path ? failure.message : '';
   useEffect(() => {
     if (!engine) return;
     const abort = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     setLoading(true);
-    setError('');
+    setFailure(undefined);
     async function poll() {
       try {
         const data = await pluginRequest<MarketPositionsPage>(pluginId, path, {
@@ -27,14 +43,16 @@ export function useMarketPositions(pluginId: string, engine?: string) {
         });
         if (abort.signal.aborted) return;
         setState((old) =>
-          old?.path === path &&
+          old?.scope === scope &&
+          old.path === path &&
           JSON.stringify(old.data) === JSON.stringify(data)
             ? old
-            : { path, data },
+            : { context, scope, path, data },
         );
-        setError('');
+        setFailure(undefined);
       } catch (error) {
-        if (!abort.signal.aborted) setError(errorText(error));
+        if (!abort.signal.aborted)
+          setFailure({ scope, path, message: errorText(error) });
       } finally {
         if (!abort.signal.aborted) {
           setLoading(false);
@@ -47,21 +65,28 @@ export function useMarketPositions(pluginId: string, engine?: string) {
       abort.abort();
       clearTimeout(timer);
     };
-  }, [pluginId, engine, path, revision]);
-  const data = state?.data;
-  const historyReady = state?.path === path;
+  }, [pluginId, engine, context, scope, path, revision]);
+  // Keep the last successful page only within the same strategy selection.
+  const data = state?.scope === scope ? state.data : undefined;
+  const historyReady = !!data && state?.path === path;
   return {
     data,
+    strategies: state?.context === context ? state.data.strategies : [],
+    strategyIds,
+    filterKey: scope,
+    setStrategyIds: (ids: string[]) =>
+      setQuery({ strategyIds: [...new Set(ids)].sort(), cursors: [] }),
     historyReady,
-    loading,
+    loading: loading || (!historyReady && !error),
     error,
     page: cursors.length + 1,
     refresh: () => setRevision((value) => value + 1),
-    newer: () => setCursors((old) => old.slice(0, -1)),
-    latest: () => setCursors([]),
+    newer: () =>
+      setQuery((old) => ({ ...old, cursors: old.cursors.slice(0, -1) })),
+    latest: () => setQuery((old) => ({ ...old, cursors: [] })),
     older: () => {
       if (!loading && historyReady && data?.next)
-        setCursors((old) => [...old, data.next!]);
+        setQuery((old) => ({ ...old, cursors: [...old.cursors, data.next!] }));
     },
   };
 }

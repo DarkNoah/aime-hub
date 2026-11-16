@@ -20,7 +20,7 @@ import {
 import { POINT_BACKTEST_RULES } from '../../strategy-types.js';
 
 import { actualFuture, resolveTqOptions } from '../tq-options.js';
-import { readMarketPositions } from './positions.js';
+import { readMarketPositionMonths, readMarketPositions } from './positions.js';
 import type { MarketPositionsPage } from '../../market-positions.js';
 
 const shape = backtestSchema.shape;
@@ -87,20 +87,25 @@ export function signalRoutes(
   );
   api.get('/monitors/positions', async (c) => {
     const { monitors, records, config } = get();
-    const rows = (await monitors.list(c.get('userId'))).filter(
+    const available = (await monitors.list(c.get('userId'))).filter(
       (row) =>
         !row.deleted &&
         (row.config.display_engine ?? row.engine) === config.engine,
     );
-    const [positions, views, strategyNames] = await Promise.all([
+    const selected = new Set(c.req.queries('strategy') ?? []);
+    const rows = selected.size
+      ? available.filter((row) => selected.has(row.strategy_id))
+      : available;
+    const [positions, monthly, views, strategyNames] = await Promise.all([
       readMarketPositions(
         monitors.history,
         rows.map((row) => row.id),
         c.req.query('before'),
       ),
+      readMarketPositionMonths(monitors.history, rows),
       Promise.all(rows.map((row) => monitors.view(row))),
       Promise.all(
-        [...new Set(rows.map((row) => row.strategy_id))].map(
+        [...new Set(available.map((row) => row.strategy_id))].map(
           async (id) => [id, (await records.storedStrategy(id)).name] as const,
         ),
       ),
@@ -110,8 +115,10 @@ export function signalRoutes(
       positions.progress.map((row) => [row.monitor_id, row]),
     );
     return c.json({
+      strategies: strategyNames.map(([id, name]) => ({ id, name })),
       open: positions.open,
       history: positions.history,
+      monthly,
       next: positions.next,
       monitors: views.map((view) => ({
         ...view,
