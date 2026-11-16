@@ -1691,6 +1691,26 @@ export const en = {
   'skills.personalRemoveHint':
     '“{{name}}” and its bundled files will be deleted from your personal skill directory. Future personal conversations will use the global version if one exists with the same name.',
   'skills.import': 'Import skills',
+  'skills.importMode': 'Import mode',
+  'skills.importBySkill': 'By skill',
+  'skills.importWholeProject': 'Whole project',
+  'skills.bySkillImportHint':
+    'Install selected skill directories with their bundled resources.',
+  'skills.projectImportHint':
+    'Preserve the complete repository or archive and select the skill entries to load.',
+  'skills.projectSourceHint':
+    'Whole-project mode preserves all files at the selected revision, including when using a folder or skill link.',
+  'skills.wholeProject': 'Whole project',
+  'skills.projectFiles': '{{count}} project files preserved',
+  'skills.projectRoot': 'Project root: {{path}}',
+  'skills.projectEntryHint':
+    'All project files are installed once; only selected entries are loaded. Follow the skill instructions to set up dependencies.',
+  'skills.projectEntriesSelected': '{{count}} entries selected',
+  'skills.importProject': 'Import project',
+  'skills.projectInstallSuccess':
+    'Imported the complete project with {{count}} skill entries.',
+  'skills.projectManaged':
+    'This skill belongs to a whole project. Delete the project using its group action.',
   'skills.openRepository': 'Open GitHub repository {{name}}',
   'skills.updateGroup': 'Update skill group',
   'skills.updateGroupNamed': 'Update {{name}}',
@@ -1786,6 +1806,13 @@ export const en = {
   'skills.removeGroupHint':
     'Permanently delete all skills in “{{name}}” ({{count}} in total) and their bundled files, including skills hidden by the current search. Future conversation runs will no longer load them.',
   'skills.removeGroupSuccess': 'Deleted {{count}} skills from the group.',
+  'skills.removeProjectNamed': 'Delete project {{name}}',
+  'skills.removeProjectTitle': 'Delete this entire project?',
+  'skills.removeProjectHint':
+    'Permanently delete “{{name}}”, including every project file, shared resource, and all {{count}} enabled skill entries, even those hidden by the current search.',
+  'skills.removeProject': 'Delete project',
+  'skills.removeProjectSuccess':
+    'Deleted the project and {{count}} skill entries.',
   'skills.groupChanged':
     'The skills in this group have changed. Refresh the list and confirm the group again.',
   'skills.invalidUrl':

@@ -55,6 +55,9 @@ export function SkillsManager({ scope }: { scope: SkillScope }) {
   const [updatingGroup, setUpdatingGroup] = useState<string>();
   const [sourceGroup, setSourceGroup] = useState<string>();
   const [preview, setPreview] = useState<InstalledSkill>();
+  const removingProject =
+    removing?.kind === 'group' &&
+    removing.skills.some((skill) => skill.projectRoot);
   const submitting = useRef(false);
   useEffect(() => {
     const controller = new AbortController();
@@ -134,7 +137,12 @@ export function SkillsManager({ scope }: { scope: SkillScope }) {
       setRemoving(undefined);
       toast.success(
         removing.kind === 'group'
-          ? t('skills.removeGroupSuccess', { count: removed.length })
+          ? t(
+              removingProject
+                ? 'skills.removeProjectSuccess'
+                : 'skills.removeGroupSuccess',
+              { count: removed.length },
+            )
           : t('skills.removeSuccess'),
       );
     } catch (cause) {
@@ -340,16 +348,23 @@ export function SkillsManager({ scope }: { scope: SkillScope }) {
             <DialogTitle>
               {t(
                 removing?.kind === 'group'
-                  ? 'skills.removeGroupTitle'
+                  ? removingProject
+                    ? 'skills.removeProjectTitle'
+                    : 'skills.removeGroupTitle'
                   : 'skills.removeTitle',
               )}
             </DialogTitle>
             <DialogDescription>
               {removing?.kind === 'group'
-                ? t('skills.removeGroupHint', {
-                    name: removing.group,
-                    count: removing.skills.length,
-                  })
+                ? t(
+                    removingProject
+                      ? 'skills.removeProjectHint'
+                      : 'skills.removeGroupHint',
+                    {
+                      name: removing.group,
+                      count: removing.skills.length,
+                    },
+                  )
                 : t(
                     scope === 'personal'
                       ? 'skills.personalRemoveHint'
@@ -388,7 +403,9 @@ export function SkillsManager({ scope }: { scope: SkillScope }) {
               {pending ? <Loader2 className="animate-spin" /> : <Trash2 />}
               {t(
                 removing?.kind === 'group'
-                  ? 'skills.removeGroup'
+                  ? removingProject
+                    ? 'skills.removeProject'
+                    : 'skills.removeGroup'
                   : 'skills.remove',
               )}
             </Button>

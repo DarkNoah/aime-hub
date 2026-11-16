@@ -1,4 +1,3 @@
-import { Workspace } from '@mastra/core/workspace';
 import { resolve, sep } from 'node:path';
 import type { ChatSkill } from '@aime/shared/threads';
 import type { RuntimeAgent } from '@aime/shared/agents';
@@ -8,7 +7,7 @@ import {
   discoverPersonalSkills,
   discoverProjectSkills,
 } from './workspace.js';
-import { directorySkillConfig } from './skill-source.js';
+import { directorySkillConfig, ScopedSkillsWorkspace } from './skill-source.js';
 
 /** Resolve only server-owned roots for the already-authorized conversation scope. */
 export async function resolveAgentSkillPaths(
@@ -47,11 +46,12 @@ export async function listChatSkills(
     : discoverPersonalSkills(root, userId));
   if (!discovered.length) return [];
   // The catalog and the Agent share directory-based identities and validation.
-  const workspace = new Workspace(
+  const workspace = new ScopedSkillsWorkspace(
     directorySkillConfig(
       discovered.map((skill) => skill.path),
       userId,
     ),
+    userId,
   );
   const groups = new Map(
     discovered.map((skill) => [

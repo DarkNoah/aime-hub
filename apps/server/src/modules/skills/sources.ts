@@ -3,9 +3,13 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { SkillError } from './errors.js';
 import { parseGitHubRepository } from './github.js';
+import { skillProjectEntriesSchema } from './project.js';
 
 export const SKILL_SOURCES_FILE = '.skill-sources.json';
 const installationSchema = z.discriminatedUnion('mode', [
+  z
+    .object({ mode: z.literal('project'), entries: skillProjectEntriesSchema })
+    .strict(),
   z.object({ mode: z.literal('collection') }).strict(),
   z
     .object({

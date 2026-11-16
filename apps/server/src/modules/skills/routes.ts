@@ -43,6 +43,12 @@ export function skillArchiveRoutes(
         return c.json({ code: 'SKILL_ARCHIVE_INVALID' }, 400);
       }
       const file = form.get('file');
+      const mode = form.get('mode') ?? 'skills';
+      if (
+        form.getAll('mode').length > 1 ||
+        (mode !== 'skills' && mode !== 'project')
+      )
+        return c.json({ code: 'SKILL_INVALID_SELECTION' }, 400);
       if (!(file instanceof File) || form.getAll('file').length !== 1)
         return c.json({ code: 'SKILL_ARCHIVE_INVALID' }, 400);
       if (file.size > SKILL_ARCHIVE_MAX_BYTES)
@@ -54,6 +60,7 @@ export function skillArchiveRoutes(
           file.name,
           Buffer.from(await file.arrayBuffer()),
           c.req.raw.signal,
+          mode,
         );
         if (c.req.raw.signal.aborted) {
           await target.discard(scan.id);

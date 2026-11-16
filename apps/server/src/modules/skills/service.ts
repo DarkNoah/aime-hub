@@ -25,6 +25,12 @@ import type {
 } from '@aime/shared/skills';
 import { SkillError } from './errors.js';
 import { readSkillArchive } from './archive.js';
+import {
+  readSkillProject,
+  SKILL_PROJECT_FILE,
+  skillProjectSchema,
+  type SkillProject,
+} from './project.js';
 import { fileError } from '../files/paths.js';
 import { userDirectory } from '../threads/workspace.js';
 import type { EnvironmentVariableService } from '../environment-variables/service.js';
@@ -168,6 +174,29 @@ export class SkillService {
       )
         return;
       const entries = await readdir(directory, { withFileTypes: true });
+      if (
+        parts.length === 2 &&
+        entries.some((entry) => entry.name === SKILL_PROJECT_FILE)
+      ) {
+        const project = await readSkillProject(directory);
+        if (!project) return;
+        for (const entry of project.entries) {
+          const metadata = describe(
+            await readFile(join(directory, project.root, entry.path), 'utf8'),
+            entry.name,
+          );
+          const entryDirectory = dirname(entry.path);
+          skills.push({
+            path: `${path}/${project.root}${entryDirectory === '.' ? '' : `/${entryDirectory}`}`,
+            name: entry.name,
+            description: metadata.description,
+            valid: metadata.valid,
+            group: path,
+            projectRoot: `${path}/${project.root}`,
+          });
+        }
+        return;
+      }
       const manifest = entries.find(
         (entry) => entry.name === 'SKILL.md' && entry.isFile(),
       );
@@ -198,8 +227,12 @@ export class SkillService {
     return { root: this.root, skills };
   }
 
-  async scan(input: string, signal?: AbortSignal): Promise<SkillScan> {
-    return this.scanRepository(input, signal);
+  async scan(
+    input: string,
+    signal?: AbortSignal,
+    mode: 'skills' | 'project' = 'skills',
+  ): Promise<SkillScan> {
+    return this.scanRepository(input, signal, undefined, undefined, mode);
   }
 
   private async scanRepository(
@@ -207,12 +240,19 @@ export class SkillService {
     signal?: AbortSignal,
     original?: SkillSource,
     legacyPaths?: Set<string>,
+    mode: 'skills' | 'project' = 'skills',
+    resolveRef = false,
   ): Promise<SkillScan> {
     const repository = parseGitHubRepository(input);
-    const snapshot = await this.download(repository, signal, original, {
-      ...process.env,
-      ...(await this.environmentVariables?.getEnv(this.userId)),
-    });
+    const snapshot = await this.download(
+      repository,
+      signal,
+      resolveRef ? undefined : original,
+      {
+        ...process.env,
+        ...(await this.environmentVariables?.getEnv(this.userId)),
+      },
+    );
     return this.scanSnapshot(
       repository,
       snapshot,
@@ -220,6 +260,8 @@ export class SkillService {
       signal,
       original,
       legacyPaths,
+      undefined,
+      mode,
     );
   }
 
@@ -227,8 +269,22 @@ export class SkillService {
     filename: string,
     data: Buffer,
     signal?: AbortSignal,
+    mode: 'skills' | 'project' = 'skills',
   ): Promise<SkillScan> {
     const snapshot = await readSkillArchive(filename, data, signal);
+    if (mode === 'project') {
+      const regular = snapshot.files.filter(isRegularFile);
+      const prefix = `${regular[0]?.path.split('/')[0]}/`;
+      if (
+        regular.length &&
+        regular.every((file) => file.path.startsWith(prefix))
+      )
+        // Archive resources use immutable oids for I/O; only their project-relative paths change.
+        snapshot.files = snapshot.files.map((file) => ({
+          ...file,
+          path: file.path.slice(prefix.length),
+        }));
+    }
     return this.scanSnapshot(
       {
         owner: '@local',
@@ -241,6 +297,7 @@ export class SkillService {
       undefined,
       undefined,
       filename,
+      mode,
     );
   }
 
@@ -252,9 +309,19 @@ export class SkillService {
     original?: SkillSource,
     legacyPaths?: Set<string>,
     filename?: string,
+    mode: 'skills' | 'project' = 'skills',
   ): Promise<SkillScan> {
     try {
       if (signal?.aborted) throw new SkillError('SKILL_DOWNLOAD_FAILED', 502);
+      const projectMode =
+        mode === 'project' || original?.installation?.mode === 'project';
+      const parent = await this.directory([repository.owner, repository.repo]);
+      if (
+        !projectMode &&
+        parent &&
+        (await stat(join(parent, SKILL_PROJECT_FILE)))
+      )
+        throw new SkillError('SKILL_CONFLICT', 409);
       // Resolve names across the whole repository so scoped and full scans use identical destinations.
       const manifests = snapshot.files.filter(
         (file) => isRegularFile(file) && /(^|\/)SKILL\.md$/.test(file.path),
@@ -283,6 +350,105 @@ export class SkillService {
             ? `${candidate.name}-${createHash('sha256').update(candidate.file.path).digest('hex').slice(0, 8)}`
             : candidate.name,
       }));
+      if (projectMode) {
+        const manifests = new Set(named.map(({ file }) => file.path));
+        const roots = named.filter(({ file }) => {
+          let parent = dirname(file.path);
+          while (parent !== '.') {
+            parent = dirname(parent);
+            if (
+              manifests.has(parent === '.' ? 'SKILL.md' : `${parent}/SKILL.md`)
+            )
+              return false;
+          }
+          return true;
+        });
+        const previous =
+          original?.installation?.mode === 'project'
+            ? original.installation.entries
+            : undefined;
+        const enabled = previous
+          ? previous.map((entry) => {
+              const candidate = roots.find(
+                ({ file }) => file.path === entry.path,
+              );
+              if (!candidate)
+                throw new SkillError('SKILL_UPDATE_SOURCE_NOT_FOUND', 409);
+              return { ...candidate, name: entry.name };
+            })
+          : roots;
+        const projectRoot = `${repository.owner}/${repository.repo}/project`;
+        const regular = snapshot.files.filter(isRegularFile);
+        const skills = enabled.map(
+          ({ file, content, name }): RepositorySkill => {
+            const metadata = describe(content, name);
+            if (previous && !metadata.valid)
+              throw new SkillError('SKILL_UPDATE_EMPTY', 409);
+            const files = skillFiles(snapshot, file.path);
+            const resources = files.filter(isRegularFile);
+            const folder = dirname(file.path);
+            return {
+              path: file.path,
+              group: folder === '.' ? '' : dirname(folder).replace(/^\.$/, ''),
+              name,
+              ...metadata,
+              destination: `${projectRoot}${folder === '.' ? '' : `/${folder}`}`,
+              installed: !!parent,
+              fileCount: resources.length,
+              bytes: resources.reduce((size, entry) => size + entry.size, 0),
+              skippedFiles: files.length - resources.length,
+              bundledSkills: resources
+                .filter(
+                  (entry) =>
+                    entry.path !== file.path &&
+                    /(^|\/)SKILL\.md$/.test(entry.path),
+                )
+                .map((entry) => entry.path),
+            };
+          },
+        );
+        const result: SkillScan = {
+          id: randomUUID(),
+          ...repository,
+          importMode: 'project',
+          ...(filename ? { sourceType: 'archive' as const, filename } : {}),
+          project: {
+            destination: projectRoot,
+            fileCount: regular.length,
+            bytes: regular.reduce((size, entry) => size + entry.size, 0),
+            skippedFiles: snapshot.files.length - regular.length,
+          },
+          commit: snapshot.commit,
+          scope: '',
+          ref: snapshot.ref ?? null,
+          expiresAt: new Date(Date.now() + SCAN_TTL).toISOString(),
+          skills,
+        };
+        if (signal?.aborted) throw new SkillError('ABORTED');
+        const timer = setTimeout(() => {
+          void this.discard(result.id).catch(() => {});
+        }, SCAN_TTL);
+        timer.unref();
+        this.scans.set(result.id, {
+          result,
+          snapshot,
+          timer,
+          source: input
+            ? {
+                url: repository.url,
+                ref: snapshot.ref ?? null,
+                scope: '',
+                installation: {
+                  mode: 'project',
+                  entries: skills
+                    .filter((skill) => skill.valid)
+                    .map((skill) => ({ path: skill.path, name: skill.name })),
+                },
+              }
+            : undefined,
+        });
+        return result;
+      }
       const { scopePath, fileOnly } = snapshot;
       const scoped = named.filter(
         ({ file }) =>
@@ -420,27 +586,74 @@ export class SkillService {
   }
 
   install(id: string, paths: string[]): Promise<InstalledSkill[]> {
-    return this.exclusive(() => this.installScan(id, paths));
+    return this.exclusive(async () => {
+      let scan: CachedScan;
+      try {
+        // Reject stale scans and invalid selections before creating the lock directory.
+        scan = this.selection(id, paths).cached;
+      } catch (error) {
+        await this.releaseScan(id);
+        throw error;
+      }
+      return this.withGroupLock(
+        `${scan.result.owner}/${scan.result.repo}`,
+        () => this.installScan(id, paths),
+      );
+    });
+  }
+
+  private selection(id: string, paths: string[]) {
+    const cached = this.scans.get(id);
+    if (!cached || Date.parse(cached.result.expiresAt) <= Date.now())
+      throw new SkillError('SKILL_SCAN_EXPIRED', 410);
+    const selected = [...new Set(paths)].map((path) => {
+      const skill = cached.result.skills.find((skill) => skill.path === path);
+      if (!skill || !skill.valid)
+        throw new SkillError('SKILL_INVALID_SELECTION');
+      return skill;
+    });
+    if (!selected.length) throw new SkillError('SKILL_INVALID_SELECTION');
+    return { cached, selected };
+  }
+
+  private async withGroupLock<T>(
+    group: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    const parts = group.split('/');
+    if (!this.userId && parts[0] === 'plugins')
+      throw new SkillError('SKILL_UNSAFE_PATH', 403);
+    if (parts.length !== 2 || !safeRepositoryPath(group)) return action();
+    const owner = (await this.directory([parts[0]], true))!;
+    const lock = join(owner, `.${parts[1]}.skill-install.lock`);
+    await mkdir(lock).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'EEXIST') throw new SkillError('SKILL_CONFLICT', 409);
+      throw error;
+    });
+    try {
+      return await action();
+    } finally {
+      await rmdir(lock);
+    }
   }
 
   private async installScan(
     id: string,
     paths: string[],
   ): Promise<InstalledSkill[]> {
-    const cached = this.scans.get(id);
     try {
-      if (!cached || Date.parse(cached.result.expiresAt) <= Date.now())
-        throw new SkillError('SKILL_SCAN_EXPIRED', 410);
-      const selected = [...new Set(paths)].map((path) => {
-        const skill = cached.result.skills.find((skill) => skill.path === path);
-        if (!skill || !skill.valid)
-          throw new SkillError('SKILL_INVALID_SELECTION');
-        return skill;
-      });
-      if (!selected.length) throw new SkillError('SKILL_INVALID_SELECTION');
+      const { cached, selected } = this.selection(id, paths);
       const { owner, repo } = cached.result;
       if (!this.userId && owner === 'plugins')
         throw new SkillError('SKILL_UNSAFE_PATH', 403);
+      if (cached.result.importMode === 'project')
+        return await this.installProject(cached, selected);
+      const existingGroup = await this.directory([owner, repo]);
+      if (
+        existingGroup &&
+        (await stat(join(existingGroup, SKILL_PROJECT_FILE)))
+      )
+        throw new SkillError('SKILL_CONFLICT', 409);
       // An existing manifest on an ancestor would hide all installed children at runtime.
       for (const parts of [[], [owner], [owner, repo]]) {
         const parent = await this.directory(parts, true);
@@ -512,6 +725,69 @@ export class SkillService {
     }
   }
 
+  private async installProject(
+    cached: CachedScan,
+    selected: RepositorySkill[],
+  ): Promise<InstalledSkill[]> {
+    const { owner, repo } = cached.result;
+    for (const parts of [[], [owner]]) {
+      const parent = await this.directory(parts, true);
+      if (await stat(join(parent!, 'SKILL.md')))
+        throw new SkillError('SKILL_CONFLICT', 409);
+    }
+    const ownerDirectory = (await this.directory([owner]))!;
+    const destination = join(ownerDirectory, repo);
+    if (await stat(destination)) throw new SkillError('SKILL_CONFLICT', 409);
+    const project: SkillProject = skillProjectSchema.parse({
+      version: 1,
+      root: 'project',
+      entries: selected.map((skill) => ({
+        path: skill.path,
+        name: skill.name,
+      })),
+    });
+    const staging = await mkdtemp(
+      join(dirname(this.root), '.skill-project-install-'),
+    );
+    try {
+      const group = join(staging, 'group');
+      const root = join(group, project.root);
+      await mkdir(root, { recursive: true });
+      for (const file of cached.snapshot.files.filter(isRegularFile))
+        await this.writeResource(root, file.path, file, cached.snapshot);
+      await writeFile(
+        join(group, SKILL_PROJECT_FILE),
+        JSON.stringify(project, null, 2),
+        { flag: 'wx' },
+      );
+      if (cached.source) {
+        const source: SkillSource = {
+          ...cached.source,
+          scope: '',
+          installation: { mode: 'project', entries: project.entries },
+        };
+        await writeFile(
+          join(group, SKILL_SOURCES_FILE),
+          serializeSkillSources([source]),
+          { flag: 'wx' },
+        );
+      }
+      await this.directory([owner]);
+      if (await stat(destination)) throw new SkillError('SKILL_CONFLICT', 409);
+      await rename(group, destination);
+    } finally {
+      await rm(staging, { recursive: true, force: true });
+    }
+    return selected.map((skill) => ({
+      path: skill.destination,
+      name: skill.name,
+      description: skill.description,
+      valid: true,
+      group: `${owner}/${repo}`,
+      projectRoot: `${owner}/${repo}/project`,
+    }));
+  }
+
   /** Resolve an installed package under this user's scope and serialize against updates/removal. */
   withFiles<T>(path: string, action: (root: string) => Promise<T>): Promise<T> {
     return this.exclusive(async () => {
@@ -549,97 +825,174 @@ export class SkillService {
   }
 
   updateGroup(group: string, source?: string): Promise<InstalledSkill[]> {
-    return this.exclusive(async () => {
-      if (!this.userId && group.split('/')[0] === 'plugins')
-        throw new SkillError('SKILL_UNSAFE_PATH', 403);
-      if (!safeRepositoryPath(group))
-        throw new SkillError('SKILL_UNSAFE_PATH', 403);
-      const directory = await this.directory(group.split('/'));
-      const current = (await this.list()).skills.filter(
-        (skill) => skill.group === group,
-      );
-      if (!directory || !current.length)
-        throw new SkillError('SKILL_NOT_FOUND', 404);
-      const sources: (string | SkillSource)[] = source
-        ? [normalizeSkillSource(source, group)]
-        : await readSkillSources(directory);
-      for (const source of sources)
-        normalizeSkillSource(
-          typeof source === 'string' ? source : source.url,
-          group,
+    return this.exclusive(() =>
+      this.withGroupLock(group, async () => {
+        if (!this.userId && group.split('/')[0] === 'plugins')
+          throw new SkillError('SKILL_UNSAFE_PATH', 403);
+        if (!safeRepositoryPath(group))
+          throw new SkillError('SKILL_UNSAFE_PATH', 403);
+        const directory = await this.directory(group.split('/'));
+        const current = (await this.list()).skills.filter(
+          (skill) => skill.group === group,
         );
-      if (!sources.length) throw new SkillError('SKILL_SOURCE_UNKNOWN', 409);
-      const scans: SkillScan[] = [];
-      let staging: string | undefined;
-      let backup: string | undefined;
-      try {
-        // Validate every original scope against the latest upstream snapshot before replacing anything.
-        for (const source of sources) {
-          let scan: SkillScan;
-          try {
-            scan = await this.scanRepository(
-              typeof source === 'string' ? source : source.url,
-              undefined,
-              typeof source === 'string' ? undefined : source,
-              new Set(current.map((skill) => skill.path)),
-            );
-          } catch (error) {
-            if (
-              error instanceof SkillError &&
-              error.code === 'SKILL_SOURCE_NOT_FOUND'
-            )
-              throw new SkillError('SKILL_UPDATE_SOURCE_NOT_FOUND', 409);
-            throw error;
-          }
-          scans.push(scan);
-          if (!scan.skills.some((skill) => skill.valid))
-            throw new SkillError('SKILL_UPDATE_EMPTY', 409);
-        }
-        const selected = new Map<string, { scanId: string; path: string }>();
-        for (const scan of scans)
-          for (const skill of scan.skills.filter((skill) => skill.valid))
-            selected.set(skill.destination, {
-              scanId: scan.id,
-              path: skill.path,
-            });
-        staging = await mkdtemp(join(dirname(this.root), '.skill-update-'));
-        const resolvedSources = scans.map(
-          (scan) => this.scans.get(scan.id)!.source!,
-        );
-        const saved = join(staging, 'previous');
-        await rename(directory, saved);
-        backup = saved;
-        const installed: InstalledSkill[] = [];
-        for (const scan of scans) {
-          const paths = [...selected.values()]
-            .filter((skill) => skill.scanId === scan.id)
-            .map((skill) => skill.path);
-          if (paths.length)
-            installed.push(...(await this.installScan(scan.id, paths)));
-        }
-        const metadata = join(staging, SKILL_SOURCES_FILE);
-        await writeFile(metadata, serializeSkillSources(resolvedSources), {
-          flag: 'wx',
-        });
-        await rename(metadata, join(directory, SKILL_SOURCES_FILE));
-        backup = undefined;
-        return installed;
-      } catch (error) {
-        if (backup) {
-          await rm(directory, { recursive: true, force: true });
-          await rename(backup, directory);
-          backup = undefined;
-        }
-        throw error;
-      } finally {
+        if (!directory || !current.length)
+          throw new SkillError('SKILL_NOT_FOUND', 404);
+        const project =
+          group.split('/').length === 2
+            ? await readSkillProject(directory)
+            : undefined;
+        if (project)
+          return this.updateProject(group, directory, project, source);
+        const sources: (string | SkillSource)[] = source
+          ? [normalizeSkillSource(source, group)]
+          : await readSkillSources(directory);
+        for (const source of sources)
+          normalizeSkillSource(
+            typeof source === 'string' ? source : source.url,
+            group,
+          );
+        if (!sources.length) throw new SkillError('SKILL_SOURCE_UNKNOWN', 409);
+        const scans: SkillScan[] = [];
+        let staging: string | undefined;
+        let backup: string | undefined;
         try {
-          await Promise.all(scans.map((scan) => this.releaseScan(scan.id)));
+          // Validate every original scope against the latest upstream snapshot before replacing anything.
+          for (const source of sources) {
+            let scan: SkillScan;
+            try {
+              scan = await this.scanRepository(
+                typeof source === 'string' ? source : source.url,
+                undefined,
+                typeof source === 'string' ? undefined : source,
+                new Set(current.map((skill) => skill.path)),
+              );
+            } catch (error) {
+              if (
+                error instanceof SkillError &&
+                error.code === 'SKILL_SOURCE_NOT_FOUND'
+              )
+                throw new SkillError('SKILL_UPDATE_SOURCE_NOT_FOUND', 409);
+              throw error;
+            }
+            scans.push(scan);
+            if (!scan.skills.some((skill) => skill.valid))
+              throw new SkillError('SKILL_UPDATE_EMPTY', 409);
+          }
+          const selected = new Map<string, { scanId: string; path: string }>();
+          for (const scan of scans)
+            for (const skill of scan.skills.filter((skill) => skill.valid))
+              selected.set(skill.destination, {
+                scanId: scan.id,
+                path: skill.path,
+              });
+          staging = await mkdtemp(join(dirname(this.root), '.skill-update-'));
+          const resolvedSources = scans.map(
+            (scan) => this.scans.get(scan.id)!.source!,
+          );
+          const saved = join(staging, 'previous');
+          await rename(directory, saved);
+          backup = saved;
+          const installed: InstalledSkill[] = [];
+          for (const scan of scans) {
+            const paths = [...selected.values()]
+              .filter((skill) => skill.scanId === scan.id)
+              .map((skill) => skill.path);
+            if (paths.length)
+              installed.push(...(await this.installScan(scan.id, paths)));
+          }
+          const metadata = join(staging, SKILL_SOURCES_FILE);
+          await writeFile(metadata, serializeSkillSources(resolvedSources), {
+            flag: 'wx',
+          });
+          await rename(metadata, join(directory, SKILL_SOURCES_FILE));
+          backup = undefined;
+          return installed;
+        } catch (error) {
+          if (backup) {
+            await rm(directory, { recursive: true, force: true });
+            await rename(backup, directory);
+            backup = undefined;
+          }
+          throw error;
         } finally {
-          if (staging && !backup)
-            await rm(staging, { recursive: true, force: true });
+          try {
+            await Promise.all(scans.map((scan) => this.releaseScan(scan.id)));
+          } finally {
+            if (staging && !backup)
+              await rm(staging, { recursive: true, force: true });
+          }
         }
+      }),
+    );
+  }
+
+  private async updateProject(
+    group: string,
+    directory: string,
+    project: SkillProject,
+    input?: string,
+  ): Promise<InstalledSkill[]> {
+    const sources = await readSkillSources(directory);
+    if (sources.length !== 1 || sources[0].installation?.mode !== 'project')
+      throw new SkillError('SKILL_SOURCE_UNKNOWN', 409);
+    const previous = sources[0];
+    const url = input
+      ? normalizeSkillSource(input, group)
+      : normalizeSkillSource(previous.url, group);
+    // The saved entry set is independent from the repository's current manifests.
+    const original: SkillSource = {
+      ...previous,
+      url,
+      scope: '',
+      installation: { mode: 'project', entries: project.entries },
+    };
+    let scan: SkillScan;
+    try {
+      scan = await this.scanRepository(
+        url,
+        undefined,
+        original,
+        undefined,
+        'project',
+        !!input,
+      );
+    } catch (error) {
+      if (
+        error instanceof SkillError &&
+        error.code === 'SKILL_SOURCE_NOT_FOUND'
+      )
+        throw new SkillError('SKILL_UPDATE_SOURCE_NOT_FOUND', 409);
+      throw error;
+    }
+    let staging: string | undefined;
+    let backup: string | undefined;
+    try {
+      if (!scan.skills.length || scan.skills.some((skill) => !skill.valid))
+        throw new SkillError('SKILL_UPDATE_EMPTY', 409);
+      staging = await mkdtemp(
+        join(dirname(this.root), '.skill-project-update-'),
+      );
+      const saved = join(staging, 'previous');
+      await rename(directory, saved);
+      backup = saved;
+      const installed = await this.installScan(
+        scan.id,
+        scan.skills.map((skill) => skill.path),
+      );
+      backup = undefined;
+      return installed;
+    } catch (error) {
+      if (backup) {
+        await rm(directory, { recursive: true, force: true });
+        await rename(backup, directory);
+        backup = undefined;
       }
-    });
+      throw error;
+    } finally {
+      await this.releaseScan(scan.id);
+      if (staging && !backup)
+        await rm(staging, { recursive: true, force: true });
+    }
   }
 
   private async writeResource(
@@ -667,11 +1020,12 @@ export class SkillService {
       if (!safeRepositoryPath(path))
         throw new SkillError('SKILL_UNSAFE_PATH', 403);
       const target = await this.directory(path.split('/'));
-      if (
-        !target ||
-        !(await this.list()).skills.some((skill) => skill.path === path)
-      )
-        throw new SkillError('SKILL_NOT_FOUND', 404);
+      const selected = (await this.list()).skills.find(
+        (skill) => skill.path === path,
+      );
+      if (!target || !selected) throw new SkillError('SKILL_NOT_FOUND', 404);
+      if (selected.projectRoot)
+        throw new SkillError('SKILL_PROJECT_MANAGED', 409);
       await rm(target, { recursive: true });
       const group = path.includes('/')
         ? path.slice(0, path.lastIndexOf('/'))
@@ -682,53 +1036,73 @@ export class SkillService {
   }
 
   removeGroup(group: string, expectedPaths: string[]) {
-    return this.exclusive(async () => {
-      if (!this.userId && group.split('/')[0] === 'plugins')
-        throw new SkillError('SKILL_UNSAFE_PATH', 403);
-      if (!safeRepositoryPath(group))
-        throw new SkillError('SKILL_UNSAFE_PATH', 403);
-      const groupDirectory = await this.directory(group.split('/'));
-      if (!groupDirectory) throw new SkillError('SKILL_NOT_FOUND', 404);
-      const skills = (await this.list()).skills.filter(
-        (skill) => skill.group === group,
-      );
-      if (!skills.length) throw new SkillError('SKILL_NOT_FOUND', 404);
-      const expected = new Set(expectedPaths);
-      // Require the exact group that was presented in the confirmation dialog.
-      if (
-        expected.size !== skills.length ||
-        skills.some((skill) => !expected.has(skill.path))
-      )
-        throw new SkillError('SKILL_GROUP_CHANGED', 409);
-      const targets: { path: string; directory: string }[] = [];
-      for (const skill of skills) {
-        const directory = await this.directory(skill.path.split('/'));
-        if (!directory) throw new SkillError('SKILL_GROUP_CHANGED', 409);
-        targets.push({ path: skill.path, directory });
-      }
-      // Only remove the skills shown in this group, not sibling groups or loose files.
-      const staging = await mkdtemp(join(dirname(this.root), '.skill-remove-'));
-      const moved: { original: string; staged: string }[] = [];
-      try {
-        for (const target of targets) {
-          const staged = join(staging, basename(target.directory));
-          await rename(target.directory, staged);
-          moved.push({ original: target.directory, staged });
+    return this.exclusive(() =>
+      this.withGroupLock(group, async () => {
+        if (!this.userId && group.split('/')[0] === 'plugins')
+          throw new SkillError('SKILL_UNSAFE_PATH', 403);
+        if (!safeRepositoryPath(group))
+          throw new SkillError('SKILL_UNSAFE_PATH', 403);
+        const groupDirectory = await this.directory(group.split('/'));
+        if (!groupDirectory) throw new SkillError('SKILL_NOT_FOUND', 404);
+        const skills = (await this.list()).skills.filter(
+          (skill) => skill.group === group,
+        );
+        if (!skills.length) throw new SkillError('SKILL_NOT_FOUND', 404);
+        const expected = new Set(expectedPaths);
+        // Require the exact group that was presented in the confirmation dialog.
+        if (
+          expected.size !== skills.length ||
+          skills.some((skill) => !expected.has(skill.path))
+        )
+          throw new SkillError('SKILL_GROUP_CHANGED', 409);
+        if (skills.some((skill) => skill.projectRoot)) {
+          const project = await readSkillProject(groupDirectory);
+          if (!project) throw new SkillError('SKILL_PROJECT_INVALID', 409);
+          const staging = await mkdtemp(
+            join(dirname(this.root), '.skill-project-remove-'),
+          );
+          try {
+            await rename(groupDirectory, join(staging, 'project'));
+          } catch (error) {
+            await rm(staging, { recursive: true, force: true });
+            throw error;
+          }
+          await rm(staging, { recursive: true, force: true });
+          return skills.map((skill) => skill.path);
         }
-      } catch (error) {
-        for (const entry of moved.reverse())
-          await rename(entry.staged, entry.original);
+        const targets: { path: string; directory: string }[] = [];
+        for (const skill of skills) {
+          const directory = await this.directory(skill.path.split('/'));
+          if (!directory) throw new SkillError('SKILL_GROUP_CHANGED', 409);
+          targets.push({ path: skill.path, directory });
+        }
+        // Only remove the skills shown in this group, not sibling groups or loose files.
+        const staging = await mkdtemp(
+          join(dirname(this.root), '.skill-remove-'),
+        );
+        const moved: { original: string; staged: string }[] = [];
+        try {
+          for (const target of targets) {
+            const staged = join(staging, basename(target.directory));
+            await rename(target.directory, staged);
+            moved.push({ original: target.directory, staged });
+          }
+        } catch (error) {
+          for (const entry of moved.reverse())
+            await rename(entry.staged, entry.original);
+          await rm(staging, { recursive: true, force: true });
+          throw error;
+        }
         await rm(staging, { recursive: true, force: true });
-        throw error;
-      }
-      await rm(staging, { recursive: true, force: true });
-      await rm(join(groupDirectory, SKILL_SOURCES_FILE), { force: true });
-      // Prune an empty group while preserving separate subgroups or loose files.
-      await rmdir(groupDirectory).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== 'ENOTEMPTY' && error.code !== 'ENOENT') throw error;
-      });
-      return targets.map((target) => target.path);
-    });
+        await rm(join(groupDirectory, SKILL_SOURCES_FILE), { force: true });
+        // Prune an empty group while preserving separate subgroups or loose files.
+        await rmdir(groupDirectory).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== 'ENOTEMPTY' && error.code !== 'ENOENT')
+            throw error;
+        });
+        return targets.map((target) => target.path);
+      }),
+    );
   }
 
   async dispose() {

@@ -1552,6 +1552,23 @@ export const zhCN = {
   'skills.personalRemoveHint':
     '将从你的个人技能目录删除「{{name}}」及其附带文件。若有同名全局技能，后续个人会话将恢复使用全局版本。',
   'skills.import': '导入技能',
+  'skills.importMode': '导入方式',
+  'skills.importBySkill': '按技能导入',
+  'skills.importWholeProject': '整项目导入',
+  'skills.bySkillImportHint': '安装所选技能目录及其附带资源。',
+  'skills.projectImportHint':
+    '保留整个仓库或压缩包的目录结构，勾选要加载的技能入口。',
+  'skills.projectSourceHint':
+    '整项目模式保留所选版本的全部文件；文件夹或技能链接也会扫描完整仓库。',
+  'skills.wholeProject': '整项目',
+  'skills.projectFiles': '完整保留 {{count}} 个项目文件',
+  'skills.projectRoot': '项目根目录：{{path}}',
+  'skills.projectEntryHint':
+    '所有项目文件只安装一份，仅加载勾选的入口；项目依赖需按技能说明安装。',
+  'skills.projectEntriesSelected': '已选 {{count}} 个入口',
+  'skills.importProject': '导入项目',
+  'skills.projectInstallSuccess': '已导入完整项目，启用 {{count}} 个技能入口。',
+  'skills.projectManaged': '此技能属于整项目，请通过分组操作删除整个项目。',
   'skills.openRepository': '打开 GitHub 项目 {{name}}',
   'skills.updateGroup': '更新技能组',
   'skills.updateGroupNamed': '一键更新 {{name}}',
@@ -1642,6 +1659,12 @@ export const zhCN = {
   'skills.removeGroupHint':
     '将永久删除「{{name}}」分组内全部 {{count}} 个技能及其附带文件，包括被当前搜索条件隐藏的技能。后续会话运行将不再加载这些技能。',
   'skills.removeGroupSuccess': '已删除分组内的 {{count}} 个技能。',
+  'skills.removeProjectNamed': '删除项目 {{name}}',
+  'skills.removeProjectTitle': '删除整个项目？',
+  'skills.removeProjectHint':
+    '将永久删除「{{name}}」的全部项目文件、共享资源及 {{count}} 个已启用技能入口，包括被当前搜索条件隐藏的入口。',
+  'skills.removeProject': '删除项目',
+  'skills.removeProjectSuccess': '已删除项目及 {{count}} 个技能入口。',
   'skills.groupChanged': '此分组的技能已发生变化，请刷新列表后重新确认。',
   'skills.invalidUrl':
     '请输入 owner/repo 或 GitHub HTTPS 仓库、tree 文件夹、blob SKILL.md 链接。',

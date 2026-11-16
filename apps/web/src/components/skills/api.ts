@@ -3,6 +3,7 @@ import { api } from '@/lib/rpc';
 import { SKILL_ARCHIVE_MAX_BYTES, type SkillScan } from '@aime/shared/skills';
 
 export type SkillScope = 'global' | 'personal';
+export type SkillImportMode = 'skills' | 'project';
 const clients = { global: api.skills, personal: api.personalSkills };
 export const getSkillApi = (scope: SkillScope) => clients[scope];
 
@@ -25,6 +26,7 @@ const errorKeys = {
   SKILL_ARCHIVE_INVALID: 'skills.archiveInvalid',
   SKILL_ARCHIVE_TOO_LARGE: 'skills.archiveTooLarge',
   SKILL_ARCHIVE_UNSAFE: 'skills.archiveUnsafe',
+  SKILL_PROJECT_MANAGED: 'skills.projectManaged',
   ABORTED: 'skills.archiveCancelled',
   VALIDATION_ERROR: 'skills.invalidUrl',
   UNAUTHORIZED: 'errors.sessionExpired',
@@ -35,6 +37,7 @@ export async function uploadSkillArchive(
   scope: SkillScope,
   file: File,
   signal: AbortSignal,
+  mode: SkillImportMode = 'skills',
 ): Promise<SkillScan> {
   if (!/\.(zip|skill)$/i.test(file.name) || !file.size)
     throw { code: 'SKILL_ARCHIVE_INVALID' };
@@ -42,6 +45,7 @@ export async function uploadSkillArchive(
     throw { code: 'SKILL_ARCHIVE_TOO_LARGE' };
   const body = new FormData();
   body.set('file', file);
+  body.set('mode', mode);
   const response = await fetch(
     scope === 'global' ? '/api/admin/skills/archives' : '/api/skills/archives',
     { method: 'POST', credentials: 'same-origin', body, signal },

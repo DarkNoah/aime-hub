@@ -1,6 +1,6 @@
 ---
 name: skill-installer
-description: Search for suitable skills by keyword or install skills from a specified repository or local .zip/.skill package into the current chat scope. Use for finding skills, listing installed skills, and installing one or more skill directories. Does not enable agents, publish configuration, or modify other users' skills.
+description: Search for suitable skills by keyword or install skills from a specified repository or local .zip/.skill package into the current chat scope. Supports complete project imports with their original source layout. Use for finding skills, listing installed skills, and installing skill directories or projects. Does not enable agents, publish configuration, or modify other users' skills.
 metadata:
   short-description: Find and install skills in the current chat scope
 ---
@@ -90,6 +90,25 @@ A repository source without a path scans the entire repository. If the root cont
 
 Without a root entry, the repository is a collection. Select the requested packages with `--path`; omit the scope only when the user requests the collection. Discovery stops at each package's `SKILL.md`, preserving any nested entries inside that package. Explicit folder or file scopes are honored; do not select an internal subdirectory of a complete package unless the user specifically wants a separate installation and its resources are self-contained. `--ref` selects a branch, tag, or full commit SHA. URLs support `tree/<ref>/<path>` and `blob/<ref>/<path>/SKILL.md`; branch names may contain `/`.
 
+### Whole Project Imports
+
+Use `--whole-project` when the skill depends on source, configuration, or resources outside its own directory, or the user asks to import the entire project. For example, a project such as `JuneYaooo/rea-toon` may keep its skill instructions under `skills/rea-toon/` and its Python implementation elsewhere in the repository. Inspect the discovered entry before installation:
+
+```sh
+python3 "$BUILTIN_SKILLS_ROOT/skill-installer/scripts/list-skills.py" --repo JuneYaooo/rea-toon --whole-project --format json
+python3 "$BUILTIN_SKILLS_ROOT/skill-installer/scripts/list-skills.py" --repo JuneYaooo/rea-toon --whole-project --path skills/rea-toon --preview
+python3 "$BUILTIN_SKILLS_ROOT/skill-installer/scripts/install-skill.py" --repo JuneYaooo/rea-toon --whole-project
+python3 "$BUILTIN_SKILLS_ROOT/skill-installer/scripts/install-skill.py" --archive "/path/to/project.zip" --whole-project --path skills/chosen-skill
+```
+
+Whole-project imports retain every regular source file under `$SKILL_HOME/<owner>/<repo>/project/`, preserving its project-relative path. Local archives use `@local/<archive-name>/project/`. In whole-project mode only, if every retained archive file belongs to one top-level directory and no file is at the archive root, that one wrapper directory is removed. For example, `rea-toon-main/pyproject.toml` becomes `project/pyproject.toml`, so the project root is suitable for project commands. This removes at most one directory level; archives with root files or multiple top-level directories keep their paths. Use the paths returned by `list-skills.py --whole-project` for `--path` selections and previews. The group-owned `.skill-project.json` records the enabled `SKILL.md` entries; installed listing and runtime loading use these entries. A root or parent `SKILL.md` includes its descendants as one entry. Hidden skill directories are supported.
+
+Omitting `--path` enables all independent entries discovered across the project. With `--whole-project`, `--path` chooses which entries to enable; the complete project is still copied, including unselected skill directories and shared files. A scoped GitHub URL retains its resolved branch, tag, or commit while importing the entire repository. Use repository-relative paths to select entries. Git metadata, symbolic links, and submodules are excluded.
+
+The destination group must not already exist; ordinary skill packages and a whole project cannot share a group. Use management-page group updates for an existing project. GitHub updates retain the recorded entries and source revision; archives have no upstream update. A failed import publishes no partial project.
+
+Importing a project only stores its files and enables its skill entries. Read its installation instructions and report any required environment, dependencies, model downloads, or service configuration separately. The import scripts never run package installation, downloaded code, or project setup commands. When a later task needs project commands, run them from the recorded project root so sibling resources resolve correctly, and follow the user's authorized scope for that setup.
+
 ## Installation Behavior
 
 - Accept only public HTTPS repository sources. Read files from a fixed commit snapshot without executing downloaded scripts or installing repository dependencies.
@@ -114,6 +133,6 @@ python3 "$BUILTIN_SKILLS_ROOT/skill-installer/scripts/install-skill.py" --archiv
 
 `--archive` is mutually exclusive with `--repo` and `--url`; `--ref` is not supported for local files. Listing, previewing, and installing archives require Python but do not require Git or a network connection. Relative paths are resolved from the command's working directory; prefer the actual absolute attachment path.
 
-The package may contain `SKILL.md` at its root, inside an outer directory, or in multiple skill directories. Paths in `--path` are the original archive-relative paths, including any outer directory. The existing complete-package rules apply: a root or parent `SKILL.md` includes its nested resources and manifests as one skill. Scripts, references, binary assets, and executable file modes are preserved without executing them.
+The package may contain `SKILL.md` at its root, inside an outer directory, or in multiple skill directories. In ordinary skill mode, paths in `--path` are the original archive-relative paths, including any outer directory. Whole-project mode uses paths relative to the project root after removing a single common wrapper as described above. The existing complete-package rules apply: a root or parent `SKILL.md` includes its nested resources and manifests as one skill. Scripts, references, binary assets, and executable file modes are preserved without executing them.
 
 Archives are limited to 100 MiB compressed, 512 MiB expanded, and 10,000 entries. ZIP entries must use store or deflate compression. Encrypted, corrupted, unsafe, duplicate/conflicting paths, symbolic links, and special files are rejected before installation. `.git`, `__MACOSX`, `.DS_Store`, and AppleDouble `._*` metadata are omitted. Staging directories are cleaned after success, failure, or cancellation; failed batches preserve prior installations.

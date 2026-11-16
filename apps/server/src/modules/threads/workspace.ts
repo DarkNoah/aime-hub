@@ -19,6 +19,7 @@ import { directorySkillConfig, ScopedSkillsWorkspace } from './skill-source.js';
 import { workspaceLspConfig, workspaceLspHooks } from './workspace-lsp.js';
 import type { EnvironmentVariableService } from '../environment-variables/service.js';
 import { BUILTIN_SKILL_GROUP } from '../skills/builtin.js';
+import { readSkillProject } from '../skills/project.js';
 import {
   projectWorkspaceSchema,
   type ProjectWorkspace,
@@ -279,6 +280,19 @@ async function discover(root: string): Promise<DiscoveredSkill[]> {
   if (!canonicalRoot) return result;
   const rootPath: string = canonicalRoot;
   async function visit(directory: string) {
+    const group = relative(root, directory);
+    if (group.split(/[\\/]/).length === 2) {
+      const project = await readSkillProject(directory);
+      if (project) {
+        for (const entry of project.entries)
+          result.push({
+            id: entry.name,
+            group,
+            path: dirname(resolve(directory, project.root, entry.path)),
+          });
+        return;
+      }
+    }
     const entries = await readdir(directory, { withFileTypes: true }).catch(
       (error: NodeJS.ErrnoException) => {
         if (error.code === 'ENOENT') return [];

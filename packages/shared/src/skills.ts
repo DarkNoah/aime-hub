@@ -5,7 +5,10 @@ export const SKILL_ARCHIVE_MAX_UNPACKED_BYTES = 512 * 1024 * 1024;
 export const SKILL_ARCHIVE_MAX_ENTRIES = 10_000;
 
 export const scanSkillsSchema = z
-  .object({ url: z.string().trim().min(1) })
+  .object({
+    url: z.string().trim().min(1),
+    mode: z.enum(['skills', 'project']).default('skills'),
+  })
   .strict();
 export const installSkillsSchema = z
   .object({
@@ -30,6 +33,7 @@ export const updateSkillGroupSchema = z
   .strict();
 
 export type InstalledSkill = {
+  projectRoot?: string;
   path: string;
   name: string;
   description: string;
@@ -56,6 +60,13 @@ export type RepositorySkill = {
 };
 
 export type SkillScan = {
+  importMode?: 'skills' | 'project';
+  project?: {
+    destination: string;
+    fileCount: number;
+    bytes: number;
+    skippedFiles: number;
+  };
   sourceType?: 'github' | 'archive';
   filename?: string;
   id: string;

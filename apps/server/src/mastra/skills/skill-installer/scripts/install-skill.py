@@ -12,6 +12,7 @@ import tempfile
 
 from repository import SkillError, directory, handle_termination, parse_source, repository, skill_home
 from archive import archive
+from project import PROJECT_FILE, install_project, installation_lock, project_snapshot, validate_entries
 
 
 SOURCES_FILE = ".skill-sources.json"
@@ -46,6 +47,10 @@ def read_sources(group: Path) -> list[dict]:
                             or not isinstance(installation["name"], str)
                             or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", installation["name"])):
                         raise ValueError()
+                elif installation.get("mode") == "project":
+                    if set(installation) != {"mode", "entries"}:
+                        raise ValueError()
+                    validate_entries(installation["entries"])
                 elif installation != {"mode": "collection"}:
                     raise ValueError()
             parsed = parse_source(source["url"])
@@ -56,7 +61,26 @@ def read_sources(group: Path) -> list[dict]:
         raise SkillError("Invalid skill source record; existing contents were preserved.") from exc
 
 
-def install(root: Path, snapshot, paths: list[str] | None) -> list[Path]:
+def install(root: Path, snapshot, paths: list[str] | None, whole_project: bool = False) -> list[Path]:
+    # Selection and destination validation happen before creating lock directories.
+    if whole_project:
+        snapshot = project_snapshot(snapshot)
+    selected = snapshot.select_project(paths) if whole_project else snapshot.select(paths)[0]
+    group = directory(root, [snapshot.source.owner, snapshot.source.repo])
+    for parent in (root, group.parent):
+        if (parent / "SKILL.md").exists() or (parent / "SKILL.md").is_symlink():
+            raise SkillError("A parent directory already contains a skill; nested installs would be hidden.")
+    if whole_project and (group.exists() or group.is_symlink()):
+        raise SkillError("The project group already exists. Remove or update the entire group first.")
+    with installation_lock(root, snapshot.source.owner, snapshot.source.repo):
+        if whole_project:
+            return install_project(root, snapshot, selected)
+        if (group / PROJECT_FILE).exists() or (group / PROJECT_FILE).is_symlink():
+            raise SkillError("This group contains a whole project. Manage it as an entire project.")
+        return install_skills(root, snapshot, paths)
+
+
+def install_skills(root: Path, snapshot, paths: list[str] | None) -> list[Path]:
     selected, scopes = snapshot.select(paths)
     group = directory(root, [snapshot.source.owner, snapshot.source.repo])
     for parent in (root, group.parent, group):
@@ -117,6 +141,7 @@ def main(argv: list[str]) -> int:
     source.add_argument("--archive", help="Local .zip or .skill package path")
     parser.add_argument("--path", nargs="+", help="Source-relative skill paths or parent directories")
     parser.add_argument("--ref", help="Branch, tag, or full commit SHA (default: repository default branch)")
+    parser.add_argument("--whole-project", action="store_true", help="Keep all project files; --path selects enabled skill entries")
     args = parser.parse_args(argv)
     try:
         root = skill_home()
@@ -124,7 +149,7 @@ def main(argv: list[str]) -> int:
             raise SkillError("--ref cannot be used with a local archive.")
         source = archive(args.archive) if args.archive else repository(parse_source(args.repo or args.url, args.ref))
         with source as snapshot:
-            targets = install(root, snapshot, args.path)
+            targets = install(root, snapshot, args.path, args.whole_project)
         for target in targets:
             print(f"Installed {target.name}: {target}")
         return 0

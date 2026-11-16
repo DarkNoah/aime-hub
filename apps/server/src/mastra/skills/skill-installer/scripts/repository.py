@@ -77,10 +77,20 @@ def directory(root: Path, parts: list[str], create: bool = False) -> Path:
 
 
 def installed(root: Path) -> list[dict]:
+    from project import read_project
+
     result = []
     if not root.exists():
         return result
     def visit(folder: Path):
+        if len(folder.relative_to(root).parts) == 2:
+            project = read_project(folder)
+            if project is not None:
+                for entry in project["entries"]:
+                    target = folder / project["root"] / PurePosixPath(entry["path"]).parent
+                    result.append({"name": entry["name"], "path": str(target.relative_to(root)),
+                                   "installed": True, "projectRoot": str((folder / project["root"]).relative_to(root))})
+                return
         manifest = folder / "SKILL.md"
         if manifest.is_file() and not manifest.is_symlink():
             result.append({"name": folder.name, "path": str(folder.relative_to(root)), "installed": True})
@@ -210,6 +220,28 @@ class Snapshot:
         suffix = self.ref + ("/" + scope if scope else "")
         return {"url": f"{self.source.url}/{kind}/{quote(suffix, safe='/')}", "ref": self.ref, "scope": scope,
                 "installation": installation}
+
+    def select_project(self, paths: list[str] | None) -> list[dict]:
+        """Select enabled entries without changing the complete project's file boundary."""
+        candidates = self.candidates()
+        top = [skill for skill in candidates if not any(
+            other["manifest"] != skill["manifest"] and
+            (not other["path"] or skill["manifest"].startswith(other["path"] + "/"))
+            for other in candidates)]
+        if not top:
+            raise SkillError("No SKILL.md was found in the project.")
+        if not paths:
+            return top
+        scopes = list(dict.fromkeys(safe_path(path, True) for path in paths))
+        selected = {}
+        for scope in scopes:
+            matches = [skill for skill in top if not scope or skill["path"] == scope
+                       or skill["manifest"] == scope or skill["manifest"].startswith(scope + "/")]
+            if not matches:
+                raise SkillError(f"No independent skill entry was found at: {scope or '.'}")
+            for skill in matches:
+                selected[skill["manifest"]] = skill
+        return list(selected.values())
 
     def copy(self, skill: dict, target: Path):
         prefix = skill["path"] + "/" if skill["path"] else ""

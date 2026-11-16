@@ -48,7 +48,7 @@ function createSkillRouter(
       skills(context.userId).updateGroup(input.body.group, input.body.source),
     ),
     scan: p.scan.handler(({ context, input, signal }) =>
-      skills(context.userId).scan(input.body.url, signal),
+      skills(context.userId).scan(input.body.url, signal, input.body.mode),
     ),
     discard: p.discard.handler(({ context, input }) =>
       skills(context.userId).discard(input.params.id),

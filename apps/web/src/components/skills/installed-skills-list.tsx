@@ -66,6 +66,7 @@ export function InstalledSkillsList(props: Props) {
       : skills;
     if (!visibleSkills.length) return null;
     const repositoryUrl = skillGroupRepositoryUrl(group);
+    const projectRoot = skills.find((skill) => skill.projectRoot)?.projectRoot;
     const label = group.startsWith('@local/')
       ? t('skills.archiveGroup', { name: group.slice('@local/'.length) })
       : group || t('skills.localGroup');
@@ -76,6 +77,11 @@ export function InstalledSkillsList(props: Props) {
           aria-hidden="true"
         />
         <span className="min-w-0 break-all">{label}</span>
+        {projectRoot ? (
+          <Badge variant="secondary" className="shrink-0">
+            {t('skills.wholeProject')}
+          </Badge>
+        ) : null}
         <span className="ml-auto text-xs tabular-nums text-muted-foreground">
           {skills.length}
         </span>
@@ -148,8 +154,18 @@ export function InstalledSkillsList(props: Props) {
                   variant="ghost"
                   size="icon"
                   disabled={props.disabled}
-                  aria-label={t('skills.removeGroupNamed', { name: group })}
-                  title={t('skills.removeGroupNamed', { name: group })}
+                  aria-label={t(
+                    projectRoot
+                      ? 'skills.removeProjectNamed'
+                      : 'skills.removeGroupNamed',
+                    { name: group },
+                  )}
+                  title={t(
+                    projectRoot
+                      ? 'skills.removeProjectNamed'
+                      : 'skills.removeGroupNamed',
+                    { name: group },
+                  )}
                   onClick={() => props.onRemoveGroup(group)}
                 >
                   <Trash2 className="text-muted-foreground" />
@@ -158,6 +174,11 @@ export function InstalledSkillsList(props: Props) {
             ) : null}
           </div>
           <CollapsibleContent>
+            {projectRoot ? (
+              <p className="break-all border-b px-4 py-2 font-mono text-xs text-muted-foreground sm:px-5">
+                {t('skills.projectRoot', { path: projectRoot })}
+              </p>
+            ) : null}
             <div className="divide-y">
               {visibleSkills.map((skill) => (
                 <article
@@ -233,18 +254,20 @@ export function InstalledSkillsList(props: Props) {
                       >
                         <Pencil className="text-muted-foreground" />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="relative z-10"
-                        disabled={!skill.path || props.disabled}
-                        aria-label={t('skills.removeNamed', {
-                          name: skill.name,
-                        })}
-                        onClick={() => props.onRemove(skill)}
-                      >
-                        <Trash2 className="text-muted-foreground" />
-                      </Button>
+                      {!skill.projectRoot ? (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="relative z-10"
+                          disabled={!skill.path || props.disabled}
+                          aria-label={t('skills.removeNamed', {
+                            name: skill.name,
+                          })}
+                          onClick={() => props.onRemove(skill)}
+                        >
+                          <Trash2 className="text-muted-foreground" />
+                        </Button>
+                      ) : null}
                     </>
                   ) : null}
                 </article>

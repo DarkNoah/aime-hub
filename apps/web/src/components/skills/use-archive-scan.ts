@@ -6,6 +6,7 @@ import {
   skillErrorKey,
   uploadSkillArchive,
   type SkillScope,
+  type SkillImportMode,
 } from './api';
 
 type ArchiveState = {
@@ -34,7 +35,10 @@ export function useArchiveScan(scope: SkillScope) {
     release();
     setState({ loading: false });
   };
-  async function upload(file: File): Promise<TranslationKey | undefined> {
+  async function upload(
+    file: File,
+    mode: SkillImportMode = 'skills',
+  ): Promise<TranslationKey | undefined> {
     release();
     const request = {
       controller: new AbortController(),
@@ -47,6 +51,7 @@ export function useArchiveScan(scope: SkillScope) {
         scope,
         file,
         request.controller.signal,
+        mode,
       );
       if (request.controller.signal.aborted || current.current !== request) {
         void client.discard({ params: { id: scan.id } }).catch(() => {});

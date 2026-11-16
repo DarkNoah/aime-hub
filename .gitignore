@@ -124,3 +124,8 @@ plugins/vibe-quant/**/__pycache__/
 !apps/server/src/modules/plugins/tool-display.test.ts
 !scripts/chat-tool-group-pages.test.ts
 !scripts/chat-tool-groups-browser.test.mjs
+!scripts/skill-projects.test.ts
+!scripts/skill-installer-projects.test.ts
+!scripts/skill-projects-browser.test.mjs
+!apps/server/src/modules/threads/project-skills.test.ts
+!apps/server/src/mastra/skills/skill-installer/scripts/project.py

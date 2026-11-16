@@ -8,6 +8,7 @@ import sys
 
 from repository import SkillError, directory, handle_termination, installed, parse_source, repository, skill_home
 from archive import archive
+from project import PROJECT_FILE, PROJECT_ROOT, project_snapshot, read_project
 
 
 def main(argv: list[str]) -> int:
@@ -20,6 +21,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--ref", help="Branch, tag, or full commit SHA")
     parser.add_argument("--format", choices=["text", "json"], default="text")
     parser.add_argument("--preview", action="store_true", help="Read one selected SKILL.md without installing")
+    parser.add_argument("--whole-project", action="store_true", help="List project entries while preserving the complete source tree")
     args = parser.parse_args(argv)
     try:
         root = skill_home()
@@ -28,7 +30,9 @@ def main(argv: list[str]) -> int:
                 raise SkillError("--ref cannot be used with a local archive.")
             source = archive(args.archive) if args.archive else repository(parse_source(args.repo or args.url, args.ref))
             with source as snapshot:
-                rows, _ = snapshot.select(args.path)
+                if args.whole_project:
+                    snapshot = project_snapshot(snapshot)
+                rows = snapshot.select_project(args.path) if args.whole_project else snapshot.select(args.path)[0]
                 if args.preview:
                     if len(rows) != 1:
                         raise SkillError("Preview requires a path selecting exactly one skill.")
@@ -36,14 +40,20 @@ def main(argv: list[str]) -> int:
                     print(snapshot.read(file).decode("utf-8"))
                     return 0
                 group = directory(root, [snapshot.source.owner, snapshot.source.repo])
+                project = read_project(group)
                 for row in rows:
-                    target = group / row["name"]
+                    target = group / PROJECT_ROOT / row["path"] if args.whole_project else group / row["name"]
                     row["destination"] = str(target)
-                    row["installed"] = target.is_dir() and not target.is_symlink() and (target / "SKILL.md").is_file()
-                    row["conflict"] = target.exists() or target.is_symlink()
+                    if args.whole_project:
+                        row["projectRoot"] = str(group / PROJECT_ROOT)
+                        row["installed"] = project is not None and any(entry["path"] == row["manifest"] for entry in project["entries"])
+                        row["conflict"] = group.exists() or group.is_symlink()
+                    else:
+                        row["installed"] = project is None and target.is_dir() and not target.is_symlink() and (target / "SKILL.md").is_file()
+                        row["conflict"] = (group / PROJECT_FILE).exists() or target.exists() or target.is_symlink()
         else:
-            if args.path or args.ref or args.preview:
-                raise SkillError("--path, --ref and --preview require a source.")
+            if args.path or args.ref or args.preview or args.whole_project:
+                raise SkillError("--path, --ref, --preview and --whole-project require a source.")
             rows = installed(root)
         if args.format == "json":
             print(json.dumps(rows, ensure_ascii=False, indent=2))

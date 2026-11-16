@@ -6,15 +6,20 @@ import {
   isSkillSourceInput,
   skillErrorKey,
   type SkillScope,
+  type SkillImportMode,
 } from './api';
 
-export function useRepositoryScan(scope: SkillScope, enabled = true) {
+export function useRepositoryScan(
+  scope: SkillScope,
+  enabled = true,
+  mode: SkillImportMode = 'skills',
+) {
   const client = getSkillApi(scope);
   const [input, setInput] = useState('');
   const [revision, setRevision] = useState(0);
   const url = input.trim();
   const valid = isSkillSourceInput(url);
-  const key = JSON.stringify([url, revision, enabled]);
+  const key = JSON.stringify([url, revision, enabled, mode]);
   const [result, setResult] = useState<{
     key: string;
     data?: SkillScan;
@@ -28,27 +33,29 @@ export function useRepositoryScan(scope: SkillScope, enabled = true) {
       void client.discard({ params: { id } }).catch(() => {});
     };
     const timer = window.setTimeout(() => {
-      void client.scan({ body: { url } }, { signal: controller.signal }).then(
-        (data) => {
-          if (controller.signal.aborted) {
-            discard(data.id);
-            return;
-          }
-          scanId = data.id;
-          setResult({ key, data });
-        },
-        (error: unknown) => {
-          if (!controller.signal.aborted)
-            setResult({ key, error: skillErrorKey(error) });
-        },
-      );
+      void client
+        .scan({ body: { url, mode } }, { signal: controller.signal })
+        .then(
+          (data) => {
+            if (controller.signal.aborted) {
+              discard(data.id);
+              return;
+            }
+            scanId = data.id;
+            setResult({ key, data });
+          },
+          (error: unknown) => {
+            if (!controller.signal.aborted)
+              setResult({ key, error: skillErrorKey(error) });
+          },
+        );
     }, 700);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
       if (scanId) discard(scanId);
     };
-  }, [client, url, valid, key, enabled]);
+  }, [client, url, valid, key, enabled, mode]);
 
   return {
     input,

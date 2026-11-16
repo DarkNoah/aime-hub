@@ -15,6 +15,13 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Sheet,
@@ -23,7 +30,12 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { LoadingState } from '@/components/loading-state';
-import { getSkillApi, skillErrorKey, type SkillScope } from './api';
+import {
+  getSkillApi,
+  skillErrorKey,
+  type SkillScope,
+  type SkillImportMode,
+} from './api';
 import {
   selectableSkills,
   selectionState,
@@ -46,8 +58,10 @@ export function ImportSkillsSheet({
 }) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<'github' | 'archive'>('github');
-  const repository = useRepositoryScan(scope, mode === 'github');
+  const [importMode, setImportMode] = useState<SkillImportMode>('skills');
+  const repository = useRepositoryScan(scope, mode === 'github', importMode);
   const archive = useArchiveScan(scope);
+  const archiveFile = useRef<File | undefined>(undefined);
   const source = mode === 'github' ? repository : archive;
   const client = getSkillApi(scope);
   const [search, setSearch] = useState('');
@@ -76,15 +90,32 @@ export function ImportSkillsSheet({
     )
       return;
     archive.clearScan();
+    archiveFile.current = undefined;
     repository.clearScan();
     repository.rescan();
     setSearch('');
     setMode(value);
   }
-  async function upload(file: File) {
-    if (submitting.current) return;
+  function changeImportMode(value: string) {
+    if (
+      submitting.current ||
+      value === importMode ||
+      (value !== 'skills' && value !== 'project')
+    )
+      return;
+    archive.clearScan();
+    repository.clearScan();
+    repository.rescan();
     setSearch('');
-    const error = await archive.upload(file);
+    setImportMode(value);
+    if (mode === 'archive' && archiveFile.current)
+      void upload(archiveFile.current, value);
+  }
+  async function upload(file: File, selectedMode = importMode) {
+    if (submitting.current) return;
+    archiveFile.current = file;
+    setSearch('');
+    const error = await archive.upload(file, selectedMode);
     if (error) toast.error(t(error));
   }
   function select(skills: RepositorySkill[], checked: boolean) {
@@ -102,7 +133,14 @@ export function ImportSkillsSheet({
         body: { scanId: scan.id, paths: [...selected] },
       });
       onInstalled(installed);
-      toast.success(t('skills.installSuccess', { count: installed.length }));
+      toast.success(
+        t(
+          importMode === 'project'
+            ? 'skills.projectInstallSuccess'
+            : 'skills.installSuccess',
+          { count: installed.length },
+        ),
+      );
       onClose();
     } catch (error) {
       source.clearScan();
@@ -131,6 +169,45 @@ export function ImportSkillsSheet({
           <SheetDescription>{t('skills.importHint')}</SheetDescription>
         </div>
         <div className="space-y-3 border-b px-5 py-4 sm:px-6">
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label htmlFor="skill-import-mode">
+                {t('skills.importMode')}
+              </Label>
+              <Select
+                value={importMode}
+                onValueChange={changeImportMode}
+                disabled={pending}
+              >
+                <SelectTrigger
+                  id="skill-import-mode"
+                  aria-label={t('skills.importMode')}
+                  aria-describedby="skill-import-mode-hint"
+                  className="w-44"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="skills">
+                    {t('skills.importBySkill')}
+                  </SelectItem>
+                  <SelectItem value="project">
+                    {t('skills.importWholeProject')}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <p
+              id="skill-import-mode-hint"
+              className="text-xs leading-5 text-muted-foreground"
+            >
+              {t(
+                importMode === 'project'
+                  ? 'skills.projectImportHint'
+                  : 'skills.bySkillImportHint',
+              )}
+            </p>
+          </div>
           <Tabs value={mode} onValueChange={changeMode}>
             <TabsList className="w-full">
               <TabsTrigger value="github" disabled={pending}>
@@ -188,7 +265,11 @@ export function ImportSkillsSheet({
                   id="skill-source-hint"
                   className="text-xs leading-5 text-muted-foreground"
                 >
-                  {t('skills.sourceHint')}
+                  {t(
+                    importMode === 'project'
+                      ? 'skills.projectSourceHint'
+                      : 'skills.sourceHint',
+                  )}
                 </p>
               </form>
             </TabsContent>
@@ -198,7 +279,10 @@ export function ImportSkillsSheet({
                 loading={archive.loading}
                 disabled={pending}
                 onFile={(file) => void upload(file)}
-                onCancel={archive.clearScan}
+                onCancel={() => {
+                  archiveFile.current = undefined;
+                  archive.clearScan();
+                }}
               />
             </TabsContent>
           </Tabs>
@@ -268,6 +352,31 @@ export function ImportSkillsSheet({
           viewportProps={{ 'aria-busy': source.loading }}
         >
           <div className="px-3 py-4 sm:px-4">
+            {scan?.project ? (
+              <div className="mb-3 space-y-1.5 rounded-md bg-muted/50 p-3 text-xs">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">{t('skills.wholeProject')}</Badge>
+                  <span>
+                    {t('skills.projectFiles', {
+                      count: scan.project.fileCount,
+                    })}
+                  </span>
+                </div>
+                <p className="break-all text-muted-foreground">
+                  {t('skills.projectRoot', { path: scan.project.destination })}
+                </p>
+                <p className="text-muted-foreground">
+                  {t('skills.projectEntryHint')}
+                </p>
+                {scan.project.skippedFiles > 0 ? (
+                  <p className="text-muted-foreground">
+                    {t('skills.skippedFiles', {
+                      count: scan.project.skippedFiles,
+                    })}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             {source.loading ? (
               <LoadingState
                 label={t(
@@ -307,9 +416,11 @@ export function ImportSkillsSheet({
                 </p>
                 <p className="mx-auto max-w-sm text-xs leading-5 text-muted-foreground">
                   {t(
-                    mode === 'archive'
-                      ? 'skills.archiveStructureHint'
-                      : 'skills.scanHint',
+                    importMode === 'project'
+                      ? 'skills.projectEntryHint'
+                      : mode === 'archive'
+                        ? 'skills.archiveStructureHint'
+                        : 'skills.scanHint',
                   )}
                 </p>
               </div>
@@ -318,7 +429,12 @@ export function ImportSkillsSheet({
         </ScrollArea>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-card px-5 py-4 sm:px-6">
           <span className="text-sm text-muted-foreground" role="status">
-            {t('skills.selected', { count: selected.size })}
+            {t(
+              importMode === 'project'
+                ? 'skills.projectEntriesSelected'
+                : 'skills.selected',
+              { count: selected.size },
+            )}
           </span>
           <div className="flex gap-2">
             <Button variant="outline" disabled={pending} onClick={onClose}>
@@ -329,7 +445,13 @@ export function ImportSkillsSheet({
               onClick={() => void install()}
             >
               {pending ? <Loader2 className="animate-spin" /> : <Download />}
-              {t(pending ? 'skills.installing' : 'skills.install')}
+              {t(
+                pending
+                  ? 'skills.installing'
+                  : importMode === 'project'
+                    ? 'skills.importProject'
+                    : 'skills.install',
+              )}
             </Button>
           </div>
         </div>
