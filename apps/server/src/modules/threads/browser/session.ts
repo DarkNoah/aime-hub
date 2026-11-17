@@ -17,6 +17,7 @@ export function createBrowserDriver(threadId: string, owner: UserBrowser) {
   return {
     browser,
     dispose: () => browser.release(),
+    withActivity: <T>(work: () => Promise<T>) => owner.withActivity(work),
     async action(action: BrowserAction) {
       if (action.kind === 'close') {
         await browser.closeThreadSession(threadId);
@@ -78,6 +79,7 @@ export type BrowserDriver = {
   action(action: BrowserAction): Promise<void>;
   capture(): Promise<BrowserFrame>;
   dispose?(): Promise<void>;
+  withActivity?<T>(work: () => Promise<T>): Promise<T>;
 };
 
 /** One CDP stream per thread, independent of the number of viewers or chat sessions. */
@@ -303,14 +305,19 @@ export class ThreadBrowserSession {
         });
       return this.closing;
     }
-    await this.serial(async () => {
-      if (this.disposed) throw new ThreadError('BROWSER_NOT_RUNNING', 409);
-      await browserOperation(
-        'browser input',
-        this.driver.action(action),
-        20_000,
-      );
-    });
+    const input = () =>
+      this.serial(async () => {
+        if (this.disposed) throw new ThreadError('BROWSER_NOT_RUNNING', 409);
+        await browserOperation(
+          'browser input',
+          this.driver.action(action),
+          20_000,
+        );
+      });
+    // Include time queued behind preview work, without keeping passive viewers alive.
+    await (this.driver.withActivity
+      ? this.driver.withActivity(input)
+      : input());
     // Input must not wait for another screenshot or state query.
     if (!['mouse', 'keyboard', 'text'].includes(action.kind))
       void this.refresh();

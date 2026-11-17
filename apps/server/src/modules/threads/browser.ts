@@ -204,18 +204,19 @@ export class ThreadBrowser extends AgentBrowser {
     for (const [name, tool] of Object.entries(tools)) {
       if (name === BROWSER_TOOLS.CLOSE || !tool.execute) continue;
       const execute = tool.execute;
-      tool.execute = (input, context) => {
-        const generation = this.owner.generation;
-        const next = this.pending
-          .catch(() => {})
-          .then(() => {
-            if (generation !== this.owner.generation || this.released)
-              throw new Error('Browser closed');
-            return execute(input, context);
-          });
-        this.pending = next;
-        return next;
-      };
+      tool.execute = (input, context) =>
+        this.owner.withActivity(async () => {
+          const generation = this.owner.generation;
+          const next = this.pending
+            .catch(() => {})
+            .then(() => {
+              if (generation !== this.owner.generation || this.released)
+                throw new Error('Browser closed');
+              return execute(input, context);
+            });
+          this.pending = next;
+          return next;
+        });
     }
     return tools;
   }

@@ -126,7 +126,7 @@ createRoot(document.getElementById('root')).render(<SessionContext.Provider valu
   assert.equal(await page.locator('[data-chat-tool-group="history-tools"]').count(),1,'hiding reasoning must not remove historical tool groups');
   const firstToggle=first.locator('button[aria-expanded]').first();
   const statusBadges=firstToggle.locator('[data-tool-group-status]');
-  assert.deepEqual(await statusBadges.allTextContents(),['成功22','失败0','运行中0']);
+  assert.deepEqual(await statusBadges.allTextContents(),['成功22']);
   assert.deepEqual(await page.evaluate(()=>window.badgeAnimations),[],'initial counts do not animate');
   assert.equal(await firstToggle.getAttribute('aria-expanded'),'false');
   assert.ok((await firstToggle.boundingBox()).height>=44,'group headers keep a usable touch target');
@@ -135,7 +135,7 @@ createRoot(document.getElementById('root')).render(<SessionContext.Provider valu
   await firstToggle.focus();
   await firstToggle.press('Enter');
   await first.getByText('step_19',{exact:true}).waitFor();
-  assert.deepEqual(await statusBadges.allTextContents(),['成功22','失败0','运行中0'],'counts cover the entire group before the next detail page is loaded');
+  assert.deepEqual(await statusBadges.allTextContents(),['成功22'],'counts cover the entire group before the next detail page is loaded');
   assert.equal(await firstToggle.getAttribute('aria-expanded'),'true');
   assert.equal(await firstToggle.evaluate(trigger=>{
     const controls=trigger.getAttribute('aria-controls');
@@ -190,9 +190,10 @@ createRoot(document.getElementById('root')).render(<SessionContext.Provider valu
       statusCounts,
       state:statusCounts.running?'running':statusCounts.failed?'failed':'completed',
     }),statusCounts);
-    await page.waitForFunction(statusCounts=>Object.entries(statusCounts).every(([status,count])=>
-      document.querySelector('[data-chat-tool-group="first"] [data-tool-group-status="'+status+'"]')?.textContent.endsWith(String(count))
-    ),statusCounts);
+    await page.waitForFunction(statusCounts=>Object.entries(statusCounts).every(([status,count])=>{
+      const badge=document.querySelector('[data-chat-tool-group="first"] [data-tool-group-status="'+status+'"]');
+      return count===0?!badge:badge?.textContent.endsWith(String(count));
+    }),statusCounts);
   };
   await updateCounts({success:22,failed:0,running:1});
   await page.waitForFunction(()=>window.badgeAnimations.length===1);
@@ -206,6 +207,7 @@ createRoot(document.getElementById('root')).render(<SessionContext.Provider valu
   await page.waitForFunction(()=>window.badgeAnimations.length===4);
   assert.deepEqual(await page.evaluate(()=>window.badgeAnimations),['running','running','failed','success'],'only increasing counts animate, including rapid successive additions');
   await updateCounts({success:22,failed:0,running:0});
+  assert.deepEqual(await statusBadges.allTextContents(),['成功22'],'badges disappear when their counts return to zero');
   await page.waitForTimeout(280);
   assert.equal(await page.evaluate(()=>window.badgeAnimations.length),4,'decreasing counts do not animate');
   await page.emulateMedia({reducedMotion:'reduce'});

@@ -15,6 +15,8 @@ import { recoverBrowserProfileLock } from './profile-lock.js';
 import { browserProxy } from './proxy.js';
 import { browserOperation } from './operation.js';
 
+const BROWSER_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+
 /** One persistent Chromium context per user and scope, outside chat workspaces. */
 export class UserBrowser {
   private context?: BrowserContext;
@@ -23,6 +25,8 @@ export class UserBrowser {
   private closedListeners = new Set<() => Promise<void>>();
   private epoch = 0;
   private closing?: Promise<void>;
+  private idleTimer?: ReturnType<typeof setTimeout>;
+  private activeOperations = new Set<symbol>();
   readonly directory: string;
 
   constructor(
@@ -66,6 +70,40 @@ export class UserBrowser {
     const next = this.pending.catch(() => {}).then(work);
     this.pending = next;
     return next;
+  }
+
+  private clearIdleTimer() {
+    clearTimeout(this.idleTimer);
+    this.idleTimer = undefined;
+  }
+
+  private scheduleIdleClose() {
+    this.clearIdleTimer();
+    if (!this.context || this.closing || this.activeOperations.size) return;
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = undefined;
+      void this.close().catch((error: unknown) => {
+        console.warn(
+          'Could not close idle browser',
+          error instanceof Error ? error.message : 'Unknown error',
+        );
+      });
+    }, BROWSER_IDLE_TIMEOUT_MS);
+    this.idleTimer.unref();
+  }
+
+  /** Only requested browser operations count as use; state/preview polling does not. */
+  async withActivity<T>(work: () => Promise<T>): Promise<T> {
+    if (this.closing) throw new Error('Browser closed');
+    const operation = Symbol();
+    this.activeOperations.add(operation);
+    this.clearIdleTimer();
+    try {
+      return await work();
+    } finally {
+      // Closing clears these tokens, so late operations cannot affect a new browser.
+      if (this.activeOperations.delete(operation)) this.scheduleIdleClose();
+    }
   }
 
   private async launch() {
@@ -117,6 +155,8 @@ export class UserBrowser {
       context.once('close', () => {
         if (this.context !== context) return;
         this.context = undefined;
+        this.clearIdleTimer();
+        this.activeOperations.clear();
         this.epoch++;
         this.managers.clear();
         // Explicit close already notified listeners before asking Chromium to
@@ -145,6 +185,7 @@ export class UserBrowser {
         this.managers.set(threadId, manager);
       }
       if (!manager.isLaunched()) await manager.newTab();
+      this.scheduleIdleClose();
       return manager;
     });
   }
@@ -161,6 +202,8 @@ export class UserBrowser {
 
   close() {
     if (this.closing) return this.closing;
+    this.clearIdleTimer();
+    this.activeOperations.clear();
     this.epoch++;
     this.closing = this.serial(async () => {
       const context = this.context;
@@ -210,6 +253,8 @@ export class UserBrowser {
       }
     }).finally(() => {
       this.closing = undefined;
+      // A failed shutdown retains the context; retry after another idle interval.
+      this.scheduleIdleClose();
     });
     return this.closing;
   }

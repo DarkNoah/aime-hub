@@ -73,6 +73,8 @@ function ToolGroupStatusBadge({
     return () => animation?.cancel();
   }, [count]);
 
+  if (count === 0) return null;
+
   return (
     <Badge
       ref={badge}
@@ -80,20 +82,16 @@ function ToolGroupStatusBadge({
       data-tool-group-status={status}
       className={cn(
         'gap-1 font-normal motion-reduce:transition-none',
-        count === 0
-          ? 'text-muted-foreground'
-          : status === 'success'
-            ? 'bg-primary/10 text-primary'
-            : status === 'failed'
-              ? 'bg-destructive/10 text-destructive'
-              : 'bg-blue-500/10 text-blue-700 dark:text-blue-300',
+        status === 'success'
+          ? 'bg-primary/10 text-primary'
+          : status === 'failed'
+            ? 'bg-destructive/10 text-destructive'
+            : 'bg-blue-500/10 text-blue-700 dark:text-blue-300',
       )}
     >
       <Icon
         className={cn(
-          status === 'running' &&
-            count > 0 &&
-            'animate-spin motion-reduce:animate-none',
+          status === 'running' && 'animate-spin motion-reduce:animate-none',
         )}
         aria-hidden
       />
@@ -211,7 +209,7 @@ export const ChatToolGroupRow = memo(function ChatToolGroupRow({
             ? t('chat.toolGroup', { count: group.count })
             : t(group.reasoningOnly ? 'chat.reasoning' : 'chat.turns.details')}
         </span>
-        {/* Keep zero-count badges mounted so the first tool added to reasoning animates. */}
+        {/* Keep status components mounted so a count rising from zero animates. */}
         <span
           className={cn(
             'col-span-2 col-start-1 row-start-2 flex-wrap justify-end gap-1.5 justify-self-end @[30rem]/tool-group:col-span-1 @[30rem]/tool-group:col-start-3 @[30rem]/tool-group:row-start-1',
