@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
+import { imageSize } from 'image-size';
 import { ThreadBrowsers } from './browser/registry.js';
 import { ThreadBrowserSession, type BrowserDriver } from './browser/session.js';
 import type { BrowserExecBinding } from './browser/exec-actions.js';
 import { chatBrowserLaunchOptions } from './browser/user-browser.js';
+import type { ThreadBrowser } from './browser.js';
 
 test('chat Chromium defaults to headless in development and headed in production', () => {
   const launcher = '/usr/local/bin/chat-chromium-xvfb';
@@ -254,6 +256,79 @@ test(
       await browsers.execForThread('first', 'another', 'project')('tabs', {}),
       [],
     );
+
+    const resize = { kind: 'resize', width: 580, height: 840 } as const;
+    const viewport = { script: '[window.innerWidth, window.innerHeight]' };
+    await first('newTab', { url: pageUrl('before resize') });
+    const initialFrame = deferred<void>();
+    const resizedFrame = deferred<string>();
+    const animatedFrame = deferred<string>();
+    let animating = false;
+    const stop = live.subscribe((event) => {
+      if (event.type !== 'frame') return;
+      initialFrame.resolve();
+      if (
+        event.frame.viewport.width === resize.width &&
+        event.frame.viewport.height === resize.height
+      ) {
+        resizedFrame.resolve(event.frame.data);
+        if (animating && 'pageScaleFactor' in event.frame.viewport)
+          animatedFrame.resolve(event.frame.data);
+      }
+    });
+    try {
+      await initialFrame.promise;
+      await live.action(resize);
+      const still = imageSize(
+        Buffer.from(await resizedFrame.promise, 'base64'),
+      );
+      assert.equal(still.type, 'jpg');
+      assert.ok(
+        Math.abs(still.width / still.height - resize.width / resize.height) <
+          0.01,
+      );
+      assert.deepEqual(await first('evaluate', viewport), [580, 840]);
+      const png = String(await first('screenshot', {}));
+      const { width, height } = imageSize(
+        Buffer.from(png.split(',')[1]!, 'base64'),
+      );
+      assert.deepEqual([width, height], [580, 840]);
+      await first('evaluate', {
+        script: "document.body.style.minHeight = '1400px'; true",
+      });
+      const full = String(await first('screenshot', { fullPage: true }));
+      assert.ok(
+        imageSize(Buffer.from(full.split(',')[1]!, 'base64')).height >= 1400,
+      );
+      animating = true;
+      await first('evaluate', {
+        script:
+          'document.body.animate([{opacity: 1}, {opacity: 0}], {duration: 400, iterations: Infinity}); true',
+      });
+      const motion = imageSize(
+        Buffer.from(await animatedFrame.promise, 'base64'),
+      );
+      assert.equal(motion.type, 'jpg');
+      assert.ok(motion.height <= 720);
+      assert.ok(
+        Math.abs(motion.width / motion.height - resize.width / resize.height) <
+          0.01,
+      );
+    } finally {
+      stop();
+    }
+    await first('switchTab', { index: 0 });
+    assert.deepEqual(await first('evaluate', viewport), [580, 840]);
+    await first('newTab', { url: pageUrl('after resize') });
+    assert.deepEqual(await first('evaluate', viewport), [580, 840]);
+    const manager = await (live.browser as ThreadBrowser).getManagerForThread();
+    const popup = manager.getPage().waitForEvent('popup');
+    await first('evaluate', { script: 'window.open("about:blank"); true' });
+    await (
+      await popup
+    ).waitForFunction(() => innerWidth === 580 && innerHeight === 840);
+    assert.equal((await live.state()).tabs.length, 4);
+    assert.deepEqual(await second('evaluate', viewport), [1280, 720]);
     await first('close', {});
     assert.deepEqual(await second('tabs', {}), []);
   },

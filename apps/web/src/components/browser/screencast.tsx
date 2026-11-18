@@ -13,20 +13,24 @@ import type { BrowserAction, BrowserFrame } from '@aime/shared/browser';
 import { cn } from '@/lib/utils';
 import type { BrowserResource } from './resource';
 import { browserModifiers, browserPoint } from './coordinates';
+import { observeBrowserViewport } from './viewport';
 
 export function BrowserScreencast({
   resource,
   interactive = false,
+  fitViewport = false,
   onError,
   className,
 }: {
   resource: BrowserResource;
   interactive?: boolean;
+  fitViewport?: boolean;
   onError?: (error: unknown) => void;
   className?: string;
 }) {
   const { t } = useTranslation();
   const state = useSyncExternalStore(resource.subscribe, resource.getSnapshot);
+  const surface = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const viewport = useRef<BrowserFrame['viewport'] | null>(null);
@@ -59,6 +63,13 @@ export function BrowserScreencast({
       .action(action)
       .catch((error: unknown) => errorRef.current?.(error));
   }
+
+  useEffect(() => {
+    if (fitViewport && surface.current)
+      return observeBrowserViewport(surface.current, resource, (error) =>
+        errorRef.current?.(error),
+      );
+  }, [fitViewport, resource]);
 
   useEffect(() => {
     let disposed = false;
@@ -335,6 +346,7 @@ export function BrowserScreencast({
                 : 'browser.loading';
   return (
     <div
+      ref={surface}
       className={cn(
         'relative flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-hidden bg-muted/30',
         className,

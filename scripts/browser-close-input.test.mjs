@@ -48,16 +48,22 @@ import {Toaster} from 'sonner';
 import '/src/index.css';
 const blank = {status:'waiting',url:'',tabs:[],activeTabIndex:0,busy:false};
 const sources = new Set();
-const canvas = document.createElement('canvas');canvas.width=1280;canvas.height=720;
-const ctx = canvas.getContext('2d');ctx.fillStyle='#f5f5f5';ctx.fillRect(0,0,1280,720);
-ctx.fillStyle='#162e24';ctx.font='32px sans-serif';ctx.fillText('Browser interaction fixture',40,60);
-const frame = {data:canvas.toDataURL('image/jpeg').split(',')[1],viewport:{width:1280,height:720}};
+function drawFrame(width,height){
+  const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
+  const ctx=canvas.getContext('2d');ctx.fillStyle='#f5f5f5';ctx.fillRect(0,0,width,height);
+  ctx.fillStyle='#162e24';ctx.font='32px sans-serif';ctx.fillText('Browser interaction fixture',40,60);
+  return {data:canvas.toDataURL('image/jpeg').split(',')[1],viewport:{width,height}};
+}
+let frame = drawFrame(1280,720);
 window.fixture = {
   state:blank,sources,calls:[],failNext:false,holdNext:false,
   emit(type,data){for(const source of sources)source.dispatchEvent(new MessageEvent(type,{data:JSON.stringify(data)}));},
   update(next){this.state={...this.state,...next};this.emit('state',this.state);if(this.state.status==='ready')this.emit('frame',frame);},
   async action(body){
     this.calls.push(body);
+    if(body.kind==='resize'){
+      frame=drawFrame(body.width,body.height);this.emit('frame',frame);
+    }
     if(body.kind==='navigate'){
       if(this.failNext){this.failNext=false;throw new Error('navigation failed');}
       if(this.holdNext){this.holdNext=false;await new Promise(resolve=>this.release=resolve);}
@@ -69,7 +75,7 @@ window.fixture = {
 await initializeI18n();
 createRoot(document.getElementById('root')).render(
   <SessionContext.Provider value={{data:{user:{id:'user'},session:{id:'session'}},isPending:false}}>
-    <div style={{width:'min(100vw, 440px)',height:640}}><BrowserPanel threadId="thread" onClose={()=>{}}/></div><Toaster/>
+    <div style={{width:'min(100vw, 440px)',height:'min(100dvh, 640px)'}}><BrowserPanel threadId="thread" onClose={()=>{}}/></div><Toaster/>
   </SessionContext.Provider>
 );`,
     );
@@ -136,10 +142,13 @@ createRoot(document.getElementById('root')).render(
       name: '输入网址',
       exact: true,
     });
-    const open = page.getByRole('button', { name: '打开网页', exact: true });
     await page.getByText('待启动', { exact: true }).waitFor();
     assert.equal(await address.isEditable(), true);
-    assert.equal(await open.isDisabled(), true);
+    assert.equal(await address.getAttribute('enterkeyhint'), 'go');
+    assert.equal(
+      await page.getByRole('button', { name: '打开网页', exact: true }).count(),
+      0,
+    );
     assert.equal(
       await page
         .getByRole('button', { name: '刷新网页', exact: true })
@@ -151,9 +160,24 @@ createRoot(document.getElementById('root')).render(
     await page.getByText('请输入有效的浏览器地址。', { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => window.fixture.calls.length), 0);
     await address.fill('example.com');
+    await address.evaluate((input) => {
+      const key = { key: 'Enter', isComposing: true, bubbles: true };
+      input.dispatchEvent(new KeyboardEvent('keydown', key));
+      input.form.requestSubmit();
+      input.dispatchEvent(new KeyboardEvent('keyup', key));
+    });
+    assert.equal(await page.evaluate(() => window.fixture.calls.length), 0);
     await address.press('Enter');
     await page.getByText('运行中', { exact: true }).waitFor();
     assert.equal(await address.inputValue(), 'https://example.com/');
+    assert.equal(
+      await page.evaluate(
+        () =>
+          window.fixture.calls.filter((call) => call.kind === 'navigate')
+            .length,
+      ),
+      1,
+    );
     const screen = page.getByLabel('浏览器实时画面', { exact: true });
     await screen.waitFor({ state: 'visible' });
     await screen.click();
@@ -168,16 +192,17 @@ createRoot(document.getElementById('root')).render(
       window.fixture.failNext = true;
     });
     await address.fill('https://failed.example/');
-    await open.click();
+    await address.press('Enter');
     await page.getByText('浏览器操作失败，请重试。', { exact: true }).waitFor();
     assert.equal(await address.inputValue(), 'https://failed.example/');
     assert.equal(await address.isEditable(), true);
     await page.evaluate(() => {
       window.fixture.holdNext = true;
     });
-    await open.click();
+    await address.press('Enter');
     await page.getByText('正在打开…', { exact: true }).waitFor();
-    assert.equal(await open.isDisabled(), true);
+    assert.equal(await address.isEditable(), false);
+    assert.equal(await address.getAttribute('aria-busy'), 'true');
     await page.evaluate(() => window.fixture.release());
     await page.waitForFunction(
       () => document.querySelector('input').readOnly === false,
@@ -194,13 +219,12 @@ createRoot(document.getElementById('root')).render(
     await page.getByText('已关闭', { exact: true }).waitFor();
     await page.getByRole('switch', { name: '允许交互' }).click();
     await address.fill('chrome://version');
-    await open.click();
+    await address.press('Enter');
     await page.getByText('运行中', { exact: true }).waitFor();
     assert.equal(await address.inputValue(), 'chrome://version/');
     await page.evaluate(() => window.fixture.update({ busy: true }));
     await page.getByText('Agent 操作中', { exact: true }).waitFor();
     assert.equal(await address.isEditable(), true);
-    assert.equal(await open.isDisabled(), false);
     assert.equal(
       await page.getByRole('switch', { name: '允许交互' }).isDisabled(),
       false,
@@ -253,16 +277,57 @@ createRoot(document.getElementById('root')).render(
     await page.getByRole('switch', { name: '允许交互' }).click();
     assert.equal(await address.isEditable(), false);
     assert.equal(await page.locator('textarea').isDisabled(), true);
+    await page.evaluate(() => {
+      window.fixture.calls = [];
+    });
+    await page.setViewportSize({ width: 330, height: 530 });
+    // Give a read-only panel the same resize and settle time as an interactive one.
+    await page.waitForTimeout(300);
+    assert.equal(
+      await page.evaluate(() =>
+        window.fixture.calls.some((call) => call.kind === 'resize'),
+      ),
+      false,
+    );
     await page.getByRole('switch', { name: '允许交互' }).click();
     assert.equal(await address.isEditable(), true);
     assert.equal(await page.locator('textarea').isDisabled(), false);
     await page.evaluate(() => window.fixture.update({ busy: false }));
     await page.getByText('运行中', { exact: true }).waitFor();
-    for (const width of [360, 900]) {
-      await page.setViewportSize({ width, height: 720 });
+    for (const [width, height] of [
+      [360, 720],
+      [360, 560],
+      [900, 560],
+    ]) {
+      await page.setViewportSize({ width, height });
       await page.waitForFunction(
         () => document.documentElement.scrollWidth <= innerWidth,
       );
+      await page.waitForFunction(() => {
+        const canvas = document.querySelector('canvas');
+        const rect = canvas.getBoundingClientRect();
+        const last = window.fixture.calls
+          .filter((call) => call.kind === 'resize')
+          .at(-1);
+        return (
+          last?.width === Math.round(rect.width) &&
+          last.height === Math.round(rect.height) &&
+          canvas.width === last.width &&
+          canvas.height === last.height
+        );
+      });
+      await page.evaluate(() => {
+        window.fixture.calls = [];
+      });
+      await screen.click({ position: { x: 30, y: 40 } });
+      await page.waitForFunction(() => {
+        const event = window.fixture.calls.findLast(
+          (call) => call.event?.type === 'mousePressed',
+        )?.event;
+        return (
+          event && Math.abs(event.x - 30) <= 1 && Math.abs(event.y - 40) <= 1
+        );
+      });
       if (width === 360 && process.env.BROWSER_PANEL_SCREENSHOT)
         await page.screenshot({
           path: process.env.BROWSER_PANEL_SCREENSHOT.replace(
@@ -279,7 +344,6 @@ createRoot(document.getElementById('root')).render(
       .first()
       .waitFor();
     assert.equal(await address.isEditable(), false);
-    assert.equal(await open.isDisabled(), true);
     assert.deepEqual(errors, []);
   },
 );

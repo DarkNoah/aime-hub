@@ -114,6 +114,10 @@ export function browserExecActions(browser: ThreadBrowser): BrowserExecBinding {
         return tree.replace(/\[ref=(e\d+)\]/g, '@$1');
       }
       case 'screenshot': {
+        if (!args.fullPage) {
+          const frame = await manager.captureViewport('png', signal);
+          return `data:image/png;base64,${frame.data}`;
+        }
         const data = await page.screenshot({
           ...options,
           type: 'png',

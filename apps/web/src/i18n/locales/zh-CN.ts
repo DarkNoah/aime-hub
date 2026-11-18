@@ -1963,7 +1963,6 @@ export const zhCN = {
   'browser.title': '浏览器',
   'browser.screen': '浏览器实时画面',
   'browser.address': '输入网址',
-  'browser.openPage': '打开网页',
   'browser.opening': '正在打开…',
   'browser.back': '后退',
   'browser.forward': '前进',
@@ -1977,9 +1976,8 @@ export const zhCN = {
   'browser.busyHint':
     'Agent 正在运行，你仍可操作网页，与 Agent 使用同一个浏览器。',
   'browser.startChat': '创建聊天后，可在这里输入网址打开网页并交互。',
-  'browser.waitingHint':
-    '在上方输入网址，按回车或点击“打开网页”即可开始，也可以让 Agent 打开网页。',
-  'browser.closedHint': '浏览器已关闭。在上方输入网址可重新打开。',
+  'browser.waitingHint': '在上方输入网址后按回车，也可以让 Agent 打开网页。',
+  'browser.closedHint': '浏览器已关闭。输入网址后按回车可重新打开。',
   'browser.loading': '正在获取画面…',
   'browser.connecting': '正在连接…',
   'browser.connected': '已连接',

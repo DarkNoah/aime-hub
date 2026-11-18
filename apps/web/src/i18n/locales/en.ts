@@ -2153,7 +2153,6 @@ export const en = {
   'browser.title': 'Browser',
   'browser.screen': 'Live browser view',
   'browser.address': 'Enter URL',
-  'browser.openPage': 'Open page',
   'browser.opening': 'Opening…',
   'browser.back': 'Go back',
   'browser.forward': 'Go forward',
@@ -2169,8 +2168,8 @@ export const en = {
     'The Agent is running. You can still interact with the same browser.',
   'browser.startChat': 'Start a chat to open and interact with web pages here.',
   'browser.waitingHint':
-    'Enter a URL above, then press Enter or click Open page. You can also ask the Agent to open a page.',
-  'browser.closedHint': 'Browser closed. Enter a URL above to open it again.',
+    'Type a URL above and press Enter, or ask the Agent to open a page.',
+  'browser.closedHint': 'Browser closed. Type a URL and press Enter to reopen.',
   'browser.loading': 'Loading browser view…',
   'browser.connecting': 'Connecting…',
   'browser.connected': 'Connected',

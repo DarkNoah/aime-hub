@@ -115,7 +115,7 @@ export function createBrowserResource(threadId: string, sessionId: string) {
         frames.delete(listener);
       };
     },
-    action(action: BrowserAction) {
+    action(action: BrowserAction, signal?: AbortSignal) {
       if (action.kind === 'close') {
         if (closing) return closing;
         generation++;
@@ -138,16 +138,19 @@ export function createBrowserResource(threadId: string, sessionId: string) {
       const next = input
         .catch(() => {})
         .then(async () => {
-          if (version !== generation) return;
+          if (version !== generation || signal?.aborted) return;
           const controller = new AbortController();
           inputController = controller;
+          const requestSignal = signal
+            ? AbortSignal.any([signal, controller.signal])
+            : controller.signal;
           try {
             await api.threads.browser.action(
               { params: { threadId }, body: action },
-              { signal: controller.signal },
+              { signal: requestSignal },
             );
           } catch (error) {
-            if (!controller.signal.aborted) throw error;
+            if (!requestSignal.aborted) throw error;
           } finally {
             if (inputController === controller) inputController = undefined;
           }

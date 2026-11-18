@@ -2,7 +2,10 @@ import { z } from 'zod';
 
 const modifiers = z.number().int().min(0).max(15).optional();
 const coordinate = z.number().finite().min(0).max(16384);
+export const browserViewportMaxDimension = 4096;
+const dimension = z.number().int().min(1).max(browserViewportMaxDimension);
 export const browserActionSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('resize'), width: dimension, height: dimension }),
   z.object({
     kind: z.literal('mouse'),
     event: z.object({

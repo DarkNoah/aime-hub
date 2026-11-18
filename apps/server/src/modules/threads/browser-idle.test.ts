@@ -63,6 +63,12 @@ class FakeContext extends EventEmitter {
     this.owned.push(page);
     return page as unknown as Page;
   }
+  async newCDPSession() {
+    return {
+      send: async () => ({ data: Buffer.from('frame').toString('base64') }),
+      detach: async () => {},
+    };
+  }
   async cookies() {
     return [];
   }
@@ -139,6 +145,10 @@ test('unused browsers and listing unopened tabs never launch Chromium', async (t
   const { session } = fake.session(fake.owner());
   await session.exec('tabs', {});
   await session.state();
+  await assert.rejects(
+    session.action({ kind: 'resize', width: 600, height: 415 }),
+    /BROWSER_NOT_RUNNING/,
+  );
   t.mock.timers.tick(idleMs * 2);
   await setImmediate();
   assert.equal(fake.contexts.length, 0);
@@ -181,7 +191,7 @@ test('manual navigation and Agent browser tools both restart the idle countdown'
   await settled(() => context.closed && !owner.isClosing);
 });
 
-test('state reads and frame capture do not keep an idle browser alive', async (t) => {
+test('state reads, panel resizes and frame capture do not keep an idle browser alive', async (t) => {
   const fake = await fixture(t);
   const owner = fake.owner();
   const { session, driver } = fake.session(owner);
@@ -190,7 +200,10 @@ test('state reads and frame capture do not keep an idle browser alive', async (t
 
   t.mock.timers.tick(idleMs - 1);
   assert.equal((await session.state()).status, 'ready');
-  assert.ok((await driver.capture()).data);
+  await session.action({ kind: 'resize', width: 600, height: 415 });
+  const frame = await driver.capture();
+  assert.ok(frame.data);
+  assert.deepEqual(frame.viewport, { width: 600, height: 415 });
   t.mock.timers.tick(1);
   await settled(() => context.closed && !owner.isClosing);
 });

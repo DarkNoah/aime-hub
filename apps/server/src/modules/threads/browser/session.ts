@@ -38,6 +38,8 @@ export function createBrowserDriver(threadId: string, owner: UserBrowser) {
       if (action.kind === 'keyboard')
         return browser.injectKeyboardEvent(action.event, threadId);
       const manager = await browser.getManagerForThread(threadId);
+      if (action.kind === 'resize')
+        return manager.setViewport(action.width, action.height);
       if (action.kind === 'text') {
         // CDP char events accept a single character. insertText supports paste and IME commits.
         await (
@@ -65,14 +67,9 @@ export function createBrowserDriver(threadId: string, owner: UserBrowser) {
       else if (action.kind === 'forward') await page.goForward(options);
     },
     async capture(): Promise<BrowserFrame> {
-      const page = (await browser.getManagerForThread(threadId)).getPage();
-      const viewport = page.viewportSize() ?? { width: 1280, height: 720 };
-      const data = await page.screenshot({
-        type: 'jpeg',
-        quality: 65,
-        timeout: 5000,
-      });
-      return { data: data.toString('base64'), viewport };
+      return (await browser.getManagerForThread(threadId)).captureViewport(
+        'jpeg',
+      );
     },
   };
 }
@@ -349,13 +346,34 @@ export class ThreadBrowserSession {
           this.driver.action(action),
           20_000,
         );
+        const stream = this.stream;
+        if (
+          action.kind === 'resize' &&
+          stream?.isActive() &&
+          this.listeners.size &&
+          (this.lastFrame?.viewport.width !== action.width ||
+            this.lastFrame.viewport.height !== action.height)
+        ) {
+          // A static page may never send another sampled CDP frame after resizing.
+          const frame = await browserOperation(
+            'capture resized browser frame',
+            this.driver.capture(),
+          );
+          if (stream === this.stream && !this.disposed) {
+            clearTimeout(this.frameTimer);
+            this.frameTimer = undefined;
+            this.frameAt = Date.now();
+            this.lastFrame = frame;
+            this.emit({ type: 'frame', frame });
+          }
+        }
       });
     // Include time queued behind preview work, without keeping passive viewers alive.
-    await (this.driver.withActivity
+    await (this.driver.withActivity && action.kind !== 'resize'
       ? this.driver.withActivity(input)
       : input());
     // Input must not wait for another screenshot or state query.
-    if (!['mouse', 'keyboard', 'text'].includes(action.kind))
+    if (!['mouse', 'keyboard', 'text', 'resize'].includes(action.kind))
       void this.refresh();
   }
 

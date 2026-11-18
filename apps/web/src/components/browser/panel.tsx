@@ -98,6 +98,7 @@ function BrowserContent({ threadId }: { threadId: string }) {
   const [pending, setPending] = useState(0);
   const [closing, setClosing] = useState(false);
   const [navigating, setNavigating] = useState(false);
+  const composingAddress = useRef(false);
   const lastError = useRef(0);
   const ready = state.status === 'ready' && state.connection === 'connected';
   const canNavigate =
@@ -177,40 +178,50 @@ function BrowserContent({ threadId }: { threadId: string }) {
         >
           <RotateCw className="size-3.5" />
         </WebPreviewNavigationButton>
-        <WebPreviewUrl
-          value={draft ?? state.url}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
-              event.preventDefault();
-              void navigate();
-            }
+        <form
+          className="relative min-w-0 flex-1"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!composingAddress.current) void navigate();
           }}
-          readOnly={!canNavigate}
-          inputMode="url"
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
-          aria-label={t('browser.address')}
-          placeholder={t('browser.address')}
-          className="h-8 min-w-0 flex-1 text-xs"
-        />
-        <Button
-          size="sm"
-          className="h-8 shrink-0 gap-1 px-2 text-xs"
-          disabled={!canNavigate || !(draft ?? state.url).trim()}
-          aria-label={t('browser.openPage')}
-          aria-busy={navigating}
-          onClick={() => void navigate()}
         >
+          <WebPreviewUrl
+            value={draft ?? state.url}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              composingAddress.current =
+                event.nativeEvent.isComposing || event.keyCode === 229;
+            }}
+            onKeyUp={() => {
+              composingAddress.current = false;
+            }}
+            onBlur={() => {
+              composingAddress.current = false;
+            }}
+            readOnly={!canNavigate}
+            inputMode="url"
+            enterKeyHint="go"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            aria-busy={navigating}
+            aria-label={t('browser.address')}
+            placeholder={t('browser.address')}
+            className="h-8 w-full text-xs aria-busy:pr-8"
+          />
           {navigating && (
-            <LoaderCircle
-              className="size-3.5 animate-spin motion-reduce:animate-none"
-              aria-hidden
-            />
+            <span
+              role="status"
+              className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-muted-foreground"
+            >
+              <LoaderCircle
+                className="size-3.5 animate-spin motion-reduce:animate-none"
+                aria-hidden
+              />
+              <span className="sr-only">{t('browser.opening')}</span>
+            </span>
           )}
-          {t(navigating ? 'browser.opening' : 'browser.openPage')}
-        </Button>
+        </form>
         {state.tabs.length > 1 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -287,6 +298,7 @@ function BrowserContent({ threadId }: { threadId: string }) {
       <BrowserScreencast
         resource={resource}
         interactive={canControl}
+        fitViewport={ready && interactive && !closing}
         onError={report}
       />
       <p className="shrink-0 border-t px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
