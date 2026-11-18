@@ -50,7 +50,7 @@ RUN --mount=type=cache,id=hub-pnpm-store,target=/pnpm/store \
 COPY . .
 RUN --mount=type=cache,id=hub-pnpm-store,target=/pnpm/store \
     NODE_OPTIONS=--max-old-space-size=1536 nice -n 10 pnpm --store-dir=/pnpm/store --child-concurrency=1 install --offline --frozen-lockfile
-RUN NODE_OPTIONS=--max-old-space-size=2048 nice -n 10 pnpm build
+RUN NODE_OPTIONS=--max-old-space-size=4096 nice -n 10 pnpm build
 
 # Export only the installed, lockfile-resolved CLI. Application source changes
 # must not invalidate Chromium's system dependencies and browser download layers.
