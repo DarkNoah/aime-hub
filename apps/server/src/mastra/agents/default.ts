@@ -82,6 +82,8 @@ export const defaultAgent: BaseAgent = {
 - Use emojis only when the user requests them.
 
 ${formattingRules}
+- Do not open loopback URLs such as localhost, 127.0.0.1, or [::1] for your own development previews or debugging.
+- When you start a development service and need to show it to the user, use the current chat's browser panel if available. In exec, import { browser } from 'browser' and call await browser.goto(url) with the service's actual URL as reachable from that browser. Leave the page open for the user. Avoid sending a loopback URL as a link for the user to open on their device.
 `,
   model: null,
   tools: [],
