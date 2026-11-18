@@ -73,7 +73,7 @@ RUN --mount=type=cache,id=hub-apt-bookworm-${TARGETARCH},target=/var/cache/apt,s
     && apt-get install -y --no-install-recommends \
         curl xz-utils fuse3 git ripgrep \
         python3-pip python3-venv python-is-python3 \
-        jq unzip zip procps openssh-client \
+        jq unzip zip procps openssh-client xvfb xauth \
     && python3 -m venv /opt/python \
     && ln -s /usr/local/bin/bun /usr/local/bin/bunx
 ARG AGENTFS_DOWNLOAD_BASE_URL=https://github.com/tursodatabase/agentfs/releases/download
@@ -110,7 +110,9 @@ RUN --mount=type=cache,id=hub-pip-bookworm-${TARGETARCH},target=/root/.cache/pip
       /opt/python/bin/pip wheel --use-pep517 --wheel-dir /opt/plugin-wheels/vibe-quant -r plugins/vibe-quant/worker/requirements.txt; \
     fi
 COPY --from=build /app /app
-ENV PATH="/opt/python/bin:${PATH}"
+COPY --chmod=755 docker/chat-chromium-xvfb.sh /usr/local/bin/chat-chromium-xvfb
+ENV PATH="/opt/python/bin:${PATH}" \
+    CHAT_BROWSER_HEADED_EXECUTABLE=/usr/local/bin/chat-chromium-xvfb
 EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
     CMD node -e "fetch('http://127.0.0.1:3001/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"

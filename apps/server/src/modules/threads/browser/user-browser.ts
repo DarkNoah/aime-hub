@@ -42,6 +42,21 @@ const chatDisabledFeatures = driverDisabledFeatures.filter(
   (feature) => feature !== 'ThirdPartyStoragePartitioning',
 );
 
+export function chatBrowserLaunchOptions(
+  env: NodeJS.ProcessEnv = process.env,
+  platform = process.platform,
+) {
+  const launcher = env.CHAT_BROWSER_HEADED_EXECUTABLE;
+  const displayUnavailable = platform === 'linux' && !env.DISPLAY && !launcher;
+  const headless =
+    env.CHAT_BROWSER_HEADLESS === 'true' ||
+    (env.CHAT_BROWSER_HEADLESS !== 'false' && displayUnavailable);
+  return {
+    headless,
+    executablePath: (!headless && launcher) || chromium.executablePath(),
+  };
+}
+
 /** One persistent Chromium context per user and scope, outside chat workspaces. */
 export class UserBrowser {
   private context?: BrowserContext;
@@ -53,6 +68,7 @@ export class UserBrowser {
   private idleTimer?: ReturnType<typeof setTimeout>;
   private activeOperations = new Set<symbol>();
   readonly directory: string;
+  readonly launchOptions = chatBrowserLaunchOptions();
 
   constructor(
     root: string,
@@ -153,8 +169,7 @@ export class UserBrowser {
         force: true,
       });
     const context = await chromium.launchPersistentContext(profile, {
-      headless: true,
-      executablePath: chromium.executablePath(),
+      ...this.launchOptions,
       viewport: { width: 1280, height: 720 },
       proxy,
       // Use Chromium's default third-party storage partitions for logged-in browsing.

@@ -51,7 +51,7 @@ export class ThreadBrowser extends AgentBrowser {
   ) {
     let manager!: ThreadBrowserManager;
     super({
-      headless: true,
+      headless: owner.launchOptions.headless,
       // Tools and streams route by thread; UserBrowser shares its process within one user/scope.
       scope: 'thread',
       createThreadManager: (config) =>

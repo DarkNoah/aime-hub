@@ -7,6 +7,36 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { ThreadBrowsers } from './browser/registry.js';
 import { ThreadBrowserSession, type BrowserDriver } from './browser/session.js';
 import type { BrowserExecBinding } from './browser/exec-actions.js';
+import { chatBrowserLaunchOptions } from './browser/user-browser.js';
+
+test('chat Chromium selects the container display, native desktop or headless fallback', () => {
+  const launcher = '/usr/local/bin/chat-chromium-xvfb';
+  const containerEnv = { CHAT_BROWSER_HEADED_EXECUTABLE: launcher };
+  const native = chatBrowserLaunchOptions({}, 'linux');
+  assert.equal(native.headless, true);
+  assert.deepEqual(chatBrowserLaunchOptions(containerEnv, 'linux'), {
+    headless: false,
+    executablePath: launcher,
+  });
+  assert.deepEqual(
+    chatBrowserLaunchOptions(
+      { ...containerEnv, CHAT_BROWSER_HEADLESS: 'true' },
+      'linux',
+    ),
+    native,
+  );
+  assert.equal(
+    chatBrowserLaunchOptions({ DISPLAY: ':0' }, 'linux').headless,
+    false,
+  );
+  assert.equal(
+    chatBrowserLaunchOptions({ CHAT_BROWSER_HEADLESS: 'false' }, 'linux')
+      .headless,
+    false,
+  );
+  assert.equal(chatBrowserLaunchOptions({}, 'darwin').headless, false);
+  assert.equal(chatBrowserLaunchOptions({}, 'win32').headless, false);
+});
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

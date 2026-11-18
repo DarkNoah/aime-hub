@@ -43,6 +43,7 @@ services:
       WEB_ORIGINS: ${WEB_ORIGINS:?Set comma-separated browser origins, default first}
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: 3001
+      CHAT_BROWSER_HEADLESS: ${CHAT_BROWSER_HEADLESS:-false}
       ADMINS: ${ADMINS:-admin}
       WORKSPACE_ROOT: /data/workspaces
       WEB_PUSH_PUBLIC_KEY: ${WEB_PUSH_PUBLIC_KEY:-}

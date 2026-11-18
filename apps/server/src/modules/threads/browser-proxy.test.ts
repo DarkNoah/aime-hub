@@ -12,6 +12,7 @@ import { chromium, type LaunchOptions } from 'patchright-core';
 import type { Page } from 'playwright-core';
 import { ThreadBrowser } from './browser.js';
 import { browserProxy } from './browser/proxy.js';
+import { chatBrowserLaunchOptions } from './browser/user-browser.js';
 import { createChatRunner } from './runner.js';
 
 test('browser proxy is optional and accepts lowercase or uppercase settings', () => {
@@ -308,6 +309,10 @@ test(
     assert.ok(hits.includes('http://browser-proxy.invalid/script.js'));
 
     const launchArguments = await browserCommandLine(page);
+    assert.equal(
+      /(?:^|\s)--headless(?:[=\s]|$)/.test(launchArguments),
+      chatBrowserLaunchOptions().headless,
+    );
     assert.ok(
       launchArguments.includes(`--proxy-server=http://127.0.0.1:${proxyPort}`),
     );
