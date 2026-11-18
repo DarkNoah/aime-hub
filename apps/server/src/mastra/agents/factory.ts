@@ -11,7 +11,7 @@ import {
 /** Per-session dependencies. The model is already resolved using the agent/chat defaults. */
 export type AgentRuntimeOptions = Omit<
   AgentConfig,
-  'id' | 'name' | 'instructions' | 'editor' | 'tools' | 'agents'
+  'id' | 'name' | 'instructions' | 'editor' | 'tools' | 'agents' | 'browser'
 > & {
   instructions?: AgentConfig['instructions'];
   buildTools?: ToolService['buildTools'];
@@ -85,7 +85,6 @@ function buildAgentInstance(
         mastra: runtime.mastra,
         memory: runtime.memory,
         workspace: runtime.workspace,
-        browser: runtime.browser,
         buildTools: createTools,
         defaultToolConfigs,
         subagentOptions,

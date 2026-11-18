@@ -103,7 +103,7 @@ Configure only `WEB_ORIGINS`: a comma-separated list of full HTTP(S) origins. Th
 
 ### Optional runtime dependencies
 
-The browser fallback for web reading needs the matching Chromium version. For a source-based installation, run:
+The chat `exec` browser module uses Patchright with a persistent chat profile. The browser panel shows the active tab live and lets you interact with the same page. The web-reading fallback uses `playwright-extra` in a temporary browser. Both drivers use the same Chromium installation. For a source checkout, install Chromium with the following command.
 
 ```sh
 pnpm --filter @aime/server exec playwright-core install chromium

@@ -8,9 +8,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { promisify } from 'node:util';
-import type { LaunchOptions, Page } from 'playwright-core';
-import { RequestContext } from '@mastra/core/request-context';
-import { chromium } from '../../lib/browser.js';
+import { chromium, type LaunchOptions } from 'patchright-core';
+import type { Page } from 'playwright-core';
 import { ThreadBrowser } from './browser.js';
 import { browserProxy } from './browser/proxy.js';
 import { createChatRunner } from './runner.js';
@@ -144,15 +143,11 @@ test('browser tools load the acting user’s personal proxy over global settings
     { http_proxy: 'http://personal.test:8888', no_proxy: 'localhost' },
     'alice',
   );
-  const tool = browsers
-    .forThread('project-thread', 'bob')
-    .getTools().browser_goto;
-  await assert.rejects(async () => {
-    await tool.execute!({ url: 'https://example.com' }, {
-      agent: { threadId: 'project-thread' },
-      requestContext: new RequestContext([['userId', 'alice']]),
-    } as never);
-  }, stopped);
+  const execBrowser = browsers.execForThread('project-thread', 'alice');
+  await assert.rejects(
+    execBrowser('goto', { url: 'https://example.com' }),
+    stopped,
+  );
   await assert.rejects(bob.ensureReady(), stopped);
   configure({ http_proxy: 'http://second.test:8888' }, 'alice');
   await assert.rejects(browser.ensureReady(), stopped);
@@ -198,7 +193,7 @@ async function listen(t: TestContext, server: Server) {
 async function browserCommandLine(page: Page) {
   const version = await page.context().newPage();
   try {
-    // Stealth disables --enable-automation, so CDP getBrowserCommandLine is unavailable.
+    // chrome://version exposes the launch arguments without a CDP automation flag.
     await version.goto('chrome://version');
     return await version.locator('#command_line').innerText();
   } finally {
@@ -304,17 +299,8 @@ test(
     );
     const browser = browsers.acquire('thread', 'alice')
       .browser as ThreadBrowser;
-    const tool = browsers.forThread('thread', 'alice').getTools().browser_goto;
-    const result = await tool.execute!(
-      { url: 'http://browser-proxy.invalid/article' },
-      { agent: { threadId: 'thread' } } as never,
-    );
-    assert.ok(
-      result &&
-        typeof result === 'object' &&
-        'success' in result &&
-        result.success,
-    );
+    const execBrowser = browsers.execForThread('thread', 'alice');
+    await execBrowser('goto', { url: 'http://browser-proxy.invalid/article' });
     const manager = await browser.getManagerForThread('thread');
     const page = manager.getPage();
     assert.equal(await page.title(), 'HTTP through proxy');
@@ -394,22 +380,13 @@ test(
       userId: string,
       projectId?: string,
     ) => {
-      const tools = browsers.forThread(threadId, userId, projectId).getTools();
-      const result = await tools.browser_goto.execute!(
-        { url: 'http://browser-proxy.invalid/' },
-        { agent: { threadId } } as never,
-      );
-      assert.ok(
-        result &&
-          typeof result === 'object' &&
-          'success' in result &&
-          result.success,
-      );
+      const execBrowser = browsers.execForThread(threadId, userId, projectId);
+      await execBrowser('goto', { url: 'http://browser-proxy.invalid/' });
       const browser = browsers.get(threadId, userId)!.browser as ThreadBrowser;
       return {
         browser,
         page: (await browser.getManagerForThread(threadId)).getPage(),
-        tools,
+        execBrowser,
       };
     };
     const personal = await open('personal', 'alice');
@@ -455,9 +432,7 @@ test(
       () => browsers.acquire('project', 'alice', 'project-b'),
       /scope mismatch/,
     );
-    await project.tools.browser_close.execute!({}, {
-      agent: { threadId: 'project' },
-    } as never);
+    await project.execBrowser('close', {});
     assert.equal(project.browser.isBrowserRunning(), false);
     assert.equal(projectTab.browser.isBrowserRunning(), false);
     for (const entry of [personal, otherProject, otherUser])

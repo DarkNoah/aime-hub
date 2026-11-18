@@ -51,17 +51,6 @@ export class WorkspaceTools extends BaseTool<ToolDependencies> {
   }
 }
 
-export class BrowserTools extends BaseTool<ToolDependencies> {
-  override readonly deferred = true;
-
-  protected createTools(
-    _config: ToolDefaultConfigs,
-    dependencies: ToolDependencies,
-  ) {
-    return toolArray(dependencies.context?.browser?.getTools() ?? {});
-  }
-}
-
 export class SkillTools extends BaseTool<ToolDependencies> {
   override readonly deferred = true;
 
@@ -79,6 +68,5 @@ export const toolSources: readonly BaseTool<ToolDependencies>[] = [
   new PluginTools(),
   new McpTools(),
   new WorkspaceTools(),
-  new BrowserTools(),
   new SkillTools(),
 ];

@@ -575,7 +575,6 @@ export function createChatRunner(
             judge: () => resolved.model,
             maxRuns: GOAL_MAX_RUNS,
           },
-          browser: browsers.forThread(thread.id, userId, projectId),
           buildTools: async (ids, defaults, disabledTools) => {
             const built = await (tools
               ? tools.buildTools(ids, defaults, disabledTools)
@@ -713,14 +712,15 @@ export function createChatRunner(
             requestContext.set('nonInteractiveTools', true);
           requestContext.set('chatRetry', retry);
           requestContext.set('speechPlayback', speechPlayback);
-          requestContext.set('userId', createdBy ?? userId);
-          // Resolve against the current message author, including queued project messages.
-          requestContext.set(
-            'browser',
-            browsers.agentContext(thread.id, () =>
-              String(requestContext.get('userId') ?? userId),
-            ),
-          );
+          // Queued messages in the same project conversation can have different authors.
+          const setAuthor = (author: string) => {
+            requestContext.set('userId', author);
+            requestContext.set(
+              'execBrowser',
+              browsers.execForThread(thread.id, author, projectId),
+            );
+          };
+          setAuthor(createdBy ?? userId);
           requestContext.set('projectId', projectId);
           requestContext.set('automationSourceRoomId', roomBinding?.roomId);
           requestContext.set('issueId', thread.metadata?.issueId);
@@ -766,7 +766,7 @@ export function createChatRunner(
                 metadata?.createdBy;
               const authorId =
                 typeof author === 'string' ? author : (createdBy ?? userId);
-              requestContext.set('userId', authorId);
+              setAuthor(authorId);
               currentSettings =
                 chatSettingsSchema.safeParse(fromMessage).data ?? next;
               resolved = await sessionModel(currentSettings);

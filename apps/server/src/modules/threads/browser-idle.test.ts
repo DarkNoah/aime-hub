@@ -5,8 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setImmediate } from 'node:timers/promises';
 import test, { type TestContext } from 'node:test';
-import type { BrowserContext, Page } from 'playwright-core';
-import { chromium } from '../../lib/browser.js';
+import { chromium, type BrowserContext, type Page } from 'patchright-core';
 import { UserBrowser } from './browser/user-browser.js';
 import {
   createBrowserDriver,
@@ -138,9 +137,7 @@ test('a browser closes after 15 idle minutes and reports the closed state', asyn
 test('unused browsers and listing unopened tabs never launch Chromium', async (t) => {
   const fake = await fixture(t);
   const { session } = fake.session(fake.owner());
-  await session.browser.getTools().browser_tabs!.execute!({ action: 'list' }, {
-    agent: { threadId: 'thread' },
-  } as never);
+  await session.exec('tabs', {});
   await session.state();
   t.mock.timers.tick(idleMs * 2);
   await setImmediate();
@@ -154,10 +151,7 @@ test('closing the last thread tab still releases the remaining Chromium context 
   await session.action({ kind: 'navigate', url: 'https://example.com' });
   const context = fake.contexts[0]!;
 
-  await session.browser.getTools().browser_tabs!.execute!(
-    { action: 'close', index: 0 },
-    { agent: { threadId: 'thread' } } as never,
-  );
+  await session.exec('closeTab', { index: 0 });
   assert.equal(session.isRunning(), false);
   assert.equal(context.closed, false);
   assert.equal(context.pages().length, 1, 'the keeper page remains open');
@@ -180,9 +174,7 @@ test('manual navigation and Agent browser tools both restart the idle countdown'
   await session.action({ kind: 'navigate', url: 'https://example.com/next' });
   t.mock.timers.tick(idleMs - 1);
   assert.equal(context.closeCalls, 0);
-  await session.browser.getTools().browser_tabs!.execute!({ action: 'list' }, {
-    agent: { threadId: 'thread' },
-  } as never);
+  await session.exec('tabs', {});
   t.mock.timers.tick(idleMs - 1);
   assert.equal(context.closeCalls, 0);
   t.mock.timers.tick(1);

@@ -8,6 +8,7 @@ export class ThreadPageManager extends BrowserManager {
   private owned: Page[] = [];
   private active?: Page;
   private disposed = false;
+  private revision = 0;
   private inputSessions = new Map<Page, Promise<CDPSession>>();
 
   constructor(private readonly context: BrowserContext) {
@@ -37,6 +38,7 @@ export class ThreadPageManager extends BrowserManager {
   }
 
   private invalidateRefs() {
+    this.revision++;
     for (const key of Object.keys(this.getRefMap()))
       delete this.getRefMap()[key];
     this.setLastSnapshot('');
@@ -77,10 +79,35 @@ export class ThreadPageManager extends BrowserManager {
     this.changed();
   }
 
-  override async newTab() {
+  override async getSnapshot(
+    options?: Parameters<BrowserManager['getSnapshot']>[0],
+    signal?: AbortSignal,
+  ) {
+    const revision = ++this.revision;
+    const result = await super.getSnapshot(options);
+    // The user may navigate or switch tabs while Chromium is collecting the tree.
+    if (this.revision !== revision || this.disposed || signal?.aborted) {
+      this.invalidateRefs();
+      signal?.throwIfAborted();
+      throw new Error('Page changed during the snapshot. Take a new snapshot.');
+    }
+    return result;
+  }
+
+  async openPage(signal?: AbortSignal) {
     if (this.disposed) throw new Error('Browser closed');
     const page = await this.context.newPage();
+    if (signal?.aborted || this.disposed) {
+      await page.close();
+      signal?.throwIfAborted();
+      throw new Error('Browser closed');
+    }
     this.track(page);
+    return page;
+  }
+
+  override async newTab() {
+    await this.openPage();
     return { index: this.getActiveIndex(), total: this.getPages().length };
   }
   override async switchTo(index: number) {

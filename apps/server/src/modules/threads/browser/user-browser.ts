@@ -8,8 +8,8 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { BrowserContext, Cookie } from 'playwright-core';
-import { chromium } from '../../../lib/browser.js';
+import { chromium, type BrowserContext, type Cookie } from 'patchright-core';
+import type { BrowserContext as AgentBrowserContext } from 'playwright-core';
 import { ThreadPageManager } from './page-manager.js';
 import { recoverBrowserProfileLock } from './profile-lock.js';
 import { browserProxy } from './proxy.js';
@@ -181,7 +181,9 @@ export class UserBrowser {
       if (generation !== this.epoch) throw new Error('Browser closed');
       let manager = this.managers.get(threadId);
       if (!manager) {
-        manager = new ThreadPageManager(context);
+        // agent-browser declares Playwright's recursive context types. Patchright
+        // extends their evaluate signatures and implements the same page/CDP API.
+        manager = new ThreadPageManager(context as AgentBrowserContext);
         this.managers.set(threadId, manager);
       }
       if (!manager.isLaunched()) await manager.newTab();

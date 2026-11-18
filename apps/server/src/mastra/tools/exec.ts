@@ -25,14 +25,16 @@ import { z } from 'zod';
 import { ExecOutput, execOutputSchema } from './exec/output.js';
 import { runExec } from './exec/runtime.js';
 import { createExecModules } from './exec/modules.js';
+import { createExecBrowserModule } from './exec/browser.js';
 import { execToolDescription } from './exec/declaration.js';
 
 type Dependencies = {
   getTools: (context: ToolExecutionContext) => Promise<RegisteredTool[]>;
+  disabledTools?: ReadonlySet<string>;
 };
 
 /** The catalog is built at invocation time and respects global and Agent exclusions. */
-export function createExecTool({ getTools }: Dependencies) {
+export function createExecTool({ getTools, disabledTools }: Dependencies) {
   return createTool({
     id: 'exec',
     description: `Run JavaScript to orchestrate tools in a fresh isolated QuickJS/WASM runtime.
@@ -41,6 +43,7 @@ ALL_TOOLS is an array of { name, description } for all currently available built
 Call await tools.read_file({ path: 'README.md' }) or await tools.mcp__server__tool({...}). Inspect tools[name].inputSchema for its JSON Schema. Names are normalized JavaScript identifiers; use the exact name from ALL_TOOLS.
 text(value) explicitly emits text (non-strings are JSON serialized); image(value) explicitly emits an image from a base64 data URL, { image_url: dataURL }, an MCP image block, or a workspace media result. HTTP URLs are not accepted.
 Only text() and image() output is returned. Return values, bare expressions, console output and nested tool results are not automatically emitted. Await all tool calls you need; unawaited work is cancelled when the script ends, but already-started external side effects cannot be rolled back.
+In a browser-enabled chat thread, use import { browser } from 'browser'. The active page and this thread's tabs persist across exec calls and are shared with the live browser panel. Start with await browser.goto(url); text(await browser.snapshot({ interactiveOnly: true })). Use CSS selectors or refs from the current snapshot with click(target), fill(target, value), type(target, text), hover(target), select(target, value), drag(source, target), and wait(target, state?, timeout?). Refresh refs after navigation or switching tabs. Other methods: press(key), scroll(direction, amount?), back(), forward(), reload(), dialog(target, 'accept'|'dismiss', text?), evaluate(script) for page JavaScript, screenshot({ fullPage? }?), tabs(), newTab(url?), switchTab(index), closeTab(index?), close(). Tab indices start at zero. Use image(await browser.screenshot()) to show the active page. closeTab() closes the current tab; close() ends the user's browser across threads in the current personal or project scope.
 Available imports: node:fs (promises and callback APIs), node:fs/promises (readFile, writeFile, appendFile, mkdir), node:path (join, resolve, normalize, dirname, basename, extname, relative, isAbsolute, parse, format, posix/win32); names without node: also work. These are limited compatibility modules, not full Node. File operations use the current workspace, including its path, read-only, enabled-tool and approval restrictions. readFile(path, 'utf8') returns text; without encoding it returns Uint8Array. writeFile accepts text or typed arrays; flags w/wx/a and Node encodings are supported. mkdir requires the workspace mkdir tool to be enabled. Sync filesystem APIs, Buffer, process, require, other imports, network, console and timers are unavailable. path.resolve uses the workspace root. Runtime limits: 64 MiB memory, 1 second of synchronous CPU execution, at most 256 async tool/module calls and 32 concurrent calls; file reads are capped at 8 MiB. yield_time_ms is a wall-clock timeout, not a background continuation. max_output_tokens is an approximate text budget (4 UTF-8 bytes/token); image output has a separate 10 MiB budget.
 Disabled tools remain unavailable. Calls that request native background execution (including _background.enabled=true or disposition=deferred/awaited), tools that default to background execution, approval tools and suspension tools must be called directly by the Agent; exec cannot dispatch native background tasks or resume interactions. Foreground calls can run inside exec and block until their result. exec itself is excluded from tools to prevent recursion.
 Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.txt', 'hello', 'utf8'); text('saved'); const fs = await import('node:fs'); text(await fs.promises.readFile('output.txt', 'utf8')); text(ALL_TOOLS.filter(t => t.name.startsWith('mcp__'))); text(await tools.read_file({ path: 'document.pdf' })); image(await tools.read_file({ path: 'photo.png', encoding: 'base64' }));`,
@@ -89,10 +92,10 @@ Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.
           throw new Error(
             'JavaScript source exceeds 100000 characters. Split it into smaller calls.',
           );
-        const tools = await abortable(
-          getTools({ ...context, abortSignal: signal }),
-          signal,
-        );
+        const execContext = { ...context, abortSignal: signal };
+        // Pin the acting author before asynchronous discovery in a shared project chat.
+        const browser = createExecBrowserModule(execContext, disabledTools);
+        const tools = await abortable(getTools(execContext), signal);
         const catalog = new Map<string, Tool<unknown, unknown>>();
         for (const candidate of tools) {
           if (!candidate || typeof candidate !== 'object') continue;
@@ -110,21 +113,19 @@ Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.
           code,
           signal,
           deadline,
-          modules: createExecModules(
-            { ...context, abortSignal: signal },
-            {
-              availableTools: new Set(tools.map((tool) => tool.id)),
-              // The native read tool is hidden when the application owns read_file.
-              ...(context.workspace?.getToolsConfig()?.[
-                WORKSPACE_TOOLS.FILESYSTEM.READ_FILE
-              ]?.name === 'read_file' &&
-              context.workspace.getToolsConfig()?.[
-                WORKSPACE_TOOLS.FILESYSTEM.READ_FILE
-              ]?.enabled === false
-                ? { readFileEnabled: catalog.has('read_file') }
-                : {}),
-            },
-          ),
+          modules: createExecModules(execContext, {
+            availableTools: new Set(tools.map((tool) => tool.id)),
+            browser,
+            // The native read tool is hidden when the application owns read_file.
+            ...(context.workspace?.getToolsConfig()?.[
+              WORKSPACE_TOOLS.FILESYSTEM.READ_FILE
+            ]?.name === 'read_file' &&
+            context.workspace.getToolsConfig()?.[
+              WORKSPACE_TOOLS.FILESYSTEM.READ_FILE
+            ]?.enabled === false
+              ? { readFileEnabled: catalog.has('read_file') }
+              : {}),
+          }),
           catalog: [...catalog].map(([name, tool]) => {
             const inputSchema = tool.inputSchema
               ? standardSchemaToJSONSchema(toStandardSchema(tool.inputSchema), {
@@ -229,7 +230,7 @@ Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.
           },
         });
       } catch (error) {
-        output.error(error);
+        output.error(context.abortSignal?.aborted ? '用户中止了操作' : error);
       } finally {
         clearTimeout(timer);
         controller.abort(new Error('exec execution finished'));
@@ -301,6 +302,13 @@ export class ExecTool extends BuiltinTool<'builtin'> {
     defaults: ToolDefaultConfigs,
   ) {
     return createExecTool({
+      disabledTools: new Set([
+        ...(dependencies.disabledTools ?? []),
+        ...(options.disabledTools ?? []),
+        ...Object.keys(defaults).filter(
+          (id) => defaults[id]?.enabled === false,
+        ),
+      ]),
       getTools: (context) => {
         if (!dependencies.getTools)
           throw new Error('Tool registry is unavailable');

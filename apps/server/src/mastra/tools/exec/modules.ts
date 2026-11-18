@@ -6,6 +6,7 @@ import {
   WORKSPACE_TOOLS,
 } from '@mastra/core/workspace';
 import { assertLocalPath } from '../../../modules/files/workspace-access.js';
+import { createExecBrowserModule } from './browser.js';
 import ts from 'typescript';
 import { z } from 'zod';
 
@@ -55,17 +56,21 @@ const pathMethods = [
 
 export type ExecModules = ReturnType<typeof createExecModules>;
 
-/** Expose a small Node-compatible API through the same JSON-only VM boundary. */
+/** Host-backed modules return JSON values through the VM boundary. */
 export function createExecModules(
   context: ToolExecutionContext,
   options: {
     readFileEnabled?: boolean;
     availableTools?: ReadonlySet<string>;
+    browser?: ReturnType<typeof createExecBrowserModule>;
   } = {},
 ) {
+  const browser = options.browser ?? createExecBrowserModule(context);
   return {
     load(name: string): string {
       switch (name) {
+        case 'browser':
+          return browser.load();
         case 'fs':
         case 'node:fs':
           return `
@@ -142,7 +147,7 @@ export function createExecModules(
         }
         default:
           throw new Error(
-            `Unsupported exec import: ${name}. Available: node:fs, node:fs/promises, node:path (including posix/win32).`,
+            `Unsupported exec import: ${name}. Available: browser (in chat threads), node:fs, node:fs/promises, node:path (including posix/win32).`,
           );
       }
     },
@@ -185,6 +190,8 @@ export function createExecModules(
     },
     async dispatch(operation: string, input: unknown): Promise<unknown> {
       context.abortSignal?.throwIfAborted();
+      if (operation.startsWith('browser.'))
+        return browser.dispatch(operation.slice('browser.'.length), input);
       if (!Object.hasOwn(fsOperations, operation))
         throw new Error(`Unknown filesystem operation: ${operation}`);
       const workspace = context.workspace;

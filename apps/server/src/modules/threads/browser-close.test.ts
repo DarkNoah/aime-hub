@@ -325,11 +325,8 @@ test(
       /Chromium|Google Chrome/,
     );
     stopped.resolve();
-    const toolResult = (await driver.browser.getTools().browser_goto.execute!(
-      { url: 'chrome://version' },
-      { agent: { threadId: 'thread' } } as never,
-    )) as { success: boolean };
-    assert.equal(toolResult.success, true);
+    await browser.exec('goto', { url: 'chrome://version' });
+    assert.equal((await browser.state()).url, 'chrome://version/');
     await browser.action({ kind: 'close' });
   },
 );

@@ -11,6 +11,7 @@ import type { ChatSettings } from '@aime/shared/threads';
 import { agentRegistry, getAgent } from '../../mastra/agents/index.js';
 import { buildAgent } from '../../mastra/agents/factory.js';
 import { readFile } from '../../mastra/tools/read_file.js';
+import { exec } from '../../mastra/tools/exec.js';
 import type { LanguageModelService } from '../models/language-model.js';
 import type { UsageService } from '../usage/service.js';
 import { createChatRunner } from './runner.js';
@@ -73,8 +74,16 @@ test(
         assert.match(JSON.stringify(options.prompt), /SHARED_SKILL_MARKER/);
         assert.equal(options.maxOutputTokens, 4321);
         assert.equal(options.providerOptions?.openai?.reasoningEffort, 'low');
-        if (!first)
-          assert.match(JSON.stringify(options.prompt), /CHILD_WORKSPACE_READ_OK/);
+        assert.ok(
+          !options.tools?.some((tool) => tool.name.startsWith('browser_')),
+        );
+        if (!first) {
+          assert.match(
+            JSON.stringify(options.prompt),
+            /CHILD_WORKSPACE_READ_OK/,
+          );
+          assert.match(JSON.stringify(options.prompt), /CHILD_BROWSER_TABS_0/);
+        }
         return {
           stream: new ReadableStream({
             start(controller) {
@@ -84,6 +93,14 @@ test(
                   toolCallId: 'child-read',
                   toolName: 'read_file',
                   input: JSON.stringify({ path: 'probe.txt' }),
+                });
+                controller.enqueue({
+                  type: 'tool-call',
+                  toolCallId: 'child-browser',
+                  toolName: 'exec',
+                  input: JSON.stringify({
+                    code: 'import { tabs } from "browser"; text("CHILD_BROWSER_TABS_" + (await tabs()).length);',
+                  }),
                 });
                 controller.enqueue({
                   type: 'finish',
@@ -173,7 +190,7 @@ test(
       } as unknown as LanguageModelService,
       root,
       undefined,
-      { buildTools: async () => ({ read_file: readFile }) },
+      { buildTools: async () => ({ read_file: readFile, exec }) },
       {
         getConfig: async () => parent,
         getAgent: async (_id, options) => buildAgent(parent, options),

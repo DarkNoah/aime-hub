@@ -1,7 +1,8 @@
 import type { BrowserEvent } from '@aime/shared/browser';
 import { emptyBrowserState } from '@aime/shared/browser';
-import type { BrowserContext } from '@mastra/core/browser';
-import { ThreadBrowserRouter } from '../browser.js';
+import { ThreadError } from '../errors.js';
+import type { BrowserExecBinding } from './exec-actions.js';
+export type { BrowserExecBinding } from './exec-actions.js';
 import { UserBrowser } from './user-browser.js';
 import {
   createBrowserDriver,
@@ -40,28 +41,29 @@ export class ThreadBrowsers {
       if (entry.userId === userId)
         yield [entry.session.threadId, entry.session] as const;
   }
-  forThread(id: string, defaultUserId: string, projectId?: string) {
-    return new ThreadBrowserRouter(
-      (userId) => this.acquire(id, userId, projectId).browser,
-      defaultUserId,
-    );
-  }
-  agentContext(id: string, userId: () => string): BrowserContext {
-    return {
-      provider: 'vercel-labs/agent-browser',
-      providerType: 'sdk',
-      headless: true,
-      isOpen: false,
-      getState: async () => {
-        const session = this.get(id, userId());
-        const state = session?.isRunning() ? await session.state() : undefined;
-        return {
-          isOpen: state?.status === 'ready',
-          currentUrl: state?.url,
-          pageTitle: state?.tabs[state.activeTabIndex]?.title,
-          tabCount: state?.tabs.length ?? 0,
-        };
-      },
+  execForThread(
+    id: string,
+    userId: string,
+    projectId?: string,
+  ): BrowserExecBinding {
+    return async (operation, input, signal) => {
+      signal?.throwIfAborted();
+      const entry = this.sessions.get(this.key(id, userId));
+      if (entry && entry.projectId !== projectId)
+        throw new Error('Browser thread scope mismatch');
+      if (!entry && operation !== 'goto' && operation !== 'newTab') {
+        if (operation === 'tabs') return [];
+        if (operation === 'close')
+          return this.owners
+            .get(JSON.stringify([userId, projectId ?? null]))
+            ?.close();
+        throw new ThreadError('BROWSER_NOT_RUNNING', 409);
+      }
+      return (entry?.session ?? this.acquire(id, userId, projectId)).exec(
+        operation,
+        input,
+        signal,
+      );
     };
   }
   acquire(id: string, userId: string, projectId?: string) {

@@ -10,12 +10,15 @@ import { ThreadBrowser } from '../browser.js';
 import type { UserBrowser } from './user-browser.js';
 import { ThreadError } from '../errors.js';
 import { browserOperation } from './operation.js';
+import { withAbortSignal } from '../../../lib/abort.js';
+import { browserExecActions, type BrowserExecBinding } from './exec-actions.js';
 
 /** Keep provider-specific navigation and text insertion outside the stream lifecycle. */
 export function createBrowserDriver(threadId: string, owner: UserBrowser) {
   const browser = new ThreadBrowser(owner, threadId);
   return {
     browser,
+    exec: browserExecActions(browser),
     dispose: () => browser.release(),
     withActivity: <T>(work: () => Promise<T>) => owner.withActivity(work),
     async action(action: BrowserAction) {
@@ -78,6 +81,7 @@ export type BrowserDriver = {
   browser: MastraBrowser;
   action(action: BrowserAction): Promise<void>;
   capture(): Promise<BrowserFrame>;
+  exec?: BrowserExecBinding;
   dispose?(): Promise<void>;
   withActivity?<T>(work: () => Promise<T>): Promise<T>;
 };
@@ -89,6 +93,9 @@ export class ThreadBrowserSession {
   private stream?: ScreencastStream;
   private timer?: ReturnType<typeof setInterval>;
   private pending: Promise<unknown> = Promise.resolve();
+  // Agent calls serialize independently so manual input and preview can continue during a wait.
+  private execPending: Promise<unknown> = Promise.resolve();
+  private execLifetime = new AbortController();
   private disposed = false;
   private lastFrame?: BrowserFrame;
   private frameAt = 0;
@@ -137,6 +144,9 @@ export class ThreadBrowserSession {
   }
 
   private invalidate() {
+    this.execLifetime.abort(new Error('Browser closed'));
+    this.execLifetime = new AbortController();
+    this.execPending = Promise.resolve();
     this.generation++;
     this.pending = Promise.resolve();
     this.refreshing = undefined;
@@ -271,6 +281,32 @@ export class ThreadBrowserSession {
         }).catch(() => {});
       }
     };
+  }
+
+  async exec(operation: string, input: unknown, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    if (this.disposed) throw new ThreadError('BROWSER_NOT_RUNNING', 409);
+    if (operation === 'close')
+      return withAbortSignal(signal, () => this.action({ kind: 'close' }));
+    if (this.closing) throw new ThreadError('BROWSER_NOT_RUNNING', 409);
+    const dispatch = this.driver.exec;
+    if (!dispatch) throw new Error('Browser automation is unavailable');
+    const lifetime = this.execLifetime.signal;
+    const active = signal ? AbortSignal.any([lifetime, signal]) : lifetime;
+    const enqueue = () => {
+      const next = this.execPending
+        .catch(() => {})
+        .then(() =>
+          withAbortSignal(active, () => dispatch(operation, input, active)),
+        );
+      this.execPending = next;
+      return next;
+    };
+    // Even queued work counts as activity. An aborted queue entry checks its signal
+    // again when it reaches the front and never dispatches a late command.
+    return withAbortSignal(active, () =>
+      this.driver.withActivity ? this.driver.withActivity(enqueue) : enqueue(),
+    );
   }
 
   async action(action: BrowserAction) {

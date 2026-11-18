@@ -118,13 +118,11 @@ pnpm dev
 
 ### 可选运行依赖
 
-聊天浏览器和网页读取的浏览器兜底共用 `playwright-extra` + stealth 启动器，降低常见自动化特征；网页读取仍使用独立的临时浏览器，不共享用户登录数据。两者需要对应版本的 Chromium，可在源码环境执行：
+聊天中的 `exec` 浏览器模块通过 Patchright 驱动 Chromium，沿用聊天的持久化登录配置。浏览器侧栏实时显示当前标签页，用户可在同一页面手动操作。网页读取使用 `playwright-extra` 和独立的临时浏览器。两者使用同一份 Chromium，源码环境可运行以下命令安装。
 
 ```sh
 pnpm --filter @aime/server exec playwright-core install chromium
 ```
-
-stealth 无法保证通过所有网站的检测；网站直接打开的弹窗，其首次请求和页面脚本可能早于插件注入。
 
 聊天浏览器与 `exec_command` 使用相同的环境变量规则：项目聊天读取 **全局 → 当前项目**，个人聊天读取 **全局 → 当前用户个人配置**，同名变量由后一层覆盖，项目聊天不加载个人变量。可在对应环境变量中设置 `http_proxy`（兼容 `HTTP_PROXY`，小写优先），例如 `http://proxy.example.com:7890`。启动 Chromium 时由 Playwright 添加 `--proxy-server`，用于浏览器的 HTTP/HTTPS 访问，支持 HTTP(S) 代理账号密码及无需认证的 SOCKS5 地址。可选的 `no_proxy`（兼容 `NO_PROXY`）以逗号分隔 Chromium 代理绕过规则，例如 `localhost,127.0.0.1,.example.com`。浏览器按用户及个人／项目作用域隔离，同一用户在同一作用域的聊天共享登录数据；原有个人登录数据保留，项目浏览器使用独立配置。每次启动时读取最新环境变量；修改后需关闭对应浏览器并重新打开，无需重启 API。`web_fetch` 仍使用自己的网络请求链路。
 

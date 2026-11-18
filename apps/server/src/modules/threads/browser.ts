@@ -1,42 +1,11 @@
-import {
-  AgentBrowser,
-  AgentBrowserThreadManager,
-  BROWSER_TOOLS,
-  closeInputSchema,
-  tabsInputSchema,
-} from '@mastra/agent-browser';
+import { AgentBrowser, AgentBrowserThreadManager } from '@mastra/agent-browser';
 import {
   ScreencastStreamImpl,
-  type MastraBrowser,
   type ScreencastOptions,
 } from '@mastra/core/browser';
-import { createTool } from '@mastra/core/tools';
 import type { CDPSession } from 'playwright-core';
 import { UserBrowser } from './browser/user-browser.js';
 import { browserOperation } from './browser/operation.js';
-
-/** Project threads can contain messages from different users in the same Agent run. */
-export class ThreadBrowserRouter extends AgentBrowser {
-  constructor(
-    private resolve: (userId: string) => MastraBrowser,
-    private defaultUserId: string,
-  ) {
-    super({ scope: 'thread' });
-  }
-
-  override getTools() {
-    const tools = this.resolve(this.defaultUserId).getTools();
-    for (const [name, tool] of Object.entries(tools)) {
-      tool.execute = (input, context) => {
-        const author = context?.requestContext?.get('userId');
-        const userId =
-          typeof author === 'string' && author ? author : this.defaultUserId;
-        return this.resolve(userId).getTools()[name]!.execute!(input, context);
-      };
-    }
-    return tools;
-  }
-}
 
 /** Mastra routes threads; the context belongs to this user in the current scope. */
 class ThreadBrowserManager extends AgentBrowserThreadManager {
@@ -73,7 +42,6 @@ class ThreadBrowserManager extends AgentBrowserThreadManager {
 export class ThreadBrowser extends AgentBrowser {
   protected override threadManager: ThreadBrowserManager;
   private unsubscribe: () => void;
-  private pending: Promise<unknown> = Promise.resolve();
   private opening?: Promise<void>;
   private released = false;
 
@@ -152,73 +120,12 @@ export class ThreadBrowser extends AgentBrowser {
     this.notifyBrowserClosed(this.threadId);
     await Promise.allSettled(streams.map((stream) => stream.stop()));
   }
-  /** Thread cleanup releases its pages; browser_close ends the user's browser in this scope. */
+  /** Thread cleanup releases its pages; explicit close ends the user's browser in this scope. */
   async release() {
     this.released = true;
     this.unsubscribe();
     await this.reset();
     await this.owner.release(this.threadId);
-  }
-
-  override getTools() {
-    const tools = super.getTools();
-    tools[BROWSER_TOOLS.CLOSE] = createTool({
-      id: BROWSER_TOOLS.CLOSE,
-      description:
-        'End this user’s browser in the current personal or project scope. Closes its tabs across threads in that scope, preserves login data, and does not restore old pages on the next launch. Other projects and users keep their browsers. To close only a tab in this thread, use browser_tabs with action close.',
-      inputSchema: closeInputSchema,
-      execute: async () => {
-        await this.close();
-        return {
-          success: true,
-          hint: 'The user browser is closed for all threads in this personal or project scope. Login data is retained. Opening a URL starts fresh pages.',
-        };
-      },
-    });
-    tools[BROWSER_TOOLS.TABS] = createTool({
-      id: BROWSER_TOOLS.TABS,
-      description:
-        'Manage only this chat thread’s browser tabs: list, new, switch or close. Indices are local to this thread. Listing a closed browser returns an empty list without starting it.',
-      inputSchema: tabsInputSchema,
-      execute: async (input) => {
-        if (input.action !== 'new' && !this.isBrowserRunning()) {
-          if (input.action !== 'list') throw new Error('Browser not running');
-          return {
-            success: true,
-            tabs: [],
-            hint: 'No browser is running. Open a URL or create a new tab to start a fresh browser session.',
-          };
-        }
-        if (input.action === 'new' && !this.isBrowserRunning()) {
-          await this.ensureReady();
-          if (input.url) {
-            const result = await this.goto({ url: input.url }, this.threadId);
-            if (!result.success) return result;
-          }
-          return { success: true, index: 0, total: 1 };
-        }
-        return this.tabs(input, this.threadId);
-      },
-    });
-    // Serialize tools within a thread. Other threads have independent pages and may run concurrently.
-    for (const [name, tool] of Object.entries(tools)) {
-      if (name === BROWSER_TOOLS.CLOSE || !tool.execute) continue;
-      const execute = tool.execute;
-      tool.execute = (input, context) =>
-        this.owner.withActivity(async () => {
-          const generation = this.owner.generation;
-          const next = this.pending
-            .catch(() => {})
-            .then(() => {
-              if (generation !== this.owner.generation || this.released)
-                throw new Error('Browser closed');
-              return execute(input, context);
-            });
-          this.pending = next;
-          return next;
-        });
-    }
-    return tools;
   }
 
   // Page-manager events handle all transitions, including popup and window.close().

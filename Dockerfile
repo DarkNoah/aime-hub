@@ -55,8 +55,11 @@ RUN NODE_OPTIONS=--max-old-space-size=2048 nice -n 10 pnpm build
 # Export only the installed, lockfile-resolved CLI. Application source changes
 # must not invalidate Chromium's system dependencies and browser download layers.
 FROM build AS playwright-package
+WORKDIR /app/apps/server
+# Both drivers must resolve the same Chromium installed in the runtime image.
+RUN node -e "require('node:assert/strict').equal(require('patchright-core').chromium.executablePath(), require('playwright-core').chromium.executablePath())"
 RUN mkdir -p /opt/playwright-core \
-    && cp -aL apps/server/node_modules/playwright-core/. /opt/playwright-core/
+    && cp -aL node_modules/playwright-core/. /opt/playwright-core/
 
 FROM system-deps AS server
 ARG AGENTFS_VERSION=0.6.4
