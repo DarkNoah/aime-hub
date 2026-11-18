@@ -313,6 +313,11 @@ test(
     );
     assert.ok(launchArguments.includes('--proxy-bypass-list=127.0.0.1'));
     assert.doesNotMatch(launchArguments, /sec:ret|sec%3Aret/);
+    const disabledFeatures = Array.from(
+      launchArguments.matchAll(/--disable-features=([^\s"]+)/g),
+      ([, features]) => features.split(','),
+    ).flat();
+    assert.ok(!disabledFeatures.includes('ThirdPartyStoragePartitioning'));
     // Allow the fixture's self-signed certificate without weakening production TLS.
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Security.setIgnoreCertificateErrors', { ignore: true });

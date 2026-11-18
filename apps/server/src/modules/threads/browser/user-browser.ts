@@ -17,6 +17,31 @@ import { browserOperation } from './operation.js';
 
 const BROWSER_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 
+// Patchright 1.64.3 passes these features in one switch. ignoreDefaultArgs
+// matches the whole argument, so replace it while retaining the other defaults.
+const driverDisabledFeatures = [
+  'AvoidUnnecessaryBeforeUnloadCheckSync',
+  'DestroyProfileOnBrowserClose',
+  'DialMediaRouteProvider',
+  'GlobalMediaControls',
+  'HttpsUpgrades',
+  'LensOverlay',
+  'PaintHolding',
+  'ThirdPartyStoragePartitioning',
+  'BlockOriginHeaderModificationOnRedirect',
+  'AvoidCorsURLLoaderRestartOnRedirect',
+  'Translate',
+  'AutoDeElevate',
+  'OptimizationHints',
+  'NetworkTimeServiceQuerying',
+  'AimEnabled',
+  'msForceBrowserSignIn',
+  'msEdgeUpdateLaunchServicesPreferredVersion',
+];
+const chatDisabledFeatures = driverDisabledFeatures.filter(
+  (feature) => feature !== 'ThirdPartyStoragePartitioning',
+);
+
 /** One persistent Chromium context per user and scope, outside chat workspaces. */
 export class UserBrowser {
   private context?: BrowserContext;
@@ -132,7 +157,15 @@ export class UserBrowser {
       executablePath: chromium.executablePath(),
       viewport: { width: 1280, height: 720 },
       proxy,
-      args: ['--no-first-run', '--disable-session-crashed-bubble'],
+      // Use Chromium's default third-party storage partitions for logged-in browsing.
+      ignoreDefaultArgs: [
+        '--disable-features=' + driverDisabledFeatures.join(','),
+      ],
+      args: [
+        '--no-first-run',
+        '--disable-session-crashed-bubble',
+        '--disable-features=' + chatDisabledFeatures.join(','),
+      ],
     });
     try {
       // Session cookies need explicit persistence when Chromium is cleanly shut down.
