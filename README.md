@@ -124,7 +124,7 @@ pnpm dev
 pnpm --filter @aime/server exec playwright-core install chromium
 ```
 
-Docker 服务镜像默认以有窗口模式运行聊天浏览器。每个用户在个人或项目作用域内启动浏览器时，镜像会按需创建独立的 Xvfb 虚拟显示，关闭浏览器时释放。宿主机无需连接显示器或开放图形端口，预览和手动接管仍在聊天侧栏完成。设置服务端环境变量 `CHAT_BROWSER_HEADLESS=true` 可切换到无头模式。源码运行时，桌面环境默认使用有窗口模式，没有 `DISPLAY` 的 Linux 默认使用无头模式。
+聊天浏览器在开发和测试环境中默认使用无头模式（`headless: true`），在生产环境（`NODE_ENV=production`）默认使用有窗口模式（`headless: false`）。可通过服务端环境变量 `CHAT_BROWSER_HEADLESS=true` 或 `false` 覆盖默认值。Docker 服务镜像会为每个有窗口的浏览器实例分配独立的 Xvfb 虚拟显示，关闭实例时释放。预览和手动接管均在聊天侧栏完成。在容器外以有窗口模式运行 Linux 版 Chromium 时，需要提供可用的显示环境。
 
 聊天浏览器与 `exec_command` 使用相同的环境变量规则：项目聊天读取 **全局 → 当前项目**，个人聊天读取 **全局 → 当前用户个人配置**，同名变量由后一层覆盖，项目聊天不加载个人变量。可在对应环境变量中设置 `http_proxy`（兼容 `HTTP_PROXY`，小写优先），例如 `http://proxy.example.com:7890`。启动 Chromium 时由 Playwright 添加 `--proxy-server`，用于浏览器的 HTTP/HTTPS 访问，支持 HTTP(S) 代理账号密码及无需认证的 SOCKS5 地址。可选的 `no_proxy`（兼容 `NO_PROXY`）以逗号分隔 Chromium 代理绕过规则，例如 `localhost,127.0.0.1,.example.com`。浏览器按用户及个人／项目作用域隔离，同一用户在同一作用域的聊天共享登录数据；原有个人登录数据保留，项目浏览器使用独立配置。每次启动时读取最新环境变量；修改后需关闭对应浏览器并重新打开，无需重启 API。`web_fetch` 仍使用自己的网络请求链路。
 

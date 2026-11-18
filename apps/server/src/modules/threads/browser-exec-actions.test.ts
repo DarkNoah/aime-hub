@@ -9,33 +9,39 @@ import { ThreadBrowserSession, type BrowserDriver } from './browser/session.js';
 import type { BrowserExecBinding } from './browser/exec-actions.js';
 import { chatBrowserLaunchOptions } from './browser/user-browser.js';
 
-test('chat Chromium selects the container display, native desktop or headless fallback', () => {
+test('chat Chromium defaults to headless in development and headed in production', () => {
   const launcher = '/usr/local/bin/chat-chromium-xvfb';
-  const containerEnv = { CHAT_BROWSER_HEADED_EXECUTABLE: launcher };
-  const native = chatBrowserLaunchOptions({}, 'linux');
+  const development = {
+    NODE_ENV: 'development',
+    DISPLAY: ':0',
+    CHAT_BROWSER_HEADED_EXECUTABLE: launcher,
+  };
+  const production = {
+    NODE_ENV: 'production',
+    CHAT_BROWSER_HEADED_EXECUTABLE: launcher,
+  };
+  const native = chatBrowserLaunchOptions({});
+  const headed = { headless: false, executablePath: launcher };
+
   assert.equal(native.headless, true);
-  assert.deepEqual(chatBrowserLaunchOptions(containerEnv, 'linux'), {
-    headless: false,
-    executablePath: launcher,
-  });
+  assert.deepEqual(chatBrowserLaunchOptions(development), native);
+  assert.equal(chatBrowserLaunchOptions({ NODE_ENV: 'test' }).headless, true);
+  assert.deepEqual(chatBrowserLaunchOptions(production), headed);
+  assert.equal(
+    chatBrowserLaunchOptions({ NODE_ENV: 'production' }).headless,
+    false,
+  );
   assert.deepEqual(
-    chatBrowserLaunchOptions(
-      { ...containerEnv, CHAT_BROWSER_HEADLESS: 'true' },
-      'linux',
-    ),
+    chatBrowserLaunchOptions({ ...production, CHAT_BROWSER_HEADLESS: 'true' }),
     native,
   );
-  assert.equal(
-    chatBrowserLaunchOptions({ DISPLAY: ':0' }, 'linux').headless,
-    false,
+  assert.deepEqual(
+    chatBrowserLaunchOptions({
+      ...development,
+      CHAT_BROWSER_HEADLESS: 'false',
+    }),
+    headed,
   );
-  assert.equal(
-    chatBrowserLaunchOptions({ CHAT_BROWSER_HEADLESS: 'false' }, 'linux')
-      .headless,
-    false,
-  );
-  assert.equal(chatBrowserLaunchOptions({}, 'darwin').headless, false);
-  assert.equal(chatBrowserLaunchOptions({}, 'win32').headless, false);
 });
 
 function deferred<T>() {

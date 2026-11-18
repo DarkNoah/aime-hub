@@ -42,15 +42,11 @@ const chatDisabledFeatures = driverDisabledFeatures.filter(
   (feature) => feature !== 'ThirdPartyStoragePartitioning',
 );
 
-export function chatBrowserLaunchOptions(
-  env: NodeJS.ProcessEnv = process.env,
-  platform = process.platform,
-) {
+export function chatBrowserLaunchOptions(env: NodeJS.ProcessEnv = process.env) {
   const launcher = env.CHAT_BROWSER_HEADED_EXECUTABLE;
-  const displayUnavailable = platform === 'linux' && !env.DISPLAY && !launcher;
   const headless =
     env.CHAT_BROWSER_HEADLESS === 'true' ||
-    (env.CHAT_BROWSER_HEADLESS !== 'false' && displayUnavailable);
+    (env.CHAT_BROWSER_HEADLESS !== 'false' && env.NODE_ENV !== 'production');
   return {
     headless,
     executablePath: (!headless && launcher) || chromium.executablePath(),
