@@ -122,6 +122,7 @@ for (const scenario of [
       });
       let actors = 0;
       let finished = 0;
+      let firstToolVisible = false;
       const customThreshold = [
         'configured-threshold',
         'raised-threshold',
@@ -148,7 +149,6 @@ for (const scenario of [
           } else {
             prompts.push(serialized);
             order.push(`actor-${++actors}`);
-            if (scenario === 'model-change' && actors === 1) await gate;
           }
           const tool = !observer && actors <= 2;
           const totalTokens = observer
@@ -160,7 +160,7 @@ for (const scenario of [
               : 100;
           return {
             stream: new ReadableStream({
-              start(controller) {
+              async start(controller) {
                 if (tool)
                   controller.enqueue({
                     type: 'tool-call',
@@ -179,6 +179,8 @@ for (const scenario of [
                   });
                   controller.enqueue({ type: 'text-end', id: 'text' });
                 }
+                // New input can preempt reasoning-only requests before usage is recorded.
+                if (scenario === 'model-change' && actors === 1) await gate;
                 controller.enqueue({
                   type: 'finish',
                   finishReason: tool ? 'tool-calls' : 'stop',
@@ -284,6 +286,13 @@ for (const scenario of [
         settings,
         onEvent: (event) => {
           eventTypes.push(event.type);
+          if (
+            event.type === 'message' &&
+            event.message.parts.some(
+              (part) => 'toolCallId' in part && part.toolCallId === 'clock-1',
+            )
+          )
+            firstToolVisible = true;
           if (event.type === 'error') errors.push(event.error);
           if (event.type === 'usage') finished++;
         },
@@ -305,7 +314,7 @@ for (const scenario of [
         ],
       });
       if (scenario === 'model-change') {
-        await until(() => actors === 1);
+        await until(() => firstToolVisible);
         await session.send({
           ...settings,
           model: 'provider/second',

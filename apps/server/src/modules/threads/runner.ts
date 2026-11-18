@@ -668,7 +668,7 @@ export function createChatRunner(
           refreshMessages,
         ).catch((error: unknown) => onEvent({ type: 'error', error }));
         // Track only in-flight stream consumption, never queued messages or turn order.
-        const streams = new Set<Promise<void>>();
+        const streams = new Map<string, Promise<void>>();
         const consume = (output: MastraModelOutput<unknown>) => {
           const consuming = (async () => {
             for await (const chunk of output.fullStream) {
@@ -680,8 +680,11 @@ export function createChatRunner(
             .catch((error: unknown) =>
               onEvent({ type: 'error', error, runId: output.runId }),
             )
-            .finally(() => streams.delete(consuming));
-          streams.add(consuming);
+            .finally(() => {
+              if (streams.get(output.runId) === consuming)
+                streams.delete(output.runId);
+            });
+          streams.set(output.runId, consuming);
         };
         const optionsFor = async (
           next: ChatSettings,
@@ -818,13 +821,7 @@ export function createChatRunner(
                 messages.filter(
                   (message) =>
                     message.role !== 'system' ||
-                    !(typeof message.content === 'string'
-                      ? message.content === environmentPrompt
-                      : message.content.parts.some(
-                          (part) =>
-                            part.type === 'text' &&
-                            part.text === environmentPrompt,
-                        )),
+                    message.content !== environmentPrompt,
                 ),
             },
             onStepFinish: async (event) => {
@@ -1012,7 +1009,7 @@ export function createChatRunner(
               runAbort.abort();
               agent.abortThreadStream({ ...target, clearPendingSignals: true });
               pending.discard();
-              await Promise.allSettled([...streams]);
+              await Promise.allSettled(streams.values());
               runAbort = new AbortController();
             }
             await agent.clearObjective(target);
@@ -1023,6 +1020,8 @@ export function createChatRunner(
           moveQueued: (id, beforeId) => pending.move(id, beforeId),
           cancelQueued: (id) => pending.remove(id),
           async respond(interaction, response, next) {
+            // The suspension is visible before its final workflow snapshot has settled.
+            await streams.get(interaction.runId);
             await refreshMessages();
             // Project sessions may be owned by a different user. The reply has
             // already been checked against this server-generated owner payload.
@@ -1086,11 +1085,16 @@ export function createChatRunner(
             const closingSpeech = speechPlayback.close();
             unsubscribeCommands?.();
             runAbort.abort();
-            agent.abortThreadStream({ ...target, clearPendingSignals: true });
+            // Detaching a session must preserve suspended tool calls for a later reply.
+            agent.abortThreadStream({
+              ...target,
+              clearPendingSignals: true,
+              localOnly: true,
+            });
             subscription.unsubscribe();
             unsubscribeQueue();
             await observing;
-            await Promise.allSettled([...streams]);
+            await Promise.allSettled(streams.values());
             await closingSpeech;
             await compaction.engine.settled();
             await memory.settled();

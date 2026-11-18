@@ -104,7 +104,7 @@ export class AutomationService {
     return {
       ...meta.data,
       enabled: row.status === 'active',
-      cron: row.cron,
+      cron: row.cron ?? meta.data.cron,
       timezone: row.timezone ?? systemTimezone(),
       id: row.id,
       threadId: meta.threadId,

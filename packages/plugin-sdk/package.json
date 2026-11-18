@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@aime/shared": "workspace:*",
-    "@mastra/core": "^1.72.0",
+    "@mastra/core": "^1.84.0",
     "hono": "^4.13.13",
     "typeorm": "0.3.31",
     "zod": "^4.6.5"

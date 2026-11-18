@@ -10,7 +10,7 @@
     "@aime/shared": "workspace:*",
     "@app/plugin-sdk": "workspace:*",
     "@app/plugin-ui": "workspace:*",
-    "@mastra/core": "^1.72.0",
+    "@mastra/core": "^1.84.0",
     "defuddle": "0.19.4",
     "hono": "^4.13.13",
     "lightweight-charts": "^5.2.0",

@@ -146,9 +146,12 @@ export async function consumeSessionStream(
         )
           continue;
       }
-      // A new subscription replays pending HITL markers before the resumed run.
-      // Service metadata already contains those; only a fresh start is live.
-      if (!started && native.type !== 'start') continue;
+      // A persisted run can resume on a new subscription without a second start.
+      const startsRun =
+        native.type === 'start' ||
+        (native.type === 'tool-call-resumed' &&
+          (!started || status !== 'running'));
+      if (!started && !startsRun) continue;
       runId = native.runId || subscription.activeRunId() || runId;
       if (native.type === 'goal') {
         emit({
@@ -159,17 +162,18 @@ export async function consumeSessionStream(
         });
         continue;
       }
-      if (native.type === 'start') {
+      if (startsRun) {
         started = true;
         await closeSegment();
         await reconcileTurn();
         status = 'running';
         emit({ type: 'status', status, runId });
-        beginSegment(
-          typeof native.payload.messageId === 'string'
-            ? native.payload.messageId
-            : undefined,
-        );
+        if (native.type === 'start')
+          beginSegment(
+            typeof native.payload.messageId === 'string'
+              ? native.payload.messageId
+              : undefined,
+          );
       }
       if (
         native.type === 'step-start' &&
@@ -181,6 +185,7 @@ export async function consumeSessionStream(
       }
       if (
         native.type === 'tool-result' ||
+        native.type === 'tool-call-resumed' ||
         native.type === 'tool-output-denied' ||
         native.type === 'tool-error' ||
         native.type === 'tool-call-suspended' ||
@@ -192,7 +197,7 @@ export async function consumeSessionStream(
             (part) => 'toolCallId' in part && part.toolCallId === toolCallId,
           ),
         );
-        if (original && original.id !== messageId) {
+        if (original && (!segment || original.id !== messageId)) {
           await closeSegment();
           beginSegment(original.id);
         }

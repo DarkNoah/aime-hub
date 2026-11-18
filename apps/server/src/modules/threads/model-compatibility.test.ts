@@ -43,6 +43,7 @@ function deepseekResponse(
   tool: boolean,
   count: number,
   toolInput = '{}',
+  toolInputEvent: 'delta' | 'done' = 'delta',
 ) {
   const reasoningText = `${thought}${count}`;
   const reasoning = {
@@ -120,10 +121,12 @@ function deepseekResponse(
     },
     tool
       ? {
-          type: 'response.function_call_arguments.delta',
+          type: `response.function_call_arguments.${toolInputEvent}`,
           item_id: output.id,
           output_index: 1,
-          delta: toolInput,
+          ...(toolInputEvent === 'done'
+            ? { arguments: toolInput }
+            : { delta: toolInput }),
         }
       : {
           type: 'response.output_text.delta',
@@ -352,6 +355,34 @@ test('native Mastra processors preserve reasoning across tool calls, saved turns
       after.find((m) => m.id === original.id),
       original,
     );
+});
+
+test('native Responses executes a tool once with arguments supplied only at the end of the stream', async (t) => {
+  const expected = { value: 'lookup target' };
+  const received: (typeof expected)[] = [];
+  t.mock.method(globalThis, 'fetch', async () =>
+    deepseekResponse(true, true, 1, JSON.stringify(expected), 'done'),
+  );
+  const agent = new Agent({
+    id: 'responses-final-tool-arguments',
+    name: 'Responses final tool arguments',
+    instructions: 'Use lookup.',
+    model: gpt.model,
+    tools: {
+      lookup: createTool({
+        id: 'lookup',
+        description: 'Lookup',
+        inputSchema: z.object({ value: z.string() }),
+        execute: async (input) => {
+          received.push(input);
+          return 'found';
+        },
+      }),
+    },
+  });
+  const result = await agent.stream('Look up a value.', { maxSteps: 1 });
+  await result.consumeStream();
+  assert.deepEqual(received, [expected]);
 });
 
 test('malformed tool arguments remain paired on Responses replay and the model can correct them', async (t) => {

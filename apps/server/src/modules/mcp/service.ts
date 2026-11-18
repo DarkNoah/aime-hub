@@ -613,10 +613,10 @@ export class McpService {
             ...tool,
             id: name,
             execute: execute
-              ? async (...args: Parameters<typeof execute>) => {
+              ? async (input, context) => {
                   if (
                     server.config.oauth &&
-                    args[1]?.requestContext?.get('userId') !== userId
+                    context?.requestContext?.get('userId') !== userId
                   )
                     throw new McpError('FORBIDDEN', 403);
                   const current = await this.get(server.id, userId);
@@ -628,10 +628,10 @@ export class McpService {
                     this.connections.get(key)?.revision !== server.revision
                   )
                     throw new McpError('MCP_CONFLICT', 409);
-                  return execute(...args);
+                  return execute(input, context);
                 }
               : undefined,
-          },
+          } satisfies ToolMap[string],
         ];
       }),
     );
