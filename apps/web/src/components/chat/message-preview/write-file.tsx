@@ -23,7 +23,7 @@ export function WriteFilePreview({ part }: { part: PreviewPart }) {
     <div className="min-w-0 space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="break-all text-sm font-medium">{getToolName(part)}</h3>
-        {getStatusBadge(part.state)}
+        {getStatusBadge(part.state, part.output)}
       </div>
       {typeof input?.path === 'string' && (
         <WorkspaceFileLink

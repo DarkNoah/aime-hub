@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { isToolUIPart, type UIMessage } from 'ai';
 import type { ChatToolGroup } from '@aime/shared/chat-turns';
+import { getToolDisplayState } from '@aime/shared/tool-status';
 import { getMessageCompression } from '@aime/shared/message-compression';
 import { partRevision } from './turn-revision.js';
 import { inlineToolMedia } from './overview-media.js';
@@ -202,14 +203,6 @@ export type ProjectedToolGroup = {
   messages: UIMessage[];
 };
 
-function failedToolOutput(output: unknown) {
-  // Error flags are small. Avoid parsing large legacy JSON/text results merely
-  // to choose the collapsed group's status on every streaming update.
-  if (typeof output === 'string' && output.length > 16_384) return false;
-  const result = record(output);
-  return result?.isError === true || result?.ok === false;
-}
-
 function toolGroup(parts: HiddenPart[]): ProjectedToolGroup {
   const calls = new Map<string, keyof ChatToolGroup['statusCounts']>();
   let reasoningRunning = false;
@@ -219,10 +212,8 @@ function toolGroup(parts: HiddenPart[]): ProjectedToolGroup {
   for (const [index, { message, part }] of parts.entries()) {
     revision.update(JSON.stringify([message.id, partRevision(part)]));
     if (isToolUIPart(part)) {
-      const failed =
-        part.state === 'output-error' ||
-        part.state === 'output-denied' ||
-        (part.state === 'output-available' && failedToolOutput(part.output));
+      const state = getToolDisplayState(part.state, part.output);
+      const failed = state === 'output-error' || state === 'output-denied';
       // Repeated snapshots of a call contribute only its latest state.
       calls.set(
         part.toolCallId,

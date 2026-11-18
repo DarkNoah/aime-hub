@@ -1,5 +1,6 @@
 import { useMemo, type ReactNode } from 'react';
 import { isToolUIPart } from 'ai';
+import { getToolDisplayState } from '@aime/shared/tool-status';
 import { Bot, ChevronDown, Wrench } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { MessageResponse } from '@/components/ai-elements/message';
@@ -64,7 +65,12 @@ export function SubagentPreview({
     ([key]) => typeof result?.data?.[key] === 'string',
   );
   const errors =
-    tools?.filter((tool) => tool.part?.state === 'output-error').length ?? 0;
+    tools?.filter(
+      (tool) =>
+        tool.part &&
+        getToolDisplayState(tool.part.state, tool.part.output) ===
+          'output-error',
+    ).length ?? 0;
 
   return (
     <div className="min-w-0 space-y-5 [&_.animate-pulse]:motion-reduce:animate-none">
@@ -211,7 +217,8 @@ export function SubagentPreview({
                       {tool.part?.toolName ??
                         t('chat.subagent.unknownTool', { index: index + 1 })}
                     </span>
-                    {tool.part && getStatusBadge(tool.part.state)}
+                    {tool.part &&
+                      getStatusBadge(tool.part.state, tool.part.output)}
                     <ChevronDown
                       className="size-3.5 shrink-0 transition-transform group-data-[state=open]/child:rotate-180 motion-reduce:transition-none"
                       aria-hidden="true"

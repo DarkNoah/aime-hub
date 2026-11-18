@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isToolUIPart, type UIMessage } from 'ai';
+import { isToolUIPart, type ToolUIPart, type UIMessage } from 'ai';
 import {
   isChatToolGroupPart,
   type ChatToolGroup,
 } from '@aime/shared/chat-turns';
+import { getToolDisplayState } from '@aime/shared/tool-status';
 import { getTurnToolGroup, groupTurns, summarizeTurn } from './turns.js';
 import { isToolForceRendered } from '../tools/registry.js';
 
@@ -26,6 +27,65 @@ const groups = (parts: Part[]) =>
   parts.flatMap((part) =>
     part.type === 'data-tool-group' ? [part.data as ChatToolGroup] : [],
   );
+
+test('display status recognizes explicit result errors and preserves raw tools and other states', () => {
+  for (const output of [
+    { isError: true },
+    { ok: false },
+    '{"isError":true}',
+    '{"ok":false}',
+  ]) {
+    const part = tool('failed', output);
+    assert.ok(isToolUIPart(part));
+    const original = structuredClone(part);
+    assert.equal(getToolDisplayState(part.state, part.output), 'output-error');
+    assert.deepEqual(part, original);
+  }
+  for (const output of [
+    undefined,
+    null,
+    'Error: plain text is not a structured failure flag',
+    '{invalid json',
+    'null',
+    '{"isError":"true","ok":"false"}',
+    { content: { isError: true } },
+    [{ isError: true }],
+    { isError: false, ok: true },
+  ])
+    assert.equal(
+      getToolDisplayState('output-available', output),
+      'output-available',
+    );
+  const otherStates: ToolUIPart['state'][] = [
+    'input-streaming',
+    'input-available',
+    'approval-requested',
+    'approval-responded',
+    'output-denied',
+    'output-error',
+  ];
+  for (const state of otherStates)
+    assert.equal(getToolDisplayState(state, { isError: true }), state);
+});
+
+test('display status keeps the legacy JSON parsing limit for large results', () => {
+  const errorJson = '{"isError":true}';
+  assert.equal(
+    getToolDisplayState('output-available', errorJson.padEnd(16_384)),
+    'output-error',
+  );
+  assert.equal(
+    getToolDisplayState('output-available', errorJson.padEnd(16_385)),
+    'output-available',
+  );
+  assert.equal(
+    getToolDisplayState('output-available', {
+      isError: true,
+      content: 'x'.repeat(16_385),
+    }),
+    'output-error',
+  );
+});
 
 test('registered display tools expose their definition flag without creating execution tools', () => {
   for (const name of [

@@ -55,7 +55,7 @@ function ToolPreview({ part }: PreviewProps) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="break-all text-sm font-medium">{name}</h3>
-        {getStatusBadge(part.state)}
+        {getStatusBadge(part.state, part.output)}
       </div>
       {part.input !== undefined && <ToolInput input={part.input} />}
       <ToolOutput output={part.output} errorText={part.errorText} />

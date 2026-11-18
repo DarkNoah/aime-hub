@@ -48,7 +48,7 @@ const image={type:'tool-image_gen',toolCallId:'image',forceRender:true,state:'ou
 const speech={type:'tool-speech',toolCallId:'speech',forceRender:true,state:'output-available',input:{},output:{file_path:'speech.wav',duration:1,sample_rate:24000}};
 const ask={type:'tool-ask_user',toolCallId:'ask',forceRender:true,state:'output-available',input:{question:'你选择哪个方案？',options:[{label:'方案 A'},{label:'方案 B'}],selectionMode:'single_select'},output:'方案 A'};
 const panel={type:'tool-intelligent_ui',toolCallId:'panel',forceRender:true,state:'output-available',input:{html:'<p>交互面板内容</p>',title:'结果面板',waitForResponse:false},output:{ok:true}};
-window.snapshot={thread:{id:'thread',title:'Fixture',status:'running',projectId:null,queue:[],queueCount:0},activeMessageId:'assistant',activeTurnId:'turn',canContinue:false,turns:[{id:'turn',user,assistant:{id:'assistant',role:'assistant',parts:[{type:'text',text:'正在分析第一部分',state:'streaming'},group('first',22),{type:'text',text:'第一部分已完成'},image,group('second',1,{reasoningIndex:0}),{type:'text',text:'分析结束'},speech,ask,panel,group('earlier-reasoning',0,{reasoningIndex:0,reasoningOnly:true}),{type:'text',text:'继续核对'},group('reasoning',0,{reasoningIndex:1,reasoningOnly:true})]},toolCount:23,assetRevision:'media',revision:'initial'}],toolInteractions:[],history:{cursor:null,hasMore:false}};
+window.snapshot={thread:{id:'thread',title:'Fixture',status:'running',projectId:null,queue:[],queueCount:0},activeMessageId:'assistant',activeTurnId:'turn',canContinue:false,turns:[{id:'turn',user,assistant:{id:'assistant',role:'assistant',parts:[{type:'text',text:'正在分析第一部分',state:'streaming'},group('first',22),{type:'text',text:'第一部分已完成'},image,group('second',2,{reasoningIndex:0,state:'failed',statusCounts:{success:0,failed:2,running:0}}),{type:'text',text:'分析结束'},speech,ask,panel,group('earlier-reasoning',0,{reasoningIndex:0,reasoningOnly:true}),{type:'text',text:'继续核对'},group('reasoning',0,{reasoningIndex:1,reasoningOnly:true})]},toolCount:24,assetRevision:'media',revision:'initial'}],toolInteractions:[],history:{cursor:null,hasMore:false}};
 window.snapshot.turns.unshift({id:'history-turn',user:{id:'history-user',role:'user',parts:[{type:'text',text:'历史问题'}]},assistant:{id:'history-assistant',role:'assistant',parts:[group('history-reasoning',0,{reasoningIndex:0,reasoningOnly:true}),{type:'text',text:'历史回复'},group('history-tools',1,{reasoningIndex:0})]},toolCount:1,assetRevision:'',revision:'history'});
 window.calls=[];window.wholeTurnCalls=0;
 chatApi.turn=async()=>{window.wholeTurnCalls++;throw new Error('Whole turn loading is forbidden');};
@@ -58,7 +58,7 @@ chatApi.toolGroup=async(threadId,turnId,groupId,cursor,page=0)=>{
  const group=window.snapshot.turns.find(turn=>turn.id===turnId).assistant.parts.find(part=>part.type==='data-tool-group'&&part.data.id===groupId).data;
  await new Promise(resolve=>setTimeout(resolve,25));
  const reasoning=(text)=>({type:'reasoning',text,state:'done'});
- const all=groupId==='first'?Array.from({length:22},(_,i)=>tool('step_'+String(i).padStart(2,'0'))):groupId==='second'?[reasoning('中途推理应隐藏'),tool('second_tool')]:groupId==='history-tools'?[reasoning('历史混合思考应隐藏'),tool('history_tool')]:groupId==='reasoning'?[reasoning('同组较早思考应隐藏'),reasoning('核对推理信息')]:groupId==='next-reasoning'?[reasoning('新回复思考')]:[reasoning('较早思考应隐藏')];
+ const all=groupId==='first'?Array.from({length:22},(_,i)=>tool('step_'+String(i).padStart(2,'0'))):groupId==='second'?[reasoning('中途推理应隐藏'),{...tool('second_tool'),output:{isError:true,error:'Permission denied'}},{...tool('second_json_tool'),type:'dynamic-tool',toolName:'second_json_tool',output:JSON.stringify({ok:false,error:'Operation failed'})}]:groupId==='history-tools'?[reasoning('历史混合思考应隐藏'),tool('history_tool')]:groupId==='reasoning'?[reasoning('同组较早思考应隐藏'),reasoning('核对推理信息')]:groupId==='next-reasoning'?[reasoning('新回复思考')]:[reasoning('较早思考应隐藏')];
  return {id:groupId,revision:group.revision,messages:[{id:'source-'+groupId,role:'assistant',parts:all.slice(page*20,(page+1)*20)}],page,hasMore:(page+1)*20<all.length};
 };
 window.update=(groupId,revision,display={})=>{
@@ -225,6 +225,12 @@ createRoot(document.getElementById('root')).render(<SessionContext.Provider valu
   assert.equal(await first.getByText('step_21',{exact:true}).count(),0);
   await second.locator('button[aria-expanded]').first().click();
   await second.getByText('second_tool',{exact:true}).waitFor();
+  const failedRows=second.locator('[data-chat-tool-group-detail] button');
+  assert.deepEqual(await failedRows.locator('[data-slot="badge"]').allTextContents(),['失败','失败'],'object and JSON failure flags agree with the group summary');
+  assert.deepEqual(await second.locator('[data-tool-group-status]').allTextContents(),['失败2']);
+  await failedRows.first().click();
+  await page.waitForFunction(()=>window.previewed?.toolCallId==='second_tool');
+  assert.deepEqual(await page.evaluate(()=>({state:window.previewed.state,output:window.previewed.output})),{state:'output-available',output:{isError:true,error:'Permission denied'}},'displaying a failure preserves the original tool result for preview');
   assert.equal(await second.getByText('中途推理应隐藏',{exact:true}).count(),0,'earlier reasoning inside a mixed group stays hidden');
   assert.deepEqual((await page.evaluate(()=>window.calls)).at(-1),{groupId:'second',page:0});
   const before=await page.evaluate(()=>window.calls.length);

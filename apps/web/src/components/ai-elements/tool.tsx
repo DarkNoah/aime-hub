@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 import type { DynamicToolUIPart, ToolUIPart } from 'ai';
+import { getToolDisplayState } from '@aime/shared/tool-status';
 import {
   CheckCircleIcon,
   ChevronDownIcon,
@@ -43,6 +44,7 @@ export type ToolHeaderProps = {
   className?: string;
   onPreview?: () => void;
   compact?: boolean;
+  output?: unknown;
 } & (
   | { type: ToolUIPart['type']; state: ToolUIPart['state']; toolName?: never }
   | {
@@ -64,12 +66,15 @@ const statusIcons: Record<ToolPart['state'], ReactNode> = {
 
 const ToolStatusBadge = ({
   status,
+  output,
   compact = false,
 }: {
   status: ToolPart['state'];
+  output?: unknown;
   compact?: boolean;
 }) => {
   const { t } = useTranslation();
+  const displayState = getToolDisplayState(status, output);
   return (
     <Badge
       className={cn(
@@ -78,14 +83,14 @@ const ToolStatusBadge = ({
       )}
       variant={compact ? 'ghost' : 'secondary'}
     >
-      {statusIcons[status]}
-      {t(toolStatusLabels[status])}
+      {statusIcons[displayState]}
+      {t(toolStatusLabels[displayState])}
     </Badge>
   );
 };
 
-export const getStatusBadge = (status: ToolPart['state']) => (
-  <ToolStatusBadge status={status} />
+export const getStatusBadge = (status: ToolPart['state'], output?: unknown) => (
+  <ToolStatusBadge status={status} output={output} />
 );
 
 export const ToolHeader = ({
@@ -93,6 +98,7 @@ export const ToolHeader = ({
   title,
   type,
   state,
+  output,
   toolName,
   onPreview,
   compact = false,
@@ -123,9 +129,9 @@ export const ToolHeader = ({
         >
           {title ?? derivedName}
         </span>
-        {!compact && getStatusBadge(state)}
+        {!compact && getStatusBadge(state, output)}
       </div>
-      {compact && <ToolStatusBadge status={state} compact />}
+      {compact && <ToolStatusBadge status={state} output={output} compact />}
       {onPreview ? (
         <ChevronRightIcon
           className="size-4 shrink-0 text-muted-foreground"

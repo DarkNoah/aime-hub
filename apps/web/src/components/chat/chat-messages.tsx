@@ -235,6 +235,7 @@ export const ChatMessage = memo(function ChatMessage({
                               ? { type: tool.type, toolName: tool.toolName }
                               : { type: tool.type })}
                             state={tool.state}
+                            output={tool.output}
                           />
                           <ToolContent>
                             <ToolOutput
@@ -264,6 +265,7 @@ export const ChatMessage = memo(function ChatMessage({
                         ? { type: tool.type, toolName: tool.toolName }
                         : { type: tool.type })}
                       state={tool.state}
+                      output={tool.output}
                       compact={toolGroupsExpanded}
                       onPreview={
                         openPreview ? () => openPreview(tool) : undefined
@@ -359,6 +361,7 @@ export const ChatMessage = memo(function ChatMessage({
                         ? { type: part.type, toolName: part.toolName }
                         : { type: part.type })}
                       state={part.state}
+                      output={part.output}
                       onPreview={
                         openPreview ? () => openPreview(part) : undefined
                       }
