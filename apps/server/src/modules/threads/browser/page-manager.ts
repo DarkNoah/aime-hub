@@ -19,7 +19,10 @@ export class ThreadPageManager extends BrowserManager {
     { size: Viewport; done: Promise<void> }
   >();
 
-  constructor(private readonly context: BrowserContext) {
+  constructor(
+    private readonly context: BrowserContext,
+    private readonly onPage?: (page: Page) => void,
+  ) {
     super();
   }
 
@@ -130,6 +133,7 @@ export class ThreadPageManager extends BrowserManager {
     }
     if (this.owned.includes(page)) return;
     this.owned.push(page);
+    this.onPage?.(page);
     this.active = page;
     // A popup belongs to its opener's thread, never whichever thread last ran a tool.
     page.on('popup', (popup) => {

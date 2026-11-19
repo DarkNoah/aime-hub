@@ -1,14 +1,26 @@
 import type { BrowserEvent } from '@aime/shared/browser';
 import { emptyBrowserState } from '@aime/shared/browser';
+import { z } from 'zod';
 import { ThreadError } from '../errors.js';
+import { withAbortSignal } from '../../../lib/abort.js';
 import type { BrowserExecBinding } from './exec-actions.js';
 export type { BrowserExecBinding } from './exec-actions.js';
 import { UserBrowser } from './user-browser.js';
+import { NetworkCaptureStore } from './network-store.js';
 import {
   createBrowserDriver,
   ThreadBrowserSession,
   type BrowserDriver,
 } from './session.js';
+
+const listFilters = z.object({
+  url: z.string().optional(),
+  method: z.string().optional(),
+  status: z.number().int().optional(),
+  offset: z.number().int().nonnegative().optional(),
+  limit: z.number().int().positive().optional(),
+});
+const readRequest = z.object({ id: z.string().min(1) });
 
 /** Threads own pages; each user has separate personal and project browser profiles. */
 export class ThreadBrowsers {
@@ -28,6 +40,7 @@ export class ThreadBrowsers {
       userId: string,
       projectId?: string,
     ) => Promise<Record<string, string>>,
+    private captures = new NetworkCaptureStore(),
   ) {}
 
   private key(id: string, userId: string) {
@@ -46,17 +59,36 @@ export class ThreadBrowsers {
     userId: string,
     projectId?: string,
   ): BrowserExecBinding {
+    const scope = { threadId: id, userId, projectId };
     return async (operation, input, signal) => {
       signal?.throwIfAborted();
       const entry = this.sessions.get(this.key(id, userId));
       if (entry && entry.projectId !== projectId)
         throw new Error('Browser thread scope mismatch');
+      // Recording can be armed before the first navigation. Reading it never
+      // starts Chromium or extends its idle timeout.
+      switch (operation) {
+        case 'start':
+          return this.captures.start(scope);
+        case 'stop':
+          return this.captures.stop(scope);
+        case 'list':
+          return withAbortSignal(signal, () =>
+            this.captures.list(scope, listFilters.parse(input)),
+          );
+        case 'read':
+          return withAbortSignal(signal, () =>
+            this.captures.read(scope, readRequest.parse(input).id),
+          );
+      }
       if (!entry && operation !== 'goto' && operation !== 'newTab') {
         if (operation === 'tabs') return [];
-        if (operation === 'close')
+        if (operation === 'close') {
+          this.captures.stopScopeOwner(userId, projectId);
           return this.owners
             .get(JSON.stringify([userId, projectId ?? null]))
             ?.close();
+        }
         throw new ThreadError('BROWSER_NOT_RUNNING', 409);
       }
       return (entry?.session ?? this.acquire(id, userId, projectId)).exec(
@@ -83,6 +115,7 @@ export class ThreadBrowsers {
             userId,
             this.getEnvironment,
             projectId,
+            this.captures,
           )),
         );
       session = new ThreadBrowserSession(id, this.create(id, owner));
@@ -128,20 +161,27 @@ export class ThreadBrowsers {
     await session.dispose();
   }
   async remove(id: string) {
-    await Promise.all(
-      [...this.sessions.values()]
+    await Promise.all([
+      this.captures.removeThread(id),
+      ...[...this.sessions.values()]
         .filter((entry) => entry.session.threadId === id)
         .map((entry) => this.removeSession(entry.session, entry.userId)),
-    );
+    ]);
   }
   async dispose() {
-    await Promise.all([...this.owners.values()].map((owner) => owner.close()));
-    await Promise.allSettled(
-      [...this.sessions.values()].map((entry) =>
-        this.removeSession(entry.session, entry.userId),
-      ),
-    );
-    this.watchers.clear();
-    this.owners.clear();
+    try {
+      await Promise.all(
+        [...this.owners.values()].map((owner) => owner.close()),
+      );
+      await Promise.allSettled(
+        [...this.sessions.values()].map((entry) =>
+          this.removeSession(entry.session, entry.userId),
+        ),
+      );
+      this.watchers.clear();
+      this.owners.clear();
+    } finally {
+      await this.captures.dispose();
+    }
   }
 }

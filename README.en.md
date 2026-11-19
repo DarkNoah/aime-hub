@@ -109,6 +109,10 @@ The chat `exec` browser module uses Patchright with a persistent chat profile. T
 pnpm --filter @aime/server exec playwright-core install chromium
 ```
 
+To record the current chat thread's HTTP(S) traffic, call `await browser.start()` before navigating or clicking. Recording also covers manual browser input. Find requests with `await browser.list({ method: 'POST' })`, then inspect a request and its response with `await browser.read(id)`. Calling `await browser.stop()` stops recording new requests and lets pending responses finish.
+
+The server encrypts each record in a temporary directory named with the request start time and deletes it after 15 minutes. A server restart ends access to earlier records. The server retains up to 512 records per thread and 2048 per process, evicting older records first. It redacts common credential fields and captures small JSON, URL-encoded form and plain-text bodies. Request details include the reason when a body is omitted.
+
 Linux also needs Playwright's system libraries. Projects use the local filesystem by default. AgentFS workspaces require the `agentfs` CLI and Linux FUSE or macOS NFS mounting support. The Docker server image includes Chromium, AgentFS, and related tools; the Linux host still needs `/dev/fuse`.
 
 ## Usage notes

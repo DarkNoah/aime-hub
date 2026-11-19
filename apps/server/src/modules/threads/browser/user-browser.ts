@@ -11,6 +11,8 @@ import { join } from 'node:path';
 import { chromium, type BrowserContext, type Cookie } from 'patchright-core';
 import type { BrowserContext as AgentBrowserContext } from 'playwright-core';
 import { ThreadPageManager } from './page-manager.js';
+import { NetworkCaptureEvents } from './network-events.js';
+import type { NetworkCaptureStore } from './network-store.js';
 import { recoverBrowserProfileLock } from './profile-lock.js';
 import { browserProxy } from './proxy.js';
 import { browserOperation } from './operation.js';
@@ -56,6 +58,7 @@ export function chatBrowserLaunchOptions(env: NodeJS.ProcessEnv = process.env) {
 /** One persistent Chromium context per user and scope, outside chat workspaces. */
 export class UserBrowser {
   private context?: BrowserContext;
+  private network?: NetworkCaptureEvents;
   private managers = new Map<string, ThreadPageManager>();
   private pending: Promise<unknown> = Promise.resolve();
   private closedListeners = new Set<() => Promise<void>>();
@@ -74,6 +77,7 @@ export class UserBrowser {
       projectId?: string,
     ) => Promise<Record<string, string>>,
     readonly projectId?: string,
+    private readonly captures?: NetworkCaptureStore,
   ) {
     if (!userId) throw new Error('Browser owner is required');
     this.directory = join(
@@ -196,9 +200,15 @@ export class UserBrowser {
       await keeper.goto('about:blank');
       await Promise.all(pages.slice(1).map((page) => page.close()));
       this.context = context;
+      if (this.captures)
+        this.network = new NetworkCaptureEvents(
+          context as AgentBrowserContext,
+          this.captures,
+        );
       context.once('close', () => {
         if (this.context !== context) return;
         this.context = undefined;
+        this.network = undefined;
         this.clearIdleTimer();
         this.activeOperations.clear();
         this.epoch++;
@@ -206,6 +216,7 @@ export class UserBrowser {
         // Explicit close already notified listeners before asking Chromium to
         // exit. Only an unexpected disconnect needs another notification.
         if (this.closing) return;
+        this.captures?.stopScopeOwner(this.userId, this.projectId);
         for (const listener of this.closedListeners)
           void listener().catch(() => {});
       });
@@ -227,7 +238,16 @@ export class UserBrowser {
       if (!manager) {
         // agent-browser declares Playwright's recursive context types. Patchright
         // extends their evaluate signatures and implements the same page/CDP API.
-        manager = new ThreadPageManager(context as AgentBrowserContext);
+        const network = this.network;
+        const scope = {
+          userId: this.userId,
+          projectId: this.projectId,
+          threadId,
+        };
+        manager = new ThreadPageManager(
+          context as AgentBrowserContext,
+          (page) => network?.track(page, scope),
+        );
         this.managers.set(threadId, manager);
       }
       if (!manager.isLaunched()) await manager.newTab();
@@ -248,6 +268,7 @@ export class UserBrowser {
 
   close() {
     if (this.closing) return this.closing;
+    this.captures?.stopScopeOwner(this.userId, this.projectId);
     this.clearIdleTimer();
     this.activeOperations.clear();
     this.epoch++;

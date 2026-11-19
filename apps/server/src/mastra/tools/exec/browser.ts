@@ -1,9 +1,13 @@
 import type { ToolExecutionContext } from '@mastra/core/tools';
 import type { BrowserExecBinding } from '../../../modules/threads/browser/registry.js';
 
-// Named parameters cross the VM boundary as a JSON object. Snapshot and
-// screenshot accept their options object directly.
+// Named parameters cross the VM boundary as a JSON object. A null parameter
+// list passes the caller's options object directly.
 const methods = {
+  start: ['start', ''],
+  list: ['list', null],
+  read: ['read', 'id'],
+  stop: ['stop', ''],
   goto: ['goto', 'url'],
   snapshot: ['snapshot', null],
   click: ['click', 'target'],
@@ -62,8 +66,8 @@ export function createExecBrowserModule(
       const execute = requireBinding();
       if (!Object.hasOwn(methods, operation))
         throw new Error(`Unknown browser operation: ${operation}`);
-      const [legacyName] = methods[operation as keyof typeof methods];
-      if (disabledTools?.has(`browser_${legacyName}`))
+      const [permissionName] = methods[operation as keyof typeof methods];
+      if (disabledTools?.has(`browser_${permissionName}`))
         throw new Error(`Browser operation disabled: ${operation}`);
       if (
         operation === 'newTab' &&

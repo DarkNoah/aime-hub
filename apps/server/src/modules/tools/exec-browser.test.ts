@@ -63,6 +63,41 @@ test('all browser imports dispatch to the current request and emit screenshots a
   ]);
 });
 
+test('network capture methods pass query options and request ids across exec calls', async () => {
+  const context = new RequestContext();
+  const calls: unknown[] = [];
+  context.set('execBrowser', async (name: string, args: unknown) => {
+    calls.push([name, args]);
+    if (name === 'list') return { entries: [{ id: 'request-1' }] };
+    if (name === 'read') return { status: 201 };
+  });
+  const capture = await run("import { start } from 'browser'; await start()", {
+    requestContext: context,
+  });
+  assert.ok(!capture.isError);
+  const query = await run(
+    `
+      import browser, { list, stop } from 'browser';
+      await browser.list();
+      const { entries } = await list({ url: '/orders', method: 'POST', status: 201, offset: 0, limit: 5 });
+      await stop();
+      text(await browser.read(entries[0].id));
+    `,
+    { requestContext: context },
+  );
+  assert.deepEqual(query.content, [{ type: 'text', text: '{"status":201}' }]);
+  assert.deepEqual(calls, [
+    ['start', {}],
+    ['list', {}],
+    [
+      'list',
+      { url: '/orders', method: 'POST', status: 201, offset: 0, limit: 5 },
+    ],
+    ['stop', {}],
+    ['read', { id: 'request-1' }],
+  ]);
+});
+
 test('browser module requires a host binding even for direct VM dispatch', async () => {
   for (const code of [
     "import { tabs } from 'browser'; await tabs()",
@@ -110,7 +145,7 @@ test('legacy operation exclusions apply to browser module calls and raw dispatch
     ['exec'],
     { browser_click: { enabled: false } },
     {
-      disabledTools: ['browser_tabs', 'browser_type'],
+      disabledTools: ['browser_tabs', 'browser_type', 'browser_read'],
     },
   );
   const exec = tools.exec as typeof basicExec;
@@ -127,6 +162,7 @@ test('legacy operation exclusions apply to browser module calls and raw dispatch
       () => browser.fill('input', 'hello'),
       () => browser.click('button'),
       () => globalThis.__execModuleCall('browser.closeTab', {}),
+      () => globalThis.__execModuleCall('browser.read', {id:'request-1'}),
       () => globalThis.__execModuleCall('browser.constructor', {}),
     ]) {
       try { await operation(); } catch (error) { text(error.message); }
@@ -144,6 +180,7 @@ test('legacy operation exclusions apply to browser module calls and raw dispatch
       'Browser operation disabled: fill',
       'Browser operation disabled: click',
       'Browser operation disabled: closeTab',
+      'Browser operation disabled: read',
       'Unknown browser operation: constructor',
     ],
   );

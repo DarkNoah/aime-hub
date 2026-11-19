@@ -119,6 +119,7 @@ plugins/vibe-quant/**/__pycache__/
 !apps/server/src/modules/threads/browser-close.test.ts
 !apps/server/src/modules/threads/browser-idle.test.ts
 !apps/server/src/modules/threads/browser-exec-actions.test.ts
+!apps/server/src/modules/threads/browser-network*.test.ts
 !apps/server/src/modules/threads/runner-exec-browser.test.ts
 !apps/server/src/modules/tools/exec-browser.test.ts
 !scripts/browser-close-input.test.mjs
