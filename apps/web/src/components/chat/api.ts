@@ -1,4 +1,5 @@
 import type {
+  AskUserAnswer,
   ChatSettings,
   CreateThreadInput,
   RunInput,
@@ -112,6 +113,15 @@ export const chatApi = {
     api.threads.respondToTool({
       params: { threadId, interactionId },
       body: response,
+    }),
+  respondToQuestions: (
+    threadId: string,
+    interactionId: string,
+    answers: AskUserAnswer[],
+  ) =>
+    api.threads.respondToQuestions({
+      params: { threadId, interactionId },
+      body: { answers },
     }),
   retry: (threadId: string, settings: ChatSettings) =>
     api.threads.retry({ params: { threadId }, body: settings }),

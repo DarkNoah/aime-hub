@@ -1,7 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { isToolUIPart } from 'ai';
 import {
-  BrainIcon,
   CheckIcon,
   ChevronDownIcon,
   CircleAlertIcon,
@@ -110,7 +109,6 @@ export const ChatToolGroupRow = memo(function ChatToolGroupRow({
   loadDetails,
   threadId,
   pendingToolCallIds,
-  reasoningIndex,
 }: {
   turn: ChatTurnSummary;
   group: ChatToolGroup;
@@ -118,7 +116,6 @@ export const ChatToolGroupRow = memo(function ChatToolGroupRow({
   loadDetails?: LoadChatToolGroup;
   threadId: string;
   pendingToolCallIds: ReadonlySet<string>;
-  reasoningIndex?: number;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -131,16 +128,13 @@ export const ChatToolGroupRow = memo(function ChatToolGroupRow({
   }, [turn, group]);
   const current = detail?.summaryRevision === group.revision;
   const loading = loadingMore || (expanded && !current && !failed);
-  let partIndex = 0;
   const messages = detail?.messages
     .map((message) => ({
       ...message,
-      parts: message.parts.filter((part) => {
-        const index = partIndex++;
-        return part.type === 'reasoning'
-          ? index === reasoningIndex
-          : !isToolUIPart(part) || !pendingToolCallIds.has(part.toolCallId);
-      }),
+      parts: message.parts.filter(
+        (part) =>
+          !isToolUIPart(part) || !pendingToolCallIds.has(part.toolCallId),
+      ),
     }))
     .filter((message) => message.parts.length > 0);
 
@@ -193,21 +187,14 @@ export const ChatToolGroupRow = memo(function ChatToolGroupRow({
       data-chat-tool-group={group.id}
     >
       <CollapsibleTrigger className="grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5 rounded-lg px-3 py-2 text-left text-sm outline-none transition-colors duration-150 hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-[state=open]:rounded-b-none data-[state=open]:bg-muted/40 motion-reduce:transition-none @[30rem]/tool-group:grid-cols-[auto_minmax(0,1fr)_auto_auto] @[30rem]/tool-group:gap-x-3">
-        {group.reasoningOnly ? (
-          <BrainIcon
-            className="size-4 shrink-0 text-muted-foreground"
-            aria-hidden
-          />
-        ) : (
-          <WrenchIcon
-            className="size-4 shrink-0 text-muted-foreground"
-            aria-hidden
-          />
-        )}
+        <WrenchIcon
+          className="size-4 shrink-0 text-muted-foreground"
+          aria-hidden
+        />
         <span className="min-w-0 flex-1 font-medium leading-5">
           {group.count > 0
             ? t('chat.toolGroup', { count: group.count })
-            : t(group.reasoningOnly ? 'chat.reasoning' : 'chat.turns.details')}
+            : t('chat.turns.details')}
         </span>
         {/* Keep status components mounted so a count rising from zero animates. */}
         <span
@@ -270,25 +257,18 @@ export const ChatToolGroupRow = memo(function ChatToolGroupRow({
           <ScrollArea
             type="auto"
             viewportProps={{
-              className: cn(
-                '[&>div]:block! focus-visible:ring-inset',
-                !group.reasoningOnly && 'max-h-[min(24rem,60dvh)]',
-              ),
-              tabIndex: group.reasoningOnly ? undefined : 0,
+              className:
+                'max-h-[min(24rem,60dvh)] [&>div]:block! focus-visible:ring-inset',
+              tabIndex: 0,
               'aria-label': t('chat.turns.details'),
             }}
           >
-            <div
-              data-chat-tool-group-detail={group.id}
-              className={group.reasoningOnly ? 'px-3 py-3' : 'px-1 py-1'}
-            >
+            <div data-chat-tool-group-detail={group.id} className="px-1 py-1">
               <ChatMessages
                 messages={messages ?? []}
                 threadId={threadId}
                 running={false}
                 activeMessageId={null}
-                showAllReasoning
-                hideReasoningTrigger={group.reasoningOnly}
                 toolGroupsExpanded
                 disabled
               />

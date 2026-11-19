@@ -113,34 +113,10 @@ export function mergeThreadMessage(
     return mergeOverlappingMessages(current, incoming);
   // Storage can lag behind the stream even when it keeps the same message ID.
   // A shorter cumulative snapshot must not erase the unsaved end of the turn.
-  if (
-    current.role === 'assistant' &&
-    incoming.parts.every((part, index) => {
-      const previous = current.parts[index];
-      if (!previous || part.type !== previous.type) return false;
-      const key = partIdentity(part);
-      const previousKey = partIdentity(previous);
-      if (key && previousKey) return key === previousKey;
-      if (
-        (part.type === 'text' && previous.type === 'text') ||
-        (part.type === 'reasoning' && previous.type === 'reasoning')
-      )
-        return (
-          part.text.startsWith(previous.text) ||
-          previous.text.startsWith(part.text)
-        );
-      return JSON.stringify(part) === JSON.stringify(previous);
-    })
-  )
-    return {
-      ...incoming,
-      parts: [
-        ...incoming.parts.map((part, index) =>
-          mergePart(current.parts[index], part),
-        ),
-        ...current.parts.slice(incoming.parts.length),
-      ],
-    };
+  if (current.role === 'assistant') {
+    const parts = mergeCumulativeParts(current.parts, incoming.parts);
+    if (parts) return { ...incoming, parts };
+  }
   const results = new Map(
     current.parts
       .filter(isToolUIPart)
@@ -207,6 +183,59 @@ function partIdentity(part: Part): string | undefined {
     return `${part.type}:${part.id}`;
 }
 
+function matchingPart(current: Part, incoming: Part) {
+  if (current.type !== incoming.type) return false;
+  const key = partIdentity(current);
+  const otherKey = partIdentity(incoming);
+  if (key && otherKey) return key === otherKey;
+  if (
+    (current.type === 'text' && incoming.type === 'text') ||
+    (current.type === 'reasoning' && incoming.type === 'reasoning')
+  )
+    return (
+      current.text.startsWith(incoming.text) ||
+      incoming.text.startsWith(current.text)
+    );
+  return JSON.stringify(current) === JSON.stringify(incoming);
+}
+
+// Native history can omit step markers and reasoning from a cumulative snapshot.
+// Align substantive parts in order so a stale prefix can update an earlier tool
+// without truncating text streamed after it.
+function mergeCumulativeParts(current: Part[], incoming: Part[]) {
+  const parts: Part[] = [];
+  const currentHasReasoning = current.some((part) => part.type === 'reasoning');
+  const incomingHasReasoning = incoming.some(
+    (part) => part.type === 'reasoning',
+  );
+  let left = 0;
+  let right = 0;
+  while (left < current.length && right < incoming.length) {
+    const before = current[left];
+    const after = incoming[right];
+    if (matchingPart(before, after)) {
+      parts.push(mergePart(before, after));
+      left++;
+      right++;
+    } else if (
+      before.type === 'step-start' ||
+      (before.type === 'reasoning' && !incomingHasReasoning)
+    ) {
+      parts.push(before);
+      left++;
+    } else if (
+      after.type === 'step-start' ||
+      (after.type === 'reasoning' && !currentHasReasoning)
+    ) {
+      parts.push(after);
+      right++;
+    } else {
+      return;
+    }
+  }
+  return [...parts, ...current.slice(left), ...incoming.slice(right)];
+}
+
 function mergePart(current: Part, incoming: Part): Part {
   if (isToolUIPart(current) && isToolUIPart(incoming)) {
     if (
@@ -260,22 +289,12 @@ function mergePartGap(current: Part[], incoming: Part[]): Part[] {
   let cursor = 0;
   let incomingCursor = 0;
   for (const [partIndex, part] of incoming.entries()) {
-    const match = current.findIndex((other, index) => {
-      if (
-        index < cursor ||
-        (partIdentity(part) && partIdentity(other)) ||
-        part.type !== other.type
-      )
-        return false;
-      if (
-        (part.type === 'text' && other.type === 'text') ||
-        (part.type === 'reasoning' && other.type === 'reasoning')
-      )
-        return (
-          part.text.startsWith(other.text) || other.text.startsWith(part.text)
-        );
-      return JSON.stringify(part) === JSON.stringify(other);
-    });
+    const match = current.findIndex(
+      (other, index) =>
+        index >= cursor &&
+        !(partIdentity(part) && partIdentity(other)) &&
+        matchingPart(other, part),
+    );
     if (match >= 0) {
       result.push(
         ...current.slice(cursor, match),
@@ -358,6 +377,90 @@ function mergeOverlappingMessages(
   };
 }
 
+function interruptedReplyLink(message: UIMessage) {
+  if (message.role !== 'assistant') return;
+  const link = (
+    message.metadata as {
+      interruptedReply?: { draftId?: unknown; storedId?: unknown };
+    }
+  )?.interruptedReply;
+  if (typeof link?.draftId === 'string' && typeof link.storedId === 'string')
+    return { draftId: link.draftId, storedId: link.storedId };
+}
+
+/** Mastra saves an interrupted step as one compact text record. Overlay it only
+ * on the assistant ID reported by that run, preserving the original live blocks.
+ * Collect both sides first: history, a late write and the live feed can arrive in any order.
+ */
+function projectInterruptedReplies(
+  snapshots: UIMessage[],
+  removed: Set<string>,
+) {
+  const links = new Map<string, string>();
+  for (const message of snapshots) {
+    const link = interruptedReplyLink(message);
+    if (link && !removed.has(message.id))
+      links.set(link.storedId, link.draftId);
+  }
+  if (!links.size) return snapshots;
+
+  const drafts = new Map<string, UIMessage[]>();
+  for (const id of links.values()) drafts.set(id, []);
+  for (const message of snapshots) {
+    if (message.role !== 'assistant' || removed.has(message.id)) continue;
+    for (const source of threadMessageSourceIds(message))
+      drafts.get(source)?.push(message);
+  }
+  return snapshots.map((saved) => {
+    const draftId = links.get(saved.id);
+    const compact = saved.parts[0];
+    if (!draftId || saved.parts.length !== 1 || compact.type !== 'text')
+      return saved;
+    let projected = saved;
+    let covered = -1;
+    for (const draft of drafts.get(draftId) ?? []) {
+      if (draft === saved) continue;
+      const parts = draft.parts;
+      const types = parts.map((part) => part.type);
+      const start = types.lastIndexOf('step-start') + 1;
+      const text = parts
+        .slice(start)
+        .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+        .join('');
+      if (
+        !(compact.text.startsWith(text) || text.startsWith(compact.text)) ||
+        text.length < covered
+      )
+        continue;
+      covered = text.length;
+      const updated = [...parts];
+      const last = types.lastIndexOf('text');
+      const tail = updated[last];
+      if (last >= start && tail?.type === 'text') {
+        updated[last] = mergePart(
+          { ...compact, text: tail.text },
+          {
+            ...tail,
+            text: tail.text + compact.text.slice(text.length),
+          },
+        );
+      } else updated.push(compact);
+      projected = {
+        ...saved,
+        metadata: {
+          ...(saved.metadata as object),
+          interruptedReply: { draftId, storedId: saved.id },
+          reconciledMessageIds: [
+            ...new Set([saved.id, ...threadMessageSourceIds(draft)]),
+          ],
+        },
+        parts: updated,
+      };
+    }
+    return projected;
+  });
+}
+
 /** Coalesce live/stored identities without dropping content absent from storage. */
 export function mergeThreadMessages(
   current: UIMessage[],
@@ -367,7 +470,10 @@ export function mergeThreadMessages(
   const removed = new Set(removedMessageIds);
   const messages = new Map<string, UIMessage>();
   const aliases = new Map<string, string>();
-  for (const message of [...current, ...incoming]) {
+  for (const message of projectInterruptedReplies(
+    [...current, ...incoming],
+    removed,
+  )) {
     if (removed.has(message.id)) continue;
     // A reconnect can introduce the canonical message after the client has
     // already received a text-only draft. Its source IDs are proof of overlap
@@ -421,57 +527,70 @@ export function mergeThreadMessages(
   return result;
 }
 
+function coversStreamedParts(draft: UIMessage, stored: UIMessage) {
+  const parts = draft.parts.filter(
+    (part) =>
+      part.type !== 'step-start' &&
+      !((part.type === 'text' || part.type === 'reasoning') && !part.text),
+  );
+  let cursor = -1;
+  return (
+    parts.length > 0 &&
+    parts.every((part) => {
+      cursor = stored.parts.findIndex((other, index) => {
+        if (index <= cursor || other.type !== part.type) return false;
+        const key = partIdentity(part);
+        const otherKey = partIdentity(other);
+        if (key && otherKey) return key === otherKey;
+        if (part.type === 'text' && other.type === 'text')
+          return other.text.startsWith(part.text);
+        return JSON.stringify(part) === JSON.stringify(other);
+      });
+      return cursor >= 0;
+    })
+  );
+}
+
 /** Finished streams may have text-only aliases without shared tool/provider IDs. */
 export function reconcileThreadMessages(
   current: UIMessage[],
   persisted: UIMessage[],
   streamedMessageIds: string[],
 ) {
-  const saved = [...persisted];
-  const ids = new Set(saved.map((message) => message.id));
+  if (!streamedMessageIds.length)
+    return mergeThreadMessages(current, persisted);
   const streamed = new Set(streamedMessageIds);
-  // Text equality alone is only sufficient after this turn has stopped and
-  // only against its final assistant block, never an older identical answer.
-  const lastBoundary = saved.reduce(
-    (last, message, index) => (message.role !== 'assistant' ? index : last),
-    -1,
-  );
-  const remaining = current.map((message) => {
-    if (
-      message.role !== 'assistant' ||
-      ids.has(message.id) ||
-      !streamed.has(message.id)
-    )
-      return message;
-    const parts = message.parts.filter(
-      (part) =>
-        !part.type.startsWith('step-') &&
-        !((part.type === 'reasoning' || part.type === 'text') && !part.text),
+  const ids = new Set(persisted.map((message) => message.id));
+  // Without a shared identity, only compare drafts in the latest matching turn.
+  const lastBoundary = (messages: UIMessage[]) =>
+    messages.reduce(
+      (last, message, index) => (message.role === 'assistant' ? last : index),
+      -1,
     );
-    if (!parts.length) return message;
-    for (let index = saved.length - 1; index > lastBoundary; index--) {
-      const candidate = saved[index];
-      let cursor = 0;
-      const covered = parts.every((part) => {
-        const match = candidate.parts.findIndex((other, i) => {
-          if (i < cursor || part.type !== other.type) return false;
-          const key = partIdentity(part);
-          const otherKey = partIdentity(other);
-          if (key && otherKey) return key === otherKey;
-          if (part.type === 'text' && other.type === 'text')
-            return other.text.startsWith(part.text);
-          return JSON.stringify(part) === JSON.stringify(other);
-        });
-        if (match < 0) return false;
-        cursor = match + 1;
-        return true;
-      });
-      if (covered) {
-        saved[index] = mergeOverlappingMessages(message, candidate);
-        return saved[index];
-      }
+  const liveBoundary = lastBoundary(current);
+  const savedBoundary = lastBoundary(persisted);
+  const candidates = persisted
+    .slice(savedBoundary + 1)
+    .filter((m) => !streamed.has(m.id) && !interruptedReplyLink(m));
+  const matches = new Map<string, UIMessage>();
+  const claims = new Map<string, number>();
+  if (
+    liveBoundary < 0 ||
+    current[liveBoundary].id === persisted[savedBoundary]?.id
+  ) {
+    for (const draft of current.slice(liveBoundary + 1)) {
+      if (!streamed.has(draft.id) || ids.has(draft.id)) continue;
+      const covered = candidates.filter((m) => coversStreamedParts(draft, m));
+      for (const stored of covered)
+        claims.set(stored.id, (claims.get(stored.id) ?? 0) + 1);
+      if (covered.length === 1) matches.set(draft.id, covered[0]);
     }
-    return message;
+  }
+  const remaining = current.map((draft) => {
+    const saved = matches.get(draft.id);
+    return saved && claims.get(saved.id) === 1
+      ? mergeOverlappingMessages(draft, saved)
+      : draft;
   });
-  return mergeThreadMessages(remaining, saved);
+  return mergeThreadMessages(remaining, persisted);
 }

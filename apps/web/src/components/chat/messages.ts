@@ -43,6 +43,7 @@ export function groupMessageParts(
   const groups: ChatMessagePart[] = [];
   let toolGroup: Extract<ChatMessagePart, { type: 'tools' }> | undefined;
   for (const [index, part] of message.parts.entries()) {
+    if (part.type === 'reasoning') continue;
     if (
       isToolUIPart(part) &&
       !isSpecialTool(getToolName(part)) &&

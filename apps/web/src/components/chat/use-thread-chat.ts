@@ -7,6 +7,7 @@ import type {
   ThreadSummary,
   ChatUsage,
   ToolInteraction,
+  AskUserAnswer,
   ToolResponse,
   ThreadBackgroundTask,
   ThreadCommandSession,
@@ -55,6 +56,7 @@ export function useThreadChat(
   );
   const [error, setError] = useState<unknown>(null);
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
+  const [thinking, setThinking] = useState(false);
   const [history, setHistory] = useState<Pick<
     ChatTurnPage,
     'cursor' | 'hasMore'
@@ -121,6 +123,7 @@ export function useThreadChat(
       setError(null);
       updateThread(snapshot.thread);
       setActiveMessageId(snapshot.activeMessageId);
+      setThinking(snapshot.thinking === true);
       setActiveTurnId(snapshot.activeTurnId);
       setCanContinue(snapshot.canContinue);
       setUsage(snapshot.usage ?? null);
@@ -295,6 +298,12 @@ export function useThreadChat(
     respondToTool: async (interactionId: string, response: ToolResponse) => {
       await chatApi.respondToTool(threadId, interactionId, response);
     },
+    respondToQuestions: async (
+      interactionId: string,
+      answers: AskUserAnswer[],
+    ) => {
+      await chatApi.respondToQuestions(threadId, interactionId, answers);
+    },
     messages,
     turns,
     groupDetails,
@@ -304,6 +313,7 @@ export function useThreadChat(
     connected,
     error,
     activeMessageId,
+    thinking: connected && thinking,
     send,
     continueRun: async () => {
       setSubmitting(true);

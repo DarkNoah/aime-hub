@@ -44,6 +44,7 @@ plugins/vibe-quant/**/__pycache__/
 !scripts/intelligent-ui-browser.test.mjs
 !scripts/chat-tool-interactions-browser.test.mjs
 !scripts/chat-ask-user.test.ts
+!apps/server/src/modules/threads/runner-ask-user.test.ts
 
 !scripts/group-chats-browser.test.mjs
 !scripts/group-chat-choices-browser.test.mjs
@@ -134,3 +135,6 @@ plugins/vibe-quant/**/__pycache__/
 !scripts/skill-projects-browser.test.mjs
 !apps/server/src/modules/threads/project-skills.test.ts
 !apps/server/src/mastra/skills/skill-installer/scripts/project.py
+!apps/server/src/modules/threads/runner-abort-reply.test.ts
+!apps/server/src/modules/threads/session-stream-error.test.ts
+!scripts/interrupted-thread-messages.test.ts

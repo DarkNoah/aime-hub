@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { isToolUIPart, type UIMessage } from 'ai';
 import type { ChatToolGroup } from '@aime/shared/chat-turns';
+import type { ToolResponse } from '@aime/shared/threads';
 import { getToolDisplayState } from '@aime/shared/tool-status';
 import { getMessageCompression } from '@aime/shared/message-compression';
 import { partRevision } from './turn-revision.js';
@@ -12,6 +13,7 @@ type ToolPart = Extract<Part, { toolCallId: string }>;
 export type TurnProjectionOptions = {
   forceRender?: (toolName: string) => boolean;
   threadId?: string;
+  askUserResponses?: ReadonlyMap<string, ToolResponse>;
 };
 
 type ProjectionContext = TurnProjectionOptions & {
@@ -150,17 +152,36 @@ function displayedTool(
   messageId: string,
   context: ProjectionContext,
 ): ToolPart {
+  const name = toolName(part);
+  const response =
+    name === 'ask_user' &&
+    part.state !== 'output-error' &&
+    part.state !== 'output-denied'
+      ? context.askUserResponses?.get(part.toolCallId)
+      : undefined;
   const key = JSON.stringify([
     context.threadId,
     context.turnId,
     context.cursor,
     messageId,
+    response?.id,
   ]);
   const cached = displayParts.get(part)?.get(key);
   if (cached) return cached;
-  const name = toolName(part);
   let input = part.input;
   let output = part.output;
+  let state = part.state;
+  let approval = part.approval;
+  // Mastra publishes the tool results together after the last question is answered.
+  // The overview can already show the user's persisted response to each suspension.
+  if (response?.action === 'resume') {
+    state = 'output-available';
+    output = response.data;
+  } else if (response?.action === 'decline') {
+    state = 'output-denied';
+    output = undefined;
+    approval = { id: response.id, approved: false, reason: response.reason };
+  }
   if (name === 'image_gen') {
     input = {};
     output = mediaOutput(part, messageId, context);
@@ -184,12 +205,12 @@ function displayedTool(
     type: part.type,
     ...(part.type === 'dynamic-tool' ? { toolName: part.toolName } : {}),
     toolCallId: part.toolCallId,
-    state: part.state,
+    state,
     forceRender: true,
     ...(input !== undefined ? { input } : {}),
     ...(output !== undefined ? { output } : {}),
     ...(part.errorText !== undefined ? { errorText: part.errorText } : {}),
-    ...('approval' in part && part.approval ? { approval: part.approval } : {}),
+    ...(approval ? { approval } : {}),
   } as ToolPart;
   let contexts = displayParts.get(part);
   if (!contexts) displayParts.set(part, (contexts = new Map()));
@@ -205,11 +226,9 @@ export type ProjectedToolGroup = {
 
 function toolGroup(parts: HiddenPart[]): ProjectedToolGroup {
   const calls = new Map<string, keyof ChatToolGroup['statusCounts']>();
-  let reasoningRunning = false;
-  let reasoningIndex: number | undefined;
   const messages: UIMessage[] = [];
   const revision = createHash('sha256');
-  for (const [index, { message, part }] of parts.entries()) {
+  for (const { message, part } of parts) {
     revision.update(JSON.stringify([message.id, partRevision(part)]));
     if (isToolUIPart(part)) {
       const state = getToolDisplayState(part.state, part.output);
@@ -223,9 +242,6 @@ function toolGroup(parts: HiddenPart[]): ProjectedToolGroup {
             ? 'success'
             : 'running',
       );
-    } else if (part.type === 'reasoning') {
-      reasoningIndex = index;
-      reasoningRunning ||= part.state === 'streaming';
     }
     if (messages.at(-1)?.id === message.id) messages.at(-1)!.parts.push(part);
     else messages.push({ ...message, parts: [part] });
@@ -241,15 +257,11 @@ function toolGroup(parts: HiddenPart[]): ProjectedToolGroup {
       statusCounts,
       revision: revision.digest('hex'),
       state:
-        reasoningRunning || statusCounts.running > 0
+        statusCounts.running > 0
           ? 'running'
           : statusCounts.failed > 0
             ? 'failed'
             : 'completed',
-      ...(reasoningIndex !== undefined ? { reasoningIndex } : {}),
-      ...(parts.every(({ part }) => part.type === 'reasoning')
-        ? { reasoningOnly: true }
-        : {}),
     },
     messages,
   };
@@ -292,7 +304,6 @@ export function projectTurn(
           parts.push(displayedTool(part, message.id, context));
         } else hidden.push({ message, part, index });
       } else if (
-        (part.type === 'reasoning' && part.text.trim()) ||
         (part.type === 'file' && part.mediaType.startsWith('image/')) ||
         getMessageCompression(part) !== null ||
         (part.type === 'data-background-task-completed' &&

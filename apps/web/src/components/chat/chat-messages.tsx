@@ -1,8 +1,17 @@
 import { Fragment, memo, useMemo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { LoaderCircle, ScanText } from 'lucide-react';
-import { isToolUIPart, type UIMessage } from 'ai';
-import type { ToolInteraction, ToolResponse } from '@aime/shared/threads';
+import {
+  isToolUIPart,
+  type DynamicToolUIPart,
+  type ToolUIPart,
+  type UIMessage,
+} from 'ai';
+import type {
+  AskUserAnswer,
+  ToolInteraction,
+  ToolResponse,
+} from '@aime/shared/threads';
 import {
   isSubagentTool,
   isChatToolGroupPart,
@@ -20,18 +29,13 @@ import {
   MessageResponse,
 } from '@/components/ai-elements/message';
 import {
-  Reasoning,
-  ReasoningContent,
-  ReasoningTrigger,
-} from '@/components/ai-elements/reasoning';
-import { Shimmer } from '@/components/ai-elements/shimmer';
-import {
   Tool,
   ToolContent,
   ToolHeader,
   ToolInput,
   ToolOutput,
 } from '@/components/ai-elements/tool';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { PreviewImage } from '@/components/image-viewer/preview-image';
 import { ChatBackgroundTask } from './chat-background-task';
@@ -42,6 +46,7 @@ import { ChatMessageCompression } from './chat-message-compression';
 import { ChatToolAttachments } from './chat-tool-attachments';
 import { getToolAttachments } from './tool-attachments';
 import { ChatToolRenderer } from './tool-renderers';
+import { ChatQuestionGroup } from './chat-question-group';
 import { getToolName, isSpecialTool } from './tool-renderers/registry';
 import { SubagentBadge } from './subagent-badge';
 import { useMessagePreview } from './message-preview/context';
@@ -59,10 +64,8 @@ export function ChatMessages({
   toolInteractions = [],
   onToolResponse,
   disabled,
-  showAllReasoning = false,
   hideUserMessages = false,
   toolGroupsExpanded = false,
-  hideReasoningTrigger = false,
 }: {
   messages: UIMessage[];
   threadId?: string;
@@ -74,10 +77,8 @@ export function ChatMessages({
     response: ToolResponse,
   ) => Promise<void>;
   disabled?: boolean;
-  showAllReasoning?: boolean;
   hideUserMessages?: boolean;
   toolGroupsExpanded?: boolean;
-  hideReasoningTrigger?: boolean;
 }) {
   const rows = groupChatMessages(
     messages,
@@ -105,16 +106,11 @@ export function ChatMessages({
               !!activeMessageId &&
               sourceIds.includes(activeMessageId)
             }
-            showReasoning={
-              showAllReasoning || sourceIds.includes(lastMessageId ?? '')
-            }
-            showAllReasoning={showAllReasoning}
             isLastMessage={sourceIds.includes(lastMessageId ?? '')}
             toolInteractions={toolInteractions}
             onToolResponse={onToolResponse}
             disabled={disabled}
             toolGroupsExpanded={toolGroupsExpanded}
-            hideReasoningTrigger={hideReasoningTrigger}
           />
         ))}
       {toolInteractions
@@ -139,15 +135,17 @@ export const ChatMessage = memo(function ChatMessage({
   parts,
   elapsedMs,
   streaming,
-  showReasoning,
+  thinking = false,
   isLastMessage = false,
   toolInteractions = [],
   onToolResponse,
+  questionsByCall,
+  questionInteractions = [],
+  onQuestionResponses,
+  questionsDisabled,
   disabled,
-  showAllReasoning = false,
   hideToolDetails = false,
   toolGroupsExpanded = false,
-  hideReasoningTrigger = false,
   renderToolGroup,
 }: {
   message: UIMessage;
@@ -155,18 +153,23 @@ export const ChatMessage = memo(function ChatMessage({
   parts?: ChatMessagePart[];
   elapsedMs?: number;
   streaming: boolean;
-  showReasoning: boolean;
+  thinking?: boolean;
   isLastMessage?: boolean;
   toolInteractions?: ToolInteraction[];
   onToolResponse?: (
     interactionId: string,
     response: ToolResponse,
   ) => Promise<void>;
+  questionsByCall?: ReadonlyMap<string, (ToolUIPart | DynamicToolUIPart)[]>;
+  questionInteractions?: readonly ToolInteraction[];
+  onQuestionResponses?: (
+    interactionId: string,
+    answers: AskUserAnswer[],
+  ) => Promise<void>;
+  questionsDisabled?: boolean;
   disabled?: boolean;
-  showAllReasoning?: boolean;
   hideToolDetails?: boolean;
   toolGroupsExpanded?: boolean;
-  hideReasoningTrigger?: boolean;
   renderToolGroup?: (group: ChatToolGroup) => ReactNode;
 }) {
   const { t } = useTranslation();
@@ -181,17 +184,14 @@ export const ChatMessage = memo(function ChatMessage({
     );
   if (
     message.parts.length > 0 &&
+    !thinking &&
     groupedParts.length === 0 &&
     !display.attachments.length
   )
     return null;
-  const lastReasoningIndex = message.parts.reduce(
-    (last, part, index) => (part.type === 'reasoning' ? index : last),
-    -1,
-  );
   return (
     <Message from={message.role} className="w-full min-w-0 max-w-full">
-      {groupedParts.length > 0 && (
+      {(groupedParts.length > 0 || thinking) && (
         <MessageContent
           data-chat-message-content
           className="min-w-0 max-w-full overflow-hidden text-sm leading-7 [overflow-wrap:anywhere] group-[.is-assistant]:w-full"
@@ -335,6 +335,23 @@ export const ChatMessage = memo(function ChatMessage({
                 </Fragment>
               );
             if (isToolUIPart(part)) {
+              const questions = questionsByCall?.get(part.toolCallId);
+              if (questions) {
+                if (questions[0].toolCallId !== part.toolCallId) return null;
+                return (
+                  <ChatQuestionGroup
+                    key={`questions:${part.toolCallId}`}
+                    tools={questions}
+                    interactions={questionInteractions.filter(
+                      (item) =>
+                        questionsByCall?.get(item.toolCallId) === questions,
+                    )}
+                    onSubmit={onQuestionResponses}
+                    disabled={questionsDisabled}
+                    onPreview={openPreview ?? undefined}
+                  />
+                );
+              }
               const interaction = toolInteractions.find(
                 (item) => item.toolCallId === part.toolCallId,
               );
@@ -437,43 +454,6 @@ export const ChatMessage = memo(function ChatMessage({
                   {part.text}
                 </MessageResponse>
               );
-            if (part.type === 'reasoning') {
-              if (
-                !showReasoning ||
-                (!showAllReasoning && index !== lastReasoningIndex)
-              )
-                return null;
-              const isReasoningStreaming =
-                streaming && part.state === 'streaming';
-              if (!part.text && !isReasoningStreaming) return null;
-              return (
-                <Reasoning
-                  // Reset expansion for a new stream or completed history, not for every text delta.
-                  key={`reasoning-${index}-${isReasoningStreaming ? 'streaming' : 'complete'}`}
-                  isStreaming={isReasoningStreaming}
-                  open={hideReasoningTrigger ? true : undefined}
-                  defaultOpen={toolGroupsExpanded || isReasoningStreaming}
-                >
-                  {!hideReasoningTrigger && (
-                    <ReasoningTrigger
-                      getThinkingMessage={(active) =>
-                        active ? (
-                          <Shimmer duration={1}>{t('chat.thinking')}</Shimmer>
-                        ) : (
-                          t('chat.reasoning')
-                        )
-                      }
-                    />
-                  )}
-                  <ReasoningContent
-                    maxHeight={100}
-                    className={hideReasoningTrigger ? 'mt-0' : undefined}
-                  >
-                    {part.text}
-                  </ReasoningContent>
-                </Reasoning>
-              );
-            }
             if (part.type === 'file' && part.mediaType.startsWith('image/'))
               return (
                 <PreviewImage
@@ -486,6 +466,21 @@ export const ChatMessage = memo(function ChatMessage({
               );
             return null;
           })}
+          {thinking && (
+            <Badge
+              role="status"
+              variant="ghost"
+              className="gap-1.5 overflow-visible px-0 text-sm font-normal text-muted-foreground"
+            >
+              <span
+                aria-hidden="true"
+                className="inline-grid size-6 shrink-0 origin-bottom place-items-center text-lg leading-none select-none motion-safe:animate-thinking-tilt"
+              >
+                🤔
+              </span>
+              <span>{t('chat.thinking')}</span>
+            </Badge>
+          )}
         </MessageContent>
       )}
       <ChatMessageAttachments
@@ -497,7 +492,7 @@ export const ChatMessage = memo(function ChatMessage({
         streaming={streaming}
         elapsedMs={elapsedMs}
       />
-      {streaming && (
+      {streaming && !thinking && (
         <LoaderCircle
           className="mb-2 size-3 animate-spin text-muted-foreground"
           aria-label={t('chat.running')}

@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useContext, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, CircleHelp, LoaderCircle, ShieldCheck, X } from 'lucide-react';
 import type { DynamicToolUIPart, ToolUIPart } from 'ai';
@@ -18,10 +18,13 @@ import {
 } from '@/components/ai-elements/confirmation';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { cn } from '@/lib/utils';
+import { ChatQuestionFields } from './chat-question-fields';
+import {
+  ChatQuestionDrafts,
+  emptyQuestionDraft,
+  formatQuestionAnswer,
+  questionAnswer,
+} from './question-answer';
 import { useToolResponse } from './tool-renderers/use-tool-response';
 import { getToolName } from './tool-renderers/registry';
 
@@ -40,8 +43,15 @@ export function ChatToolInteraction({
 }: ToolInteractionProps) {
   const { t } = useTranslation();
   const inputId = useId();
-  const [selected, setSelected] = useState<string[]>([]);
-  const [text, setText] = useState('');
+  const draftCache = useContext(ChatQuestionDrafts);
+  const toolName = interaction?.toolName ?? getToolName(tool);
+  const draftId =
+    toolName === 'ask_user'
+      ? (interaction?.toolCallId ?? tool?.toolCallId)
+      : undefined;
+  const [draft, setDraft] = useState(
+    () => (draftId && draftCache?.get(draftId)) || emptyQuestionDraft,
+  );
   const { response, pending, error, setError, submit } = useToolResponse({
     interaction,
     disabled:
@@ -50,13 +60,11 @@ export function ChatToolInteraction({
       tool?.state === 'output-denied',
     onRespond,
   });
-  const toolName = interaction?.toolName ?? getToolName(tool);
   const question =
     toolName === 'ask_user'
       ? userQuestionSchema.safeParse(interaction?.suspendPayload ?? tool?.input)
           .data
       : undefined;
-  const multi = question?.selectionMode === 'multi_select';
   const approval = interaction?.kind === 'approval';
   const hasOutput = tool?.state === 'output-available';
   const rejected =
@@ -64,28 +72,14 @@ export function ChatToolInteraction({
   const done = !!response || hasOutput || rejected;
   const actionable = !!interaction && !done && !!onRespond;
   const unavailable = disabled || pending || !actionable;
-  const answer = multi
-    ? [...selected, ...(text.trim() ? [text.trim()] : [])]
-    : text.trim() || selected[0] || '';
+  const answer = questionAnswer(question, draft);
   const answered =
     response?.action === 'resume'
       ? response.data
       : hasOutput
         ? tool.output
         : undefined;
-  const answerText =
-    typeof answered === 'string'
-      ? answered
-      : Array.isArray(answered)
-        ? answered.join(', ')
-        : answered &&
-            typeof answered === 'object' &&
-            'content' in answered &&
-            typeof answered.content === 'string'
-          ? answered.content
-          : answered === undefined
-            ? ''
-            : JSON.stringify(answered);
+  const answerText = formatQuestionAnswer(answered);
   let schema = interaction?.resumeSchema;
   if (typeof schema === 'string') {
     try {
@@ -101,18 +95,18 @@ export function ChatToolInteraction({
     schema.type === 'string';
 
   function submitAnswer() {
-    let data: ToolResponse & { action: 'resume' };
     try {
-      data = {
-        id: '',
+      void submit({
         action: 'resume',
-        data: question ? answer : plainText ? text : JSON.parse(text),
-      };
+        data: question
+          ? answer
+          : plainText
+            ? draft.text
+            : JSON.parse(draft.text),
+      });
     } catch {
       setError('chat.toolInteraction.invalidJson');
-      return;
     }
-    void submit(data);
   }
 
   return (
@@ -190,106 +184,16 @@ export function ChatToolInteraction({
           }}
         >
           {!approval && (
-            <>
-              {!!question?.options?.length && (
-                <div
-                  className="space-y-2"
-                  role="group"
-                  aria-label={t(
-                    multi
-                      ? 'chat.toolInteraction.chooseMany'
-                      : 'chat.toolInteraction.chooseOne',
-                  )}
-                >
-                  <p className="text-xs text-muted-foreground">
-                    {t(
-                      multi
-                        ? 'chat.toolInteraction.chooseMany'
-                        : 'chat.toolInteraction.chooseOne',
-                    )}
-                  </p>
-                  {question.options.map((option, index) => {
-                    const checked = selected.includes(option.label);
-                    return (
-                      <Button
-                        key={`${index}:${option.label}`}
-                        type="button"
-                        variant="outline"
-                        aria-pressed={checked}
-                        disabled={unavailable}
-                        className={cn(
-                          'h-auto w-full justify-start gap-3 whitespace-normal px-3 py-3 text-left',
-                          checked && 'border-primary bg-primary/5',
-                        )}
-                        onClick={() => {
-                          setSelected((current) =>
-                            multi
-                              ? current.includes(option.label)
-                                ? current.filter(
-                                    (value) => value !== option.label,
-                                  )
-                                : [...current, option.label]
-                              : [option.label],
-                          );
-                          if (!multi) setText('');
-                        }}
-                      >
-                        <span
-                          className={cn(
-                            'flex size-4 shrink-0 items-center justify-center border',
-                            multi ? 'rounded' : 'rounded-full',
-                            checked
-                              ? 'border-primary bg-primary text-primary-foreground'
-                              : 'border-muted-foreground/50',
-                          )}
-                        >
-                          {checked && <Check className="size-3" />}
-                        </span>
-                        <span className="min-w-0 space-y-1">
-                          <span className="block text-sm font-medium">
-                            {option.label}
-                          </span>
-                          {option.description && (
-                            <span className="block text-xs font-normal leading-5 text-muted-foreground">
-                              {option.description}
-                            </span>
-                          )}
-                        </span>
-                      </Button>
-                    );
-                  })}
-                </div>
-              )}
-              <div className="space-y-2">
-                <Label htmlFor={inputId}>
-                  {t(
-                    question?.options?.length
-                      ? 'chat.toolInteraction.otherAnswer'
-                      : !question && !plainText
-                        ? 'chat.toolInteraction.resumeData'
-                        : 'chat.toolInteraction.answer',
-                  )}
-                </Label>
-                <Textarea
-                  id={inputId}
-                  value={text}
-                  disabled={unavailable}
-                  maxLength={60000}
-                  className="min-h-20 resize-y"
-                  placeholder={t(
-                    question
-                      ? 'chat.toolInteraction.placeholder'
-                      : plainText
-                        ? 'chat.toolInteraction.placeholder'
-                        : 'chat.toolInteraction.jsonPlaceholder',
-                  )}
-                  onChange={(event) => {
-                    setText(event.target.value);
-                    if (!multi && event.target.value) setSelected([]);
-                  }}
-                />
-              </div>
-            </>
+            <ChatQuestionFields
+              question={question}
+              json={!question && !plainText}
+              draft={draft}
+              disabled={!!unavailable}
+              onChange={(next) => {
+                if (draftId) draftCache?.set(draftId, next);
+                setDraft(next);
+              }}
+            />
           )}
           {error && (
             <p role="alert" className="text-sm text-destructive">
@@ -324,7 +228,7 @@ export function ChatToolInteraction({
                 type="submit"
                 disabled={
                   unavailable ||
-                  !(question ? answer.length : text.trim().length)
+                  !(question ? answer.length : draft.text.trim().length)
                 }
               >
                 {pending && <LoaderCircle className="animate-spin" />}

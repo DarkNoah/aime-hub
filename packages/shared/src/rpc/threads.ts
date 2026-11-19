@@ -7,6 +7,7 @@ import {
   runInputSchema,
   updateThreadSchema,
   toolResponseSchema,
+  askUserAnswerSchema,
   updateQueuedMessageSchema,
   moveQueuedMessageSchema,
   type QueuedMessageDetail,
@@ -308,6 +309,20 @@ export const threadsContract = {
       z.object({
         params: z.object({ threadId, interactionId: id }),
         body: toolResponseSchema,
+      }),
+    )
+    .output(type<ThreadSummary>()),
+  respondToQuestions: procedure
+    .route({
+      method: 'POST',
+      path: '/threads/{threadId}/tool-interactions/{interactionId}/answers',
+      inputStructure: 'detailed',
+      successStatus: 202,
+    })
+    .input(
+      z.object({
+        params: z.object({ threadId, interactionId: id }),
+        body: z.object({ answers: z.array(askUserAnswerSchema).min(1) }),
       }),
     )
     .output(type<ThreadSummary>()),

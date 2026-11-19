@@ -27,7 +27,7 @@ export type ChatSubagentSummary = {
   state: ToolUIPart['state'];
 };
 
-/** A consecutive group of tool/reasoning parts; payloads are loaded on expansion. */
+/** A consecutive group of details whose payloads are loaded on expansion. */
 export type ChatToolGroup = {
   id: string;
   count: number;
@@ -35,9 +35,9 @@ export type ChatToolGroup = {
   statusCounts: { success: number; failed: number; running: number };
   revision: string;
   state: 'running' | 'completed' | 'failed';
-  /** Position of the final reasoning part in this group's flattened detail parts. */
+  /** Legacy summaries included reasoning in the group detail. */
   reasoningIndex?: number;
-  /** Allows the overview to omit older thinking without hiding tools or other details. */
+  /** Older servers could publish groups containing only reasoning. */
   reasoningOnly?: boolean;
 };
 
@@ -80,6 +80,30 @@ export function isCompletedAskUserPart(part: UIMessage['parts'][number]) {
   );
 }
 
+/** Mastra normally starts a new assistant message for each model step.
+ * Some adapters keep several steps in a message and mark them with step-start.
+ */
+export function groupAskUserCalls(messages: readonly UIMessage[]): string[][] {
+  const groups: string[][] = [];
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue;
+    const calls = new Set<string>();
+    for (const part of message.parts) {
+      if (part.type === 'step-start') {
+        if (calls.size > 1) groups.push([...calls]);
+        calls.clear();
+      } else if (
+        part.type === 'tool-ask_user' ||
+        (part.type === 'dynamic-tool' && part.toolName === 'ask_user')
+      ) {
+        calls.add(part.toolCallId);
+      }
+    }
+    if (calls.size > 1) groups.push([...calls]);
+  }
+  return groups;
+}
+
 /** Details must add visible content beyond the final text already in the overview. */
 export function hasChatTurnDetails(messages: readonly UIMessage[]) {
   let textCount = 0;
@@ -88,7 +112,6 @@ export function hasChatTurnDetails(messages: readonly UIMessage[]) {
       message.role === 'assistant' &&
       message.parts.some((part) => {
         if (part.type === 'text') return !!part.text.trim() && ++textCount > 1;
-        if (part.type === 'reasoning') return !!part.text.trim();
         if (isToolUIPart(part))
           return (
             !isIntelligentUiPart(part) &&
@@ -120,6 +143,8 @@ export type ChatTurnSummary = {
   /** Whether details add visible content beyond the final assistant text. */
   hasDetails?: boolean;
   toolCount: number;
+  /** Ordered ask_user call IDs declared together by one model step. */
+  askUserGroups?: string[][];
   /** Lightweight badges; full delegation inputs and results stay in turn details. */
   subagents?: ChatSubagentSummary[];
   elapsedMs?: number;
@@ -148,6 +173,8 @@ export type ChatTurnSnapshot = Omit<
   turns: ChatTurnSummary[];
   removedTurnIds?: string[];
   activeTurnId: string | null;
+  /** True while the active assistant message is streaming a reasoning part. */
+  thinking?: boolean;
   canContinue: boolean;
   /** Present on the initial snapshot and on reconnect, never on an update. */
   history?: Pick<ChatTurnPage, 'cursor' | 'hasMore'>;

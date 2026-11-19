@@ -122,7 +122,7 @@ const orderedPanel={type:'tool-'+INTELLIGENT_UI_TOOL,toolCallId:'ordered',state:
 const preparingText={type:'text',text:'正在准备图表',state:'done'};
 const finalText={type:'text',text:'这是图表后的最终说明',state:'done'};
 const orderedUser={id:'order-turn',role:'user',parts:[{type:'text',text:'展示图表并说明'}]};
-const orderedGroup={id:'chart-tools',count:1,statusCounts:{success:1,failed:0,running:0},revision:'chart-tools-v1',state:'completed',reasoningIndex:0};
+const orderedGroup={id:'chart-tools',count:1,statusCounts:{success:1,failed:0,running:0},revision:'chart-tools-v1',state:'completed'};
 const orderedSummary={id:'order-turn',user:orderedUser,assistant:{id:'order-assistant',role:'assistant',parts:[preparingText,{type:'data-tool-group',data:orderedGroup},orderedPanel,finalText]},hasDetails:true,toolCount:2,revision:'order-revision',assetRevision:''};
 const orderedDetail={id:'chart-tools',revision:'chart-tools-v1',messages:[{id:'order-tools',role:'assistant',parts:[{type:'reasoning',text:'检查图表数据。',state:'done'},{type:'tool-read_file',toolCallId:'chart-data',state:'output-available',input:{path:'chart.csv'},output:'x=1, y=2'}]}],page:0,hasMore:false};
 window.groupReads=[];
@@ -562,7 +562,11 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     );
     await group.locator('button[aria-expanded]').first().click();
     await groupDetail.waitFor();
-    await page.getByText('检查图表数据。', { exact: true }).waitFor();
+    await groupDetail.getByText('read_file', { exact: true }).waitFor();
+    assert.equal(
+      await page.getByText('检查图表数据。', { exact: true }).count(),
+      0,
+    );
     await assertTurnOrder();
     assert.equal(
       await page.getByText('正在准备图表', { exact: true }).count(),

@@ -175,6 +175,20 @@ export async function consumeSessionStream(
               : undefined,
           );
       }
+      if (status === 'failed') {
+        // Some streams also send a finish after the terminal error.
+        if (native.type === 'finish') emit({ type: 'status', status, runId });
+        continue;
+      }
+      if (native.type === 'error') {
+        // The thread subscription stays open for later runs. Drain its last
+        // deltas now, and report the native error once outside the UI adapter.
+        status = 'failed';
+        await closeSegment();
+        await reconcileTurn();
+        emit({ type: 'error', error: native.payload.error, runId });
+        continue;
+      }
       if (
         native.type === 'step-start' &&
         native.payload.messageId &&
@@ -221,9 +235,6 @@ export async function consumeSessionStream(
           settings: settings(),
         });
         emit({ type: 'status', status, runId });
-      } else if (native.type === 'error') {
-        status = 'failed';
-        emit({ type: 'error', error: native.payload.error, runId });
       } else if (native.type === 'abort') {
         status = 'canceled';
         await closeSegment();

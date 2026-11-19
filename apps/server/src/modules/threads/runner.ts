@@ -31,6 +31,7 @@ import type {
 import type { MastraModelOutput } from '@mastra/core/stream';
 import { RequestContext } from '@mastra/core/request-context';
 import { createObservabilityContext } from '@mastra/core/observability';
+import { InterruptedReplyProcessor } from './interrupted-reply.js';
 import { ThreadMessageMemory } from './message-memory.js';
 import type { ResolveMemoryConfig } from '../../mastra/memory.js';
 import { chatSettingsSchema, type ChatSettings } from '@aime/shared/threads';
@@ -332,6 +333,19 @@ export function createChatRunner(
           failurePolicy: 'abort',
         },
       } satisfies Omit<ObservationalMemoryConfig, 'storage'>;
+      const interruptedIds = new Map<string, string>();
+      const presentSaved = (message: UIMessage) => {
+        const draftId = interruptedIds.get(message.id);
+        return draftId
+          ? {
+              ...message,
+              metadata: {
+                ...(message.metadata as object),
+                interruptedReply: { draftId, storedId: message.id },
+              },
+            }
+          : message;
+      };
       const memory = new ThreadMessageMemory(
         {
           ...memoryConfig,
@@ -346,7 +360,11 @@ export function createChatRunner(
         },
         target,
         (message) => {
-          onEvent({ type: 'message', message, active: false });
+          onEvent({
+            type: 'message',
+            message: presentSaved(message),
+            active: false,
+          });
         },
       );
       const budget = await ContextBudget.load(
@@ -612,9 +630,13 @@ export function createChatRunner(
         const messages = new Map<string, UIMessage>();
         const refreshMessages = async (streamedMessageIds: string[] = []) => {
           await memory.settled();
-          const history = await memory.recall({ ...target, perPage: 80 });
+          const history = await memory.recall({
+            ...target,
+            perPage: 80,
+            hideSignals: false,
+          });
           const persisted = sortThreadMessages(
-            threadMessages(history.messages),
+            threadMessages(history.messages).map(presentSaved),
           );
           const reconciled = reconcileThreadMessages(
             [...messages.values()],
@@ -803,13 +825,15 @@ export function createChatRunner(
               };
             },
           );
+          const interrupted = new InterruptedReplyProcessor(interruptedIds);
           return {
             inputProcessors: [
               ...inputProcessors,
               compatibility,
+              interrupted,
               deferredToolContext(requestContext),
             ],
-            outputProcessors: [compaction, compatibility],
+            outputProcessors: [interrupted, compaction, compatibility],
             memory: { thread: thread.id, resource: thread.resourceId },
             abortSignal,
             requestContext,

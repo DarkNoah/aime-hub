@@ -97,17 +97,29 @@ export const runInputSchema = chatSettingsSchema
     { message: 'A goal requires a text objective', path: ['parts'] },
   );
 export type RunInput = z.infer<typeof runInputSchema>;
+
+// Raw model tool calls can contain null where Mastra omits optional fields
+// in the suspension payload. Both forms describe the same question.
+function optionalQuestionField<T extends z.ZodType>(field: T) {
+  return field
+    .nullable()
+    .transform((value) => value ?? undefined)
+    .optional();
+}
+
 export const userQuestionSchema = z.object({
   question: z.string().trim().min(1),
-  options: z
-    .array(
+  options: optionalQuestionField(
+    z.array(
       z.object({
         label: z.string().trim().min(1),
-        description: z.string().optional(),
+        description: optionalQuestionField(z.string()),
       }),
-    )
-    .optional(),
-  selectionMode: z.enum(['single_select', 'multi_select']).optional(),
+    ),
+  ),
+  selectionMode: optionalQuestionField(
+    z.enum(['single_select', 'multi_select']),
+  ),
 });
 export type UserQuestion = z.infer<typeof userQuestionSchema>;
 export const toolResponseSchema = z.intersection(
@@ -122,6 +134,11 @@ export const toolResponseSchema = z.intersection(
   ]),
 );
 export type ToolResponse = z.infer<typeof toolResponseSchema>;
+export const askUserAnswerSchema = z.object({
+  toolCallId: z.string().min(1),
+  response: toolResponseSchema.refine((value) => value.action !== 'approve'),
+});
+export type AskUserAnswer = z.infer<typeof askUserAnswerSchema>;
 export const toolInteractionSchema = z.object({
   kind: z.enum(['approval', 'suspended']),
   runId: z.string().min(1),
@@ -133,6 +150,8 @@ export const toolInteractionSchema = z.object({
 });
 export type ToolInteraction = z.infer<typeof toolInteractionSchema> & {
   id: string;
+  /** The user turn containing this call, when known. */
+  turnId?: string;
   response?: ToolResponse;
 };
 export const updateQueuedMessageSchema = z

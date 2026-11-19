@@ -39,6 +39,18 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);
+  --animate-thinking-tilt: thinking-tilt 2.4s ease-in-out infinite;
+
+  @keyframes thinking-tilt {
+    0%,
+    75%,
+    100% {
+      transform: rotate(0deg);
+    }
+    35% {
+      transform: translateY(-1px) rotate(-9deg);
+    }
+  }
 }
 
 :root {

@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 import { isToolUIPart, type UIMessage } from 'ai';
+import { threadMessageSourceIds } from '@aime/shared/thread-messages';
+import type { ThreadStatus } from '@aime/shared/threads';
 import {
+  groupAskUserCalls,
   isSubagentTool,
   type ChatSubagentSummary,
   type ChatTurnSummary,
@@ -21,6 +24,31 @@ export function groupTurns(messages: readonly UIMessage[]): ChatTurn[] {
     turns.at(-1)!.messages.push(message);
   }
   return turns;
+}
+
+export function activeTurnState(
+  turns: readonly ChatTurn[],
+  activeMessageId: string | null,
+  status: ThreadStatus,
+) {
+  if (activeMessageId) {
+    for (const turn of turns) {
+      const message = turn.messages.find((item) =>
+        threadMessageSourceIds(item).includes(activeMessageId),
+      );
+      if (!message) continue;
+      const part = message.parts.at(-1);
+      return {
+        activeTurnId: turn.id,
+        thinking:
+          status === 'running' &&
+          message.role === 'assistant' &&
+          part?.type === 'reasoning' &&
+          part.state === 'streaming',
+      };
+    }
+  }
+  return { activeTurnId: null, thinking: false };
 }
 
 function timestamp(metadata: unknown) {
@@ -93,21 +121,32 @@ export function summarizeTurn(
         }
       : null;
   const startedAt = timestamp(user?.metadata);
+  const askUserGroups = groupAskUserCalls(turn.messages);
+  const revision = createHash('sha256').update(
+    turn.messages.map(messageRevision).join(':'),
+  );
+  if (options.askUserResponses?.size) {
+    // A confirmed answer changes the visible card before the native message changes.
+    revision.update(
+      JSON.stringify(
+        [...options.askUserResponses.values()].map((response) => response.id),
+      ),
+    );
+  }
   return {
     id: turn.id,
     user,
     assistant,
     hasDetails: projection.groups.length > 0,
     toolCount: tools.size,
+    ...(askUserGroups.length ? { askUserGroups } : {}),
     ...(subagents.size ? { subagents: [...subagents.values()] } : {}),
     ...(startedAt !== undefined &&
     finishedAt !== undefined &&
     finishedAt >= startedAt
       ? { elapsedMs: finishedAt - startedAt }
       : {}),
-    revision: createHash('sha256')
-      .update(turn.messages.map(messageRevision).join(':'))
-      .digest('hex'),
+    revision: revision.digest('hex'),
     assetRevision: [...assets].join(','),
     ...(cursor ? { cursor } : {}),
   };

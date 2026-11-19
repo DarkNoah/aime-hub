@@ -32,6 +32,7 @@ export class SharedEventSource extends EventTarget {
 import React from 'react';
 import {createRoot} from 'react-dom/client';
 import {ChatTurns} from '/src/components/chat/chat-turns';
+import {isThreadActive} from '@aime/shared/threads';
 import {useThreadChat} from '/src/components/chat/use-thread-chat';
 import {chatApi} from '/src/components/chat/api';
 import {MessagePreviewContext} from '/src/components/chat/message-preview/context';
@@ -48,8 +49,8 @@ const image={type:'tool-image_gen',toolCallId:'image',forceRender:true,state:'ou
 const speech={type:'tool-speech',toolCallId:'speech',forceRender:true,state:'output-available',input:{},output:{file_path:'speech.wav',duration:1,sample_rate:24000}};
 const ask={type:'tool-ask_user',toolCallId:'ask',forceRender:true,state:'output-available',input:{question:'你选择哪个方案？',options:[{label:'方案 A'},{label:'方案 B'}],selectionMode:'single_select'},output:'方案 A'};
 const panel={type:'tool-intelligent_ui',toolCallId:'panel',forceRender:true,state:'output-available',input:{html:'<p>交互面板内容</p>',title:'结果面板',waitForResponse:false},output:{ok:true}};
-window.snapshot={thread:{id:'thread',title:'Fixture',status:'running',projectId:null,queue:[],queueCount:0},activeMessageId:'assistant',activeTurnId:'turn',canContinue:false,turns:[{id:'turn',user,assistant:{id:'assistant',role:'assistant',parts:[{type:'text',text:'正在分析第一部分',state:'streaming'},group('first',22),{type:'text',text:'第一部分已完成'},image,group('second',2,{reasoningIndex:0,state:'failed',statusCounts:{success:0,failed:2,running:0}}),{type:'text',text:'分析结束'},speech,ask,panel,group('earlier-reasoning',0,{reasoningIndex:0,reasoningOnly:true}),{type:'text',text:'继续核对'},group('reasoning',0,{reasoningIndex:1,reasoningOnly:true})]},toolCount:24,assetRevision:'media',revision:'initial'}],toolInteractions:[],history:{cursor:null,hasMore:false}};
-window.snapshot.turns.unshift({id:'history-turn',user:{id:'history-user',role:'user',parts:[{type:'text',text:'历史问题'}]},assistant:{id:'history-assistant',role:'assistant',parts:[group('history-reasoning',0,{reasoningIndex:0,reasoningOnly:true}),{type:'text',text:'历史回复'},group('history-tools',1,{reasoningIndex:0})]},toolCount:1,assetRevision:'',revision:'history'});
+window.snapshot={thread:{id:'thread',title:'Fixture',status:'running',projectId:null,queue:[],queueCount:0},activeMessageId:'assistant',activeTurnId:'turn',thinking:true,canContinue:false,turns:[{id:'turn',user,assistant:{id:'assistant',role:'assistant',parts:[{type:'text',text:'正在分析第一部分',state:'streaming'},group('first',22),{type:'text',text:'第一部分已完成'},image,group('second',2,{state:'failed',statusCounts:{success:0,failed:2,running:0}}),{type:'text',text:'分析结束'},speech,ask,panel,{type:'text',text:'继续核对'}]},toolCount:24,assetRevision:'media',revision:'initial'}],toolInteractions:[],history:{cursor:null,hasMore:false}};
+window.snapshot.turns.unshift({id:'history-turn',user:{id:'history-user',role:'user',parts:[{type:'text',text:'历史问题'}]},assistant:{id:'history-assistant',role:'assistant',parts:[{type:'text',text:'历史回复'},group('history-tools',1),{type:'reasoning',state:'streaming',text:'历史残留思考'}]},toolCount:1,assetRevision:'',revision:'history'});
 window.calls=[];window.wholeTurnCalls=0;
 chatApi.turn=async()=>{window.wholeTurnCalls++;throw new Error('Whole turn loading is forbidden');};
 chatApi.toolGroup=async(threadId,turnId,groupId,cursor,page=0)=>{
@@ -58,14 +59,14 @@ chatApi.toolGroup=async(threadId,turnId,groupId,cursor,page=0)=>{
  const group=window.snapshot.turns.find(turn=>turn.id===turnId).assistant.parts.find(part=>part.type==='data-tool-group'&&part.data.id===groupId).data;
  await new Promise(resolve=>setTimeout(resolve,25));
  const reasoning=(text)=>({type:'reasoning',text,state:'done'});
- const all=groupId==='first'?Array.from({length:22},(_,i)=>tool('step_'+String(i).padStart(2,'0'))):groupId==='second'?[reasoning('中途推理应隐藏'),{...tool('second_tool'),output:{isError:true,error:'Permission denied'}},{...tool('second_json_tool'),type:'dynamic-tool',toolName:'second_json_tool',output:JSON.stringify({ok:false,error:'Operation failed'})}]:groupId==='history-tools'?[reasoning('历史混合思考应隐藏'),tool('history_tool')]:groupId==='reasoning'?[reasoning('同组较早思考应隐藏'),reasoning('核对推理信息')]:groupId==='next-reasoning'?[reasoning('新回复思考')]:[reasoning('较早思考应隐藏')];
+ const all=groupId==='first'?Array.from({length:22},(_,i)=>tool('step_'+String(i).padStart(2,'0'))):groupId==='second'?[reasoning('中途推理应隐藏'),{...tool('second_tool'),output:{isError:true,error:'Permission denied'}},{...tool('second_json_tool'),type:'dynamic-tool',toolName:'second_json_tool',output:JSON.stringify({ok:false,error:'Operation failed'})}]:[reasoning('历史混合思考应隐藏'),tool('history_tool')];
  return {id:groupId,revision:group.revision,messages:[{id:'source-'+groupId,role:'assistant',parts:all.slice(page*20,(page+1)*20)}],page,hasMore:(page+1)*20<all.length};
 };
 window.update=(groupId,revision,display={})=>{
  window.snapshot={...window.snapshot,turns:window.snapshot.turns.map(turn=>({...turn,revision:turn.revision+'x',assistant:{...turn.assistant,parts:turn.assistant.parts.map(part=>part.type==='data-tool-group'&&part.data.id===groupId?{...part,data:{...part.data,revision,...display}}:part)}}))};
  window.source.dispatchEvent(new MessageEvent('update',{data:JSON.stringify({...window.snapshot,history:undefined})}));
 };
-function App(){const chat=useThreadChat('thread',undefined,{receiveSpeech:false});window.chat=chat;return <main style={{maxWidth:760,margin:'24px auto',padding:16}}><MessagePreviewContext.Provider value={part=>{window.previewed=part;}}><ChatTurns turns={chat.turns} groupDetails={chat.groupDetails} loadGroupDetails={chat.loadGroupDetails} threadId="thread" running activeTurnId={chat.activeTurnId} activeMessageId={chat.activeMessageId} toolInteractions={chat.toolInteractions} onToolResponse={chat.respondToTool} disabled={false}/></MessagePreviewContext.Provider></main>;}
+function App(){const chat=useThreadChat('thread',undefined,{receiveSpeech:false});window.chat=chat;return <main style={{maxWidth:760,margin:'24px auto',padding:16}}><MessagePreviewContext.Provider value={part=>{window.previewed=part;}}><ChatTurns turns={chat.turns} groupDetails={chat.groupDetails} loadGroupDetails={chat.loadGroupDetails} threadId="thread" running={isThreadActive(chat.thread?.status)} thinking={chat.thinking} activeTurnId={chat.activeTurnId} activeMessageId={chat.activeMessageId} toolInteractions={chat.toolInteractions} onToolResponse={chat.respondToTool} disabled={false}/></MessagePreviewContext.Provider></main>;}
 await initializeI18n();
 createRoot(document.getElementById('root')).render(<SessionContext.Provider value={{data:{session:{id:'fixture-session'},user:{id:'fixture-user'}}}}><ThemeProvider><App/></ThemeProvider></SessionContext.Provider>);
 `);
@@ -121,9 +122,19 @@ createRoot(document.getElementById('root')).render(<SessionContext.Provider valu
   await page.getByText('你选择哪个方案？',{exact:true}).waitFor();
   await page.locator('iframe[title="结果面板"]').waitFor();
   assert.deepEqual(await page.evaluate(()=>window.calls),[]);
-  assert.equal(await page.locator('[data-chat-tool-group="history-reasoning"]').count(),0,'historical pure reasoning groups stay hidden');
-  assert.equal(await page.locator('[data-chat-tool-group="earlier-reasoning"]').count(),0,'earlier reasoning groups in the latest turn stay hidden');
-  assert.equal(await page.locator('[data-chat-tool-group="history-tools"]').count(),1,'hiding reasoning must not remove historical tool groups');
+  const thinking = page.getByRole('status').filter({ has: page.getByText('正在思考…', { exact: true }) });
+  await thinking.waitFor();
+  const thinkingEmoji = thinking.locator('[aria-hidden="true"]').filter({ hasText: '🤔' });
+  const emojiAnimations = () => thinkingEmoji.evaluate(node => node.getAnimations().map(animation => animation.animationName));
+  assert.equal(await thinking.count(), 1, 'only the active turn shows a thinking indicator');
+  assert.equal(await thinking.evaluate(node =>
+    !!node.closest('[data-chat-message-content]') &&
+    !node.closest('[data-chat-tool-group], button') &&
+    !node.querySelector('button'),
+  ), true, 'the message body shows an icon and plain status text');
+  assert.deepEqual(await emojiAnimations(), [], 'reduced motion keeps the emoji still');
+  assert.equal(await page.getByText('历史残留思考', { exact: true }).count(), 0);
+  assert.equal(await page.getByText('思考过程', { exact: true }).count(), 0);
   const firstToggle=first.locator('button[aria-expanded]').first();
   const statusBadges=firstToggle.locator('[data-tool-group-status]');
   assert.deepEqual(await statusBadges.allTextContents(),['成功22']);
@@ -184,6 +195,7 @@ createRoot(document.getElementById('root')).render(<SessionContext.Provider valu
   assert.equal(await page.evaluate(()=>window.calls.length),2);
   await firstToggle.click();
   await page.emulateMedia({reducedMotion:'no-preference'});
+  assert.deepEqual(await emojiAnimations(), ['thinking-tilt'], 'the emoji tilts while thinking');
   const updateCounts=async(statusCounts)=>{
     await page.evaluate(statusCounts=>window.update('first','counts-'+JSON.stringify(statusCounts),{
       count:Object.values(statusCounts).reduce((total,count)=>total+count,0),
@@ -238,10 +250,6 @@ createRoot(document.getElementById('root')).render(<SessionContext.Provider valu
   await page.waitForTimeout(850);
   assert.ok(await page.evaluate(()=>window.calls.length)>before,'continuous revisions must not starve detail reads');
   await page.evaluate(()=>clearInterval(window.streamingTimer));
-  await page.locator('[data-chat-tool-group="reasoning"] button[aria-expanded]').first().click();
-  await page.getByText('核对推理信息',{exact:true}).waitFor();
-  assert.equal(await page.getByText('同组较早思考应隐藏',{exact:true}).count(),0,'only the final reasoning block in a group is displayed');
-  assert.equal(await page.getByText('思考过程',{exact:true}).count(),1,'a pure reasoning group has one heading, without an inner duplicate');
   const historyTools=page.locator('[data-chat-tool-group="history-tools"]');
   await historyTools.locator('button[aria-expanded]').first().click();
   await historyTools.getByText('history_tool',{exact:true}).waitFor();
@@ -286,31 +294,59 @@ createRoot(document.getElementById('root')).render(<SessionContext.Provider valu
   await page.waitForFunction(()=>!document.documentElement.classList.contains('dark'));
   await page.evaluate(()=>{
     const next={id:'next-turn',user:{id:'next-user',role:'user',parts:[{type:'text',text:'继续新的问题'}]},assistant:{id:'next-assistant',role:'assistant',parts:[{type:'text',text:'新的回复正在加载',state:'streaming'}]},toolCount:0,assetRevision:'',revision:'next'};
-    window.snapshot={...window.snapshot,activeTurnId:next.id,activeMessageId:'next-assistant',turns:[...window.snapshot.turns,next]};
+    window.snapshot={...window.snapshot,activeTurnId:next.id,activeMessageId:'next-assistant',thinking:false,turns:[...window.snapshot.turns,next]};
     window.source.dispatchEvent(new MessageEvent('update',{data:JSON.stringify({...window.snapshot,history:undefined})}));
   });
   await page.getByText('新的回复正在加载',{exact:true}).waitFor();
-  assert.equal(await page.locator('[data-chat-tool-group="reasoning"]').count(),0,'starting a new reply removes the prior reply reasoning');
-  assert.equal(await page.getByText('核对推理信息',{exact:true}).count(),0);
-  assert.equal(await page.getByText('思考过程',{exact:true}).count(),0);
+  await thinking.waitFor({state:'detached'});
   assert.equal(await second.getByText('second_tool',{exact:true}).count(),1,'already expanded tool details remain available');
-  await page.evaluate(()=>{
-    window.snapshot={...window.snapshot,turns:window.snapshot.turns.map(turn=>turn.id!=='next-turn'?turn:{...turn,revision:'next-reasoning',assistant:{...turn.assistant,parts:[...turn.assistant.parts,{type:'data-tool-group',data:{id:'next-reasoning',count:0,statusCounts:{success:0,failed:0,running:0},revision:'next-v1',state:'completed',reasoningIndex:0,reasoningOnly:true}}]}})};
-    window.source.dispatchEvent(new MessageEvent('update',{data:JSON.stringify({...window.snapshot,history:undefined})}));
-  });
-  await page.locator('[data-chat-tool-group="next-reasoning"] button[aria-expanded]').first().click();
-  await page.getByText('新回复思考',{exact:true}).waitFor();
-  assert.equal(await page.getByText('思考过程',{exact:true}).count(),1);
-  assert.equal(await page.getByText('核对推理信息',{exact:true}).count(),0);
-  await page.emulateMedia({reducedMotion:'no-preference'});
-  await page.evaluate(()=>{
-    window.badgeAnimations=[];
-    window.update('next-reasoning','first-tool',{
-      count:1,statusCounts:{success:0,failed:0,running:1},state:'running',reasoningOnly:false,
-    });
-  });
-  await page.waitForFunction(()=>window.badgeAnimations.length===1);
-  assert.deepEqual(await page.evaluate(()=>window.badgeAnimations),['running'],'the first tool added to an existing reasoning group animates');
+
+  const updatePhase = async (parts, thinking = false, status = 'running') => {
+    await page.evaluate(({ parts, thinking, status }) => {
+      const current = window.snapshot;
+      const assistant = parts.length ? { id: 'next-assistant', role: 'assistant', parts } : null;
+      const turns = current.turns.map(turn => turn.id === 'next-turn'
+        ? { ...turn, revision: turn.revision + 'x', assistant }
+        : turn);
+      window.snapshot = { ...current, thread: { ...current.thread, status }, thinking, turns };
+      window.source.dispatchEvent(new MessageEvent('update', {
+        data: JSON.stringify({ ...window.snapshot, history: undefined }),
+      }));
+    }, { parts, thinking, status });
+  };
+  await updatePhase([], true);
+  await thinking.waitFor();
+  assert.equal(await thinking.evaluate(node => node.closest('[data-chat-turn]').dataset.chatTurn), 'next-turn');
+  await updatePhase([]);
+  await thinking.waitFor({ state: 'detached' });
+
+  const runningTool = {
+    type: 'data-tool-group',
+    data: {
+      id: 'next-tool', revision: 'tool-running', count: 1, state: 'running',
+      statusCounts: { success: 0, failed: 0, running: 1 },
+    },
+  };
+  await updatePhase([], true);
+  await thinking.waitFor();
+  await updatePhase([runningTool]);
+  await page.locator('[data-chat-tool-group="next-tool"] [data-tool-group-status="running"]').waitFor();
+  await thinking.waitFor({ state: 'detached' });
+
+  await updatePhase([runningTool], true);
+  await thinking.waitFor();
+  await updatePhase([runningTool, { type: 'text', state: 'streaming', text: '新回复正文' }]);
+  await page.getByText('新回复正文', { exact: true }).waitFor();
+  await thinking.waitFor({ state: 'detached' });
+
+  await updatePhase([], true);
+  await thinking.waitFor();
+  await page.evaluate(() => window.source.onerror());
+  await thinking.waitFor({ state: 'detached' });
+  await updatePhase([], true);
+  await thinking.waitFor();
+  await updatePhase([], true, 'canceled');
+  await thinking.waitFor({ state: 'detached' });
   assert.equal(await page.evaluate(()=>window.wholeTurnCalls),0);
   assert.deepEqual(errors,[]);
 });

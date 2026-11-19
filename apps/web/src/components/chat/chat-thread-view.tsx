@@ -30,6 +30,7 @@ export function ChatThreadView({
 }) {
   const { t } = useTranslation();
   const running = isThreadActive(chat.thread?.status);
+  const suspended = chat.thread?.status === 'suspended';
   return (
     <ChatConversation
       contentClassName={chatContentClassName}
@@ -59,20 +60,20 @@ export function ChatThreadView({
         activeTurnId={chat.activeTurnId}
         threadId={threadId}
         running={running}
+        thinking={chat.thinking}
+        suspended={suspended}
         activeMessageId={chat.activeMessageId}
         toolInteractions={readOnly ? [] : chat.toolInteractions}
-        onToolResponse={chat.respondToTool}
+        onToolResponse={readOnly ? undefined : chat.respondToTool}
+        onQuestionResponses={
+          !readOnly && (running || suspended)
+            ? chat.respondToQuestions
+            : undefined
+        }
+        questionsDisabled={readOnly || disabled || !chat.connected}
         disabled={readOnly || disabled || !chat.connected || running}
       />
       {chat.thread && !chat.turns.length && (emptyState ?? <ChatWelcome />)}
-      {running && !chat.activeMessageId && (
-        <p
-          role="status"
-          className="text-sm text-muted-foreground motion-safe:animate-pulse"
-        >
-          {t('chat.thinking')}
-        </p>
-      )}
       {children}
     </ChatConversation>
   );

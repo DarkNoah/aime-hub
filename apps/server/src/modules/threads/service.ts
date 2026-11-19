@@ -27,6 +27,7 @@ import type {
   ChatToolGroupDetail,
 } from '@aime/shared/chat-turns';
 import {
+  activeTurnState,
   groupTurns,
   summarizeTurn,
   getTurnToolGroup,
@@ -53,6 +54,7 @@ import {
   threadMessageSourceIds,
 } from '@aime/shared/thread-messages';
 import type {
+  AskUserAnswer,
   ChatSettings,
   CreateThreadInput,
   QueuedMessage,
@@ -71,6 +73,7 @@ import type {
   ThreadGoal,
 } from '@aime/shared/threads';
 import {
+  askUserAnswerSchema,
   toolResponseSchema,
   runInputSchema,
   threadStreamStatusSchema,
@@ -84,7 +87,15 @@ import {
 import type { ProjectThreadAccess } from '../projects/service.js';
 import { threadScope } from './scope.js';
 import { ThreadNavigationFeed } from './navigation-feed.js';
-import { validateToolResponse } from './tool-interactions.js';
+import { recoverQuestionInteractions } from './question-batch-recovery.js';
+import {
+  alreadyReceivedAnswers,
+  questionResponses,
+  queuedQuestionAnswer,
+  type QuestionBatch,
+  validateQuestionAnswers,
+  validateToolResponse,
+} from './tool-interactions.js';
 import {
   ThreadBackgroundTasks,
   isBackgroundTaskActive,
@@ -102,6 +113,7 @@ type Subscription = {
   pending: Promise<void>;
 };
 
+type StoredInteraction = ToolInteraction & { settings: ChatSettings };
 type ThreadData = {
   status: ThreadStatus;
   activeId: string | null;
@@ -110,7 +122,8 @@ type ThreadData = {
   error: string | null;
   autoTitle: boolean;
   usage: ChatUsage | null;
-  toolInteractions: (ToolInteraction & { settings: ChatSettings })[];
+  toolInteractions: StoredInteraction[];
+  questionBatch: QuestionBatch | null;
 };
 type Runtime = {
   issueStatus?: string;
@@ -222,6 +235,7 @@ const initialData = (): ThreadData => ({
   autoTitle: true,
   usage: null,
   toolInteractions: [],
+  questionBatch: null,
 });
 function dataOf(thread: StorageThreadType): ThreadData {
   const defaults = initialData();
@@ -250,6 +264,7 @@ function dataOf(thread: StorageThreadType): ThreadData {
   if (data.status === 'success') data.error = null;
   return data;
 }
+
 const messageText = (input: RunInput) =>
   input.parts
     .filter((part) => part.type === 'text')
@@ -429,6 +444,7 @@ export class ThreadService {
             activeId: null,
             error: null,
             toolInteractions: [],
+            questionBatch: null,
           },
         });
       }
@@ -658,6 +674,7 @@ export class ThreadService {
       commandSessions: runtime.session?.commands?.list() ?? [],
       toolInteractions: runtime.data.toolInteractions.map((item) => ({
         id: item.id,
+        turnId: item.turnId,
         kind: item.kind,
         runId: item.runId,
         toolCallId: item.toolCallId,
@@ -688,28 +705,28 @@ export class ThreadService {
     // Native replay can include older, partial storage windows. The overview
     // only publishes the complete recent window; older turns use cursor paging.
     const turns = groupTurns(runtime.messages).slice(-TURN_PAGE_SIZE);
+    const batch = runtime.data.questionBatch;
     return {
       ...state,
       // Completed approvals belong in details, not every status event.
       toolInteractions: state.toolInteractions?.filter(
-        (item) => !item.response,
+        (item) => !item.response && !queuedQuestionAnswer(batch, item),
       ),
       turns: turns.map((turn) =>
         this.summarizeTurn(
           runtime.thread.id,
           turn,
           runtime.turnLocators.get(turn.id),
+          state.toolInteractions,
+          batch,
         ),
       ),
       removedTurnIds: snapshot.removedMessageIds,
-      activeTurnId:
-        turns.find((turn) =>
-          turn.messages.some((message) =>
-            threadMessageSourceIds(message).includes(
-              snapshot.activeMessageId ?? '',
-            ),
-          ),
-        )?.id ?? null,
+      ...activeTurnState(
+        turns,
+        snapshot.activeMessageId,
+        snapshot.thread.status,
+      ),
       canContinue: canContinueThread(
         runtime.messages,
         snapshot.thread,
@@ -1003,6 +1020,7 @@ export class ThreadService {
           session?.abort();
           await session?.close();
           runtime.data.toolInteractions = [];
+          runtime.data.questionBatch = null;
           runtime.data.status = 'failed';
           runtime.data.error = 'ROOM_SUSPEND_NOT_SUPPORTED';
           runtime.data.activeId = null;
@@ -1086,10 +1104,16 @@ export class ThreadService {
           event.usage,
         );
       else if (event.type === 'interaction') {
-        const pending = { ...event.interaction, settings: event.settings };
+        const pending = {
+          ...event.interaction,
+          turnId: groupTurns(runtime.messages).at(-1)?.id,
+          settings: event.settings,
+        };
         runtime.data.toolInteractions = [
           ...runtime.data.toolInteractions.filter(
-            (item) => item.toolCallId !== pending.toolCallId,
+            (item) =>
+              item.runId !== pending.runId ||
+              item.toolCallId !== pending.toolCallId,
           ),
           pending,
         ].slice(-100);
@@ -1108,6 +1132,7 @@ export class ThreadService {
         )
           runtime.issueExecution = { runId: event.runId, result: '' };
         runtime.data.error = threadErrorMessage(event.error);
+        runtime.data.questionBatch = null;
         runtime.data.status = 'failed';
         runtime.data.activeId = null;
         runtime.activeMessageId = null;
@@ -1126,6 +1151,11 @@ export class ThreadService {
         )
           return;
         runtime.data.status = event.status;
+        if (
+          runtime.data.questionBatch?.runId === event.runId &&
+          !['running', 'pending', 'suspended', 'waiting'].includes(event.status)
+        )
+          runtime.data.questionBatch = null;
         if (event.status === 'success') runtime.data.error = null;
         if (runtime.goal) {
           runtime.goal.evaluating = false;
@@ -1141,6 +1171,8 @@ export class ThreadService {
         }
       }
       await this.save(runtime);
+      if (event.type === 'status' && event.status === 'suspended')
+        await this.resumeNextQuestion(runtime);
       this.publish(runtime);
       this.release(runtime);
     }).catch((error: unknown) => {
@@ -1239,8 +1271,49 @@ export class ThreadService {
     if (cached) return cached;
     const data = dataOf(thread);
     if (data.usage) data.usage = await this.withConsumedTokens(id, data.usage);
-    if (
+    const batch = data.questionBatch;
+    const readWholeTurns = historyMode === 'turns' || !!batch;
+    const history = readWholeTurns
+      ? await readTurnPage(this.memory, {
+          threadId: id,
+          resourceId: thread.resourceId,
+        })
+      : {
+          ...(await this.history(userId, id)),
+          locators: new Map<string, string>(),
+          cursor: null,
+        };
+    const messages = readWholeTurns
+      ? history.messages
+      : mergeThreadMessages([], history.messages);
+    // A thread saved by an older version can be reopened between two questions.
+    // Bind accepted siblings as well, so the last resume preserves both answers.
+    const pendingRunIds = new Set(
+      data.toolInteractions
+        .filter((item) => !item.turnId && !item.response)
+        .map((item) => item.runId),
+    );
+    if (pendingRunIds.size) {
+      const turnId = groupTurns(messages).at(-1)?.id;
+      for (const item of data.toolInteractions)
+        if (pendingRunIds.has(item.runId)) item.turnId ??= turnId;
+    }
+    const interruptedBatch =
+      batch &&
+      ['pending', 'running', 'suspended', 'waiting'].includes(data.status) &&
+      (!data.activeId || data.activeId === batch.runId);
+    const recovered = interruptedBatch
+      ? recoverQuestionInteractions(batch, data.toolInteractions, messages)
+      : undefined;
+    if (batch && !recovered) data.questionBatch = null;
+    if (recovered) {
+      data.toolInteractions = recovered;
+      data.activeId = null;
+      data.error = null;
+      data.status = 'suspended';
+    } else if (
       data.activeId ||
+      interruptedBatch ||
       (typeof thread.metadata?.issueId === 'number' &&
         (data.status === 'pending' || data.status === 'running'))
     ) {
@@ -1248,21 +1321,6 @@ export class ThreadService {
       data.error = 'RUN_INTERRUPTED';
       data.status = 'failed';
     }
-    const history =
-      historyMode === 'turns'
-        ? await readTurnPage(this.memory, {
-            threadId: id,
-            resourceId: thread.resourceId,
-          })
-        : {
-            ...(await this.history(userId, id)),
-            locators: new Map<string, string>(),
-            cursor: null,
-          };
-    const messages =
-      historyMode === 'messages'
-        ? mergeThreadMessages([], history.messages)
-        : history.messages;
     const runtime: Runtime = {
       thread,
       data,
@@ -1277,10 +1335,10 @@ export class ThreadService {
       turnLocators: history.locators,
       historyCursor: history.cursor,
       turnHistoryCurrent:
-        historyMode === 'turns' ||
+        readWholeTurns ||
         (!history.hasMore && groupTurns(messages).length <= TURN_PAGE_SIZE),
       partialTurnId:
-        historyMode === 'messages' &&
+        !readWholeTurns &&
         history.hasMore &&
         messages[0]?.role === 'assistant'
           ? messages[0].id
@@ -1295,6 +1353,7 @@ export class ThreadService {
       backgroundTasksError: null,
     };
     if (
+      batch ||
       dataOf(thread).activeId ||
       thread.metadata?.aime !== undefined ||
       runtime.issueEvents.length ||
@@ -1325,6 +1384,7 @@ export class ThreadService {
         throw error;
       }
     }
+    await this.resumeNextQuestion(runtime);
     this.release(runtime);
     return runtime;
   }
@@ -1495,10 +1555,17 @@ export class ThreadService {
     });
   }
 
-  private summarizeTurn(threadId: string, turn: ChatTurn, cursor?: string) {
+  private summarizeTurn(
+    threadId: string,
+    turn: ChatTurn,
+    cursor?: string,
+    interactions: readonly ToolInteraction[] = [],
+    batch?: QuestionBatch | null,
+  ) {
     const summary = summarizeTurn(turn, cursor, {
       threadId,
       forceRender: this.runner.isToolForceRendered,
+      askUserResponses: questionResponses(turn.id, interactions, batch),
     });
     return {
       ...summary,
@@ -1842,9 +1909,16 @@ export class ThreadService {
       cursor,
     );
     await this.accessible(userId, id);
+    const { toolInteractions, questionBatch } = dataOf(thread);
     return {
       turns: groupTurns(page.messages).map((turn) =>
-        this.summarizeTurn(id, turn, page.locators.get(turn.id)),
+        this.summarizeTurn(
+          id,
+          turn,
+          page.locators.get(turn.id),
+          toolInteractions,
+          questionBatch,
+        ),
       ),
       cursor: page.cursor,
       hasMore: page.hasMore,
@@ -2171,6 +2245,7 @@ export class ThreadService {
       else await this.runner.clearGoal?.(id);
       runtime.goal = null;
       if (goal?.status === 'active' && this.busy(runtime)) {
+        runtime.data.questionBatch = null;
         runtime.data.status = 'canceled';
         runtime.data.activeId = null;
         runtime.activeMessageId = null;
@@ -2203,25 +2278,134 @@ export class ThreadService {
         runtime.data.status === 'pending'
       )
         throw new ThreadError('THREAD_BUSY', 409);
-      validateToolResponse(interaction, response, userId);
-      const session = await this.session(
-        runtime,
-        interaction.settings,
-        false,
-        userId,
-      );
-      await session.respond(interaction, response, interaction.settings);
-      interaction.response = response;
-      runtime.data.acceptedIds = [
-        ...runtime.data.acceptedIds,
-        response.id,
-      ].slice(-200);
-      runtime.data.status = 'pending';
-      runtime.data.error = null;
+      const batch = runtime.data.questionBatch;
+      if (queuedQuestionAnswer(batch, interaction))
+        throw new ThreadError('TOOL_NOT_PENDING', 409);
+      await this.resumeTool(runtime, interaction, response, userId);
+      if (
+        batch?.runId === interaction.runId &&
+        interaction.kind === 'approval' &&
+        response.action === 'decline'
+      ) {
+        batch.answers = batch.answers.filter(
+          (item) => item.toolCallId !== interaction.toolCallId,
+        );
+        if (!batch.answers.length) runtime.data.questionBatch = null;
+      }
       await this.save(runtime);
       this.publish(runtime);
       return this.summary(runtime.thread, runtime);
     });
+  }
+
+  respondToQuestions(
+    userId: string,
+    id: string,
+    interactionId: string,
+    raw: AskUserAnswer[],
+  ) {
+    return this.scopeLocked(userId, id, async () => {
+      if (this.closing) throw new ThreadError('SERVER_STOPPING', 503);
+      const answers = askUserAnswerSchema.array().parse(raw);
+      const runtime = await this.runtime(userId, id);
+      if (groupChatThreadBinding(runtime.thread.metadata))
+        throw new ThreadError('FORBIDDEN', 403);
+      const anchor = runtime.data.toolInteractions.find(
+        (item) => item.id === interactionId,
+      );
+      const first = answers.find(
+        (answer) => answer.toolCallId === anchor?.toolCallId,
+      );
+      if (
+        !anchor ||
+        !first ||
+        anchor.kind !== 'suspended' ||
+        anchor.toolName !== 'ask_user'
+      )
+        throw new ThreadError('TOOL_NOT_PENDING', 409);
+      if (anchor.response) {
+        if (
+          alreadyReceivedAnswers(
+            anchor,
+            answers,
+            runtime.data.toolInteractions,
+            runtime.data.questionBatch,
+          )
+        )
+          return this.summary(runtime.thread, runtime);
+        throw new ThreadError('TOOL_NOT_PENDING', 409);
+      }
+      if (runtime.data.status !== 'suspended' || runtime.data.questionBatch)
+        throw new ThreadError('THREAD_BUSY', 409);
+      const turn = groupTurns(runtime.messages).find(
+        (turn) => turn.id === anchor.turnId,
+      );
+      if (!turn) throw new ThreadError('TOOL_NOT_PENDING', 409);
+      validateQuestionAnswers(
+        this.summarizeTurn(id, turn, undefined, runtime.data.toolInteractions),
+        anchor,
+        answers,
+      );
+      if (
+        answers.some((answer) =>
+          runtime.data.acceptedIds.includes(answer.response.id),
+        )
+      )
+        throw new ThreadError('VALIDATION_ERROR', 400);
+      await this.resumeTool(runtime, anchor, first.response, userId);
+      const remaining = answers.filter((answer) => answer !== first);
+      runtime.data.questionBatch = remaining.length
+        ? { runId: anchor.runId, turnId: turn.id, userId, answers: remaining }
+        : null;
+      await this.save(runtime);
+      this.publish(runtime);
+      return this.summary(runtime.thread, runtime);
+    });
+  }
+
+  private async resumeTool(
+    runtime: Runtime,
+    interaction: StoredInteraction,
+    response: ToolResponse,
+    userId: string,
+  ) {
+    validateToolResponse(interaction, response, userId);
+    const session = await this.session(
+      runtime,
+      interaction.settings,
+      false,
+      userId,
+    );
+    await session.respond(interaction, response, interaction.settings);
+    interaction.turnId ??= groupTurns(runtime.messages).at(-1)?.id;
+    interaction.response = response;
+    runtime.data.acceptedIds = [...runtime.data.acceptedIds, response.id].slice(
+      -200,
+    );
+    runtime.data.status = 'pending';
+    runtime.data.error = null;
+  }
+
+  /** Only a real ask_user suspension can consume its pre-submitted answer. */
+  private async resumeNextQuestion(runtime: Runtime) {
+    const batch = runtime.data.questionBatch;
+    if (!batch || this.closing || runtime.data.status !== 'suspended') return;
+    const pending = runtime.data.toolInteractions.find(
+      (item) => !item.response && queuedQuestionAnswer(batch, item),
+    );
+    if (!pending) return;
+    const answer = queuedQuestionAnswer(batch, pending)!;
+    try {
+      await this.accessible(batch.userId, runtime.thread.id);
+      await this.resumeTool(runtime, pending, answer.response, batch.userId);
+      batch.answers = batch.answers.filter((item) => item !== answer);
+      if (!batch.answers.length) runtime.data.questionBatch = null;
+    } catch (error) {
+      // Reopen the outstanding questions for an explicit retry.
+      runtime.data.questionBatch = null;
+      runtime.data.error = threadErrorMessage(error);
+    }
+    await this.save(runtime);
   }
 
   private upsert(runtime: Runtime, message: UIMessage) {
@@ -2268,6 +2452,7 @@ export class ThreadService {
       else await this.runner.clearGoal?.(id);
       runtime.goal = null;
       runtime.data.toolInteractions = [];
+      runtime.data.questionBatch = null;
       for (const task of runtime.backgroundTasks.filter(isBackgroundTaskActive))
         await this.backgroundTaskManager?.cancel(task.id);
       for (const command of runtime.session?.commands?.list() ?? [])
@@ -2288,6 +2473,7 @@ export class ThreadService {
       if (groupChatThreadBinding(runtime.thread.metadata))
         throw new ThreadError('FORBIDDEN', 403);
       runtime.session?.abort();
+      runtime.data.questionBatch = null;
       runtime.data.status = 'canceled';
       runtime.data.activeId = null;
       runtime.activeMessageId = null;

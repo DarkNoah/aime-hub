@@ -6,7 +6,12 @@ import {
   type ChatToolGroup,
 } from '@aime/shared/chat-turns';
 import { getToolDisplayState } from '@aime/shared/tool-status';
-import { getTurnToolGroup, groupTurns, summarizeTurn } from './turns.js';
+import {
+  activeTurnState,
+  getTurnToolGroup,
+  groupTurns,
+  summarizeTurn,
+} from './turns.js';
 import { isToolForceRendered } from '../tools/registry.js';
 
 type Part = UIMessage['parts'][number];
@@ -100,7 +105,7 @@ test('registered display tools expose their definition flag without creating exe
     assert.equal(isToolForceRendered(name), false, name);
 });
 
-test('consecutive tools and reasoning collapse across messages, preserving all text and group-only details', () => {
+test('consecutive tools group across messages while reasoning stays out of the overview and details', () => {
   const reasoning: Part = { type: 'reasoning', text: 'hidden reasoning' };
   const turn = {
     id: 'turn',
@@ -127,9 +132,9 @@ test('consecutive tools and reasoning collapse across messages, preserving all t
     ['First update', 'Second update', 'Final answer'],
   );
   const [first, second] = groups(summary.assistant!.parts);
-  assert.equal(first.id, 'a:1');
+  assert.equal(first.id, 'one');
   assert.equal(first.count, 2);
-  assert.equal(first.reasoningIndex, 0);
+  assert.equal(first.reasoningIndex, undefined);
   assert.equal(first.reasoningOnly, undefined);
   assert.equal(second.id, 'three');
   assert.equal(second.count, 1);
@@ -142,33 +147,60 @@ test('consecutive tools and reasoning collapse across messages, preserving all t
   assert.deepEqual(detail.summary, first);
   assert.deepEqual(
     detail.messages.flatMap((message) => message.parts),
-    [reasoning, tool('one'), tool('two')],
+    [tool('one'), tool('two')],
   );
   assert.equal(getTurnToolGroup(turn, 'missing'), undefined);
   assert.deepEqual(turn, original);
 });
 
-test('group identity survives appended tools and revisions ignore other groups and visible text', () => {
+test('live thinking follows only the active assistant message and its current part', () => {
+  const reasoning: Part = { type: 'reasoning', state: 'streaming', text: '' };
+  const active = assistant('stored', [reasoning]);
+  active.metadata = { reconciledMessageIds: ['live'] };
+  const turns = [
+    {
+      id: 'turn',
+      messages: [assistant('older', [reasoning]), active],
+    },
+  ];
+  const state = () => activeTurnState(turns, 'live', 'running');
+  assert.deepEqual(state(), { activeTurnId: 'turn', thinking: true });
+  for (const status of [
+    'pending',
+    'success',
+    'failed',
+    'suspended',
+    'canceled',
+  ] as const)
+    assert.equal(activeTurnState(turns, 'live', status).thinking, false);
+  assert.deepEqual(activeTurnState(turns, null, 'running'), {
+    activeTurnId: null,
+    thinking: false,
+  });
+  active.parts = [{ ...reasoning, text: 'Private content' }];
+  assert.equal(state().thinking, true);
+  active.parts = [{ ...reasoning, state: 'done' }];
+  assert.equal(state().thinking, false);
+  for (const next of [
+    text('answer'),
+    tool('one'),
+    { type: 'step-start' } as const,
+  ]) {
+    active.parts = [reasoning, next];
+    assert.equal(state().thinking, false);
+  }
+});
+
+test('reasoning creates no groups and cannot change the revision of tool details', () => {
   const thinking: Part = {
     type: 'reasoning',
     text: 'Thinking',
     state: 'streaming',
   };
   const turn = { id: 'turn', messages: [assistant('a', [thinking])] };
-  const initial = groups(summarizeTurn(turn).assistant!.parts)[0];
-  assert.equal(initial.state, 'running');
-  assert.equal(initial.reasoningOnly, true);
-  assert.equal(initial.reasoningIndex, 0);
-  const twoThoughts = groups(
-    summarizeTurn({
-      id: 'turn',
-      messages: [
-        assistant('a', [thinking, { ...thinking, text: 'Latest thought' }]),
-      ],
-    }).assistant!.parts,
-  )[0];
-  assert.equal(twoThoughts.reasoningIndex, 1);
-  assert.equal(twoThoughts.reasoningOnly, true);
+  const initial = summarizeTurn(turn);
+  assert.equal(initial.assistant, null);
+  assert.equal(initial.hasDetails, false);
   const finishedThinking: Part = { ...thinking, state: 'done' };
   const next = {
     ...turn,
@@ -182,19 +214,13 @@ test('group identity survives appended tools and revisions ignore other groups a
     ],
   };
   const [first, second] = groups(summarizeTurn(next).assistant!.parts);
-  assert.equal(first.id, initial.id);
-  assert.notEqual(first.revision, initial.revision);
+  assert.equal(first.id, 'one');
   assert.equal(first.state, 'completed');
-  assert.equal(
-    first.reasoningOnly,
-    undefined,
-    'adding a tool preserves the group even when its reasoning is hidden',
-  );
   const changed = {
     ...next,
     messages: [
       assistant('a', [
-        finishedThinking,
+        { ...thinking, text: 'Different thought' },
         next.messages[0].parts[1],
         text('Changed text'),
         tool('two', 'new result'),
@@ -342,14 +368,9 @@ test('tool group counts use the latest state once per call and exclude reasoning
     failed: 0,
     running: 0,
   });
-  const thinking = groupFor([reasoning]);
-  assert.equal(thinking.state, 'running');
-  assert.equal(thinking.reasoningOnly, true);
-  assert.deepEqual(thinking.statusCounts, {
-    success: 0,
-    failed: 0,
-    running: 0,
-  });
+  const thinking = groupFor([tool('finished'), reasoning]);
+  assert.equal(thinking.state, 'completed');
+  assert.deepEqual(thinking.statusCounts, completed.statusCounts);
 });
 
 test('force-rendered cards split tool groups and retain required interaction data', () => {

@@ -146,6 +146,14 @@ export function threadRouter(
         input.body,
       ),
     ),
+    respondToQuestions: p.respondToQuestions.handler(({ context, input }) =>
+      threads().respondToQuestions(
+        context.userId,
+        input.params.threadId,
+        input.params.interactionId,
+        input.body.answers,
+      ),
+    ),
     queued: p.queued.handler(({ context, input }) =>
       threads().getQueued(
         context.userId,
