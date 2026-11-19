@@ -25,6 +25,7 @@ export type ChatSettings = z.infer<typeof chatSettingsSchema>;
 export type ChatSkill = {
   /** Canonical skill ID and command name, taken from the package directory. */
   name: string;
+  sourceUserName?: string;
   description: string;
   /** Parent directory relative to the skills root, e.g. owner/repo. */
   group: string;

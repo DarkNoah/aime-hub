@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { apiErrorCode } from '@/lib/rpc';
+import { api, apiErrorCode } from '@/lib/rpc';
 import { useTranslation } from 'react-i18next';
 import {
   FolderGit2,
@@ -10,7 +10,13 @@ import {
   Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { InstalledSkill, InstalledSkills } from '@aime/shared/skills';
+import type {
+  InstalledSkill,
+  InstalledSkills,
+  SkillDestination,
+  SkillSharing,
+  SkillSharingOptions,
+} from '@aime/shared/skills';
 import type { TranslationKey } from '@/i18n/config';
 import { PageHeader } from '@/components/page-header';
 import { LoadingState } from '@/components/loading-state';
@@ -30,6 +36,7 @@ import {
 import { getSkillApi, skillErrorKey, type SkillScope } from './api';
 import { ImportSkillsSheet } from './import-skills-sheet';
 import { UpdateSourceDialog } from './update-source-dialog';
+import { ShareSkillDialog } from './share-skill-dialog';
 
 const SkillPreviewDialog = lazy(() =>
   import('./skill-preview-dialog').then((m) => ({
@@ -41,10 +48,22 @@ type SkillRemoval =
   | { kind: 'skill'; skill: InstalledSkill }
   | { kind: 'group'; group: string; skills: InstalledSkill[] };
 
+function sameDestination(
+  sharing: SkillSharing | undefined,
+  target: SkillDestination,
+) {
+  return target.scope === 'global'
+    ? sharing?.scope === 'global'
+    : sharing?.scope === 'project' && sharing.projectId === target.projectId;
+}
+
 export function SkillsManager({ scope }: { scope: SkillScope }) {
   const { t } = useTranslation();
   const client = getSkillApi(scope);
   const [catalog, setCatalog] = useState<InstalledSkills>();
+  const [sharing, setSharing] = useState<SkillSharingOptions>();
+  const [sharingError, setSharingError] = useState(false);
+  const [selectedSkill, setSelectedSkill] = useState<InstalledSkill>();
   const [error, setError] = useState<TranslationKey>();
   const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -61,30 +80,56 @@ export function SkillsManager({ scope }: { scope: SkillScope }) {
   const submitting = useRef(false);
   useEffect(() => {
     const controller = new AbortController();
-    void client.list(undefined, { signal: controller.signal }).then(
-      (data) => {
-        if (!controller.signal.aborted) {
-          setCatalog(data);
-          setError(undefined);
-          setLoading(false);
-        }
-      },
-      (cause: unknown) => {
-        if (!controller.signal.aborted) {
-          setError(skillErrorKey(cause));
-          setLoading(false);
-        }
-      },
-    );
+    const options = { signal: controller.signal };
+    void Promise.allSettled([
+      client.list(undefined, options),
+      scope === 'personal'
+        ? api.personalSkills.sharing(undefined, options)
+        : undefined,
+    ]).then(([catalogResult, sharingResult]) => {
+      if (controller.signal.aborted) return;
+      if (catalogResult.status === 'fulfilled') {
+        setCatalog(catalogResult.value);
+        setError(undefined);
+      } else {
+        setError(skillErrorKey(catalogResult.reason));
+      }
+      setSharingError(sharingResult.status === 'rejected');
+      if (sharingResult.status === 'fulfilled') setSharing(sharingResult.value);
+      setLoading(false);
+    });
     return () => controller.abort();
-  }, [client, revision]);
+  }, [client, scope, revision]);
   const query = search.trim().toLocaleLowerCase();
-  const visible =
-    catalog?.skills.filter((skill) =>
-      `${skill.name} ${skill.path} ${skill.description}`
-        .toLocaleLowerCase()
-        .includes(query),
-    ) ?? [];
+  const personalPaths = new Set(catalog?.skills.map((item) => item.path));
+  const publishedByPath = new Map<string, SkillSharing[]>();
+  const otherEntries = (sharing?.shared ?? []).filter((item) => {
+    if (
+      !item.sharing ||
+      item.sharing.legacyMoved ||
+      !personalPaths.has(item.path)
+    )
+      return true;
+    const locations = publishedByPath.get(item.path) ?? [];
+    locations.push(item.sharing);
+    publishedByPath.set(item.path, locations);
+    return false;
+  });
+  const skills = [...(catalog?.skills ?? []), ...otherEntries];
+  const linkedGroups = new Set<string>();
+  for (const item of catalog?.skills ?? []) {
+    if (!item.sharing || item.sharing.legacyMoved) continue;
+    const parts = item.group.split('/');
+    while (parts.length) {
+      linkedGroups.add(parts.join('/'));
+      parts.pop();
+    }
+  }
+  const visible = skills.filter((skill) =>
+    `${skill.name} ${skill.path} ${skill.description} ${skill.sharing?.userName ?? ''} ${skill.sharing?.projectName ?? ''}`
+      .toLocaleLowerCase()
+      .includes(query),
+  );
   function refresh() {
     setLoading(true);
     setRevision((value) => value + 1);
@@ -106,6 +151,98 @@ export function SkillsManager({ scope }: { scope: SkillScope }) {
         : current,
     );
   }
+  function canShare(skill: InstalledSkill) {
+    if (scope !== 'personal' || !sharing || sharingError || !skill.path)
+      return false;
+    return (
+      !!skill.sharing ||
+      publishedByPath.has(skill.path) ||
+      sharing.global ||
+      sharing.projects.length > 0
+    );
+  }
+  async function changeSharing(
+    skill: InstalledSkill,
+    target: Parameters<
+      typeof api.personalSkills.setSharing
+    >[0]['body']['target'],
+  ) {
+    if (submitting.current) return;
+    submitting.current = true;
+    setPending(true);
+    try {
+      const affected = await api.personalSkills.setSharing({
+        body: { path: skill.path, target },
+      });
+      const affectedPaths = new Set(affected.map((item) => item.path));
+      const destination = target.scope === 'personal' ? target.from : target;
+      setSharing((current) => {
+        if (!current) return current;
+        const retained = current.shared.filter(
+          (item) =>
+            !affectedPaths.has(item.path) ||
+            !sameDestination(item.sharing, destination),
+        );
+        return {
+          ...current,
+          shared:
+            target.scope === 'personal' ? retained : [...retained, ...affected],
+        };
+      });
+      if (target.scope === 'personal' && skill.sharing?.legacyMoved)
+        installed(affected);
+      setSelectedSkill(undefined);
+      toast.success(
+        t(
+          target.scope === 'personal'
+            ? skill.sharing?.legacyMoved
+              ? 'skills.moveBackSuccess'
+              : 'skills.unshareSuccess'
+            : 'skills.shareSuccess',
+        ),
+      );
+    } catch (cause) {
+      if (
+        apiErrorCode(cause) === 'PROJECT_ARCHIVED' &&
+        target.scope === 'project'
+      ) {
+        setSharing(
+          (current) =>
+            current && {
+              ...current,
+              projects: current.projects.filter(
+                (project) => project.id !== target.projectId,
+              ),
+            },
+        );
+        setSelectedSkill(undefined);
+      }
+      toast.error(
+        t(
+          apiErrorCode(cause) === 'SKILL_CONFLICT'
+            ? 'skills.shareConflict'
+            : skillErrorKey(cause),
+        ),
+      );
+    } finally {
+      submitting.current = false;
+      setPending(false);
+    }
+  }
+  function unshare(skill: InstalledSkill, location: SkillDestination) {
+    const from: SkillDestination =
+      location.scope === 'global'
+        ? { scope: 'global' }
+        : { scope: 'project', projectId: location.projectId };
+    void changeSharing(skill, { scope: 'personal', from });
+  }
+  function chooseShare(skill: InstalledSkill) {
+    if (!skill.sharing) {
+      setSelectedSkill(skill);
+    } else {
+      unshare(skill, skill.sharing);
+    }
+  }
   async function remove() {
     if (!removing || submitting.current) return;
     submitting.current = true;
@@ -124,6 +261,16 @@ export function SkillsManager({ scope }: { scope: SkillScope }) {
         removed = [removing.skill.path];
       }
       const removedPaths = new Set(removed);
+      setSharing(
+        (current) =>
+          current && {
+            ...current,
+            shared: current.shared.filter(
+              (item) =>
+                item.sharing?.legacyMoved || !removedPaths.has(item.path),
+            ),
+          },
+      );
       setCatalog((current) =>
         current
           ? {
@@ -218,7 +365,7 @@ export function SkillsManager({ scope }: { scope: SkillScope }) {
           />
         </div>
         <Badge variant="secondary">
-          {t('skills.installedCount', { count: catalog?.skills.length ?? 0 })}
+          {t('skills.installedCount', { count: skills.length })}
         </Badge>
         <Button
           variant="outline"
@@ -237,12 +384,12 @@ export function SkillsManager({ scope }: { scope: SkillScope }) {
           <code className="block break-all">{catalog.root}</code>
         </div>
       ) : null}
-      {error ? (
+      {error || sharingError ? (
         <div
           role="alert"
           className="flex items-center justify-between gap-3 rounded-lg border border-destructive/25 p-4 text-sm text-destructive"
         >
-          <span>{t(error)}</span>
+          <span>{t(error ?? 'skills.sharingLoadError')}</span>
           <Button variant="outline" onClick={refresh}>
             {t('skills.retry')}
           </Button>
@@ -250,7 +397,7 @@ export function SkillsManager({ scope }: { scope: SkillScope }) {
       ) : null}
       {loading && !catalog ? (
         <LoadingState />
-      ) : catalog?.skills.length ? (
+      ) : skills.length ? (
         <ScrollArea
           className="h-[min(65dvh,48rem)] rounded-xl border bg-card"
           viewportProps={{ 'aria-busy': loading }}
@@ -260,6 +407,11 @@ export function SkillsManager({ scope }: { scope: SkillScope }) {
               mode="manage"
               skills={visible}
               disabled={loading || pending}
+              personal={scope === 'personal'}
+              publishedByPath={publishedByPath}
+              linkedGroups={linkedGroups}
+              canShare={canShare}
+              onShare={chooseShare}
               updatingGroup={updatingGroup}
               onUpdateGroup={(group) => void updateGroup(group)}
               onPreview={setPreview}
@@ -268,7 +420,7 @@ export function SkillsManager({ scope }: { scope: SkillScope }) {
                 setRemoving({
                   kind: 'group',
                   group,
-                  skills: catalog.skills.filter(
+                  skills: (catalog?.skills ?? []).filter(
                     (skill) => skill.group === group,
                   ),
                 })
@@ -302,6 +454,17 @@ export function SkillsManager({ scope }: { scope: SkillScope }) {
           scope={scope}
           onClose={() => setImporting(false)}
           onInstalled={installed}
+        />
+      ) : null}
+      {selectedSkill && sharing ? (
+        <ShareSkillDialog
+          skill={selectedSkill}
+          sharing={sharing}
+          pending={pending}
+          onClose={() => setSelectedSkill(undefined)}
+          published={publishedByPath.get(selectedSkill.path) ?? []}
+          onShare={(target) => void changeSharing(selectedSkill, target)}
+          onUnshare={(target) => unshare(selectedSkill, target)}
         />
       ) : null}
       {sourceGroup ? (
@@ -370,6 +533,16 @@ export function SkillsManager({ scope }: { scope: SkillScope }) {
                     { name: removing?.skill.name ?? '' },
                   )}
             </DialogDescription>
+            {removing &&
+              scope === 'personal' &&
+              (removing.kind === 'skill'
+                ? [removing.skill]
+                : removing.skills
+              ).some((item) => publishedByPath.has(item.path)) && (
+                <p className="text-sm text-muted-foreground">
+                  {t('skills.removePublishedHint')}
+                </p>
+              )}
           </DialogHeader>
           <code className="break-all text-xs text-muted-foreground">
             {removing?.kind === 'group' ? removing.group : removing?.skill.path}

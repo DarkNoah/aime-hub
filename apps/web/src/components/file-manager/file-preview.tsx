@@ -33,6 +33,7 @@ export function FilePreview({
   navigation = 0,
   revision,
   edits,
+  readOnly = false,
 }: {
   client: FilePreviewClient;
   path: string;
@@ -40,6 +41,7 @@ export function FilePreview({
   navigation?: number;
   revision: number;
   edits: FileEdits;
+  readOnly?: boolean;
 }) {
   const { t } = useTranslation();
   const [wrap, setWrap] = useFileWrap();
@@ -100,7 +102,8 @@ export function FilePreview({
       </div>
     );
   if (!data) return <PreviewLoading />;
-  const editable = data.kind === 'text' && !data.truncated && !!data.version;
+  const editable =
+    !readOnly && data.kind === 'text' && !data.truncated && !!data.version;
   const markdown = getPreviewKind(data) === 'markdown';
   // A search result or message link should reveal its source on every click.
   const mode =
@@ -292,13 +295,15 @@ export function FilePreview({
                 <TabsTrigger value="source" className="text-xs">
                   {t('files.markdownSource')}
                 </TabsTrigger>
-                <TabsTrigger
-                  value="edit"
-                  className="text-xs"
-                  disabled={!editable}
-                >
-                  {t('files.editMode')}
-                </TabsTrigger>
+                {!readOnly && (
+                  <TabsTrigger
+                    value="edit"
+                    className="text-xs"
+                    disabled={!editable}
+                  >
+                    {t('files.editMode')}
+                  </TabsTrigger>
+                )}
               </TabsList>
             </div>
             <TabsContent key={mode} value={mode} className="min-h-0 min-w-0">

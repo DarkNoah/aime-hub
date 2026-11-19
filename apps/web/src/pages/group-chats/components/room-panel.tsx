@@ -29,6 +29,7 @@ import { AvatarGroup, AvatarGroupCount } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 import { useRoom } from '../use-room';
 import { RoomComposer, type RoomComposerHandle } from './room-composer';
 import { RoomReadMarker } from './room-read-marker';
@@ -36,7 +37,7 @@ import { RoomMessage } from './room-message';
 import { RoomMessageNavigation } from './room-message-navigation';
 import { RoomAgentEditor } from './room-agent-editor';
 import { RoomMembersPanel } from './room-members-panel';
-import { AgentStatus } from './agent-status';
+import { AgentStatus, WorkingAgents } from './agent-status';
 import { RoomMemberEditor } from './room-member-editor';
 import { RoomAgentPicker } from './room-agent-picker';
 import { RoomA2aEditor } from './room-a2a-editor';
@@ -252,6 +253,9 @@ function RoomContent({
   }, []);
   const room = state.room!;
   const agents = room.agents ?? [];
+  const workingAgents = agents.filter(
+    (agent) => agent.enabled && agent.status === 'running',
+  );
   const bot = agents.find((agent) => agent.id === room.botAgentId);
   const a2aMembers = room.a2aMembers ?? [];
   const mentionMembers = new Map(
@@ -293,7 +297,7 @@ function RoomContent({
     >
       <header
         data-chat-header
-        className="flex min-h-13 shrink-0 items-center gap-1.5 border-b px-3 py-0.5 sm:min-h-16 sm:gap-3 sm:px-4 sm:py-3"
+        className="flex min-h-13 shrink-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 border-b px-3 py-0.5 sm:min-h-16 sm:flex-nowrap sm:gap-3 sm:px-4 sm:py-3"
       >
         {projectId && (
           <Button
@@ -311,15 +315,21 @@ function RoomContent({
             </Link>
           </Button>
         )}
-        <div className="flex min-w-0 flex-1 items-center gap-2 sm:block">
-          <div className="min-w-0 sm:contents">
+        <div className="contents sm:block sm:min-w-0 sm:flex-1">
+          <div className="min-w-0 flex-1 sm:contents">
             {roomSwitcher ?? (
               <h1 className="truncate text-sm font-semibold">
                 {t('groupChat.heading')}
               </h1>
             )}
           </div>
-          <div className="flex shrink-0 items-center gap-1.5 sm:mt-1 sm:flex-wrap">
+          <div
+            className={cn(
+              'flex min-w-0 flex-wrap items-center gap-1.5 sm:mt-1',
+              workingAgents.length > 0 &&
+                'max-sm:order-last max-sm:basis-full max-sm:pb-1',
+            )}
+          >
             <Badge
               variant="secondary"
               className="hidden text-[10px] sm:inline-flex"
@@ -332,7 +342,11 @@ function RoomContent({
                     : 'groupChat.personal',
               )}
             </Badge>
-            {bot && <AgentStatus agent={bot} />}
+            {workingAgents.length > 0 ? (
+              <WorkingAgents agents={workingAgents} />
+            ) : (
+              bot && <AgentStatus agent={bot} />
+            )}
           </div>
         </div>
         <button
@@ -465,6 +479,11 @@ function RoomContent({
             userId={userId}
             label={name(message.senderId, message.senderName)}
             profile={state.profiles.get(message.senderId)}
+            agentAvatarUrl={
+              message.senderKind === 'agent'
+                ? room.agentAvatarUrls?.[message.senderId]
+                : undefined
+            }
             targetName={
               message.targetAgentId ? name(message.targetAgentId) : undefined
             }

@@ -1,10 +1,14 @@
 import { rpc, required } from '../../rpc/context.js';
 import type { GroupChatService } from './service.js';
 import type { ThreadService } from '../threads/service.js';
+import { getRoomAgentAvatarUrls } from './agent-avatars.js';
 
 export function groupChatRouter(
   service?: GroupChatService,
-  threads?: Pick<ThreadService, 'invalidateProject' | 'refreshNavigation'>,
+  threads?: Pick<
+    ThreadService,
+    'invalidateProject' | 'refreshNavigation' | 'withWorkspaceFiles'
+  >,
 ) {
   const p = rpc.groupChats;
   const rooms = () => required(service);
@@ -134,9 +138,16 @@ export function groupChatRouter(
     create: p.create.handler(({ context, input }) =>
       rooms().create(context.userId, input.body),
     ),
-    get: p.get.handler(({ context, input }) =>
-      rooms().get(context.userId, input.params.roomId),
-    ),
+    get: p.get.handler(async ({ context, input }) => {
+      const room = await rooms().get(context.userId, input.params.roomId);
+      if (!threads) return room;
+      const agentAvatarUrls = await getRoomAgentAvatarUrls(
+        threads,
+        context.userId,
+        room.agents,
+      );
+      return { ...room, agentAvatarUrls };
+    }),
     update: p.update.handler(({ context, input }) =>
       rooms().update(context.userId, input.params.roomId, input.body.title),
     ),

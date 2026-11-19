@@ -125,6 +125,9 @@ export function createChatRunner(
   getMessageCompressionTokens: () => Promise<number> = async () =>
     defaultSystemSettings.messageCompressionTokens,
   browserCaptures?: NetworkCaptureStore,
+  skillPublisherNames?: (
+    userIds: string[],
+  ) => Promise<ReadonlyMap<string, string>>,
 ): ChatRunner {
   const getConfig = async (
     id?: string | null,
@@ -229,7 +232,12 @@ export function createChatRunner(
         : undefined;
       try {
         await filesystem?.init?.();
-        return await listChatSkills(workspaceRoot, userId, projectId);
+        return await listChatSkills(
+          workspaceRoot,
+          userId,
+          projectId,
+          skillPublisherNames,
+        );
       } finally {
         await filesystem?.destroy?.();
       }

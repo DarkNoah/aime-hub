@@ -289,6 +289,7 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       idleWakeHours: null,
     });
     const agentsByRoom = new Map();
+    const agentAvatarUrls = {};
     const roomAgents = (roomId) => {
       if (!agentsByRoom.has(roomId)) agentsByRoom.set(roomId, [botFor(roomId)]);
       return agentsByRoom.get(roomId);
@@ -334,6 +335,7 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
         (id) => id !== 'alice' && (room.projectId || id !== room.createdBy),
       ),
       agents: roomAgents(room.id),
+      agentAvatarUrls: room.id === roomId ? agentAvatarUrls : {},
       a2aMembers: roomA2aMembers(room.id),
       botAgentId: 'bot0000000000001',
     });
@@ -353,6 +355,10 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       text: `消息 ${i + 1}`,
       createdAt: new Date().toISOString(),
     }));
+    Object.assign(messages[78], {
+      senderKind: 'agent',
+      senderId: 'bot0000000000001',
+    });
     const users = [
       { id: 'alice', name: '林然', username: 'alice', image: null },
       { id: 'bob', name: '陈禾', username: 'bob', image: null },
@@ -903,6 +909,67 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       0,
     );
 
+    await t.test(
+      'room header shows every working agent name on a narrow screen',
+      async (t) => {
+        const agents = roomAgents(roomId);
+        const bot = agents[0];
+        const worker = {
+          ...bot,
+          id: 'activityworker01',
+          threadId: 'activitythread01',
+          name: '市场数据分析与研究助手MarketIntelligenceResearchAssistantForInternationalMarkets',
+          role: 'worker',
+          status: 'running',
+        };
+        t.after(async () => {
+          agentsByRoom.set(roomId, agents);
+          bot.status = 'idle';
+          await page.setViewportSize({ width: 1440, height: 1000 });
+        });
+        const header = page.locator('[data-chat-header]');
+        const activity = header.getByRole('status');
+        await header.getByText('待命', { exact: true }).waitFor();
+        agentsByRoom.set(roomId, [...agents, worker]);
+        await activity.filter({ hasText: worker.name }).waitFor();
+        assert.match(await activity.innerText(), /工作中/);
+
+        await page.setViewportSize({ width: 360, height: 780 });
+        bot.status = 'running';
+        await activity.filter({ hasText: bot.name }).waitFor();
+        assert.ok((await activity.innerText()).includes(worker.name));
+        assert.ok(
+          await activity.evaluate((status) => {
+            const bounds = status.getBoundingClientRect();
+            const range = document.createRange();
+            range.selectNodeContents(status);
+            return (
+              bounds.left >= 0 &&
+              bounds.right <= window.innerWidth &&
+              [...range.getClientRects()].every(
+                (rect) =>
+                  rect.left >= bounds.left - 1 &&
+                  rect.right <= bounds.right + 1 &&
+                  rect.bottom <= bounds.bottom + 1,
+              ) &&
+              [...status.querySelectorAll('*')].every(
+                (element) => element.scrollWidth <= element.clientWidth + 1,
+              )
+            );
+          }),
+          'Full agent names should fit inside the visible status area',
+        );
+        worker.status = 'idle';
+        await activity
+          .filter({ hasText: worker.name })
+          .waitFor({ state: 'hidden' });
+        assert.ok((await activity.innerText()).includes(bot.name));
+        bot.status = 'idle';
+        await header.getByText('待命', { exact: true }).waitFor();
+        assert.equal(await header.getByText(/工作中/).count(), 0);
+      },
+    );
+
     const input = page.getByRole('textbox', { name: '输入消息…' });
     await input.fill('切换成员面板时保留草稿');
     await page.getByRole('button', { name: '3 位成员', exact: true }).click();
@@ -914,6 +981,38 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     await roster.getByText('林然', { exact: true }).waitFor();
     await roster.getByText('Room assistant', { exact: true }).waitFor();
     await roster.getByText('领导', { exact: true }).waitFor();
+    await t.test(
+      'room avatars appear after creation and fall back on image errors',
+      async () => {
+        const bot = botFor(roomId);
+        const avatarPath = `.agents/agents/${bot.id}.png`;
+        const url = `/api/threads/${bot.threadId}/files/raw?${new URLSearchParams({ path: avatarPath })}`;
+        const member = roster.getByRole('button', {
+          name: '提及 Room assistant',
+          exact: true,
+        });
+        const message = page.locator('[data-chat-turn="message000000079"]');
+        await member.locator('[data-slot="avatar-fallback"]').waitFor();
+        await message.locator('[data-slot="avatar-fallback"]').waitFor();
+        const png = await page.evaluate(
+          () =>
+            document
+              .createElement('canvas')
+              .toDataURL('image/png')
+              .split(',')[1],
+        );
+        uploadedFiles.set(avatarPath, Buffer.from(png, 'base64'));
+        agentAvatarUrls[bot.id] = `${url}&v=1`;
+        await member.locator('[data-slot="avatar-image"]').waitFor();
+        await message.locator('[data-slot="avatar-image"]').waitFor();
+        uploadedFiles.set(avatarPath, Buffer.from('invalid image'));
+        agentAvatarUrls[bot.id] = `${url}&v=2`;
+        await member.locator('[data-slot="avatar-fallback"]').waitFor();
+        await message.locator('[data-slot="avatar-fallback"]').waitFor();
+        uploadedFiles.delete(avatarPath);
+        delete agentAvatarUrls[bot.id];
+      },
+    );
     assert.equal(await page.getByRole('dialog').count(), 0);
     assert.equal(await page.getByRole('complementary').count(), 1);
     assert.equal(await page.locator('[data-chat-turn]').count(), 50);

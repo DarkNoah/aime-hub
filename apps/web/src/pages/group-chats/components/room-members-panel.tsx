@@ -245,6 +245,7 @@ export function RoomMembersPanel({
               <li key={agent.id} className="flex gap-3 py-4">
                 <RoomAgentAvatar
                   name={agent.name}
+                  image={room.agentAvatarUrls?.[agent.id]}
                   onMention={agent.enabled ? () => onMention(agent) : undefined}
                 />
                 <div className="min-w-0 flex-1 space-y-2">

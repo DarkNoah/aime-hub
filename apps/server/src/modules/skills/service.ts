@@ -9,9 +9,19 @@ import {
   rename,
   rm,
   rmdir,
+  symlink,
+  unlink,
   writeFile,
 } from 'node:fs/promises';
-import { basename, dirname, join, resolve } from 'node:path';
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from 'node:path';
 import {
   validateSkillContent,
   validateSkillMetadata,
@@ -22,8 +32,22 @@ import type {
   RepositorySkill,
   SkillScan,
   SkillContent,
+  SkillDestination,
 } from '@aime/shared/skills';
+import {
+  projectWorkspaceSchema,
+  type ProjectWorkspace,
+} from '@aime/shared/projects';
 import { SkillError } from './errors.js';
+import {
+  clearPersonalSkillShares,
+  listSkillShareLinks,
+  projectSharedSkillsRoot,
+  readSkillShareLink,
+  resolveSkillShareLink,
+  withSkillShareLock,
+  type SkillShareLink,
+} from './share-links.js';
 import { readSkillArchive } from './archive.js';
 import {
   readSkillProject,
@@ -33,7 +57,17 @@ import {
   type SkillProject,
 } from './project.js';
 import { fileError } from '../files/paths.js';
-import { userDirectory } from '../threads/workspace.js';
+import {
+  createProjectFilesystem,
+  projectDirectory,
+  userDirectory,
+} from '../threads/workspace.js';
+import {
+  assertTransferTree,
+  moveSkillDirectory,
+  pruneEmptySkillParents,
+  type SkillTransferOptions,
+} from './transfer.js';
 import type { EnvironmentVariableService } from '../environment-variables/service.js';
 import {
   normalizeSkillSource,
@@ -61,6 +95,13 @@ type CachedScan = {
   snapshot: RepositorySnapshot;
   timer: NodeJS.Timeout;
 };
+
+export type SkillGroupReplaced = (
+  previousDirectory: string,
+  previous: InstalledSkill[],
+  installedDirectory: string,
+  installed: InstalledSkill[],
+) => Promise<void>;
 
 function slug(value: string) {
   return (
@@ -103,10 +144,56 @@ async function stat(path: string) {
   });
 }
 
+async function describeInstallation(
+  directory: string,
+  path: string,
+  project: SkillProject | undefined,
+  manifest: boolean,
+): Promise<InstalledSkill[]> {
+  const skills: InstalledSkill[] = [];
+  const parts = path.split('/');
+  if (project) {
+    const projectRoot = project.root === '.' ? path : `${path}/${project.root}`;
+    for (const entry of project.entries) {
+      const metadata = describe(
+        await readFile(join(directory, project.root, entry.path), 'utf8'),
+        entry.name,
+      );
+      const entryDirectory = dirname(entry.path);
+      skills.push({
+        path: `${projectRoot}${entryDirectory === '.' ? '' : `/${entryDirectory}`}`,
+        name: entry.name,
+        description: metadata.description,
+        valid: metadata.valid,
+        group: path,
+        projectRoot,
+        sourceType:
+          parts.length === 1 || parts[0] === '@local' ? 'archive' : 'github',
+      });
+    }
+    return skills;
+  }
+  if (manifest) {
+    const name = basename(directory);
+    const file = join(directory, 'SKILL.md');
+    const metadata = describe(await readFile(file, 'utf8'), name);
+    skills.push({
+      path,
+      name,
+      description: metadata.description,
+      valid: metadata.valid,
+      group: path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '',
+    });
+    return skills;
+  }
+  return skills;
+}
+
 export class SkillService {
   readonly root: string;
   private scans = new Map<string, CachedScan>();
   private personalServices = new Map<string, SkillService>();
+  private projectServices = new Map<string, SkillService>();
   private mutations: Promise<unknown> = Promise.resolve();
 
   constructor(
@@ -114,13 +201,20 @@ export class SkillService {
     private download = downloadGitHubRepository,
     private userId?: string,
     private environmentVariables?: Pick<EnvironmentVariableService, 'getEnv'>,
+    private projectId?: string,
   ) {
     this.workspaceRoot = resolve(workspaceRoot);
     const directory =
       userId !== undefined
         ? userDirectory(this.workspaceRoot, userId)
-        : this.workspaceRoot;
+        : projectId !== undefined
+          ? projectDirectory(this.workspaceRoot, projectId)
+          : this.workspaceRoot;
     this.root = join(directory, '.agents', 'skills');
+  }
+
+  private get isGlobal() {
+    return this.userId === undefined && this.projectId === undefined;
   }
 
   forUser(userId: string): SkillService {
@@ -137,24 +231,388 @@ export class SkillService {
     return service;
   }
 
-  /** Check each component, including absent ancestors, before any read/write. */
-  private async directory(
+  forProject(projectId: string): SkillService {
+    let service = this.projectServices.get(projectId);
+    if (!service) {
+      service = new SkillService(
+        this.workspaceRoot,
+        this.download,
+        undefined,
+        this.environmentVariables,
+        projectId,
+      );
+      this.projectServices.set(projectId, service);
+    }
+    return service;
+  }
+
+  async withProjectWorkspace<T>(
+    projectId: string,
+    config: ProjectWorkspace,
+    action: (service: SkillService) => Promise<T>,
+  ): Promise<T> {
+    const path = projectDirectory(this.workspaceRoot, projectId);
+    const workspace = projectWorkspaceSchema.parse(config);
+    const filesystem = createProjectFilesystem(path, workspace);
+    await this.checkedDirectory(path, true);
+    if (workspace.mode === 'composite')
+      for (const name of [
+        '.uploads',
+        ...workspace.mounts.map((mount) => mount.mountPath),
+      ])
+        await this.checkedDirectory(join(path, name));
+    try {
+      await filesystem.init?.();
+      return await action(this.forProject(projectId));
+    } finally {
+      await filesystem.destroy?.();
+    }
+  }
+
+  private shareRoot(target: SkillDestination) {
+    return target.scope === 'global'
+      ? resolve(this.workspaceRoot, '.agents', 'skills')
+      : projectSharedSkillsRoot(this.workspaceRoot, target.projectId);
+  }
+
+  private async linkedEntries(
+    target: SkillDestination,
+    link: SkillShareLink,
+    includeMissing: boolean,
+  ) {
+    const source = await resolveSkillShareLink(
+      this.workspaceRoot,
+      this.shareRoot(target),
+      link.unit,
+    );
+    let entries: InstalledSkill[] = [];
+    if (source?.userId === link.userId) {
+      try {
+        entries = await describeInstallation(
+          source.directory,
+          link.unit,
+          source.project,
+          !source.project,
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+    if (includeMissing && !entries.length)
+      entries = [
+        {
+          path: link.unit,
+          name: basename(link.unit),
+          group: dirname(link.unit) === '.' ? '' : dirname(link.unit),
+          description: '',
+          valid: false,
+        },
+      ];
+    return entries.map((skill) => ({
+      ...skill,
+      sharing: { ...target, userId: link.userId, userName: link.userId },
+    }));
+  }
+
+  private async linkedSkills(
+    target: SkillDestination,
+    userId?: string,
+  ): Promise<InstalledSkill[]> {
+    const links = await listSkillShareLinks(
+      this.workspaceRoot,
+      this.shareRoot(target),
+      userId,
+    );
+    const entries = [];
+    for (const link of links)
+      entries.push(...(await this.linkedEntries(target, link, !!userId)));
+    return entries;
+  }
+
+  listPersonalShares(userId: string, target: SkillDestination) {
+    userDirectory(this.workspaceRoot, userId);
+    return this.linkedSkills(target, userId);
+  }
+
+  async sharePersonal(
+    userId: string,
+    path: string,
+    target: SkillDestination,
+  ): Promise<InstalledSkill[]> {
+    if (
+      !this.isGlobal ||
+      !safeRepositoryPath(path) ||
+      (target.scope === 'global' &&
+        ['builtin', 'plugins'].includes(path.split('/')[0].toLowerCase()))
+    )
+      throw new SkillError('SKILL_UNSAFE_PATH', 403);
+    const personal = this.forUser(userId);
+    const destination =
+      target.scope === 'global' ? this : this.forProject(target.projectId);
+    const store = this.shareRoot(target);
+    return personal.exclusive(() =>
+      destination.exclusive(() =>
+        personal.withGroupLock(path.split('/')[0], async () => {
+          const installed = (await personal.list()).skills;
+          const selected = installed.find((entry) => entry.path === path);
+          if (!selected) throw new SkillError('SKILL_NOT_FOUND', 404);
+          const unit = selected.projectRoot ? selected.group : selected.path;
+          const entries = selected.projectRoot
+            ? installed.filter(
+                (entry) => entry.projectRoot === selected.projectRoot,
+              )
+            : [selected];
+          const parts = unit.split('/');
+          const source = await personal.directory(parts);
+          if (!source) throw new SkillError('SKILL_NOT_FOUND', 404);
+          await assertTransferTree(source);
+          await this.checkedDirectory(store, true);
+          return withSkillShareLock(
+            this.workspaceRoot,
+            store,
+            unit,
+            async () => {
+              const existing = await readSkillShareLink(
+                this.workspaceRoot,
+                store,
+                unit,
+              );
+              if (existing?.userId === userId)
+                return this.linkedEntries(target, existing, false);
+              const names = new Set(entries.map((entry) => entry.name));
+              if (
+                (await destination.list()).skills.some((entry) =>
+                  names.has(entry.name),
+                )
+              )
+                throw new SkillError('SKILL_CONFLICT', 409);
+              await destination.assertImportAncestors(parts);
+              // Project-local native installs and server-managed links share one catalog.
+              if (
+                target.scope === 'project' &&
+                (await stat(join(destination.root, unit)))
+              )
+                throw new SkillError('SKILL_CONFLICT', 409);
+              if (selected.projectRoot && selected.sourceType === 'archive') {
+                const alternate =
+                  parts.length === 1
+                    ? ['@local', unit]
+                    : parts[0] === '@local' && selected.projectRoot !== unit
+                      ? [parts[1]]
+                      : undefined;
+                if (alternate) {
+                  await destination.assertNoArchiveLayout(alternate);
+                  if (
+                    await readSkillShareLink(
+                      this.workspaceRoot,
+                      store,
+                      alternate.join('/'),
+                    )
+                  )
+                    throw new SkillError('SKILL_CONFLICT', 409);
+                }
+              }
+              const location = join(store, unit);
+              const created: string[] = [];
+              try {
+                await this.checkedDirectory(dirname(location), true, created);
+                await symlink(
+                  relative(dirname(location), source),
+                  location,
+                  'dir',
+                ).catch((error: NodeJS.ErrnoException) => {
+                  if (error.code === 'EEXIST')
+                    throw new SkillError('SKILL_CONFLICT', 409);
+                  throw error;
+                });
+              } catch (error) {
+                if (created.length)
+                  await pruneEmptySkillParents(
+                    created[created.length - 1],
+                    dirname(created[0]),
+                  );
+                throw error;
+              }
+              return entries.map((skill) => ({
+                ...skill,
+                sharing: { ...target, userId, userName: userId },
+              }));
+            },
+            { catalog: true },
+          );
+        }),
+      ),
+    );
+  }
+
+  async unsharePersonal(
+    userId: string,
+    path: string,
+    target: SkillDestination,
+  ): Promise<InstalledSkill[]> {
+    if (!this.isGlobal || !safeRepositoryPath(path))
+      throw new SkillError('SKILL_UNSAFE_PATH', 403);
+    const destination =
+      target.scope === 'global' ? this : this.forProject(target.projectId);
+    const store = this.shareRoot(target);
+    if (!(await this.checkedDirectory(store)))
+      throw new SkillError('SKILL_NOT_FOUND', 404);
+    return this.forUser(userId).exclusive(() =>
+      destination.exclusive(() =>
+        withSkillShareLock(this.workspaceRoot, store, path, async () => {
+          let unit = path;
+          while (unit !== '.') {
+            const link = await readSkillShareLink(
+              this.workspaceRoot,
+              store,
+              unit,
+            );
+            if (link) {
+              if (link.userId !== userId)
+                throw new SkillError('FORBIDDEN', 403);
+              const entries = await this.linkedEntries(target, link, true);
+              if (
+                path !== unit &&
+                !entries.some((entry) => entry.path === path)
+              )
+                throw new SkillError('SKILL_NOT_FOUND', 404);
+              await unlink(join(store, unit));
+              await pruneEmptySkillParents(dirname(join(store, unit)), store);
+              return entries.map((skill) => ({ ...skill, sharing: undefined }));
+            }
+            unit = dirname(unit);
+          }
+          throw new SkillError('SKILL_NOT_FOUND', 404);
+        }),
+      ),
+    );
+  }
+
+  async restoreMovedPersonal(
+    userId: string,
+    path: string,
+    target: SkillDestination,
+    options: SkillTransferOptions,
+  ): Promise<InstalledSkill[]> {
+    if (!this.isGlobal || !safeRepositoryPath(path))
+      throw new SkillError('SKILL_UNSAFE_PATH', 403);
+    const lock = path.split('/')[0];
+    if (
+      target.scope === 'global' &&
+      ['builtin', 'plugins'].includes(lock.toLowerCase())
+    )
+      throw new SkillError('SKILL_UNSAFE_PATH', 403);
+    const personal = this.forUser(userId);
+    const shared =
+      target.scope === 'global' ? this : this.forProject(target.projectId);
+    // The CLI installer also serializes on the first path segment.
+    return personal.exclusive(() =>
+      shared.exclusive(() =>
+        personal.withGroupLock(lock, () =>
+          shared.withGroupLock(lock, () =>
+            shared.transferInstalled(path, personal, options),
+          ),
+        ),
+      ),
+    );
+  }
+
+  private async transferInstalled(
+    path: string,
+    destination: SkillService,
+    options: SkillTransferOptions,
+  ) {
+    const installed = (await this.list()).skills;
+    const skill = installed.find((entry) => entry.path === path);
+    if (!skill) throw new SkillError('SKILL_NOT_FOUND', 404);
+    const entries = skill.projectRoot
+      ? installed.filter(
+          (entry) =>
+            entry.group === skill.group &&
+            entry.projectRoot === skill.projectRoot,
+        )
+      : [skill];
+    const unit = skill.projectRoot ? skill.group : skill.path;
+    const parts = unit.split('/');
+    const directory = await this.directory(parts);
+    if (!directory) throw new SkillError('SKILL_NOT_FOUND', 404);
+    await options.verify(directory, entries);
+    await destination.assertImportAncestors(parts);
+    if (skill.projectRoot && skill.sourceType === 'archive') {
+      if (parts.length === 1) {
+        await destination.assertNoArchiveLayout(['@local', unit]);
+      } else if (parts[0] === '@local' && skill.projectRoot !== unit) {
+        await destination.assertNoArchiveLayout([parts[1]]);
+      }
+    }
+    const names = new Set(entries.map((entry) => entry.name));
+    if (
+      (await destination.list()).skills.some((entry) => names.has(entry.name))
+    )
+      throw new SkillError('SKILL_CONFLICT', 409);
+    const created: string[] = [];
+    try {
+      const parent = (await destination.directory(
+        parts.slice(0, -1),
+        true,
+        created,
+      ))!;
+      const moved = join(parent, parts.at(-1)!);
+      await moveSkillDirectory(
+        directory,
+        moved,
+        skill,
+        installed.some(
+          (entry) => entry.path !== path && entry.group === skill.group,
+        ),
+        () => options.commit(moved, entries),
+      );
+    } catch (error) {
+      if (created.length)
+        await pruneEmptySkillParents(
+          created[created.length - 1],
+          dirname(created[0]),
+        );
+      throw error;
+    }
+    await pruneEmptySkillParents(dirname(directory), this.root);
+    return entries;
+  }
+
+  private directory(
     parts: string[],
     create = false,
+    created?: string[],
+  ): Promise<string | null> {
+    return this.checkedDirectory(join(this.root, ...parts), create, created);
+  }
+
+  /** Check each component, including absent ancestors, before any read/write. */
+  private async checkedDirectory(
+    directory: string,
+    create = false,
+    created?: string[],
   ): Promise<string | null> {
     let current = this.workspaceRoot;
+    const path = relative(this.workspaceRoot, directory);
+    if (
+      !path ||
+      path === '..' ||
+      path.startsWith('..' + sep) ||
+      isAbsolute(path)
+    )
+      throw new SkillError('SKILL_UNSAFE_PATH', 403);
     if (create) await mkdir(current, { recursive: true });
-    for (const part of [
-      ...(this.userId !== undefined ? ['users', this.userId] : []),
-      '.agents',
-      'skills',
-      ...parts,
-    ]) {
+    for (const part of path.split(sep)) {
       current = join(current, part);
-      if (create)
-        await mkdir(current).catch((error: NodeJS.ErrnoException) => {
-          if (error.code !== 'EEXIST') throw error;
-        });
+      if (create) {
+        try {
+          await mkdir(current);
+          created?.push(current);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        }
+      }
       const info = await stat(current);
       if (!info) return null;
       if (!info.isDirectory() || info.isSymbolicLink())
@@ -179,12 +637,13 @@ export class SkillService {
 
   async list(): Promise<InstalledSkills> {
     const skills: InstalledSkill[] = [];
-    const enabled = await enabledPluginSkills(this.workspaceRoot);
-    if (!(await this.directory([]))) return { root: this.root, skills };
+    const enabled = this.isGlobal
+      ? await enabledPluginSkills(this.workspaceRoot)
+      : undefined;
     const visit = async (directory: string, path: string) => {
       const parts = path ? path.split('/') : [];
       if (
-        !this.userId &&
+        enabled &&
         parts[0] === 'plugins' &&
         parts[1] &&
         !enabled.has(parts[1])
@@ -195,57 +654,43 @@ export class SkillService {
         parts.length === 1 || parts.length === 2
           ? await readSkillProject(directory, { legacy: parts.length === 2 })
           : undefined;
-      if (project) {
-        const projectRoot =
-          project.root === '.' ? path : `${path}/${project.root}`;
-        for (const entry of project.entries) {
-          const metadata = describe(
-            await readFile(join(directory, project.root, entry.path), 'utf8'),
-            entry.name,
-          );
-          const entryDirectory = dirname(entry.path);
-          skills.push({
-            path: `${projectRoot}${entryDirectory === '.' ? '' : `/${entryDirectory}`}`,
-            name: entry.name,
-            description: metadata.description,
-            valid: metadata.valid,
-            group: path,
-            projectRoot,
-            sourceType:
-              parts.length === 1 || parts[0] === '@local'
-                ? 'archive'
-                : 'github',
-          });
-        }
-        return;
-      }
-      const manifest = entries.find(
-        (entry) => entry.name === 'SKILL.md' && entry.isFile(),
+      const installed = await describeInstallation(
+        directory,
+        path,
+        project,
+        entries.some((entry) => entry.name === 'SKILL.md' && entry.isFile()),
       );
-      if (manifest) {
-        const name = basename(directory);
-        const file = join(directory, manifest.name);
-        const metadata = describe(await readFile(file, 'utf8'), name);
-        skills.push({
-          path,
-          name,
-          description: metadata.description,
-          valid: metadata.valid,
-          group: path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '',
-        });
+      if (installed.length) {
+        skills.push(...installed);
         return;
       }
       for (const entry of entries.sort((a, b) =>
         a.name.localeCompare(b.name),
       )) {
-        if (entry.isDirectory() && !entry.name.startsWith('.'))
-          await visit(
-            join(directory, entry.name),
-            path ? `${path}/${entry.name}` : entry.name,
+        if (entry.name.startsWith('.')) continue;
+        const unit = path ? `${path}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) await visit(join(directory, entry.name), unit);
+        else if (this.isGlobal && entry.isSymbolicLink()) {
+          const link = await readSkillShareLink(
+            this.workspaceRoot,
+            this.root,
+            unit,
           );
+          if (link)
+            skills.push(
+              ...(await this.linkedEntries({ scope: 'global' }, link, false)),
+            );
+        }
       }
     };
-    await visit(this.root, '');
+    if (await this.directory([])) await visit(this.root, '');
+    if (this.projectId)
+      skills.push(
+        ...(await this.linkedSkills({
+          scope: 'project',
+          projectId: this.projectId,
+        })),
+      );
     return { root: this.root, skills };
   }
 
@@ -373,7 +818,11 @@ export class SkillService {
         projectMode && filename
           ? repository.repo
           : `${repository.owner}/${repository.repo}`;
-      if (!this.userId && projectMode && ['plugins', 'builtin'].includes(group))
+      if (
+        this.isGlobal &&
+        projectMode &&
+        ['plugins', 'builtin'].includes(group)
+      )
         throw new SkillError('SKILL_UNSAFE_PATH', 403);
       let parent = await this.directory(group.split('/'));
       if (projectMode && filename && !parent) {
@@ -711,7 +1160,7 @@ export class SkillService {
     action: () => Promise<T>,
   ): Promise<T> {
     const parts = group.split('/');
-    if (!this.userId && parts[0] === 'plugins')
+    if (this.isGlobal && parts[0] === 'plugins')
       throw new SkillError('SKILL_UNSAFE_PATH', 403);
     if (parts.length > 2 || !safeRepositoryPath(group)) return action();
     const locks: string[] = [];
@@ -742,7 +1191,7 @@ export class SkillService {
     try {
       const { cached, selected } = this.selection(id, paths);
       const { owner, repo } = cached.result;
-      if (!this.userId && owner === 'plugins')
+      if (this.isGlobal && owner === 'plugins')
         throw new SkillError('SKILL_UNSAFE_PATH', 403);
       if (cached.result.importMode === 'project')
         return await this.installProject(cached, selected);
@@ -824,25 +1273,30 @@ export class SkillService {
     }
   }
 
+  private async assertNoArchiveLayout(parts: string[]) {
+    // Flat archives and their legacy @local layout use different installer locks.
+    if (await stat(join(this.root, `.${parts[0]}.skill-install.lock`)))
+      throw new SkillError('SKILL_CONFLICT', 409);
+    const directory = await this.directory(parts);
+    const legacy = parts.length === 2;
+    if (
+      directory &&
+      (await readSkillProject(directory, { legacy }))?.version ===
+        (legacy ? 1 : 2)
+    )
+      throw new SkillError('SKILL_CONFLICT', 409);
+  }
+
   private async installProject(
     cached: CachedScan,
     selected: RepositorySkill[],
   ): Promise<InstalledSkill[]> {
     const groupPath = cached.projectGroup!;
     const parts = groupPath.split('/');
-    if (!this.userId && ['plugins', 'builtin'].includes(groupPath))
+    if (this.isGlobal && ['plugins', 'builtin'].includes(groupPath))
       throw new SkillError('SKILL_UNSAFE_PATH', 403);
-    if (cached.result.sourceType === 'archive' && cached.projectVersion === 2) {
-      // An old archive group can be temporarily absent while an earlier layout is updated.
-      if (await stat(join(this.root, '.@local.skill-install.lock')))
-        throw new SkillError('SKILL_CONFLICT', 409);
-      const legacy = await this.directory(['@local', cached.result.repo]);
-      if (
-        legacy &&
-        (await readSkillProject(legacy, { legacy: true }))?.version === 1
-      )
-        throw new SkillError('SKILL_CONFLICT', 409);
-    }
+    if (cached.result.sourceType === 'archive' && cached.projectVersion === 2)
+      await this.assertNoArchiveLayout(['@local', cached.result.repo]);
     await this.assertImportAncestors(parts);
     const parentDirectory = (await this.directory(parts.slice(0, -1), true))!;
     const destination = join(parentDirectory, parts.at(-1)!);
@@ -906,15 +1360,39 @@ export class SkillService {
   withFiles<T>(
     path: string,
     action: (root: string, skill: InstalledSkill) => Promise<T>,
+    mode: 'read' | 'write' = 'read',
   ): Promise<T> {
     return this.exclusive(async () => {
       if (path && !safeRepositoryPath(path))
         throw new SkillError('SKILL_UNSAFE_PATH', 403);
-      const directory = await this.directory(path ? path.split('/') : []);
       const skill = (await this.list()).skills.find(
-        (skill) => skill.path === path,
+        (entry) => entry.path === path,
       );
-      if (!directory || !skill) throw new SkillError('SKILL_NOT_FOUND', 404);
+      if (!skill) {
+        // Preserve the unsafe-path result for untrusted symlinks.
+        await this.directory(path ? path.split('/') : []);
+        throw new SkillError('SKILL_NOT_FOUND', 404);
+      }
+      let directory: string | null;
+      if (skill.sharing) {
+        if (mode === 'write')
+          throw new SkillError('SKILL_SHARED_READ_ONLY', 403);
+        const unit = skill.projectRoot ? skill.group : skill.path;
+        const link = await resolveSkillShareLink(
+          this.workspaceRoot,
+          this.shareRoot(skill.sharing),
+          unit,
+        );
+        if (!link || link.userId !== skill.sharing.userId)
+          throw new SkillError('SKILL_NOT_FOUND', 404);
+        directory = await this.checkedDirectory(
+          join(link.directory, relative(unit, path)),
+        );
+        if (directory) await assertTransferTree(directory);
+      } else {
+        directory = await this.directory(path ? path.split('/') : []);
+      }
+      if (!directory) throw new SkillError('SKILL_NOT_FOUND', 404);
       try {
         return await action(directory, skill);
       } catch (error) {
@@ -924,14 +1402,7 @@ export class SkillService {
   }
 
   read(path: string): Promise<SkillContent> {
-    return this.exclusive(async () => {
-      if (path && !safeRepositoryPath(path))
-        throw new SkillError('SKILL_UNSAFE_PATH', 403);
-      const directory = await this.directory(path ? path.split('/') : []);
-      const skill = (await this.list()).skills.find(
-        (skill) => skill.path === path,
-      );
-      if (!directory || !skill) throw new SkillError('SKILL_NOT_FOUND', 404);
+    return this.withFiles(path, async (directory, skill) => {
       const manifest = join(directory, 'SKILL.md');
       const info = await stat(manifest);
       if (!info?.isFile() || info.isSymbolicLink())
@@ -940,13 +1411,31 @@ export class SkillService {
     });
   }
 
-  updateGroup(group: string, source?: string): Promise<InstalledSkill[]> {
+  private async assertGroupWritable(group: string) {
+    if (this.userId) return;
+    const store = this.projectId
+      ? projectSharedSkillsRoot(this.workspaceRoot, this.projectId)
+      : this.root;
+    if (
+      (await listSkillShareLinks(this.workspaceRoot, store)).some(
+        ({ unit }) => unit === group || unit.startsWith(group + '/'),
+      )
+    )
+      throw new SkillError('SKILL_SHARED_READ_ONLY', 403);
+  }
+
+  updateGroup(
+    group: string,
+    source?: string,
+    afterReplace?: SkillGroupReplaced,
+  ): Promise<InstalledSkill[]> {
     return this.exclusive(() =>
       this.withGroupLock(group, async () => {
-        if (!this.userId && group.split('/')[0] === 'plugins')
+        if (this.isGlobal && group.split('/')[0] === 'plugins')
           throw new SkillError('SKILL_UNSAFE_PATH', 403);
         if (!safeRepositoryPath(group))
           throw new SkillError('SKILL_UNSAFE_PATH', 403);
+        await this.assertGroupWritable(group);
         const directory = await this.directory(group.split('/'));
         const current = (await this.list()).skills.filter(
           (skill) => skill.group === group,
@@ -959,7 +1448,14 @@ export class SkillService {
             ? await readSkillProject(directory, { legacy: depth === 2 })
             : undefined;
         if (project)
-          return this.updateProject(group, directory, project, source);
+          return this.updateProject(
+            group,
+            directory,
+            project,
+            current,
+            source,
+            afterReplace,
+          );
         const sources: (string | SkillSource)[] = source
           ? [normalizeSkillSource(source, group)]
           : await readSkillSources(directory);
@@ -1022,6 +1518,19 @@ export class SkillService {
             flag: 'wx',
           });
           await rename(metadata, join(directory, SKILL_SOURCES_FILE));
+          if (this.userId) {
+            const next = new Set(installed.map((entry) => entry.path));
+            const removed = current
+              .filter((entry) => !next.has(entry.path))
+              .map((entry) => entry.path);
+            if (removed.length)
+              await clearPersonalSkillShares(
+                this.workspaceRoot,
+                this.userId,
+                removed,
+              );
+          }
+          await afterReplace?.(saved, current, directory, installed);
           backup = undefined;
           return installed;
         } catch (error) {
@@ -1047,7 +1556,9 @@ export class SkillService {
     group: string,
     directory: string,
     project: SkillProject,
+    current: InstalledSkill[],
     input?: string,
+    afterReplace?: SkillGroupReplaced,
   ): Promise<InstalledSkill[]> {
     const sources = await readSkillSources(directory);
     if (sources.length !== 1 || sources[0].installation?.mode !== 'project')
@@ -1097,6 +1608,7 @@ export class SkillService {
         scan.id,
         scan.skills.map((skill) => skill.path),
       );
+      await afterReplace?.(saved, current, directory, installed);
       backup = undefined;
       return installed;
     } catch (error) {
@@ -1131,35 +1643,46 @@ export class SkillService {
       });
   }
 
-  remove(path: string) {
-    return this.exclusive(async () => {
-      if (!this.userId && path.split('/')[0] === 'plugins')
-        throw new SkillError('SKILL_UNSAFE_PATH', 403);
-      if (!safeRepositoryPath(path))
-        throw new SkillError('SKILL_UNSAFE_PATH', 403);
-      const target = await this.directory(path.split('/'));
-      const selected = (await this.list()).skills.find(
-        (skill) => skill.path === path,
-      );
-      if (!target || !selected) throw new SkillError('SKILL_NOT_FOUND', 404);
-      if (selected.projectRoot)
-        throw new SkillError('SKILL_PROJECT_MANAGED', 409);
-      await rm(target, { recursive: true });
-      const group = path.includes('/')
-        ? path.slice(0, path.lastIndexOf('/'))
-        : '';
-      if (!(await this.list()).skills.some((skill) => skill.group === group))
-        await rm(join(dirname(target), SKILL_SOURCES_FILE), { force: true });
-    });
+  async remove(path: string) {
+    if (
+      !safeRepositoryPath(path) ||
+      (this.isGlobal && path.split('/')[0] === 'plugins')
+    )
+      throw new SkillError('SKILL_UNSAFE_PATH', 403);
+    if (!(await this.directory([])))
+      throw new SkillError('SKILL_NOT_FOUND', 404);
+    return this.exclusive(() =>
+      this.withGroupLock(path.split('/')[0], async () => {
+        const visible = (await this.list()).skills;
+        if (visible.some((entry) => entry.path === path && entry.sharing))
+          throw new SkillError('SKILL_SHARED_READ_ONLY', 403);
+        const target = await this.directory(path.split('/'));
+        const selected = visible.find((skill) => skill.path === path);
+        if (!target || !selected) throw new SkillError('SKILL_NOT_FOUND', 404);
+        if (selected.projectRoot)
+          throw new SkillError('SKILL_PROJECT_MANAGED', 409);
+        if (this.userId)
+          await clearPersonalSkillShares(this.workspaceRoot, this.userId, [
+            path,
+          ]);
+        await rm(target, { recursive: true });
+        const group = path.includes('/')
+          ? path.slice(0, path.lastIndexOf('/'))
+          : '';
+        if (!(await this.list()).skills.some((skill) => skill.group === group))
+          await rm(join(dirname(target), SKILL_SOURCES_FILE), { force: true });
+      }),
+    );
   }
 
   removeGroup(group: string, expectedPaths: string[]) {
     return this.exclusive(() =>
       this.withGroupLock(group, async () => {
-        if (!this.userId && group.split('/')[0] === 'plugins')
+        if (this.isGlobal && group.split('/')[0] === 'plugins')
           throw new SkillError('SKILL_UNSAFE_PATH', 403);
         if (!safeRepositoryPath(group))
           throw new SkillError('SKILL_UNSAFE_PATH', 403);
+        await this.assertGroupWritable(group);
         const groupDirectory = await this.directory(group.split('/'));
         if (!groupDirectory) throw new SkillError('SKILL_NOT_FOUND', 404);
         const skills = (await this.list()).skills.filter(
@@ -1178,6 +1701,10 @@ export class SkillService {
             legacy: group.split('/').length === 2,
           });
           if (!project) throw new SkillError('SKILL_PROJECT_INVALID', 409);
+          if (this.userId)
+            await clearPersonalSkillShares(this.workspaceRoot, this.userId, [
+              group,
+            ]);
           const staging = await mkdtemp(
             join(dirname(this.root), '.skill-project-remove-'),
           );
@@ -1196,6 +1723,12 @@ export class SkillService {
           if (!directory) throw new SkillError('SKILL_GROUP_CHANGED', 409);
           targets.push({ path: skill.path, directory });
         }
+        if (this.userId)
+          await clearPersonalSkillShares(
+            this.workspaceRoot,
+            this.userId,
+            skills.map((entry) => entry.path),
+          );
         // Only remove the skills shown in this group, not sibling groups or loose files.
         const staging = await mkdtemp(
           join(dirname(this.root), '.skill-remove-'),
@@ -1231,7 +1764,9 @@ export class SkillService {
       ...[...this.personalServices.values()].map((service) =>
         service.dispose(),
       ),
+      ...[...this.projectServices.values()].map((service) => service.dispose()),
     ]);
     this.personalServices.clear();
+    this.projectServices.clear();
   }
 }

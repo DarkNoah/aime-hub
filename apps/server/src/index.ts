@@ -270,6 +270,7 @@ const threads = new ThreadService(
     groupChats,
     async () => (await systemSettings.get()).messageCompressionTokens,
     new NetworkCaptureStore({ secret: env.BETTER_AUTH_SECRET }),
+    (ids) => users.skillPublisherNames(ids),
   ),
   projects,
   mastra.backgroundTaskManager,

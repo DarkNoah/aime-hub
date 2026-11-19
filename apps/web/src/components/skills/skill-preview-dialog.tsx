@@ -120,6 +120,7 @@ export function SkillPreviewDialog({
                 path={state.selected}
                 revision={0}
                 edits={edits}
+                readOnly={!!skill.sharing && !skill.sharing.legacyMoved}
               />
             </ResizablePanel>
           </ResizablePanelGroup>

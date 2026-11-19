@@ -1,13 +1,15 @@
 import { Bot, Cable } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 export function RoomAgentAvatar({
   name,
+  image,
   external = false,
   onMention,
 }: {
   name: string;
+  image?: string;
   external?: boolean;
   onMention?: () => void;
 }) {
@@ -15,6 +17,7 @@ export function RoomAgentAvatar({
   const Icon = external ? Cable : Bot;
   const avatar = (
     <Avatar title={name} aria-label={onMention ? undefined : name}>
+      {image && <AvatarImage src={image} alt="" className="object-cover" />}
       <AvatarFallback className="bg-primary/10 text-primary">
         <Icon className="size-4" aria-hidden="true" />
       </AvatarFallback>

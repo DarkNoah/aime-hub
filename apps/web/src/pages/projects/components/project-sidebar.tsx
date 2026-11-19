@@ -137,6 +137,7 @@ function ProjectItem({
     params.projectId === project.id ? params.threadId : undefined;
   const navigation = useProjectNavigation();
   const runningCount = useProjectRunningCount(project.id);
+  const botsLabel = `${project.name} · ${t('groupChat.heading')}`;
   const resource = navigation.threads(project.id);
   const list = useSyncExternalStore(
     resource.subscribe,
@@ -201,6 +202,24 @@ function ProjectItem({
           )}
         </CollapsibleTrigger>
         <Button
+          asChild
+          variant="ghost"
+          size="icon-sm"
+          className="size-7 shrink-0"
+        >
+          <Link
+            to="/projects/$projectId/group-chats"
+            params={{ projectId: project.id }}
+            activeOptions={{ includeSearch: false }}
+            activeProps={{ className: 'bg-card text-primary' }}
+            title={botsLabel}
+            aria-label={botsLabel}
+            onClick={onNavigate}
+          >
+            <MessagesSquare aria-hidden="true" className="size-3.5" />
+          </Link>
+        </Button>
+        <Button
           variant="ghost"
           size="icon-sm"
           className="size-7 shrink-0"
@@ -224,7 +243,7 @@ function ProjectItem({
             params={{ projectId: project.id }}
             activeOptions={{ includeSearch: false }}
             onClick={onNavigate}
-            title={`${project.name} · ${t('groupChat.heading')}`}
+            title={botsLabel}
             className="sidebar-link mb-1 flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring"
             activeProps={{ className: 'bg-card font-semibold text-primary' }}
             inactiveProps={{

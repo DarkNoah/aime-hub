@@ -2,6 +2,7 @@ export type SlashCommandItem = {
   id: string;
   name: string;
   description: string;
+  sourceUserName?: string;
   keywords?: string[];
   disabled?: boolean;
   current?: boolean;

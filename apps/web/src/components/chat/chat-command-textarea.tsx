@@ -28,6 +28,20 @@ import './chat-command-textarea.css';
 
 const PASTED_TEXT_FILE_THRESHOLD = 10_000;
 
+function SkillSourceBadge({ name }: { name: string }) {
+  const { t } = useTranslation();
+  const label = t('chat.commands.personalSkillSource', { name });
+  return (
+    <Badge
+      variant="outline"
+      className="min-w-0 max-w-full shrink"
+      title={label}
+    >
+      <span className="truncate">{label}</span>
+    </Badge>
+  );
+}
+
 export function ChatCommandTextarea({
   value,
   onValueChange,
@@ -377,6 +391,11 @@ export function ChatCommandTextarea({
                                     {t('chat.commands.currentAgent')}
                                   </Badge>
                                 )}
+                                {item.sourceUserName && (
+                                  <SkillSourceBadge
+                                    name={item.sourceUserName}
+                                  />
+                                )}
                                 <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
                                   {item.description}
                                 </span>
@@ -394,6 +413,11 @@ export function ChatCommandTextarea({
                                         <Badge variant="secondary">
                                           {t('chat.commands.currentAgent')}
                                         </Badge>
+                                      )}
+                                      {item.sourceUserName && (
+                                        <SkillSourceBadge
+                                          name={item.sourceUserName}
+                                        />
                                       )}
                                     </span>
                                     <span className="text-xs leading-5 whitespace-pre-wrap text-muted-foreground">

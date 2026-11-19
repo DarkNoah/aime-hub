@@ -185,7 +185,7 @@ export function ProviderActionDialog({
         }}
         onPointerDownOutside={(event) => event.preventDefault()}
       >
-        <DialogHeader>
+        <DialogHeader className="shrink-0">
           <DialogTitle>{t(title)}</DialogTitle>
           <DialogDescription>
             {t(
@@ -199,9 +199,12 @@ export function ProviderActionDialog({
             )}
           </DialogDescription>
         </DialogHeader>
-        <ScrollArea className="min-h-0 flex-1">
-          <form onSubmit={submit} className="space-y-5">
-            <fieldset disabled={pending} className="min-w-0 space-y-4">
+        <form onSubmit={submit} className="flex min-h-0 flex-col gap-4">
+          <ScrollArea
+            className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] overflow-hidden"
+            viewportProps={{ className: 'min-h-0 [&>div]:block!' }}
+          >
+            <fieldset disabled={pending} className="min-w-0 space-y-4 p-1">
               {deleting ? (
                 <>
                   <p className="break-all rounded-lg bg-muted p-3 text-sm">
@@ -596,43 +599,43 @@ export function ProviderActionDialog({
                 </>
               )}
             </fieldset>
-            {error && (
-              <p role="alert" className="text-sm text-destructive">
-                {t(error)}
-              </p>
-            )}
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={pending}
-                onClick={onClose}
-              >
-                {t('providers.cancel')}
-              </Button>
-              <Button
-                type="submit"
-                disabled={
-                  pending || confirmationMissing || configurationUnavailable
-                }
-                className={
-                  deleting
-                    ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                    : undefined
-                }
-              >
-                {pending && <Loader2 className="animate-spin" />}
-                {t(
-                  pending
-                    ? 'providers.saving'
-                    : deleting
-                      ? 'providers.confirmDelete'
-                      : 'providers.save',
-                )}
-              </Button>
-            </DialogFooter>
-          </form>
-        </ScrollArea>
+          </ScrollArea>
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {t(error)}
+            </p>
+          )}
+          <DialogFooter className="shrink-0">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending}
+              onClick={onClose}
+            >
+              {t('providers.cancel')}
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                pending || confirmationMissing || configurationUnavailable
+              }
+              className={
+                deleting
+                  ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                  : undefined
+              }
+            >
+              {pending && <Loader2 className="animate-spin" />}
+              {t(
+                pending
+                  ? 'providers.saving'
+                  : deleting
+                    ? 'providers.confirmDelete'
+                    : 'providers.save',
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

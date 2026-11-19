@@ -17,6 +17,8 @@ import {
   type InstalledSkills,
   type InstalledSkill,
   type SkillScan,
+  sharePersonalSkillSchema,
+  type SkillSharingOptions,
 } from '../skills.js';
 
 function createSkillsContract(basePath: '/admin/skills' | '/skills') {
@@ -126,4 +128,21 @@ function createSkillsContract(basePath: '/admin/skills' | '/skills') {
 }
 
 export const skillsContract = createSkillsContract('/admin/skills');
-export const personalSkillsContract = createSkillsContract('/skills');
+export const personalSkillsContract = {
+  ...createSkillsContract('/skills'),
+  sharing: procedure
+    .route({
+      method: 'GET',
+      path: '/skills/sharing',
+      inputStructure: 'detailed',
+    })
+    .output(type<SkillSharingOptions>()),
+  setSharing: procedure
+    .route({
+      method: 'POST',
+      path: '/skills/sharing',
+      inputStructure: 'detailed',
+    })
+    .input(z.object({ body: sharePersonalSkillSchema }))
+    .output(type<InstalledSkill[]>()),
+};

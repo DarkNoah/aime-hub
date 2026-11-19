@@ -80,6 +80,24 @@ export class ProjectService implements ProjectThreadAccess {
     return { role };
   }
 
+  listManagedSkillProjects(userId: string) {
+    return this.database
+      .getRepository(Project)
+      .createQueryBuilder('project')
+      .innerJoin(
+        ProjectMember,
+        'member',
+        "member.project_id = project.id AND member.user_id = :userId AND member.role IN ('owner', 'admin') AND member.deleted_at IS NULL",
+        { userId },
+      )
+      .select('project.id', 'id')
+      .addSelect('project.name', 'name')
+      .addSelect('project.archived', 'archived')
+      .orderBy('project.name', 'ASC')
+      .addOrderBy('project.id', 'ASC')
+      .getRawMany<Pick<ProjectSummary, 'id' | 'name' | 'archived'>>();
+  }
+
   async get(userId: string, projectId: string): Promise<ProjectDetail> {
     const { project, role, member } = await this.access(userId, projectId);
     return {
@@ -209,11 +227,11 @@ export class ProjectService implements ProjectThreadAccess {
   withManagementAccess<T>(
     userId: string,
     id: string,
-    action: (manager: EntityManager) => Promise<T>,
+    action: (manager: EntityManager, project: Project) => Promise<T>,
   ) {
-    return this.mutate(userId, id, async (manager, _project, role) => {
+    return this.mutate(userId, id, async (manager, project, role) => {
       requireProjectManager(role);
-      return action(manager);
+      return action(manager, project);
     });
   }
 

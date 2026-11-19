@@ -2,6 +2,9 @@ import { useId } from 'react';
 import {
   ChevronRight,
   Folder,
+  Share2,
+  Link2Off,
+  FolderInput,
   Pencil,
   ExternalLink,
   RefreshCw,
@@ -12,6 +15,7 @@ import { useTranslation } from 'react-i18next';
 import {
   skillGroupRepositoryUrl,
   type InstalledSkill,
+  type SkillSharing,
 } from '@aime/shared/skills';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -34,6 +38,11 @@ type Props = {
       onUpdateGroup: (group: string) => void;
       onPreview: (skill: InstalledSkill) => void;
       updatingGroup?: string;
+      personal?: boolean;
+      linkedGroups?: ReadonlySet<string>;
+      publishedByPath?: ReadonlyMap<string, SkillSharing[]>;
+      canShare?: (skill: InstalledSkill) => boolean;
+      onShare?: (skill: InstalledSkill) => void;
     }
   | {
       mode: 'select';
@@ -52,11 +61,62 @@ export function InstalledSkillsList(props: Props) {
     props.mode === 'select' ? props.search?.trim().toLowerCase() : '';
   const groups = new Map<string, InstalledSkill[]>();
   for (const skill of props.skills) {
-    const group = groups.get(skill.group) ?? [];
+    const sharing = props.mode === 'manage' && props.personal && skill.sharing;
+    const key = sharing
+      ? JSON.stringify([
+          skill.group,
+          sharing.scope,
+          sharing.scope === 'project' && sharing.projectId,
+        ])
+      : skill.group;
+    const group = groups.get(key) ?? [];
     group.push(skill);
-    groups.set(skill.group, group);
+    groups.set(key, group);
   }
-  return [...groups].map(([group, skills]) => {
+  function shareAction(skill: InstalledSkill, name: string) {
+    if (props.mode !== 'manage' || !props.onShare || !props.canShare?.(skill))
+      return null;
+    const label = t(
+      skill.sharing?.legacyMoved
+        ? 'skills.moveBackNamed'
+        : skill.sharing
+          ? 'skills.stopSharingNamed'
+          : 'skills.shareNamed',
+      { name },
+    );
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        className="relative z-10 gap-1.5 px-2 text-muted-foreground"
+        disabled={props.disabled}
+        aria-label={label}
+        title={label}
+        onClick={() => props.onShare?.(skill)}
+      >
+        {skill.sharing?.legacyMoved ? (
+          <FolderInput />
+        ) : skill.sharing ? (
+          <Link2Off />
+        ) : (
+          <Share2 />
+        )}
+        <span className="hidden sm:inline">
+          {t(
+            skill.sharing?.legacyMoved
+              ? 'skills.moveBack'
+              : skill.sharing
+                ? 'skills.stopSharing'
+                : 'skills.shareTo',
+          )}
+        </span>
+      </Button>
+    );
+  }
+  return [...groups].map(([key, skills]) => {
+    const group = skills[0].group;
+    const sharedSummary =
+      props.mode === 'manage' && props.personal && !!skills[0].sharing;
     const visibleSkills = query
       ? skills.filter((skill) =>
           `${skill.name} ${skill.path} ${skill.description}`
@@ -92,7 +152,7 @@ export function InstalledSkillsList(props: Props) {
       </>
     );
     return (
-      <Collapsible key={group} defaultOpen asChild>
+      <Collapsible key={key} defaultOpen asChild>
         <section aria-label={label}>
           <div className="flex items-center border-b bg-muted/50">
             {props.mode === 'select' ? (
@@ -121,7 +181,11 @@ export function InstalledSkillsList(props: Props) {
                 </div>
               )}
             </h2>
-            {group && props.mode === 'manage' ? (
+            {projectRoot ? shareAction(skills[0], projectRoot) : null}
+            {group &&
+            props.mode === 'manage' &&
+            !sharedSummary &&
+            !props.linkedGroups?.has(group) ? (
               <div className="mr-2 flex shrink-0 items-center gap-0.5">
                 {repositoryUrl ? (
                   <>
@@ -216,6 +280,8 @@ export function InstalledSkillsList(props: Props) {
                           >
                             {skill.name}
                           </label>
+                        ) : sharedSummary ? (
+                          skill.name
                         ) : (
                           <button
                             type="button"
@@ -235,6 +301,47 @@ export function InstalledSkillsList(props: Props) {
                       >
                         {t(skill.valid ? 'skills.installed' : 'skills.invalid')}
                       </Badge>
+                      {props.mode === 'manage' &&
+                        props.personal &&
+                        !skill.sharing &&
+                        props.publishedByPath
+                          ?.get(skill.path)
+                          ?.map((location) => (
+                            <Badge
+                              key={
+                                location.scope === 'global'
+                                  ? 'global'
+                                  : location.projectId
+                              }
+                              variant="outline"
+                              className="max-w-full whitespace-normal break-all"
+                            >
+                              {location.scope === 'global'
+                                ? t('skills.sharedGlobally')
+                                : t('skills.sharedToProject', {
+                                    name:
+                                      location.projectName ??
+                                      location.projectId,
+                                  })}
+                            </Badge>
+                          ))}
+                      {skill.sharing ? (
+                        <Badge
+                          variant="outline"
+                          className="max-w-full whitespace-normal break-all"
+                        >
+                          {skill.sharing.scope === 'global'
+                            ? t('skills.sharedGlobalBy', {
+                                user: skill.sharing.userName,
+                              })
+                            : t('skills.sharedProjectBy', {
+                                user: skill.sharing.userName,
+                                project:
+                                  skill.sharing.projectName ??
+                                  skill.sharing.projectId,
+                              })}
+                        </Badge>
+                      ) : null}
                     </div>
                     {skill.description ? (
                       <p className="line-clamp-2 text-sm leading-6 text-muted-foreground">
@@ -245,7 +352,10 @@ export function InstalledSkillsList(props: Props) {
                       {skill.path ? `${skill.path}/` : ''}SKILL.md
                     </p>
                   </div>
-                  {props.mode === 'manage' ? (
+                  {!skill.projectRoot ? shareAction(skill, skill.name) : null}
+                  {props.mode === 'manage' &&
+                  !sharedSummary &&
+                  (!skill.sharing || skill.sharing.legacyMoved) ? (
                     <>
                       <Button
                         variant="ghost"

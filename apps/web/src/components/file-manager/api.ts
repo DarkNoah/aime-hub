@@ -60,6 +60,8 @@ export function fileErrorKey(error: unknown) {
     switch (apiErrorCode(error)) {
       case 'SKILL_NOT_FOUND':
         return 'skills.notFound';
+      case 'SKILL_SHARED_READ_ONLY':
+        return 'skills.sharedReadOnly';
       case 'SKILL_UNSAFE_PATH':
         return 'skills.unsafePath';
       case 'FILE_CHANGED':

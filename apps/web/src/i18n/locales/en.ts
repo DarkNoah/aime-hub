@@ -1690,6 +1690,38 @@ export const en = {
     'Manage skills for your personal chats. Personal skills take priority over global skills with the same name.',
   'skills.personalRemoveHint':
     '“{{name}}” and its bundled files will be deleted from your personal skill directory. Future personal conversations will use the global version if one exists with the same name.',
+  'skills.shareTo': 'Share to…',
+  'skills.shareNamed': 'Share “{{name}}”',
+  'skills.share': 'Share',
+  'skills.shareHint':
+    'Changes you make in your personal directory are available at every shared location.',
+  'skills.shareWholeHint':
+    'Share the entire package, including every skill entry and its shared files. You can keep editing it in your personal directory.',
+  'skills.shareDestination': 'Share destination',
+  'skills.chooseDestination': 'Choose a destination',
+  'skills.globalDestination': 'Global skills',
+  'skills.sharedLocations': 'Shared locations',
+  'skills.stopSharing': 'Stop sharing',
+  'skills.stopSharingNamed': 'Stop sharing “{{name}}”',
+  'skills.sharedGlobally': 'Shared globally',
+  'skills.sharedToProject': 'Shared with “{{name}}”',
+  'skills.unshareSuccess': 'Stopped sharing to this location.',
+  'skills.moveBack': 'Move back to personal',
+  'skills.moveBackNamed': 'Move “{{name}}” back to personal',
+  'skills.shareSuccess': 'Shared to the selected destination.',
+  'skills.sharedReadOnly':
+    'Shared skills can only be changed in the publisher’s personal directory.',
+  'skills.removePublishedHint':
+    'Deleting the original also removes its shared links.',
+  'skills.moveBackSuccess': 'Moved back to your personal skills.',
+  'skills.shareProjectArchived':
+    'The project was archived. You can no longer share skills to it.',
+  'skills.shareConflict':
+    'An existing skill conflicts with this action at the destination.',
+  'skills.sharedGlobalBy': 'Global · From {{user}}',
+  'skills.sharedProjectBy': 'Project “{{project}}” · From {{user}}',
+  'skills.sharingLoadError':
+    'Could not load sharing locations or permissions. Please retry.',
   'skills.import': 'Import skills',
   'skills.importMode': 'Import mode',
   'skills.importBySkill': 'By skill',
@@ -2499,6 +2531,7 @@ export const en = {
   'chat.drawing.edit': 'Edit drawing: {{name}}',
   'chat.drawing.updated': 'Drawing updated',
   'chat.commands.skills': 'Skills',
+  'chat.commands.personalSkillSource': 'From {{name}}’s personal skills',
   'chat.goal.title': 'Goal',
   'chat.goal.command':
     'Enable goal mode now and work until the objective is complete',

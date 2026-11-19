@@ -8,6 +8,16 @@ export class UserService {
     private rooms: GroupChatService,
   ) {}
 
+  /** IDs come from links in the authorized skill catalog. */
+  async skillPublisherNames(userIds: string[]): Promise<Map<string, string>> {
+    if (!userIds.length) return new Map();
+    const rows: { id: string; name: string }[] = await this.database.query(
+      'SELECT id, name FROM users WHERE id = ANY($1::text[])',
+      [userIds],
+    );
+    return new Map(rows.map((user) => [user.id, user.name]));
+  }
+
   async lookup(
     userId: string,
     userIds: string[],

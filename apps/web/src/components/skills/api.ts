@@ -27,6 +27,8 @@ const errorKeys = {
   SKILL_ARCHIVE_TOO_LARGE: 'skills.archiveTooLarge',
   SKILL_ARCHIVE_UNSAFE: 'skills.archiveUnsafe',
   SKILL_PROJECT_MANAGED: 'skills.projectManaged',
+  SKILL_SHARED_READ_ONLY: 'skills.sharedReadOnly',
+  PROJECT_ARCHIVED: 'skills.shareProjectArchived',
   ABORTED: 'skills.archiveCancelled',
   VALIDATION_ERROR: 'skills.invalidUrl',
   UNAUTHORIZED: 'errors.sessionExpired',

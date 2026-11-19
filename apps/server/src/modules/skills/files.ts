@@ -9,10 +9,15 @@ function hasManagedMetadata(skill: InstalledSkill) {
 
 export function assertSkillFilePath(skill: InstalledSkill, path: string) {
   if (
-    hasManagedMetadata(skill) &&
-    path.split('/')[0].toLowerCase() === SKILL_META_DIRECTORY
+    path.split('/').some(isOriginMarker) ||
+    (hasManagedMetadata(skill) &&
+      path.split('/')[0].toLowerCase() === SKILL_META_DIRECTORY)
   )
     throw new SkillError('SKILL_UNSAFE_PATH', 403);
+}
+
+function isOriginMarker(name: string) {
+  return /^\.skill-origin-[a-f\d]{64}$/i.test(name);
 }
 
 export async function listSkillFiles(
@@ -22,9 +27,12 @@ export async function listSkillFiles(
 ) {
   assertSkillFilePath(skill, path);
   const listing = await listFiles(root, path);
-  if (!path && hasManagedMetadata(skill))
-    listing.entries = listing.entries.filter(
-      (entry) => entry.name.toLowerCase() !== SKILL_META_DIRECTORY,
-    );
+  listing.entries = listing.entries.filter(
+    (entry) =>
+      !isOriginMarker(entry.name) &&
+      (path ||
+        !hasManagedMetadata(skill) ||
+        entry.name.toLowerCase() !== SKILL_META_DIRECTORY),
+  );
   return listing;
 }

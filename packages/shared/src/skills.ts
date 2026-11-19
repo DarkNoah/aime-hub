@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { projectIdSchema } from './projects.js';
 
 export const SKILL_ARCHIVE_MAX_BYTES = 100 * 1024 * 1024;
 export const SKILL_ARCHIVE_MAX_UNPACKED_BYTES = 512 * 1024 * 1024;
@@ -32,7 +33,42 @@ export const updateSkillGroupSchema = z
   })
   .strict();
 
+export const skillDestinationSchema = z.discriminatedUnion('scope', [
+  z.object({ scope: z.literal('global') }).strict(),
+  z
+    .object({ scope: z.literal('project'), projectId: projectIdSchema })
+    .strict(),
+]);
+export type SkillDestination = z.infer<typeof skillDestinationSchema>;
+
+export const sharePersonalSkillSchema = z
+  .object({
+    path: z.string().min(1),
+    target: z.union([
+      skillDestinationSchema,
+      z
+        .object({ scope: z.literal('personal'), from: skillDestinationSchema })
+        .strict(),
+    ]),
+  })
+  .strict();
+
+export type SkillSharing = SkillDestination & {
+  userId: string;
+  userName: string;
+  projectName?: string;
+  /** Previously moved physical installation. Withdraw to restore its personal copy. */
+  legacyMoved?: true;
+};
+
+export type SkillSharingOptions = {
+  global: boolean;
+  projects: { id: string; name: string }[];
+  shared: InstalledSkill[];
+};
+
 export type InstalledSkill = {
+  sharing?: SkillSharing;
   sourceType?: 'github' | 'archive';
   projectRoot?: string;
   path: string;

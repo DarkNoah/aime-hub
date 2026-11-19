@@ -13,6 +13,7 @@ export function skillCommandGroup(
       id: `skill:${skill.name}`,
       name: skill.name,
       description: skill.description,
+      sourceUserName: skill.sourceUserName,
     });
     sections.set(group, items);
   }

@@ -19,7 +19,11 @@ import { directorySkillConfig, ScopedSkillsWorkspace } from './skill-source.js';
 import { workspaceLspConfig, workspaceLspHooks } from './workspace-lsp.js';
 import type { EnvironmentVariableService } from '../environment-variables/service.js';
 import { BUILTIN_SKILL_GROUP } from '../skills/builtin.js';
-import { readSkillProject } from '../skills/project.js';
+import { readSkillProject, type SkillProject } from '../skills/project.js';
+import {
+  projectSharedSkillsRoot,
+  resolveSkillShareLink,
+} from '../skills/share-links.js';
 import {
   projectWorkspaceSchema,
   type ProjectWorkspace,
@@ -191,7 +195,7 @@ export function getWorkspace(
   const lspHooks = workspaceLspHooks(workingDirectory, workspaceFilesystem);
   return new ScopedSkillsWorkspace(
     {
-      ...directorySkillConfig(skillPaths, userId),
+      ...directorySkillConfig(skillPaths, userId, root, projectId),
       id: basename(path),
       filesystem: workspaceFilesystem,
       sandbox,
@@ -258,10 +262,17 @@ export function getWorkspace(
   );
 }
 
-export type DiscoveredSkill = { id: string; group: string; path: string };
+export type DiscoveredSkill = {
+  id: string;
+  group: string;
+  path: string;
+  /** Installation directory shared by entries of a whole-project import. */
+  packageRoot?: string;
+  sourceUserId?: string;
+};
 export async function discoverInstalledSkills(root: string, userId?: string) {
   const [skills, enabled] = await Promise.all([
-    discover(resolve(root, '.agents', 'skills')),
+    discover(root, resolve(root, '.agents', 'skills'), 'global'),
     enabledPluginSkills(root, userId),
   ]);
   return skills.filter((skill) => {
@@ -269,7 +280,12 @@ export async function discoverInstalledSkills(root: string, userId?: string) {
     return parts[0] !== 'plugins' || enabled.has(parts[1]);
   });
 }
-async function discover(root: string): Promise<DiscoveredSkill[]> {
+
+async function discover(
+  workspaceRoot: string,
+  root: string,
+  shares?: 'global' | 'project',
+) {
   const result: DiscoveredSkill[] = [];
   const canonicalRoot = await realpath(root).catch(
     (error: NodeJS.ErrnoException) => {
@@ -277,22 +293,47 @@ async function discover(root: string): Promise<DiscoveredSkill[]> {
       throw error;
     },
   );
-  if (!canonicalRoot) return result;
-  const rootPath: string = canonicalRoot;
+  if (
+    !canonicalRoot ||
+    canonicalRoot !==
+      resolve(await realpath(workspaceRoot), relative(workspaceRoot, root))
+  )
+    return result;
+
+  function addPackage(
+    directory: string,
+    project?: SkillProject,
+    sourceUserId?: string,
+  ) {
+    const group = relative(root, directory);
+    const origin = sourceUserId ? { sourceUserId } : {};
+    if (project) {
+      for (const entry of project.entries)
+        result.push({
+          id: entry.name,
+          group,
+          packageRoot: directory,
+          path: dirname(resolve(directory, project.root, entry.path)),
+          ...origin,
+        });
+    } else
+      result.push({
+        id: basename(directory),
+        group: dirname(group).replace(/^\.$/, ''),
+        path: directory,
+        ...origin,
+      });
+  }
+
   async function visit(directory: string) {
     const group = relative(root, directory);
     const depth = group ? group.split(/[\\/]/).length : 0;
-    if (depth === 1 || depth === 2) {
+    if (shares !== 'project' && (depth === 1 || depth === 2)) {
       const project = await readSkillProject(directory, {
         legacy: depth === 2,
       });
       if (project) {
-        for (const entry of project.entries)
-          result.push({
-            id: entry.name,
-            group,
-            path: dirname(resolve(directory, project.root, entry.path)),
-          });
+        addPackage(directory, project);
         return;
       }
     }
@@ -302,20 +343,26 @@ async function discover(root: string): Promise<DiscoveredSkill[]> {
         throw error;
       },
     );
-    if (entries.some((entry) => entry.name === 'SKILL.md' && entry.isFile())) {
-      const actual = await realpath(directory);
-      const path = relative(rootPath, actual);
-      if (path.startsWith('..') || isAbsolute(path)) return;
-      result.push({
-        id: basename(directory),
-        group: dirname(relative(root, directory)).replace(/^\.$/, ''),
-        path: directory,
-      });
+    if (
+      shares !== 'project' &&
+      entries.some((entry) => entry.name === 'SKILL.md' && entry.isFile())
+    ) {
+      if ((await realpath(directory)) === resolve(canonicalRoot!, group))
+        addPackage(directory);
       return;
     }
     for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-      if (entry.isDirectory() && !entry.name.startsWith('.'))
-        await visit(resolve(directory, entry.name));
+      if (entry.name.startsWith('.')) continue;
+      const child = resolve(directory, entry.name);
+      if (entry.isDirectory()) await visit(child);
+      else if (shares && entry.isSymbolicLink()) {
+        const link = await resolveSkillShareLink(
+          workspaceRoot,
+          root,
+          relative(root, child),
+        );
+        if (link) addPackage(child, link.project, link.userId);
+      }
     }
   }
   await visit(resolve(root));
@@ -325,7 +372,7 @@ async function discover(root: string): Promise<DiscoveredSkill[]> {
 export async function discoverPersonalSkills(root: string, userId: string) {
   const [global, personal] = await Promise.all([
     discoverInstalledSkills(root, userId),
-    discover(resolve(userDirectory(root, userId), '.agents', 'skills')),
+    discover(root, resolve(userDirectory(root, userId), '.agents', 'skills')),
   ]);
   return [
     ...new Map(
@@ -339,13 +386,17 @@ export async function discoverProjectSkills(
   projectId: string,
   userId?: string,
 ) {
-  const [global, project] = await Promise.all([
+  const [global, shared, project] = await Promise.all([
     discoverInstalledSkills(root, userId),
-    discover(resolve(projectDirectory(root, projectId), '.agents', 'skills')),
+    discover(root, projectSharedSkillsRoot(root, projectId), 'project'),
+    discover(
+      root,
+      resolve(projectDirectory(root, projectId), '.agents', 'skills'),
+    ),
   ]);
   return [
     ...new Map(
-      [...global, ...project].map((skill) => [skill.id, skill]),
+      [...global, ...shared, ...project].map((skill) => [skill.id, skill]),
     ).values(),
   ];
 }

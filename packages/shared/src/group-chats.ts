@@ -157,6 +157,7 @@ export type GroupChatDetail = GroupChat & {
   canManageMemberRoles?: boolean;
   removableMemberIds?: string[];
   agents: GroupChatAgent[];
+  agentAvatarUrls?: Record<string, string>;
   a2aMembers?: GroupChatA2AMember[];
   botAgentId: string;
 };

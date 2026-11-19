@@ -31,6 +31,7 @@ export function RoomMessage({
   userId,
   label,
   profile,
+  agentAvatarUrl,
   targetName,
   fileThreadId,
   onReply,
@@ -47,6 +48,7 @@ export function RoomMessage({
   userId: string;
   label: string;
   profile?: MemberProfile;
+  agentAvatarUrl?: string;
   targetName?: string;
   fileThreadId?: string;
   onReply: () => void;
@@ -91,6 +93,7 @@ export function RoomMessage({
       {message.senderKind !== 'user' ? (
         <RoomAgentAvatar
           name={label}
+          image={agentAvatarUrl}
           external={message.senderKind === 'a2a'}
           onMention={onMention}
         />

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  link,
   mkdir,
   mkdtemp,
   readFile,
@@ -8,7 +9,7 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Agent } from '@mastra/core/agent';
 import { RequestContext } from '@mastra/core/request-context';
@@ -19,6 +20,7 @@ import {
   createPersonalWorkspace,
 } from './workspace.js';
 import { listChatSkills, resolveAgentSkillPaths } from './skills.js';
+import { projectSharedSkillsRoot } from '../skills/share-links.js';
 
 const manifest = (description: string) =>
   `---\nname: upstream-name\ndescription: ${description}\n---\nRead references/setup.md and run setup from the project root.\n`;
@@ -291,4 +293,173 @@ test('single-level archive projects load root and hidden entries alongside legac
     assert.ok(skill.instructions.includes(JSON.stringify(projectRoot)));
     assert.ok(!skill.path.includes('.skill-entry'));
   }
+});
+
+async function share(source: string, destination: string) {
+  await mkdir(dirname(destination), { recursive: true });
+  await symlink(relative(dirname(destination), source), destination);
+}
+
+test('project chat discovers only published packages and reads selected current and legacy project entries via shared paths', async (t) => {
+  const root = await fixture(t);
+  const id = 'project000000001';
+  const owner = join(root, 'users/alice');
+  const personal = join(owner, '.agents/skills');
+  const shared = projectSharedSkillsRoot(root, id);
+  const local = join(root, 'projects', id, '.agents/skills');
+  await write(personal, 'plain/SKILL.md', manifest('plain'));
+  await write(personal, 'unpublished/SKILL.md', manifest('unpublished'));
+  await share(join(personal, 'plain'), join(root, '.agents/skills/plain'));
+  // Links in a user-writable project workspace never confer a share.
+  await share(join(personal, 'unpublished'), join(local, 'unpublished'));
+  for (const legacy of [false, true]) {
+    const name = legacy ? 'legacy' : 'current';
+    const contents = await project(
+      owner,
+      name,
+      [{ path: 'skills/Selected/SKILL.md', name }],
+      { legacy },
+    );
+    await write(
+      contents,
+      'skills/NotSelected/SKILL.md',
+      manifest('unselected'),
+    );
+    await write(contents, 'skills/Selected/references/steps.md', 'Original');
+    await share(join(personal, 'demo', name), join(shared, 'demo', name));
+  }
+  assert.deepEqual(
+    (await listChatSkills(root, 'bob')).map((skill) => skill.name),
+    ['plain'],
+  );
+  assert.deepEqual(
+    (await listChatSkills(root, 'bob', 'project000000002')).map(
+      (skill) => skill.name,
+    ),
+    ['plain'],
+  );
+  const catalog = await listChatSkills(root, 'bob', id, async (ids) => {
+    assert.deepEqual(ids, ['alice']);
+    return new Map([['alice', 'Alice']]);
+  });
+  assert.deepEqual(
+    catalog.map(({ name, sourceUserName }) => [name, sourceUserName]),
+    [
+      ['current', 'Alice'],
+      ['legacy', 'Alice'],
+      ['plain', 'Alice'],
+    ],
+  );
+  const paths = await resolveAgentSkillPaths(
+    root,
+    'bob',
+    { source: 'code', skillsMode: 'auto', skillPaths: [] },
+    id,
+  );
+  const workspace = getWorkspace(
+    root,
+    'bob',
+    join(root, 'projects', id),
+    id,
+    paths,
+  );
+  t.after(() => workspace.destroy());
+  await assert.rejects(
+    workspace.filesystem!.readFile(join(personal, 'unpublished/SKILL.md')),
+  );
+  const current = await workspace.skills!.get('current');
+  assert.equal(current?.path, join(shared, 'demo/current/skills/Selected'));
+  assert.ok(
+    current?.instructions.includes(
+      JSON.stringify(join(shared, 'demo/current')),
+    ),
+  );
+  assert.equal(
+    await workspace.skills!.getReference('legacy', 'references/steps.md'),
+    'Original',
+  );
+  await write(
+    personal,
+    'demo/legacy/project/skills/Selected/references/steps.md',
+    'Edited',
+  );
+  assert.equal(
+    await workspace.skills!.getReference('legacy', 'references/steps.md'),
+    'Edited',
+  );
+  assert.equal(await workspace.skills!.get('unpublished'), null);
+  assert.equal(await workspace.skills!.get('NotSelected'), null);
+  assert.deepEqual(
+    await resolveAgentSkillPaths(
+      root,
+      'bob',
+      { source: 'database', skillsMode: 'custom', skillPaths: ['plain'] },
+      id,
+    ),
+    [join(root, '.agents/skills/plain')],
+  );
+});
+
+test('shared skill reads reject linked resources, invalid installation targets and cached entries after unsharing', async (t) => {
+  const root = await fixture(t);
+  const from = join(root, 'users/alice/.agents/skills');
+  const global = join(root, '.agents/skills');
+  await write(from, 'collection/private/SKILL.md', manifest('private'));
+  await write(from, 'open/SKILL.md', manifest('open'));
+  const outside = await write(
+    from,
+    'collection/private/references/note.md',
+    'Private note',
+  );
+  await write(from, 'open/references/public.md', 'Public note');
+  await symlink(outside, join(from, 'open/references/symbolic'));
+  await link(outside, join(from, 'open/references/hard'));
+  await symlink(dirname(outside), join(from, 'open/references/directory'));
+  await share(join(from, 'collection'), join(global, 'collection'));
+  await share(join(from, 'collection/private'), join(global, 'wrong-location'));
+  await share(join(from, 'open'), join(global, 'open'));
+  assert.deepEqual(
+    (await listChatSkills(root, 'bob')).map(({ name, sourceUserName }) => [
+      name,
+      sourceUserName,
+    ]),
+    [['open', 'alice']],
+  );
+  const workspace = getWorkspace(
+    root,
+    'bob',
+    await createPersonalWorkspace(root, 'bob'),
+    undefined,
+    [join(global, 'open')],
+  );
+  t.after(() => workspace.destroy());
+  const scoped = await workspace.skills!.getScoped!({
+    requestContext: new RequestContext(),
+  });
+  assert.equal((await scoped.get('open'))?.path, join(global, 'open'));
+  assert.equal(
+    await scoped.getReference('open', 'references/public.md'),
+    'Public note',
+  );
+  assert.deepEqual(await scoped.listReferences('open'), ['public.md']);
+  for (const resource of ['symbolic', 'hard', 'directory/note.md'])
+    assert.equal(
+      await scoped.getReference('open', `references/${resource}`),
+      null,
+    );
+  await rm(join(global, 'open'));
+  assert.deepEqual(await scoped.list(), []);
+  await assert.rejects(scoped.get('open'), /SKILL_SHARE_UNAVAILABLE/);
+  await assert.rejects(
+    scoped.getReference('open', 'references/public.md'),
+    /SKILL_SHARE_UNAVAILABLE/,
+  );
+  const next = join(root, 'users/carol/.agents/skills/open');
+  await write(next, 'SKILL.md', manifest('Next publisher'));
+  await share(next, join(global, 'open'));
+  assert.equal(
+    (await workspace.skills!.get('open'))?.description,
+    'Next publisher',
+  );
+  await assert.rejects(scoped.get('open'), /SKILL_SHARE_UNAVAILABLE/);
 });
