@@ -1,65 +1,28 @@
 # Aime Hub
 
-**可自行部署的 AI 工作空间：将个人对话、项目共享文件、Agent 与定时任务放在一起。**
-
 **简体中文** · [English](README.en.md)
 
-[产品预览](#产品预览) · [功能](#功能) · [快速开始](#快速开始) · [环境变量](#环境变量) · [部署](#部署) · [文档](#文档)
+Aime Hub 是一个可自行部署的 AI 工作空间。在个人聊天里，你可以让 Agent 分析文件、执行命令或操作浏览器；需要协作时，可以在项目中共享对话和工作目录，并把重复任务设为定时自动化。模型服务由管理员接入。
 
-Aime Hub 基于 React、Hono、oRPC 和 Mastra 构建，使用 PostgreSQL 保存账号、配置与对话。管理员接入模型供应商后，用户可以进行个人聊天，也可以在有成员权限控制的项目中共享对话和工作目录。对话由服务端执行、通过 SSE 同步，关闭页面不会停止正在运行的对话。
+![Aime Hub 的聊天与工作空间界面](apps/web/public/product/chat-light.jpg)
 
-## 产品预览
+[本地快速开始](#本地快速开始) · [生产部署](#生产部署) · [参与开发](#参与开发) · [使用与管理手册](docs/usage.zh-CN.md)
 
-本地启动后打开 **[Home Page](http://127.0.0.1:5173/home)**，查看产品界面、核心特点与部署入口。`/home` 无需登录，原有 `/` 工作区入口保持不变。
+## 工作空间能做什么
 
-![Aime Hub：AI 对话与工作空间](apps/web/public/product/chat-light.jpg)
+| 场景           | 使用方式                                                                                                                                   |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 处理个人任务   | 在[个人聊天](docs/personal-chat.md)中选择模型或 Agent，上传材料、查看工具结果。关闭标签页不会停止服务端正在执行的对话。                    |
+| 团队协作       | 在[项目](docs/projects.md)中管理成员、共享聊天与文件，让团队围绕同一份材料工作。                                                           |
+| 复用知识与工具 | 用知识库检索参考资料，用 Skill 保存可重复使用的任务说明，通过 MCP 连接外部工具。                                                           |
+| 定时运行       | 为个人或项目配置自动化并查看运行结果。任务按服务端时区执行，服务器需要保持在线。                                                           |
+| 扩展业务功能   | [全栈插件](plugins/README.md)可同时提供页面、API、Agent 和工具。例如 [Vibe Quant](plugins/vibe-quant/README.md) 提供行情、策略回测与回放。 |
 
-- **围绕工作组织 AI**：个人对话用于探索，项目将讨论、成员与共享文件放在一起。
-- **按任务组合能力**：选择模型与 Agent，复用 Skills，通过工具与 MCP 连接外部能力。
-- **让工作持续推进**：对话在服务端运行，自动化按计划执行；浅色、深色与移动端使用同一套交互。
+## 本地快速开始
 
-截图使用真实前端组件与隔离的示例数据，不包含真实账号或私有内容。图片统一存放于 [`apps/web/public/product/`](apps/web/public/product/README.md)，由 Home Page 与 README 共用。
+以下步骤在本机运行前端和 API，仅用 Docker 启动数据库。需要 Git、Node.js **≥ 22.13.0**、**pnpm 10.12.1** 和支持 `--wait` 的 Docker Compose。如果已有带 pgvector 的 PostgreSQL，可跳过启动容器的命令，将 `DATABASE_URL` 指向自己的数据库。
 
-## 功能
-
-| 能力            | 可以做什么                                                                        |
-| --------------- | --------------------------------------------------------------------------------- |
-| 个人聊天        | 流式回复、Markdown、推理展示、图片输入、工具结果、历史分页与消息队列              |
-| 项目协作        | owner/admin/member 角色、成员管理、共享对话、项目模型配置与共享工作区             |
-| 模型管理        | 管理供应商与模型、同步 OpenAI 兼容模型列表、配置能力、默认模型与思考等级          |
-| Agent 与 Skills | 管理和发布自定义 Agent，从 GitHub 批量导入技能，在聊天中用 `/` 查找技能           |
-| 工具与 MCP      | 配置网页搜索、网页读取及图片生成工具；管理 Stdio、Streamable HTTP 和 SSE MCP 连接 |
-| 自动化          | 个人、项目和系统定时任务，启停、立即运行、最近运行记录与可选 Web Push 通知        |
-| 工作区文件      | 文件树、搜索、上传、下载、文件操作及文本、图片、音视频预览                        |
-| 管理后台        | 用户与会话管理、请求日志、环境变量记录管理                                        |
-| 双语界面        | 根据浏览器语言选择简体中文或英文，未匹配时回退英文                                |
-
-工具可用性取决于所选 Agent、工具配置、模型能力及运行环境。后台环境变量会在每次启动沙盒命令时注入，不会修改 `.env`；已运行的进程保留启动时的环境。
-
-命令工具 `exec_command` 接收必填 `cmd`，以及可选 `workdir`（默认当前会话目录）、`shell`（默认用户 Shell）、`login`（默认 `true`）、`tty`（默认 `false`）、`yield_time_ms`（默认 10000，范围 250–30000 毫秒）和 `max_output_tokens`（默认 10000，上限 100000，按每 token 约 4 UTF-8 字节估算）。超过等待时间只返回控制权，进程继续运行，并返回 `session_id`。
-
-使用 `write_stdin` 继续输入或读取新增输出：
-
-```json
-{ "session_id": 123, "chars": "my-app\n" }
-{ "session_id": 123, "chars": "", "yield_time_ms": 1000 }
-```
-
-`write_stdin` 也支持 `max_output_tokens`；`chars` 默认为空，等待时间与输出预算的默认值和范围同 `exec_command`。交互式 CLI 请用 `tty: true` 启动，之后可发送 `\u0003`（Ctrl-C）中断或 `\u0004`（Ctrl-D）结束输入。返回 `exit_code` 表示进程已结束；同一会话只返回新增输出，截断时标记 `truncated`。最多保留 32 个命令会话，每个最多缓存 1 MiB 输出，退出后未读取的结果最多保留 10 分钟。会话绑定当前聊天的 Workspace，关闭 Workspace 或重启服务后失效。两个工具均可在后台工具设置中启用或停用，并支持 Agent 排除配置。
-
-聊天顶部的“后台任务”入口同时显示 Mastra 后台任务和命令进程。命令列表实时展示命令、工作目录、会话 ID、PID、PTY 与退出状态；可“停止并清理”运行中的进程，或“释放结果”丢弃已退出会话的未读输出。清理仅作用于当前聊天的命令会话。运行中的命令会阻止聊天闲置回收，关闭页面后仍继续；全部退出或清理后恢复正常回收。服务重启仍会终止进程，不支持跨重启恢复。
-
-PTY 使用固定版本 `node-pty@1.2.0-beta.15`，该上游版本包含 macOS 辅助程序执行权限修复；Linux 安装可能需要 Python 和 C++ 编译工具，Docker 构建阶段已包含这些依赖。
-
-## 快速开始
-
-以下是**本地开发**流程。Docker Compose / Dokploy 部署请见[部署](#部署)。
-
-### 1. 准备环境
-
-- Node.js **≥ 22.13.0**、**pnpm 10.12.1**（以 [package.json](package.json) 为准）。
-- Git，以及 PostgreSQL 应用数据库。可通过 [compose.local.yaml](compose.local.yaml) 启动带 pgvector 的 PostgreSQL 16；[compose.yaml](compose.yaml) 用于完整部署。
-- 可访问的模型供应商与相应凭据，在启动后通过管理后台配置。
+### 1. 安装依赖，设置认证密钥
 
 ```sh
 git clone https://github.com/DarkNoah/aime-hub.git
@@ -69,289 +32,52 @@ cp .env.example .env
 openssl rand -base64 32
 ```
 
-将最后一条命令生成的随机值填入 `.env` 的 `BETTER_AUTH_SECRET`，并将 `DATABASE_URL` 改为实际连接串。最小配置示例（请替换占位值）：
-
-```dotenv
-DATABASE_URL=postgresql://user:password@127.0.0.1:5432/aime_hub
-BETTER_AUTH_SECRET=<replace-with-generated-secret>
-WEB_ORIGINS=http://127.0.0.1:5173
-ADMINS=admin
-```
-
-其他选项可保留 [.env.example](.env.example) 的默认值。`.env` 与默认 `workspaces/` 已被 Git 忽略。
-
-使用本地 Docker 数据库时，保持 `.env` 中的 `POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_DB` 与 `DATABASE_URL` 一致，然后执行 `docker compose -f compose.local.yaml up -d`。默认仅监听 `127.0.0.1:55432`，镜像内置 pgvector。
+将最后一条命令的输出填入 `.env` 的 `BETTER_AUTH_SECRET`。示例配置中的数据库地址与本地 Compose 一致（`127.0.0.1:55432`）；如果修改数据库密码或端口，请同步修改 `DATABASE_URL`。完整配置见[环境变量示例](.env.example)。
 
 ### 2. 初始化数据库与管理员
 
-在仓库根目录执行：
-
 ```sh
+docker compose -f compose.local.yaml up -d --wait
 pnpm db:migrate
 pnpm auth:create-admin
 ```
 
-迁移先初始化 Better Auth 认证表，再执行 TypeORM 业务迁移。Mastra 在 API 启动时初始化 `mastra` schema，因此数据库账号需要建表和创建 schema 的权限。
+按提示输入用户名、邮箱和密码。管理员用户名需列在 `ADMINS` 中，示例值为 `admin`。**没有默认密码**，仅修改 `ADMINS` 也不会将已有用户提升为管理员。
 
-管理员脚本会询问用户名、邮箱和密码；用户名必须包含在 `ADMINS` 中。**没有默认账号或默认密码。** 公开注册不会授予管理员权限，修改 `ADMINS` 也不会改变已有用户角色。
-
-### 3. 启动并打开网页
+### 3. 启动服务，发送第一条消息
 
 ```sh
 pnpm dev
 ```
 
-访问 **[http://127.0.0.1:5173](http://127.0.0.1:5173)**。Vite 将同域 `/api` 请求代理到 `127.0.0.1:3001`，浏览器只需访问前端入口。API 健康检查为 `/api/health`。
+1. 打开[本地工作空间](http://127.0.0.1:5173)，用刚创建的管理员账号登录。想先浏览界面，可以打开[免登录产品预览](http://127.0.0.1:5173/home)。
+2. 在 **管理后台 → 模型供应商**（`/admin/providers`）填写供应商 API 地址和凭据，同步或手动添加模型并启用。示例环境变量中的 `OPENAI_API_KEY` 和 `DEFAULT_MODEL` 不会自动配置聊天模型。
+3. 打开 **个人聊天**（`/threads`），选择已启用的模型并发送消息。如果要让 Agent 使用工具，请选择支持工具调用的模型。
 
-开发模式下可访问 [Scalar API 文档](http://127.0.0.1:5173/api/docs)，OpenAPI JSON 位于 `/api/openapi.json`。文档由现有 oRPC 契约自动生成；仅声明 TypeScript 类型的响应不会展开字段，独立 Hono 路由（如 SSE、文件和认证接口）不在自动生成范围内。只有开发环境启用文档；`pnpm build` 会移除文档加载逻辑，发布版本的两个地址均返回 404，即使运行时误设 `NODE_ENV=development` 也不会开放。
+**遇到问题？** 先通过[健康检查](http://127.0.0.1:5173/api/health)确认前端能连通 API。如果局域网访问可以打开页面但无法登录，将浏览器的实际来源（协议、主机和端口）加入 `WEB_ORIGINS`，然后重启服务。只有使用浏览器工具时才需额外安装 Chromium：`pnpm --filter @aime/server exec playwright-core install chromium`；Linux 还需要对应的系统库。
 
-只需配置 `WEB_ORIGINS`，多个完整 HTTP(S) 来源用逗号分隔，第一项是默认浏览器入口并决定 Vite 端口；端口被占用时不会自动切换。Better Auth 使用动态 `baseURL`，认证链接跟随受信任请求的访问地址；没有请求地址或主机未匹配时回退到第一项。浏览器来源必须精确匹配列表中的协议、主机与端口，未知来源仍会被拒绝。修改 `.env` 后重启服务。需要局域网访问时，将实际 IP 加入列表，不要将监听地址 `0.0.0.0` 当作浏览器入口。不同主机分别登录，不共享 Cookie。旧配置迁移时，把原默认入口放到 `WEB_ORIGINS` 第一项，然后删除 `WEB_ORIGIN` 和 `BETTER_AUTH_URL`。
+## 生产部署
 
-### 4. 接入模型，开始对话
+使用 [compose.yaml](compose.yaml) 启动 Web、API 和 PostgreSQL；[compose.local.yaml](compose.local.yaml) 只启动开发数据库。域名、反向代理、升级和可选 E2B 桌面的完整步骤见[部署指南](docs/deployment.md)。
 
-1. 登录管理员账号，打开 **模型供应商**（`/admin/providers`）。
-2. 创建语言模型供应商，填写 Base URL 和 API Key；Base URL 应包含供应商要求的 `/v1` 等路径。
-3. 同步或手动添加模型，核对图片输入、工具调用、推理和上下文长度等能力，启用要使用的模型。
-4. 设置系统默认模型与思考等级，在 **个人聊天**（`/threads`）发送消息，或在 **项目**（`/projects`）创建共享工作区。
+- **访问入口：** 默认 Compose 不发布 Web 宿主端口。让反向代理指向 `web:80`，并将实际 HTTPS 来源填入 `WEB_ORIGINS`。
+- **初始化：** 为生产环境单独生成数据库密码和认证密钥。容器启动时自动迁移数据库；首次部署后，在 `server` 容器执行 `pnpm auth:create-admin`。
+- **持久化：** 同时备份 `postgres-data`（账号、配置、消息）和 `workspace-data`（工作文件）。限制数据库、模型请求日志及备份的访问权限，它们可能包含供应商凭据或完整对话。
+- **宿主要求：** 默认配置挂载 `/dev/fuse` 以支持 AgentFS。普通部署不需要 E2B；需要独立桌面时再叠加 [compose.e2b.yaml](compose.e2b.yaml)。
 
-`.env.example` 中的 `OPENAI_API_KEY`、`OPENAI_BASE_URL` 和 `DEFAULT_MODEL` 是预留项，**不会自动配置聊天模型**。
+## 参与开发
 
-### 可选运行依赖
+| 目录                         | 职责                                                              |
+| ---------------------------- | ----------------------------------------------------------------- |
+| [apps/web](apps/web/)        | React / Vite 前端，按聊天、项目、自动化和管理后台等业务模块组织。 |
+| [apps/server](apps/server/)  | Hono / oRPC API、Mastra Agent 运行时、工具与业务服务。            |
+| [packages](packages/)        | 认证、数据库、共享类型，以及插件 SDK 和 UI。                      |
+| [plugins](plugins/README.md) | 随宿主构建的可信插件，以及基于 Notebook 示例的开发指南。          |
 
-聊天中的 `exec` 浏览器模块通过 Patchright 驱动 Chromium，沿用聊天的持久化登录配置。浏览器侧栏实时显示当前标签页，用户可在同一页面手动操作。网页读取使用 `playwright-extra` 和独立的临时浏览器。两者使用同一份 Chromium，源码环境可运行以下命令安装。
+在仓库根目录运行 `pnpm test` 执行测试，`pnpm typecheck` 检查类型，`pnpm lint` 检查代码，`pnpm build` 构建前后端。全部命令见 [package.json](package.json)。
 
-```sh
-pnpm --filter @aime/server exec playwright-core install chromium
-```
-
-聊天浏览器在开发和测试环境中默认使用无头模式（`headless: true`），在生产环境（`NODE_ENV=production`）默认使用有窗口模式（`headless: false`）。可通过服务端环境变量 `CHAT_BROWSER_HEADLESS=true` 或 `false` 覆盖默认值。Docker 服务镜像会为每个有窗口的浏览器实例分配独立的 Xvfb 虚拟显示，关闭实例时释放。预览和手动接管均在聊天侧栏完成。在容器外以有窗口模式运行 Linux 版 Chromium 时，需要提供可用的显示环境。
-
-聊天浏览器与 `exec_command` 使用相同的环境变量规则：项目聊天读取 **全局 → 当前项目**，个人聊天读取 **全局 → 当前用户个人配置**，同名变量由后一层覆盖，项目聊天不加载个人变量。可在对应环境变量中设置 `http_proxy`（兼容 `HTTP_PROXY`，小写优先），例如 `http://proxy.example.com:7890`。启动 Chromium 时由 Playwright 添加 `--proxy-server`，用于浏览器的 HTTP/HTTPS 访问，支持 HTTP(S) 代理账号密码及无需认证的 SOCKS5 地址。可选的 `no_proxy`（兼容 `NO_PROXY`）以逗号分隔 Chromium 代理绕过规则，例如 `localhost,127.0.0.1,.example.com`。浏览器按用户及个人／项目作用域隔离，同一用户在同一作用域的聊天共享登录数据；原有个人登录数据保留，项目浏览器使用独立配置。每次启动时读取最新环境变量；修改后需关闭对应浏览器并重新打开，无需重启 API。`web_fetch` 仍使用自己的网络请求链路。
-
-Linux 还需安装 Playwright 所需的系统库。项目默认使用本地文件系统；选择 AgentFS 工作区时，需安装 `agentfs` CLI，并提供 Linux FUSE 或 macOS NFS 挂载支持。Docker 服务镜像已包含 Chromium、AgentFS 和相关工具，Linux 宿主机仍需提供 `/dev/fuse`。
-
-## 使用要点
-
-- **模型选择**：个人聊天按当前选择、个人默认、系统默认解析；项目使用项目默认配置，不继承个人模型默认。Agent 固定模型优先于聊天模型。
-- **Agent 与 MCP**：在 `/admin/agents` 创建并发布 Agent，在聊天中选择；MCP 在 `/admin/mcp` 配置，发布前需通过连接与工具发现检查。
-- **Skills**：在左上方的 `/skills` 管理个人技能，管理员在 `/admin/skills` 管理全局技能。支持 GitHub 导入、按原分支与路径整组更新、仓库跳转及内容预览；个人或项目同名技能可覆盖全局技能。
-- **会话与队列**：关闭网页不停止执行；停止当前轮次会清空待处理消息。待处理队列在内存中，服务重启后不会恢复；已保存消息仍可查看。
-- **自动化**：入口为 `/automations`、`/projects/:projectId/automations` 和 `/admin/automations`。按服务端系统时区运行，服务器需保持在线；暂停或删除任务不会取消已经开始的运行。
-- **通知**：可配置 VAPID 密钥并开启任务桌面通知。需要浏览器授权，生产环境需 HTTPS；推送到达受浏览器和操作系统影响。
-- **数据与日志**：供应商密钥目前以明文保存在数据库，模型请求日志包含完整请求与响应内容；需保护数据库、日志与备份的访问权限。
-
-详细步骤、权限边界及运行行为见[使用与管理参考](docs/usage.zh-CN.md)。
-
-### 本地子 Agent
-
-个人用户在 `/agents` 管理；项目成员在项目主页的 Agent 入口查看，项目所有者和管理员可创建、编辑、删除和启停；管理员在 `/admin/agents` 的“本地子 Agent”页签管理全局配置。原有托管 Agent 功能保留。
-
-点击“从文本创建”，粘贴 Markdown 文本或导入 `.md` 文件。创建和编辑时严格检查 YAML 头部的 `name`（1–58 位英文字母或 `_`、`-`、`:`）、非空 `displayName`、`description`、布尔值 `enabled`，以及非空的 Markdown 指令正文，缺失字段会提示并阻止保存（包括停用配置）。配置保存为对应作用域的 `.md` 文件。`name` 用作新建文件名，`displayName` 用作显示名称；创建不会覆盖同名已有文件，编辑保留原文件名。删除需确认，编辑、删除及启停会检查内容版本，避免操作过期配置。操作完成仅更新对应列表项。手工放置的旧 Markdown 文件继续沿用下面的默认值规则。
-
-启用的本地配置也会加入当前作用域的聊天 Agent 选择器与快捷命令，使用 `displayName` 展示。个人聊天只显示全局和本人配置，项目聊天只显示全局和该项目配置。创建、编辑、启停、删除后刷新可选列表。旧 Markdown 配置缺少 `displayName` 时沿用原 `name` 展示，编辑保存时需补齐新字段。
-
-主 Agent 只将以下目录中的 `<agentId>.md` 加载为 subagents：
-
-| 作用域 | 目录                                                    |
-| ------ | ------------------------------------------------------- |
-| 全局   | `<workspace_root>/.agents/agents/`                      |
-| 个人   | `<workspace_root>/users/<userId>/.agents/agents/`       |
-| 项目   | `<workspace_root>/projects/<projectId>/.agents/agents/` |
-
-例如 `reviewer.md`：
-
-```markdown
----
-name: code-reviewer
-displayName: 代码审查助手
-description: 检查代码正确性与测试覆盖
-enabled: true
----
-
-检查当前任务的代码改动，给出具体问题和改进建议。
-```
-
-文件名（去掉扩展名）决定 `agentId` 和委派工具名 `agent-<agentId>`，旧文件名仍支持数字；含冒号的 ID 会生成模型接口允许的稳定委派工具别名。`name` 为配置标识，`displayName` 为显示名称，`description` 用于说明委派用途，Markdown 正文为指令。`enabled` 缺省或为 `true` 时自动加载，为 `false` 时不加载。其他扩展名的文件不会加载或出现在管理列表中。
-
-个人会话加载全局和当前用户配置；项目会话加载全局和当前项目配置，不加载个人配置。同一 `agentId` 由个人或项目配置覆盖全局配置，包括通过 `enabled: false` 禁用同名全局 Agent。删除作用域配置后，同名全局配置可能重新生效。显式配置的 subagent 委派名称优先于同名本地文件。
-
-文件在运行时动态读取，后续执行可使用新增、修改后的配置，或移除已删除、禁用的配置。本地子 Agent 继承主 Agent 的模型与会话资源，仍只能执行一层委派。格式错误的文件会跳过并记录服务端警告。
-
-## 知识库
-
-在 `/knowledge` 的“我创建的”中管理个人知识库，并在“共用知识库”中访问获授权的共享库。创建者可在“仅自己／所有用户共用／指定用户共用”间切换：全员共用只设置一个权限，指定用户则逐人设置“只读／可编辑”。只读可查看与检索；可编辑可新增、更新、归档、恢复和启停文档，不能修改知识库模型或共享设置。只有知识库创建者能删库，系统管理员也不能代删。共享方式变化不会移动或复制文档与向量；重建期间也禁止修改共享权限。
-
-共享成员人数不限，成员列表及用户搜索分页加载。共享范围和成员权限修改自动保存并立即生效；单个成员的增删和权限调整独立提交，不覆盖其他成员。
-
-在项目主页进入 `/projects/:projectId/knowledge` 管理项目库。项目成员可读，项目 owner/admin 可维护，删库仍仅限知识库创建者。个人聊天检索自己创建与获授权共享的库；项目聊天仅检索全员共用库与当前项目库，不包含个人私有或指定用户共享资料。检索返回前重新校验共享权限，权限撤销后不再返回内容。
-
-支持文本、网页地址及 TXT、Markdown、HTML、JSON、CSV、PDF、DOCX、XLSX、PPTX、ODT、ODS、ODP、RTF（单文件最多 10 MB）。文档统一由 `officeparser` 提取正文，随后使用 [Mastra 官方 RAG 流程](https://mastra.ai/reference/rag/chunking-and-embedding)：`MDocument.chunk()` → AI SDK `embedMany()` → `PgVector`。扫描 PDF 需先 OCR。原始上传内容和处理状态保存在数据库，重启会继续未完成任务，失败资料可重试；正文与分块均可预览。
-
-检索使用 **向量 + BM25 双路召回 → RRF 筛选候选 → Rerank 最终排序**。BM25 复用 Mastra `Workspace` 官方实现，支持中英文分词；向量使用 `PgVector`。召回 RRF 按分块 ID 累加各路的 `1 / (60 + 排名)`，选取 `max(20, topK × 4)` 个候选（最多 400），再通过 Mastra `rerankWithScorer()` 仅按重排模型分数排序，最后截取 topK，不再叠加重排排名的 RRF 分数。Rerank 原始分数允许负数和大于 1 的有限值，同分时保持召回顺序。向量超时或失败时保留 BM25；未配置重排模型时保留召回 RRF，重排超时、返回异常或请求失败时整批回退到召回 RRF 排序。向量阶段最多等待 10 秒，重排阶段最多等待 60 秒。`score` 是最终排序分数：重排成功时等于 `scores.rerank`，否则等于 `scores.rrf`；`scores.rrf` 始终保留召回融合分数。这些分数不表示相关性概率。
-
-BM25 在每次请求中按可访问且已启用的资料分批构建内存索引，数据库是唯一内容来源，无需额外数据库扩展或迁移；大型语料会增加索引构建时间与内存。跨库检索对整个可访问范围统一做 BM25，同一嵌入模型和维度的向量结果先按余弦相似度合并、排序并截取候选窗口，再参与召回 RRF，避免每个库都重复占据向量第一名。不同嵌入空间保持独立召回排名，不直接比较原始相似度。单库检索使用该库配置的重排模型，未配置则不重排；跨库检索使用系统默认重排模型统一处理全部候选。没有系统默认时，如果各库已配置的重排模型只有一种，则用它处理全部候选（包括未单独配置重排的库）；全部未配置则保留召回排序；存在多种模型则整批回退到召回 RRF，并以 `model_conflict` 提示配置默认重排模型。资料启停和权限在返回前再次校验。
-
-创建时预选系统默认的 Embedding 和 Rerank 模型，保存后独立生效；系统默认值之后的变动不会改变已建库。两种模型均可修改，任一变化都会重算全部分块向量（包括已停用资料）。重建期间以数据库持久化状态和写保护锁定当前库，禁止新增、编辑、删除、启停及重复重建，其他知识库正常使用；检索仍使用旧模型和索引。先将全部向量计算到临时文件，再写入独立索引、校验数量与维度，最后在事务中同时切换模型和索引。失败保留旧数据并解锁，可重新保存目标模型重试；重启后恢复未完成重建。正在解析资料时须等待完成后再切换模型。
-
-文档可直接编辑并重新计算向量，普通编辑保留版本号；“更新版本”会保存旧版原文件、解析正文、标签及元数据，再替换文档并递增版本。版本历史支持正文与元数据 diff，以及原文件下载。每份文档记录创建人和更新时间；删除操作改为归档，保留原件与历史并排除检索。恢复后使用当前模型重新处理。
-
-每个知识库只有一张分块与向量共用表，命名为 `knowledge_<nanoid>_<向量维度>`（仅 BM25 时维度为 `0`）；不再使用独立的 `knowledge_chunks` 表。创建时可定义 text、number、boolean、date、json、blob 类型的实际列。文档元数据写入这些列，可用于检索筛选；多维标签同维度取 OR，跨维度取 AND。两个召回通道及重排后的复核应用相同筛选。
-
-参照 aime-chat 的知识库工具组，保留现有工具 ID 与后台独立启停配置，并同步参数及结果预览：
-
-- `knowledge_create`：支持 `embeddingModel`、`rerankerModel` 和 `extendColumns`；不传模型使用系统默认，null 或空字符串可明确禁用。
-- `knowledge_list`：返回当前会话可访问的库、权限、模型、文档数及扩展字段。
-- `knowledge_search`：使用文本 `query`，支持 `kb_source`（ID 或名称列表）、`top_k`（默认 10）、`where`、`tags`、`return_full_content`。扩展列统一通过 `where` 筛选，仅接受白名单字段和比较表达式，值参数化，支持 AND/OR、括号、IN、LIKE、NULL 比较。结果以 `item_id` 标识文档、`id` 标识分块，正文使用 `content`，扩展列值使用 `extendValues`。
-- `knowledge_get_document`：只读取当前文档，支持 `item_id`、text/json、pattern、offset/limit；pattern 过滤后再分页并保留原始行号。
-- `knowledge_archive_document`：仅接收 `item_id`，将文档软删除归档并排除检索，保留原件与历史；校验编辑权限、当前会话范围及重算锁，返回包含 `deletedAt` 的文档状态。
-- `knowledge_save_document`：支持 `kb_source`、`item_id`、text/file/folder/web；文档元数据就是扩展列的值，统一通过 `extendColumns: [{ column, value }]` 部分更新，未提供的列保持原值，null 清空值。action 可选 save、update_version、archive、restore、reprocess。更新版本必须提供 expectedVersion。文件与文件夹通过当前 Mastra Workspace 读取，批量导入逐项报告结果。
-
-读取与保存工具统一使用 `item_id` 作为文档标识，保存工具使用 `kb_source` 指定知识库；保存工具支持 source 对象，搜索工具仅使用 `top_k` 指定数量。工具从可信会话取得身份，沿用相同的权限与重建锁。升级时先运行 `pnpm db:migrate`；迁移在事务内搬迁原有分块及向量，校验后删除旧表。部署数据库须支持 pgvector。
-
-## 环境变量
-
-在仓库根目录配置 `.env`。认证与业务 API 共用来源白名单，不支持通配符。
-
-| 变量                                           | 配置说明                                                         |
-| ---------------------------------------------- | ---------------------------------------------------------------- |
-| `DATABASE_URL`                                 | 必填，PostgreSQL 连接串                                          |
-| `BETTER_AUTH_SECRET`                           | 必填，至少 32 字符的随机认证密钥                                 |
-| `WEB_ORIGINS`                                  | 必填，逗号分隔的来源白名单；第一项为默认入口并决定 Vite 端口     |
-| `WEB_HOST`                                     | Vite 监听地址，默认 `0.0.0.0`                                    |
-| `SERVER_HOST` / `SERVER_PORT`                  | API 监听地址与端口，默认 `0.0.0.0:3001`                          |
-| `ADMINS`                                       | 保留管理员用户名，逗号分隔，默认 `admin`；需运行初始化脚本       |
-| `WORKSPACE_ROOT`                               | 文件与技能根目录，默认 `workspaces`；相对路径从仓库命令目录解析  |
-| `NODE_ENV`                                     | 默认 `development`，生产环境设为 `production`                    |
-| `ALLOW_INSECURE_HTTP`                          | 默认 `false`；仅为可信内网临时 HTTP 访问显式设为 `true`          |
-| `WEB_PUSH_PUBLIC_KEY` / `WEB_PUSH_PRIVATE_KEY` | 可选，Web Push VAPID 密钥对；应保持稳定                          |
-| `WEB_PUSH_SUBJECT`                             | 启用推送时设置，HTTPS 联系页面或 `mailto:` 邮箱                  |
-| `TZ`                                           | 服务进程时区；Compose 默认 `Asia/Shanghai`，源码运行使用系统时区 |
-| `TEST_DATABASE_URL`                            | 可选，专用测试数据库；未设置时跳过需要它的集成测试               |
-
-生成推送密钥：
-
-```sh
-pnpm --filter @aime/server exec web-push generate-vapid-keys --json
-```
-
-Compose 还需要 `POSTGRES_PASSWORD`，并在容器内生成 `DATABASE_URL`，将 `WEB_ORIGINS` 传给 API。镜像覆盖及内网端口等部署变量见[部署说明](docs/deployment.md)。
-
-## 部署
-
-支持 **Docker Compose / Dokploy**，也可以自行托管构建产物。推荐拓扑为：**一个 API 实例 + PostgreSQL + 持久工作目录 + 同域前端入口**。
-
-### Docker Compose / Dokploy
-
-[Dockerfile](Dockerfile) 构建 API 与 Nginx 镜像；[compose.yaml](compose.yaml) 默认仅提供 `server`、`web`、`app-postgres` 三个应用服务，不加载 E2B 服务，也不要求 E2B 配置。
-
-- 配置 `WEB_ORIGINS`、`POSTGRES_PASSWORD`、`BETTER_AUTH_SECRET`，并将 HTTPS 入口路由至 `web:80`。应用服务只暴露容器端口。
-- API 容器启动时执行 `pnpm db:migrate`；启动后在 `server` 容器中执行 `pnpm auth:create-admin`。
-- PostgreSQL 与工作区分别使用 `postgres-data`、`workspace-data` 命名卷，应一起备份。
-- `server` 的 FUSE 配置需要 Linux 宿主机提供 `/dev/fuse`，并使用配置中的 `SYS_ADMIN` 等权限。
-- 临时内网直连使用 [compose.ip.yaml](compose.ip.yaml) 覆盖文件；完整配置与 Dokploy 操作见[部署说明](docs/deployment.md)。
-
-### 可选 E2B 自托管桌面
-
-需要同时部署 E2B 时，显式加载 [compose.e2b.yaml](compose.e2b.yaml)。它包含官方 E2B Embed 的管理 API、Firecracker 编排器、代理、Dashboard、数据库和初始化服务，并自动从固定版本的官方桌面镜像构建 `desktop` 模板。需要 **x86-64 Linux/KVM 专用宿主机**，推荐 Ubuntu 24.04、12 GiB 以上内存、20 GiB 以上空闲磁盘，Docker ≥ 27、Compose ≥ 2.24；本机 ARM Docker 不能运行此桌面模板。部署会配置宿主机 KVM、网络和 hugepages，完整要求见 [E2B 部署说明](docker/e2b/README.md)。
-
-在 `.env` 或 Dokploy 环境中设置 `E2B_API_KEY`，值为 `e2b_` 加至少 32 位随机十六进制字符（可用 `printf 'e2b_'; openssl rand -hex 32` 生成），然后执行：
-
-```sh
-docker compose -f compose.yaml -f compose.e2b.yaml up -d --build --wait
-```
-
-首次启动会下载运行时并构建桌面模板。后台自动连接 `http://host.docker.internal:3000`，与 E2B 初始化使用同一密钥。**管理后台 → 系统设置 → E2B Desktop** 显示“部署配置”，可直接测试连接和管理实例，无需重复填写地址或密钥。连接信息由部署环境维护，密钥不回传浏览器。
-
-实例列表支持创建、编辑存活时间和删除；仅管理带有 `managedBy=desktop-admin` 标记的实例。编辑从提交时刻重设到期时间，模板和创建名称不能原地修改。桌面默认运行 XFCE、1280×720；Agent 自动控制尚未接入。E2B 宿主机内部端口（特别是未鉴权的 `5008`）必须限制在可信主机内部，详见部署说明中的端口表。
-
-应用仍使用原有 `postgres-data`、`workspace-data` 卷；E2B 使用独立数据库卷及宿主机目录。升级时保持 Compose 项目名不变，不要用 `down -v`。原单桌面容器的数据不会自动迁移为沙箱。
-
-默认 Compose 部署可直接在后台配置已有 E2B 管理 API，无需加载自托管服务。本地开发或自行托管应用时，也可以用 `E2B_API_URL`、`E2B_API_KEY` 注入连接配置。支持的接口为 `GET/POST /v2/sandboxes`、`GET/DELETE /sandboxes/{id}` 和 `POST /sandboxes/{id}/timeout`。
-
-### 自行托管
-
-在根目录配置生产 `.env`（`NODE_ENV=production`、HTTPS 认证地址与来源白名单），然后执行：
-
-```sh
-pnpm install --frozen-lockfile
-pnpm db:migrate
-pnpm build
-pnpm start
-```
-
-首次部署还需运行 `pnpm auth:create-admin`。`pnpm start` **仅启动 API**；需另行托管 `apps/web/dist`，为 SPA 提供 `index.html` 回退，并将同域 `/api/*` 代理至 API。监听地址由 `SERVER_HOST` 控制，默认 `0.0.0.0`；同机反向代理场景可显式设为 `127.0.0.1`。
-
-参考 [Nginx 配置](apps/web/nginx.conf) 为 SSE 关闭缓冲并配置长连接超时。队列、调度和部分状态由单进程持有，当前不要运行多个 API 副本。默认不信任转发头，反向代理后的登录限流可能共享代理地址额度。
-
-## 开发
-
-前端：React 19、Vite 7、TanStack Router、Tailwind CSS 4、shadcn/ui、AI Elements、i18next。后端：Hono、oRPC、Mastra、Better Auth。数据：PostgreSQL、TypeORM 业务迁移与 Mastra 持久化。工程使用 pnpm workspace 和 TypeScript。
-
-| 命令                                | 用途                                     |
-| ----------------------------------- | ---------------------------------------- |
-| `pnpm dev`                          | 同时启动 API 与 Vite                     |
-| `pnpm db:migrate`                   | 初始化认证表并执行业务迁移               |
-| `pnpm auth:create-admin`            | 交互创建管理员                           |
-| `pnpm typecheck`                    | 检查工作区与脚本类型                     |
-| `pnpm lint`                         | ESLint 检查                              |
-| `pnpm format:check` / `pnpm format` | 检查格式 / 写入格式化结果                |
-| `pnpm test`                         | 运行测试；数据库集成测试需要相应连接配置 |
-| `pnpm build`                        | 构建 API 与前端                          |
-| `pnpm start`                        | 启动已构建 API                           |
-| `pnpm providers:catalog`            | 更新供应商能力目录                       |
-
-数据库集成测试使用独立数据库，例如：
-
-```sh
-TEST_DATABASE_URL=postgresql://user:password@127.0.0.1:5432/aime_hub_test pnpm test
-```
-
-测试账号需有创建 schema 的权限。模拟模型测试不等于真实供应商验收；图片、推理与长上下文等能力需按供应商另行验证。VS Code 用户可使用仓库内的[全栈调试配置](.vscode/launch.json)。
-
-## 全栈插件
-
-后台 `/admin/plugins` 可启用或停用同仓库插件。示例 `plugins/notebook` 包含页面、API、数据表、独立依赖和 Agent / Tool / Skill。新增插件自动发现，随构建发布；详见 [插件开发接口与验证流程](plugins/README.md)。
-
-## 项目结构
-
-```text
-apps/
-├── web/src/           # 页面、复用组件、路由与中英文翻译
-└── server/src/        # 业务模块、RPC、Mastra Agent 与工具
-packages/
-├── auth/              # Better Auth 配置与认证迁移
-├── db/                # TypeORM 业务实体与迁移
-└── shared/            # 共享类型、校验、环境加载与 RPC 契约
-scripts/               # 管理员初始化、迁移、测试与目录更新
-docs/                  # 使用、部署、架构与模块说明
-```
-
-业务接口契约位于 `packages/shared/src/rpc/`，页面路由位于 `apps/web/src/router.tsx`。API 启动时检查待执行迁移，不会自动修改认证或业务表结构；容器入口单独执行迁移。
-
-## 常见问题
-
-| 问题                       | 检查方向                                                          |
-| -------------------------- | ----------------------------------------------------------------- |
-| 登录或 API 提示来源错误    | 核对实际浏览器来源与 `WEB_ORIGINS`，修改后重启                    |
-| 提示环境配置无效           | 检查报错列出的变量，尤其是必填项与认证密钥长度                    |
-| 数据库连接失败或结构未就绪 | 检查数据库连接与权限，并执行 `pnpm db:migrate`                    |
-| 网页能打开但无法聊天       | 在后台配置供应商，启用模型并设置默认模型                          |
-| 刚导入的技能不可见         | 核对 `WORKSPACE_ROOT`、`SKILL.md`、所选 Agent 与技能作用域        |
-| AgentFS 挂载失败           | 检查 CLI、Linux FUSE / macOS NFS 和挂载权限，或使用默认本地工作区 |
-| 开发端口被占用             | 停止占用进程，或同步调整入口地址与来源白名单                      |
-
-当前未实现邮件验证、找回密码或邮件发送；注册邮箱仅作为账号标识。
-
-## 文档
-
-以下详细文档当前以简体中文为主：
-
-- [使用与管理参考](docs/usage.zh-CN.md)：MCP、自动化、Agent、Skills、模型、工具、通知与请求日志。
-- [部署说明](docs/deployment.md)：Docker Compose、Dokploy、持久化与内网访问。
-- [架构](docs/architecture.md) · [个人聊天](docs/personal-chat.md) · [项目协作](docs/projects.md)
-- [模型供应商](docs/模型供应商模块.md) · [Agent 执行规范](docs/harness.md) · [exec 工具](docs/exec-tool.md)
-- [产品需求](docs/PRD.md) · [开发约定](AGENTS.md)
+按主题阅读：[系统架构](docs/architecture.md) · [Agent 执行工具](docs/exec-tool.md) · [模型供应商](docs/模型供应商模块.md) · [开发环境 API 文档](http://127.0.0.1:5173/api/docs) · [贡献约定](AGENTS.md)。
 
 ## 许可证
 
-仓库目前未提供 `LICENSE` 文件，也未在根 `package.json` 中声明许可证。使用、修改或分发前，请向维护者确认授权条款。
+仓库未提供 `LICENSE` 文件；使用、修改或分发前，请向维护者确认授权条款。

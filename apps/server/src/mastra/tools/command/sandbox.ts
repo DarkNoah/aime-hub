@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { LocalSandbox, type LocalSandboxOptions } from '@mastra/core/workspace';
 import type { ToolExecutionContext } from '@mastra/core/tools';
 import type { ThreadCommandSession } from '@aime/shared/threads';
+import { withAbortSignal } from '../../../lib/abort.js';
 import { spawnPty, type CommandHandle } from './pty.js';
 import type { CommandInput } from './schema.js';
 
@@ -27,6 +28,7 @@ class CommandSession {
   constructor(
     readonly input: CommandInput,
     readonly workdir: string,
+    readonly backgroundTask: boolean,
   ) {}
 
   append = (data: string) => {
@@ -75,22 +77,24 @@ export class CommandSandbox extends LocalSandbox {
   }
 
   listCommandSessions(): ThreadCommandSession[] {
-    return [...this.sessions].map(([sessionId, session]) => ({
-      sessionId,
-      cmd: session.input.cmd,
-      workdir: session.workdir,
-      tty: session.input.tty,
-      pid: session.handle?.pid,
-      status: session.stopping
-        ? 'stopping'
-        : session.exitCode !== undefined
-          ? 'exited'
-          : session.handle
-            ? 'running'
-            : 'starting',
-      createdAt: session.createdAt,
-      exitCode: session.exitCode,
-    }));
+    return [...this.sessions]
+      .filter(([, session]) => !session.backgroundTask)
+      .map(([sessionId, session]) => ({
+        sessionId,
+        cmd: session.input.cmd,
+        workdir: session.workdir,
+        tty: session.input.tty,
+        pid: session.handle?.pid,
+        status: session.stopping
+          ? 'stopping'
+          : session.exitCode !== undefined
+            ? 'exited'
+            : session.handle
+              ? 'running'
+              : 'starting',
+        createdAt: session.createdAt,
+        exitCode: session.exitCode,
+      }));
   }
 
   onCommandSessionsChanged(listener: () => void) {
@@ -106,15 +110,12 @@ export class CommandSandbox extends LocalSandbox {
 
   async cleanupCommandSession(id: number): Promise<void> {
     const session = this.sessions.get(id);
-    if (!session) return;
+    if (!session || session.backgroundTask) return;
     if (session.stopping) return session.stopping;
     session.stopping = (async () => {
       // Cleanup can arrive while environment resolution or PTY startup is pending.
       const handle = await session.ready.catch(() => undefined);
-      if (handle) {
-        await handle.kill();
-        await handle.done;
-      }
+      await handle?.kill();
       this.release(id);
     })();
     this.changed();
@@ -127,7 +128,14 @@ export class CommandSandbox extends LocalSandbox {
     }
   }
 
-  async exec(input: CommandInput, signal?: AbortSignal, userId?: string) {
+  async exec(
+    input: CommandInput,
+    {
+      signal,
+      userId,
+      backgroundTask = false,
+    }: { signal?: AbortSignal; userId?: string; backgroundTask?: boolean } = {},
+  ) {
     const startedAt = performance.now();
     signal?.throwIfAborted();
     if (this.closing) throw new Error('Command sandbox is closing');
@@ -142,6 +150,7 @@ export class CommandSandbox extends LocalSandbox {
     const session = new CommandSession(
       input,
       resolve(this.workingDirectory, input.workdir ?? '.'),
+      backgroundTask,
     );
     session.busy = true;
     this.sessions.set(id, session);
@@ -164,14 +173,16 @@ export class CommandSandbox extends LocalSandbox {
       return await this.read(
         id,
         session,
-        input.yield_time_ms,
+        backgroundTask ? undefined : input.yield_time_ms,
         input.max_output_tokens,
         startedAt,
         signal,
       );
     } catch (error) {
-      await session.handle?.kill();
-      this.release(id);
+      if (this.sessions.has(id)) {
+        await session.handle?.kill();
+        this.release(id);
+      }
       throw error;
     } finally {
       this.starting.delete(startup);
@@ -189,7 +200,7 @@ export class CommandSandbox extends LocalSandbox {
     const startedAt = performance.now();
     signal?.throwIfAborted();
     const session = this.sessions.get(id);
-    if (!session || this.closing)
+    if (!session || session.backgroundTask || this.closing)
       throw new Error(
         `Unknown command session: ${id}. Sessions only exist in the current conversation and server lifetime.`,
       );
@@ -212,10 +223,13 @@ export class CommandSandbox extends LocalSandbox {
     signal?: AbortSignal,
     userId?: string,
   ): Promise<CommandHandle> {
-    await this.ensureRunning();
     // A fresh overlay also removes deleted settings, without inheriting host secrets.
     // Keep credentials local to this invocation, including concurrent commands.
-    const env = this.refreshEnv ? await this.refreshEnv(userId) : this.getEnv();
+    const env = await withAbortSignal(signal, async () => {
+      await this.ensureRunning();
+      signal?.throwIfAborted();
+      return this.refreshEnv ? this.refreshEnv(userId) : this.getEnv();
+    });
     signal?.throwIfAborted();
     if (this.closing) throw new Error('Command sandbox is closing');
     const shell =
@@ -233,11 +247,15 @@ export class CommandSandbox extends LocalSandbox {
       onStdout: session.append,
       onStderr: session.append,
     });
+    const done = handle.wait().then((result) => result.exitCode);
     return {
       pid: handle.pid,
-      done: handle.wait().then((result) => result.exitCode),
+      done,
       write: (chars) => handle.sendStdin(chars),
-      kill: () => handle.kill(),
+      async kill() {
+        await handle.kill();
+        await done;
+      },
       release: () => this.processes.release(handle.pid),
     };
   }
@@ -245,25 +263,22 @@ export class CommandSandbox extends LocalSandbox {
   private async read(
     id: number,
     session: CommandSession,
-    waitMs: number,
+    waitMs: number | undefined,
     maxTokens: number,
     startedAt: number,
     signal?: AbortSignal,
   ) {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let abort: (() => void) | undefined;
     try {
-      signal?.throwIfAborted();
-      await Promise.race([
-        session.handle.done,
-        new Promise<void>((resolve) => {
-          timer = setTimeout(resolve, waitMs);
-        }),
-        new Promise<never>((_, reject) => {
-          abort = () => reject(signal?.reason ?? new Error('Command aborted'));
-          signal?.addEventListener('abort', abort, { once: true });
-        }),
-      ]);
+      await withAbortSignal(signal, () => {
+        if (waitMs === undefined) return session.handle.done;
+        return Promise.race([
+          session.handle.done,
+          new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, waitMs);
+          }),
+        ]);
+      });
       const result = {
         ...session.take(maxTokens),
         wall_time_seconds: (performance.now() - startedAt) / 1000,
@@ -279,7 +294,6 @@ export class CommandSandbox extends LocalSandbox {
       throw error;
     } finally {
       clearTimeout(timer);
-      if (abort) signal?.removeEventListener('abort', abort);
     }
   }
 
@@ -319,6 +333,7 @@ export async function commandSandbox(context: ToolExecutionContext) {
     throw new Error(
       'This tool requires the current conversation command sandbox',
     );
-  if (workspace.status !== 'ready') await workspace.init();
+  if (workspace.status !== 'ready')
+    await withAbortSignal(context.abortSignal, () => workspace.init());
   return workspace.sandbox;
 }

@@ -6,6 +6,7 @@ import type {
 } from '../../modules/tools/types.js';
 import { randomUUID } from 'node:crypto';
 import { resolveBackgroundConfig } from '@mastra/core/background-tasks';
+import { executionRequestContext } from '../processors/deferred-tool-context.js';
 import type { RegisteredTool } from '../../modules/tools/types.js';
 import {
   standardSchemaToJSONSchema,
@@ -37,14 +38,21 @@ type Dependencies = {
 export function createExecTool({ getTools, disabledTools }: Dependencies) {
   return createTool({
     id: 'exec',
+    background: {
+      enabled: true,
+      defaultDisposition: 'foreground',
+      timeoutMs: 0,
+      maxRetries: 0,
+    },
     description: `Run JavaScript to orchestrate tools in a fresh isolated QuickJS/WASM runtime.
+For long-running scripts, call exec directly with _background: { disposition: "deferred" }. Mastra returns a task acknowledgement and delivers the script's final output when it completes. Without an override, exec runs in the foreground.
 Pass JavaScript in code (no Markdown fences); top-level await, static import and await import() are supported.
 ALL_TOOLS is an array of { name, description } for all currently available built-in, workspace and MCP tools. Each description includes an exec tool declaration with TypeScript input/output types and parameter comments. Tools without an input schema are declared without arguments; missing output schemas and unrepresentable schema types use unknown. Filter the catalog before emitting descriptions to stay within the output budget. Globally disabled tools and this Agent's excluded tools are unavailable. MCP names start with mcp__. OAuth MCP tools use the current user's credentials. If an MCP is unauthorized or absent, call request_authorization directly (outside exec), optionally passing its mcpId. After the user signs in, discover ALL_TOOLS again.
 Call await tools.read_file({ path: 'README.md' }) or await tools.mcp__server__tool({...}). Inspect tools[name].inputSchema for its JSON Schema. Names are normalized JavaScript identifiers; use the exact name from ALL_TOOLS.
 text(value) explicitly emits text (non-strings are JSON serialized); image(value) explicitly emits an image from a base64 data URL, { image_url: dataURL }, an MCP image block, or a workspace media result. HTTP URLs are not accepted.
 Only text() and image() output is returned. Return values, bare expressions, console output and nested tool results are not automatically emitted. Await all tool calls you need; unawaited work is cancelled when the script ends, but already-started external side effects cannot be rolled back.
 In a browser-enabled chat thread, use import { browser } from 'browser'. The active page and this thread's tabs persist across exec calls and are shared with the live browser panel. Start with await browser.goto(url); text(await browser.snapshot({ interactiveOnly: true })). Use CSS selectors or refs from the current snapshot with click(target), fill(target, value), type(target, text), hover(target), select(target, value), drag(source, target), and wait(target, state?, timeout?). Refresh refs after navigation or switching tabs. Other methods: press(key), scroll(direction, amount?), back(), forward(), reload(), dialog(target, 'accept'|'dismiss', text?), evaluate(script) for page JavaScript, screenshot({ fullPage? }?), tabs(), newTab(url?), switchTab(index), closeTab(index?), close(). Tab indices start at zero. Use image(await browser.screenshot()) to show the active page. closeTab() closes the current tab; close() ends the user's browser across threads in the current personal or project scope.
-Available imports: node:fs (promises and callback APIs), node:fs/promises (readFile, writeFile, appendFile, mkdir), node:path (join, resolve, normalize, dirname, basename, extname, relative, isAbsolute, parse, format, posix/win32); names without node: also work. These are limited compatibility modules, not full Node. File operations use the current workspace, including its path, read-only, enabled-tool and approval restrictions. readFile(path, 'utf8') returns text; without encoding it returns Uint8Array. writeFile accepts text or typed arrays; flags w/wx/a and Node encodings are supported. mkdir requires the workspace mkdir tool to be enabled. Sync filesystem APIs, Buffer, process, require, other imports, network, console and timers are unavailable. path.resolve uses the workspace root. Runtime limits: 64 MiB memory, 1 second of synchronous CPU execution, at most 256 async tool/module calls and 32 concurrent calls; file reads are capped at 8 MiB. yield_time_ms is a wall-clock timeout, not a background continuation. max_output_tokens is an approximate text budget (4 UTF-8 bytes/token); image output has a separate 10 MiB budget.
+Available imports: node:fs (promises and callback APIs), node:fs/promises (readFile, writeFile, appendFile, mkdir), node:path (join, resolve, normalize, dirname, basename, extname, relative, isAbsolute, parse, format, posix/win32); names without node: also work. These are limited compatibility modules, not full Node. File operations use the current workspace, including its path, read-only, enabled-tool and approval restrictions. readFile(path, 'utf8') returns text; without encoding it returns Uint8Array. writeFile accepts text or typed arrays; flags w/wx/a and Node encodings are supported. mkdir requires the workspace mkdir tool to be enabled. Sync filesystem APIs, Buffer, process, require, other imports, network, console and timers are unavailable. path.resolve uses the workspace root. Runtime limits: 64 MiB memory, 1 second of synchronous CPU execution, at most 256 async tool/module calls and 32 concurrent calls; file reads are capped at 8 MiB. yield_time_ms sets an optional wall-clock deadline. max_output_tokens is an approximate text budget (4 UTF-8 bytes/token); image output has a separate 10 MiB budget.
 Disabled tools remain unavailable. Calls that request native background execution (including _background.enabled=true or disposition=deferred/awaited), tools that default to background execution, approval tools and suspension tools must be called directly by the Agent; exec cannot dispatch native background tasks or resume interactions. Foreground calls can run inside exec and block until their result. exec itself is excluded from tools to prevent recursion.
 Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.txt', 'hello', 'utf8'); text('saved'); const fs = await import('node:fs'); text(await fs.promises.readFile('output.txt', 'utf8')); text(ALL_TOOLS.filter(t => t.name.startsWith('mcp__'))); text(await tools.read_file({ path: 'document.pdf' })); image(await tools.read_file({ path: 'photo.png', encoding: 'base64' }));`,
     inputSchema: z.object({
@@ -55,9 +63,9 @@ Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.
         ),
       yield_time_ms: z
         .number()
-        .default(30_000)
+        .optional()
         .describe(
-          'Total execution timeout in milliseconds, clamped to 1–3600000; no background continuation',
+          'Script timeout in milliseconds, clamped to 1–3600000 when supplied. Defaults to 30000 in the foreground. Omit for background scripts to use the native task lifetime.',
         ),
       max_output_tokens: z
         .number()
@@ -68,10 +76,12 @@ Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.
     }),
     outputSchema: execOutputSchema,
     execute: async ({ code, yield_time_ms, max_output_tokens }, context) => {
-      yield_time_ms = Math.max(
-        1,
-        Math.min(3_600_000, Math.floor(yield_time_ms)),
-      );
+      const background = context.agent?.isBackgroundTask;
+      const defaultTimeoutMs = background ? Infinity : 30_000;
+      const timeoutMs =
+        yield_time_ms === undefined
+          ? defaultTimeoutMs
+          : Math.max(1, Math.min(3_600_000, Math.floor(yield_time_ms)));
       max_output_tokens = Math.max(
         1,
         Math.min(10_000, Math.floor(max_output_tokens)),
@@ -81,19 +91,21 @@ Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.
       const signal = context.abortSignal
         ? AbortSignal.any([context.abortSignal, controller.signal])
         : controller.signal;
-      const deadline = Date.now() + yield_time_ms;
-      const timer = setTimeout(
-        () => controller.abort(new Error('exec execution timed out')),
-        yield_time_ms,
-      );
+      const deadline = Date.now() + timeoutMs;
+      const timer = Number.isFinite(timeoutMs)
+        ? setTimeout(
+            () => controller.abort(new Error('exec execution timed out')),
+            timeoutMs,
+          )
+        : undefined;
       try {
         signal.throwIfAborted();
         if (code.length > 100_000)
           throw new Error(
             'JavaScript source exceeds 100000 characters. Split it into smaller calls.',
           );
-        const execContext = { ...context, abortSignal: signal };
-        // Pin the acting author before asynchronous discovery in a shared project chat.
+        const requestContext = executionRequestContext(context);
+        const execContext = { ...context, requestContext, abortSignal: signal };
         const browser = createExecBrowserModule(execContext, disabledTools);
         const tools = await abortable(getTools(execContext), signal);
         const catalog = new Map<string, Tool<unknown, unknown>>();
@@ -179,7 +191,7 @@ Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.
               typeof predicate === 'function'
                 ? await predicate(validated.data, {
                     workspace: context.workspace,
-                    requestContext: context.requestContext?.all,
+                    requestContext: requestContext?.all,
                   })
                 : predicate;
             if (approval || tool.suspendSchema)
@@ -194,14 +206,16 @@ Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.
             };
             signal.throwIfAborted();
             const result = await tool.execute(input, {
-              ...context,
-              abortSignal: signal,
+              ...execContext,
+              // Mastra dispatched the outer script. Each nested tool executes inline.
+              background: undefined,
               suspend,
               resumeData: undefined,
               ...(context.agent
                 ? {
                     agent: {
                       ...context.agent,
+                      isBackgroundTask: undefined,
                       toolCallId,
                       suspend,
                       resumeData: undefined,
@@ -230,6 +244,7 @@ Examples: import { writeFile } from 'node:fs/promises'; await writeFile('output.
           },
         });
       } catch (error) {
+        if (background) throw error;
         output.error(context.abortSignal?.aborted ? '用户中止了操作' : error);
       } finally {
         clearTimeout(timer);
