@@ -11,40 +11,40 @@ Issue 分个人和项目范围。个人 Issue 只有创建者可访问；项目 
 使用内置 `issue` 工具，输入只有一个 `command` 字符串：
 
 ```json
-{"command":"create --title \"修复登录\" --body \"复现登录失败，修复并验证成功与失败路径\" --run-in-thread"}
+{"command":"create --title \"修复登录\" --body \"登录页偶发失败\" --prompt \"复现登录失败，修复并验证成功与失败路径\""}
 ```
 
 以下示例都是 `command` 的内容，不是终端命令。开头的 `issue` 可省略；参数可用 `--title "内容"` 或 `--title="内容"`。包含空格、换行、Markdown 或 `--` 的值请用单引号或双引号包裹；JSON 中另按 JSON 规则转义引号和换行。命令按文本解析，不执行 Shell、变量展开或 `$(...)`。
 
-## 创建 Issue 与新线程开关
+## 创建 Issue 并向任务线程发消息
 
 ```text
-issue create --title "任务标题" [--body "任务描述与验收标准"] [--state todo|decision|in_progress|done] [--run-in-thread]
+issue create --title "任务标题" [--body "任务描述与验收标准"] [--state todo|decision|in_progress|done] [--prompt "任务消息" 或 --no-start]
 ```
 
 | 参数 | 默认值 | 含义 |
 | --- | --- | --- |
 | `--title` | 必填 | 标题，去除首尾空白后 1–240 字符 |
-| `--body` | 空字符串 | Markdown 描述，最多 50,000 字符；交给新线程时写清背景、路径、约束、交付物与验收标准 |
+| `--body` | 空字符串 | 保存在 Issue 中的 Markdown 描述，最多 50,000 字符 |
 | `--state` | `todo` | 初始状态；单独设为 `in_progress` 不会发送任务 |
-| `--run-in-thread` | 未设置 | 无值开关：添加后创建独立任务线程并立即提交任务，不接受 `true` / `false` |
+| `--prompt "消息"` | 未设置 | 创建任务线程，将指定的非空文本作为首条聊天消息发送，最多 50,000 字符 |
 
-不带 `--run-in-thread` 时只保存 Issue，返回 `threadId: null`，不创建线程、不绑定当前对话，也不发送任务。仍可查看、修改、评论、关闭和重新打开，仍可通知关联 Bot；不能使用 `edit --message` 或 `edit --stop`。用户决定执行时，使用 `edit <id> --run-in-thread` 为原 Issue 创建任务线程并提交任务，无需另建 Issue。
+默认只保存 Issue，返回 `threadId: null`。此时可查看、修改、评论、关闭和重新打开，关联 Bot 仍可收到通知。用户决定执行时，可用 `edit <id> --prompt "任务消息"` 为原 Issue 创建任务线程并投递消息。
 
-带 `--run-in-thread` 时，群聊 Bot、其他 Agent 和普通聊天都使用相同规则：创建独立任务线程并发送首条任务消息。不能与 `--state done` 组合；需要决策后再执行的工作先只记录，不加开关。单独指定 `--state in_progress` 不会启动工作。
+群聊 Bot、其他 Agent 和普通聊天都可使用 `--prompt`。同一条命令的目标状态为 `done` 时不能提交任务。单独指定 `--state in_progress` 只设置初始状态。
 
-兼容旧命令：`--start` 等同于 `--run-in-thread`；`--no-start` 仅创建空闲任务线程，之后可用 `edit <id> --message "任务详情"` 启动。`--no-start` 与 `--run-in-thread` / `--start` 互斥。这两个旧参数也都不接受参数值；新建并执行优先使用 `--run-in-thread`。
+需要提前创建空闲线程时使用 `--no-start`，之后用 `edit <id> --message "任务消息"` 启动。`--no-start` 与 `--prompt` 互斥。
 
-启用任务线程时：
+任务线程使用以下配置。
 
-- 新线程的 `metadata.issueId` 保存 Issue ID；有关联来源时还保存服务端验证过的 `metadata.issueSourceThreadId`。新线程不会继承来源聊天室的完整历史，任务描述必须自包含。
+- 新线程的 `metadata.issueId` 保存 Issue ID。有关联来源时还保存服务端验证过的 `metadata.issueSourceThreadId`。任务线程有独立的消息历史，请将执行所需的上下文放进 prompt。
 - 工具继承当前模型和推理设置；群聊专用 Bot 不作为普通任务线程的 Agent，任务改用普通聊天默认 Agent。普通 Agent 的配置会保留。工具没有模型、Agent、项目或线程 ID 的命令参数。
-- 首条任务消息包含 Issue ID、标题、描述，以及读取最新要求、记录进展、处理阻碍和验证后关闭的要求。
+- 工具将 `--prompt` 的内容直接送入线程。Issue 编号、标题和描述保存在任务记录中，线程可通过 `issue view` 读取。
 
-`create` 和 `edit --run-in-thread` 返回 `{ issue, taskSubmitted }`。`taskSubmitted: true` 表示消息已提交，不代表任务完成；`false` 在仅记录、暂不启动时是正常结果。若 Issue/线程已保存但发送失败，保留并返回原 Issue 和线程、`taskSubmitted: false` 及 `error`。先检查原线程再重试，避免重复建单。
+`create` 和 `edit <id> --prompt "消息"` 返回 `{ issue, taskSubmitted }`。`taskSubmitted: true` 表示消息已提交。仅记录或创建空闲线程时，`taskSubmitted` 为 `false`。若保存成功但发送失败，返回中会包含原 Issue、绑定的线程 ID、`taskSubmitted: false` 和 `error`。先检查线程再决定是否重试。
 
 ```text
-issue create --title "生成导出报告" --body "读取项目数据，生成 CSV，检查列名、行数与访问权限" --run-in-thread
+issue create --title "生成导出报告" --body "目标是导出项目数据供财务核对" --prompt "导出本月项目数据为 CSV，核对列名、行数与访问权限。"
 issue create --title "后续优化计划" --body "记录待确认的优化项"
 issue create --title "等待排期" --body "已明确的任务及验收标准" --no-start
 issue create --title "确认发布方案" --body "需要用户选择发布时间" --state decision
@@ -58,7 +58,7 @@ issue create --title "确认发布方案" --body "需要用户选择发布时间
 | `view 123 [--cursor 评论游标]` | 返回最新 Issue 和最近最多 50 条评论/执行消息；本页按时间正序。用 `nextCursor` 读更早历史 |
 | `create ...` | 创建，参数见上表 |
 | `edit 123 [--title "新标题"] [--body "新描述"] [--state 状态]` | 只改显式提供的字段，至少提供一项；`--body ""` 主动清空描述 |
-| `edit 123 --run-in-thread` | 无线程则创建并绑定，已有线程则复用，发送最新 Issue ID、标题和完整描述；可同时修改标题、描述或非 `done` 状态 |
+| `edit 123 --prompt "任务消息"` | 无线程则创建并绑定，已有线程则复用，向该线程投递指定的消息。可同时修改标题、描述或非 `done` 状态 |
 | `edit 123 --message "执行指令" [--delivery wait|immediate]` | 给现有任务线程发送消息；可与标题、描述或非 `done` 状态更新组合 |
 | `edit 123 --stop` | 停止任务线程、清空队列，并将未关闭 Issue 置为 `todo` |
 | `comment 123 --body "进展或讨论"` | 保存评论；内容不能为空，最多 50,000 字符 |
@@ -71,15 +71,15 @@ issue create --title "确认发布方案" --body "需要用户选择发布时间
 ### 让已有 Issue 在线程中执行
 
 ```text
-issue edit 123 --run-in-thread
-issue edit 123 --title "更新后的任务" --body "最新任务详情与验收标准" --run-in-thread
+issue edit 123 --prompt "复现登录失败并记录复现步骤。"
+issue edit 123 --title "修复登录" --body "已确认仅移动端受影响" --prompt "修复移动端登录并验证重定向。"
 ```
 
-这是无值开关，不接受 `true` / `false`。没有任务线程时创建并绑定新线程，将同一个 Issue ID 写入 `metadata.issueId`，保留原 Issue 的来源 Bot 关联；已有任务线程时直接复用，不替换其模型或 Agent 配置。新线程沿用调用聊天的模型和推理设置，群聊专用 Bot 替换为普通默认 Agent。
+没有任务线程时创建并绑定新线程，将同一个 Issue ID 写入 `metadata.issueId`，保留原 Issue 的来源 Bot 关联。已有任务线程时复用其模型和 Agent 配置。新线程沿用调用聊天的模型和推理设置，群聊专用 Bot 替换为普通默认 Agent。
 
-先保存同一命令中的标题、描述和状态修改，再发送包含更新后 Issue ID、标题、完整描述及执行要求的消息。默认 `wait` 投递：空闲时执行，忙碌时排队。每次调用都会提交一条任务消息，重试前查看已有执行消息，避免重复执行；需要补充简短指令或立即处理时使用 `edit --message`。
+先保存同一命令中的标题、描述和状态修改，再将 `--prompt` 指定的消息按 `wait` 投递。线程空闲时执行，忙碌时排队。每次调用都会提交一条消息，重试前可用 `view` 核对执行记录。需要立即处理时使用 `edit --message` 配合 `--delivery immediate`。
 
-`--run-in-thread` 与 `--message`、`--stop` 互斥；`--delivery` 仅用于 `--message`。已完成的 Issue 不自动重开，先 `reopen`；也可在获得重开授权后显式 `edit <id> --state todo --run-in-thread`。线程绑定失败会回滚本次编辑并清理新建线程；绑定成功但投递失败会保留 Issue 和线程、返回 `taskSubmitted: false`，再次执行将复用该线程。
+`--prompt` 与 `--message`、`--stop` 互斥。`--delivery` 仅用于 `--message`。获准重开已完成的 Issue 后，可先 `reopen` 再发送消息，也可显式使用 `edit <id> --state todo --prompt "任务消息"`。绑定失败会回滚本次编辑并尝试清理新建线程，绑定成功但投递失败会保留 Issue 和线程并返回 `taskSubmitted: false`。
 
 ### 评论、投递与停止
 
@@ -111,7 +111,7 @@ issue close 123
 
 ## Bot 与任务线程协作
 
-启用新线程时，常用流程是：Bot 查重并创建 Issue → 新线程收到 ID 和完整任务详情 → 执行中记录关键进展 → 验证并关闭或说明阻碍 → 关联 Bot 收到事件 → 向用户汇报或发送同一任务的下一步。
+启用新线程时，常用流程是：Bot 查重并创建 Issue → 新线程收到 prompt 指定的任务消息 → 执行中记录关键进展 → 验证并关闭或说明阻碍 → 关联 Bot 收到事件 → 向用户汇报或发送同一任务的下一步。
 
 - Bot 负责沟通和协调，任务线程负责执行；不要两边重复执行，也不必轮询等待结束。Bot 对用户的回复必须使用聊天室发布工具，例如 `send_message`。
 - 事件只通知该 Issue 关联聊天室的 Bot，不广播同项目其他 Bot。来自群聊的工具创建保留来源关联；普通个人/项目聊天的工具创建没有默认 Bot 关联。
@@ -128,16 +128,16 @@ issue close 123
 
 关联聊天室的 Issue 提供来源聊天室入口和任务线程入口；无来源关联时直接打开任务线程。无任务线程时隐藏执行和任务线程入口，保留评论及状态操作。绑定的任务线程不能从普通线程删除入口删除，以保留历史。
 
-应用 RPC 命名空间为 `issues`：`list`、`forThread`、`view`、`create`、`edit`、`close`、`reopen`、`stop`、`comment`、`message`。创建数据中的字段叫 `runInThread`（boolean，默认 `false`），工具存在 `--run-in-thread` 时传 `true`，不存在时传 `false`。范围字段为可选 `projectId`；创建数据还包含 `title`、`body`、`state` 和可选 `settings`。`forThread` 查询某线程绑定的 Issue，未绑定返回 `null`。
+应用 RPC 命名空间为 `issues`：`list`、`forThread`、`view`、`create`、`edit`、`close`、`reopen`、`stop`、`comment`、`message`。创建数据中的字段叫 `runInThread`（boolean，默认 `false`），工具在创建时指定 `--prompt` 或 `--no-start` 会传 `true`。范围字段为可选 `projectId`；创建数据还包含 `title`、`body`、`state` 和可选 `settings`。`forThread` 查询某线程绑定的 Issue，未绑定返回 `null`。
 
 Agent 优先使用 `issue` 工具，以保留当前范围和真实操作线程信息。上述 RPC 当前未向 docs 的本机 API 脚本开放，不应直接猜 HTTP 请求或索要 Cookie；若以后开放，以 [应用 API](app-api.md) 的实时 `list` / `describe` 结果为准。
 
 ## 错误与恢复
 
-- `ISSUE_NO_THREAD`：此 Issue 尚无任务线程，不能直接 `--message` 或 `--stop`；用户需要执行时使用 `edit <id> --run-in-thread`，否则继续评论和状态更新。
+- `ISSUE_NO_THREAD`：此 Issue 尚无任务线程，不能直接 `--message` 或 `--stop`；用户需要执行时使用 `edit <id> --prompt "任务消息"`，否则继续评论和状态更新。
 - `ISSUE_CLOSED`：任务已关闭；仅在用户要求或授权允许时重开，再发送任务。
 - `TOOL_RESPONSE_REQUIRED`：任务线程仍有待处理交互，先打开线程处理；不要重复提交。
 - `ISSUE_BOT_UNAVAILABLE`：手动创建找不到可用的默认 Bot；检查对应聊天室配置后重试。
 - 权限/不存在错误：核对当前个人/项目范围和成员权限，不尝试其他身份。
-- 创建成功、启动失败：沿用返回的 Issue ID，检查模型或待处理交互，再用 `edit --run-in-thread` 提交完整任务，或用 `edit --message` 发送针对性指令。
+- 创建成功、启动失败：沿用返回的 Issue ID，检查模型或待处理交互，再用 `edit <id> --prompt "任务消息"` 重试投递，或用 `edit --message` 发送针对性指令。
 - 请求中断或超时：先查看 Issue 和执行消息，确认是否已提交，避免重复操作。工具收到 AbortSignal 会立即返回“用户中止了操作”；已提交给任务线程的工作需用 `edit --stop` 停止。

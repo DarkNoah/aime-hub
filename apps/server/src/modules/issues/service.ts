@@ -12,6 +12,7 @@ import {
   issueListSchema,
   issueCommentSchema,
   issueMessageSchema,
+  issueTaskPromptSchema,
   type Issue,
   type IssueScope,
   type IssueCreate,
@@ -27,6 +28,10 @@ import type { ThreadService } from '../threads/service.js';
 import type { IssueThreadObservation } from '../threads/session.js';
 import type { GroupChatService } from '../group-chats/service.js';
 import { enqueueIssueEvent } from './events.js';
+
+const taskMessageSchema = issueMessageSchema.extend({
+  body: issueTaskPromptSchema,
+});
 
 const columns = `id,title,body,state,project_id AS "projectId",created_by AS "createdBy",thread_id AS "threadId",created_at AS "createdAt",updated_at AS "updatedAt",closed_at AS "closedAt",
   (SELECT json_build_object('roomId',a.room_id,'agentId',a.id,'threadId',a.thread_id)
@@ -431,8 +436,10 @@ export class IssueService {
     delivery: 'wait' | 'immediate' = 'wait',
     signal?: AbortSignal,
     actorThreadId?: string,
+    kind: 'message' | 'prompt' = 'message',
   ) {
-    const data = issueMessageSchema.parse({ body, delivery });
+    const schema = kind === 'prompt' ? taskMessageSchema : issueMessageSchema;
+    const data = schema.parse({ body, delivery });
     return this.locked(id, async () => {
       const issue = await this.get(userId, id, scope);
       if (issue.state === 'done')

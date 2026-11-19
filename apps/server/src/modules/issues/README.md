@@ -12,13 +12,13 @@
 list --state open
 list --state 待决策 --limit 20
 create --title "完成数据导出" --body "导出 CSV，并验证字段与权限"
-create --title "修复登录" --body "复现问题、修复并验证" --run-in-thread
+create --title "修复登录" --body "用户报告登录失败" --prompt "复现登录失败，修复并验证成功与失败路径。"
 create --title "仅记录事项" --body "背景与待办"
 create --title "稍后安排的任务" --body "任务与验收标准" --no-start
 view 123
 edit 123 --title "更新标题" --body "更新验收标准"
 edit 123 --state decision
-edit 123 --run-in-thread
+edit 123 --prompt "按最新验收要求验证登录修复。"
 edit 123 --message "按确认的方案继续" --delivery wait
 edit 123 --message "先处理新的限制条件" --delivery immediate
 edit 123 --stop
@@ -28,9 +28,9 @@ reopen 123
 help
 ```
 
-- `create` 默认只保存 Issue，返回 `threadId: null`，不创建或绑定线程，不启动任务。添加无值开关 `--run-in-thread` 才创建独立任务线程并提交任务，不接受 `true` / `false`。仅记录的 Issue 仍支持编辑、评论、关闭、重开和关联 Bot 事件；`message` / `stop` 返回 `ISSUE_NO_THREAD`。RPC 创建数据使用 `runInThread`（默认 false），页面提供默认关闭的开关。
-- 启用新线程时，首条消息携带 Issue ID、标题、完整任务详情和执行要求。兼容 `--start`（等同于 `--run-in-thread`）和 `--no-start`（只创建空闲线程，不可与前两项同时使用）。工具返回 `taskSubmitted`，创建成功但启动失败时保留并返回原 Issue，后续用 `edit --message` 重试。
-- `edit --run-in-thread` 对原 Issue 按需创建并绑定任务线程，已有线程则复用，然后发送最新 ID、标题和描述。可同时编辑任务字段，与 `--message` / `--stop` 互斥。绑定与编辑在同一事务中提交，行锁防止并发创建重复线程；失败时补偿新建线程。投递失败保留线程，并返回 `taskSubmitted: false`。
+- `create` 默认只保存 Issue，返回 `threadId: null`。添加 `--prompt "任务消息"` 会创建独立任务线程。仅记录的 Issue 仍支持编辑、评论、关闭、重开和关联 Bot 事件。`message` / `stop` 对仅记录的 Issue 返回 `ISSUE_NO_THREAD`。RPC 创建数据使用 `runInThread`（默认 false），页面提供默认关闭的开关。
+- `--body` 保存 Issue 描述，`--prompt` 的文本直接作为聊天消息投递。`--no-start` 仅创建空闲线程，与 `--prompt` 互斥。工具返回 `taskSubmitted` 表示消息是否提交成功。
+- `edit <id> --prompt "任务消息"` 在原 Issue 缺少线程时创建并绑定线程，已有线程时复用，然后投递指定消息。可同时编辑任务字段，与 `--message` / `--stop` 互斥。绑定与编辑在同一事务中提交，行锁防止并发创建重复线程。绑定失败时尝试清理新线程，投递失败时保留线程并返回 `taskSubmitted: false`。
 - 群聊 Bot 创建 Issue 时保留模型和推理设置，新任务使用普通聊天的默认 Agent，不继承仅限聊天室的 Bot；普通成员 Agent 则保留原 Agent 配置。
 - 更新只修改显式提供的字段；仅修改标题、状态、关闭或重开不会清空描述，也不会将其他状态重置。`edit --body ""` 可主动清空描述。
 - 较长、需要持续追踪或与已有任务高度相关的工作才使用 Issue。先查找并复用相关任务；简单探索、研究、搜索和直接回答无需建单。

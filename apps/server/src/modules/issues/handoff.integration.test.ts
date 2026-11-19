@@ -168,6 +168,7 @@ for (const mode of ['create', 'manual', 'existing'] as const)
       let issues!: IssueService;
       let botSteps = 0;
       let taskSteps = 0;
+      const taskMessage = 'Run the checks and write report.txt.';
       const taskPrompts: string[] = [];
       const botPrompts: string[] = [];
       const model = new MastraLanguageModelV2Mock({
@@ -220,8 +221,8 @@ for (const mode of ['create', 'manual', 'existing'] as const)
               name: 'issue',
               input: {
                 command: existing
-                  ? 'edit 1 --run-in-thread'
-                  : 'create --title "Tracked task" --body "Complete the acceptance checks and report the artifact" --run-in-thread',
+                  ? `edit 1 --prompt "${taskMessage}"`
+                  : `create --title "Tracked task" --body "Complete the acceptance checks and report the artifact" --prompt "${taskMessage}"`,
               },
             });
           const startSteps = manual ? 3 : 2;
@@ -373,8 +374,14 @@ for (const mode of ['create', 'manual', 'existing'] as const)
       assert.equal(task?.metadata?.issueId, issue.id);
       assert.equal(task?.metadata?.issueSourceThreadId, member.threadId);
       assert.notEqual(task?.id, member.threadId);
-      assert.match(taskPrompts[0]!, /Issue #1: Tracked task/);
-      assert.match(taskPrompts[0]!, /Complete the acceptance checks/);
+      const sentMessages = (await issues.view('alice', issue.id, {})).comments
+        .filter((comment) => comment.kind === 'message')
+        .map((comment) => comment.body);
+      const expectedMessage = manual
+        ? 'Issue #1: Tracked task\n\nComplete the acceptance checks and report the artifact'
+        : taskMessage;
+      assert.deepEqual(sentMessages, [expectedMessage]);
+      assert.ok(taskPrompts[0]!.includes(JSON.stringify(expectedMessage)));
       const pending = await events.dueEvents();
       assert.equal(
         pending.length,

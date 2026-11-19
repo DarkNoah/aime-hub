@@ -64,6 +64,10 @@ export type IssueDetail = {
 export const issueCommentSchema = z.object({
   body: z.string().trim().min(1).max(50000),
 });
+export const issueTaskPromptSchema = z
+  .string()
+  .max(50000)
+  .refine((text) => text.trim().length > 0, '--prompt 不能为空');
 export const issueMessageSchema = issueCommentSchema.extend({
   delivery: z.enum(['wait', 'immediate']).default('wait'),
 });

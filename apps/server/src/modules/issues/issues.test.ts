@@ -78,18 +78,22 @@ test('issue command parser handles quoted Markdown, literal shell text, aliases 
   );
   assert.equal(parseIssueCommand('list --state closed').values.state, 'done');
   assert.equal(
-    parseIssueCommand('create --title record').values['run-in-thread'],
+    parseIssueCommand('create --title record').values.prompt,
     undefined,
   );
   assert.equal(
-    parseIssueCommand('create --title task --run-in-thread').values[
-      'run-in-thread'
-    ],
-    'true',
+    parseIssueCommand('create --title task --prompt "  检查输出\n保留格式  "')
+      .values.prompt,
+    '  检查输出\n保留格式  ',
   );
   assert.equal(
-    parseIssueCommand('edit 123 --run-in-thread').values['run-in-thread'],
-    'true',
+    parseIssueCommand('create --title record --prompt="发送原文"').values
+      .prompt,
+    '发送原文',
+  );
+  assert.equal(
+    parseIssueCommand('edit 123 --prompt "--stop 是文本"').values.prompt,
+    '--stop 是文本',
   );
   for (const command of [
     'create --title "oops',
@@ -97,21 +101,20 @@ test('issue command parser handles quoted Markdown, literal shell text, aliases 
     'list --project-id elsewhere',
     'edit 1 --stop --message go',
     'edit 1 --state done --message go',
-    'create --title x --state done --start',
-    'create --title x --start --no-start',
-    'create --title x --run-in-thread false --start',
-    'create --title x --run-in-thread yes',
-    'create --title x --run-in-thread false',
-    'create --title x --run-in-thread true',
-    'create --title x --run-in-thread=true',
-    'create --title x --run-in-thread --no-start',
-    'create --title x --run-in-thread --state done',
-    'edit 1 --run-in-thread false',
-    'edit 1 --run-in-thread=true',
-    'edit 1 --run-in-thread --message go',
-    'edit 1 --run-in-thread --stop',
-    'edit 1 --run-in-thread --state done',
-    'edit 1 --run-in-thread --delivery immediate',
+    'create --title x --start',
+    'create --title x --run-in-thread',
+    'edit 1 --run-in-thread',
+    'create --title x --prompt',
+    'create --title x --prompt ""',
+    'edit 1 --prompt "  "',
+    'create --title x --prompt --no-start',
+    'create --title x --prompt go --no-start',
+    'create --title x --prompt go --state done',
+    'edit 1 --prompt go --message followup',
+    'edit 1 --prompt go --stop',
+    'edit 1 --prompt go --state done',
+    'edit 1 --prompt go --delivery immediate',
+    'edit 1 --prompt go --prompt again',
     'edit 1 --delivery immediate',
     'edit 1 --state invalid',
     'create --title x --title y',
@@ -198,7 +201,7 @@ test('issue tool inherits authenticated scope/settings, registers admin controls
   release();
 });
 
-test('Issue creation only runs in a thread when requested, supports legacy flags, and preserves the Issue on submission failure', async () => {
+test('Issue prompts are validated before mutations, submitted verbatim, and preserve the Issue on submission failure', async () => {
   const ctx = new RequestContext();
   ctx.set('userId', 'alice');
   ctx.set('issueSourceThreadId', 'bot-source');
@@ -206,6 +209,7 @@ test('Issue creation only runs in a thread when requested, supports legacy flags
   ctx.set('chatSettings', { ...settings, agentId: botAgent.id });
   const submissions: unknown[][] = [];
   const edits: unknown[][] = [];
+  let creates = 0;
   let fail = false;
   const issue = {
     id: 42,
@@ -221,7 +225,10 @@ test('Issue creation only runs in a thread when requested, supports legacy flags
           _userId: string,
           _scope: unknown,
           data: { runInThread: boolean },
-        ) => (data.runInThread ? issue : { ...issue, threadId: null }),
+        ) => {
+          creates++;
+          return data.runInThread ? issue : { ...issue, threadId: null };
+        },
         edit: async (...args: unknown[]) => {
           edits.push(args);
           return {
@@ -242,14 +249,25 @@ test('Issue creation only runs in a thread when requested, supports legacy flags
   );
   const execute = (command: string) =>
     tool.execute!({ command }, { requestContext: ctx, observe: noopObserve });
-  assert.deepEqual(await execute('create --title task --run-in-thread'), {
-    issue,
-    taskSubmitted: true,
-  });
-  assert.match(
-    String(submissions[0]![3]),
-    /Issue #42: Implement task\n\nAcceptance details/,
+  const tooLong = 'x'.repeat(50_001);
+  for (const command of [
+    `create --title invalid --prompt "${tooLong}"`,
+    `edit 42 --title invalid --prompt "${tooLong}"`,
+  ])
+    assert.ok('error' in ((await execute(command)) as { error?: string }));
+  assert.equal(creates, 0);
+  assert.equal(edits.length, 0);
+  assert.equal(submissions.length, 0);
+
+  const prompt = '  请检查日志。\n保留格式和 --stop 文本。  ';
+  assert.deepEqual(
+    await execute(
+      `create --title task --body "Acceptance details" --prompt "${prompt}"`,
+    ),
+    { issue, taskSubmitted: true },
   );
+  assert.equal(submissions[0]![3], prompt);
+  assert.equal(submissions[0]![4], 'wait');
   assert.equal(submissions[0]![6], 'bot-source');
   for (const command of [
     'create --title backlog --no-start',
@@ -264,7 +282,7 @@ test('Issue creation only runs in a thread when requested, supports legacy flags
   assert.equal(
     submissions.length,
     1,
-    'Bot creates only a record without an execution flag',
+    'Bot creates only a record without a prompt',
   );
   ctx.set('chatSettings', settings);
   assert.deepEqual(await execute('create --title ordinary'), {
@@ -273,17 +291,20 @@ test('Issue creation only runs in a thread when requested, supports legacy flags
   });
   assert.equal(submissions.length, 1);
   assert.deepEqual(
-    await execute('create --title ordinary-task --run-in-thread'),
+    await execute(
+      `create --title ordinary-task --prompt ${'x'.repeat(50_000)}`,
+    ),
     { issue, taskSubmitted: true },
   );
   assert.equal(submissions.length, 2);
+  assert.equal(submissions[1]![3], 'x'.repeat(50_000));
   const edited = {
     ...issue,
     title: 'Updated task',
     body: 'Updated acceptance',
   };
   await execute(
-    'edit 42 --title "Updated task" --body "Updated acceptance" --run-in-thread',
+    'edit 42 --title "Updated task" --body "Updated acceptance" --prompt "Run the checks"',
   );
   assert.deepEqual(edits[0]!.slice(0, 5), [
     'alice',
@@ -292,12 +313,9 @@ test('Issue creation only runs in a thread when requested, supports legacy flags
     { title: edited.title, body: edited.body, state: undefined },
     'bot-source',
   ]);
-  assert.match(
-    String(submissions.at(-1)![3]),
-    /Issue #42: Updated task\n\nUpdated acceptance/,
-  );
+  assert.equal(submissions.at(-1)![3], 'Run the checks');
   fail = true;
-  const failure = (await execute('create --title retry --start')) as {
+  const failure = (await execute('create --title retry --prompt Retry')) as {
     issue: unknown;
     taskSubmitted: boolean;
     error: string;
@@ -306,7 +324,7 @@ test('Issue creation only runs in a thread when requested, supports legacy flags
   assert.equal(failure.taskSubmitted, false);
   assert.match(failure.error, /已创建/);
   const editFailure = (await execute(
-    'edit 42 --run-in-thread',
+    'edit 42 --prompt Retry',
   )) as typeof failure;
   assert.deepEqual(editFailure.issue, issue);
   assert.equal(editFailure.taskSubmitted, false);
@@ -615,7 +633,7 @@ test(
     );
 
     await t.test(
-      'edit --run-in-thread binds once, sends updated details, reuses settings, and protects closed or inaccessible Issues',
+      'edit --prompt binds once, sends the supplied message, reuses settings, and protects closed or inaccessible Issues',
       async () => {
         const ctx = new RequestContext();
         ctx.set('userId', 'alice');
@@ -649,7 +667,7 @@ test(
           );
           const before = stored.size;
           const first = await execute(
-            `edit ${record.id} --title "Updated task" --body "Latest acceptance" --run-in-thread`,
+            `edit ${record.id} --title "Updated task" --body "Latest acceptance" --prompt "  Run checks\nthen report.  "`,
           );
           assert.equal(first.error, undefined);
           assert.equal(first.taskSubmitted, true);
@@ -664,35 +682,34 @@ test(
             stored.get(first.issue.threadId)?.metadata?.agentId,
             fallbackAgentId,
           );
-          assert.match(
-            JSON.stringify(sends.at(-1)?.parts),
-            new RegExp(`Issue #${record.id}: Updated task`),
-          );
-          assert.match(
-            JSON.stringify(sends.at(-1)?.parts),
-            /Latest acceptance/,
-          );
+          assert.deepEqual(sends.at(-1)?.parts, [
+            { type: 'text', text: '  Run checks\nthen report.  ' },
+          ]);
+          assert.equal(first.issue.body, 'Latest acceptance');
           ctx.set('chatSettings', {
             ...settings,
             agentId: 'default',
             reasoningEffort: 'low',
           });
-          const again = await execute(`edit ${record.id} --run-in-thread`);
+          const again = await execute(
+            `edit ${record.id} --prompt "Review the report"`,
+          );
           assert.equal(again.taskSubmitted, true);
           assert.equal(again.issue?.threadId, first.issue.threadId);
           assert.equal(stored.size, before + 1);
           assert.equal(sends.at(-1)?.reasoningEffort, 'high');
-          assert.equal(
-            (
-              await issues.view('alice', record.id, recordScope)
-            ).comments.filter((c) => c.kind === 'message').length,
-            2,
+          const detail = await issues.view('alice', record.id, recordScope);
+          assert.deepEqual(
+            detail.comments
+              .filter((c) => c.kind === 'message')
+              .map((c) => c.body),
+            ['  Run checks\nthen report.  ', 'Review the report'],
           );
           await issues.edit('alice', record.id, recordScope, { state: 'done' });
           const sentBefore = sends.length;
           assert.deepEqual(
             await execute(
-              `edit ${record.id} --title "Must not change" --run-in-thread`,
+              `edit ${record.id} --title "Must not change" --prompt "Check closed task"`,
             ),
             { error: 'ISSUE_CLOSED' },
           );
@@ -702,7 +719,7 @@ test(
           );
           assert.equal(sends.length, sentBefore);
           const reopened = await execute(
-            `edit ${record.id} --state todo --run-in-thread`,
+            `edit ${record.id} --state todo --prompt "Run the task again"`,
           );
           assert.equal(reopened.taskSubmitted, true);
           assert.equal(reopened.issue?.threadId, first.issue.threadId);
@@ -870,21 +887,16 @@ test(
           });
           ctx.set('issueSourceThreadId', source.threadId);
           const created = await execute(
-            'create --title "Bot task" --body "Keep this acceptance criterion" --run-in-thread',
+            'create --title "Bot task" --body "Keep this acceptance criterion" --prompt "Verify the implementation"',
           );
           assert.equal(created.projectId, projectId ?? null);
           assert.ok(created.threadId);
           assert.deepEqual(created.source, source);
           assert.notEqual(created.threadId, source.threadId);
           assert.equal(lastSession?.thread.id, created.threadId);
-          assert.match(
-            JSON.stringify(sends.at(-1)?.parts),
-            new RegExp(`Issue #${created.id}`),
-          );
-          assert.match(
-            JSON.stringify(sends.at(-1)?.parts),
-            /Keep this acceptance criterion/,
-          );
+          assert.deepEqual(sends.at(-1)?.parts, [
+            { type: 'text', text: 'Verify the implementation' },
+          ]);
           const events = async () =>
             (await db.query(
               "SELECT agent_id,actor_id,text FROM group_chat_events WHERE kind='issue' AND (text::jsonb->>'issueId')::int=$1 ORDER BY created_at,id",
@@ -1156,7 +1168,7 @@ test(
             beforeRecord,
           );
           const activated = await execute(
-            `edit ${botRecord.id} --run-in-thread`,
+            `edit ${botRecord.id} --prompt "Activate the task"`,
           );
           assert.ok(activated.threadId);
           assert.deepEqual(activated.source, source);

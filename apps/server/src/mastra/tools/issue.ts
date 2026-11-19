@@ -7,6 +7,7 @@ import {
   issuePatchSchema,
   issueListSchema,
   issueMessageSchema,
+  issueTaskPromptSchema,
   type Issue,
 } from '@aime/shared/issues';
 import { BuiltinTool, type ToolSettings } from '../../modules/tools/base.js';
@@ -25,12 +26,12 @@ export type ResolveIssues = () => Pick<
 export function createIssueTool(resolve?: ResolveIssues) {
   return createTool({
     id: 'issue',
-    description: `Manage persistent tasks with GitHub-style issue commands in the current personal/project scope. Create an issue only for substantial, long-running tasks or work strongly related to an existing task. Reuse related issues. Simple exploration, research, search and direct answers do not need issues. Creation only records the Issue by default (threadId null). Add the valueless --run-in-thread flag to create a separate task thread and submit its Issue ID and details immediately; never pass true/false. Use edit <id> --run-in-thread to start an existing Issue: create and bind a task thread if absent, otherwise reuse it, then submit the latest Issue ID, title and description. Record-only Issues cannot receive --message or --stop until they have a task thread. Legacy --start also creates and runs a task; --no-start creates an idle thread. List/view first to avoid duplicates. The associated room Bot receives external Issue changes and task-thread results/errors as asynchronous events. Send follow-ups to the existing task with edit --message; comments alone do not execute work. Do not create a replacement issue from inside its own task thread. Completion must be verified before close.\n${issueHelp}`,
+    description: `Manage persistent tasks with GitHub-style issue commands in the current personal/project scope. Create an issue only for substantial, long-running tasks or work strongly related to an existing task. Reuse related issues. Simple exploration, research, search and direct answers do not need issues. Creation only records the Issue by default (threadId null). Add --prompt "message" to create a separate task thread and send the supplied text. Use edit <id> --prompt "message" to send the message to an existing Issue's task thread, creating and binding one if needed. Supply all instructions for this turn in --prompt. The Issue description is stored separately. Record-only Issues need a task thread before accepting --message or --stop. Create with --no-start to bind an idle thread. List/view first to avoid duplicates. The associated room Bot receives external Issue changes and task-thread results/errors as asynchronous events. Send follow-ups to the existing task with edit --message; comments alone do not execute work. Do not create a replacement issue from inside its own task thread. Completion must be verified before close.\n${issueHelp}`,
     inputSchema: z.object({
       command: z
         .string()
         .describe(
-          'One issue command, e.g. create --title "修复登录" --body "任务和验收标准", list --state open, view 123, edit 123 --run-in-thread, edit 123 --message "继续" --delivery wait, close 123. Quote values containing spaces or flags.',
+          'One issue command, e.g. create --title "修复登录" --body "任务和验收标准", list --state open, view 123, edit 123 --prompt "复现登录问题并验证修复", edit 123 --message "继续" --delivery wait, close 123. Quote values containing spaces or flags.',
         ),
     }),
     execute: async ({ command }, context) => {
@@ -65,7 +66,13 @@ export function createIssueTool(resolve?: ResolveIssues) {
             settings.agentId = null;
           return settings;
         };
-        const submitTask = async (issue: Issue, created: boolean) => {
+        const prompt = values.prompt;
+        if (prompt !== undefined) issueTaskPromptSchema.parse(prompt);
+        const submitTask = async (
+          issue: Issue,
+          message: string,
+          created: boolean,
+        ) => {
           signal?.throwIfAborted();
           try {
             return {
@@ -73,10 +80,11 @@ export function createIssueTool(resolve?: ResolveIssues) {
                 userId,
                 issue.id,
                 scope,
-                `Issue #${issue.id}: ${issue.title}\n\n${issue.body || '请完成此任务，并验证结果。'}\n\n请在此线程中执行任务，使用 issue view ${issue.id} 读取最新要求。记录关键进展、结果和验证证据；遇到阻碍时说明原因并更新为 decision；完成并验证后执行 issue close ${issue.id}。`,
+                message,
                 'wait',
                 signal,
                 actorThreadId,
+                'prompt',
               ),
               taskSubmitted: true,
             };
@@ -106,8 +114,6 @@ export function createIssueTool(resolve?: ResolveIssues) {
           const sourceThreadId = context?.requestContext?.get(
             'issueSourceThreadId',
           );
-          const start = !!(values['run-in-thread'] || values.start);
-          const runInThread = start || !!values['no-start'];
           const issue = await service.create(
             userId,
             scope,
@@ -115,14 +121,14 @@ export function createIssueTool(resolve?: ResolveIssues) {
               title: values.title,
               body: values.body,
               state: values.state,
-              runInThread,
+              runInThread: prompt !== undefined || !!values['no-start'],
               settings: taskSettings(),
             }),
             signal,
             typeof sourceThreadId === 'string' ? sourceThreadId : undefined,
             actorThreadId,
           );
-          if (start) return submitTask(issue, true);
+          if (prompt !== undefined) return submitTask(issue, prompt, true);
           return { issue, taskSubmitted: false };
         }
         if (action === 'close' || action === 'reopen')
@@ -157,7 +163,7 @@ export function createIssueTool(resolve?: ResolveIssues) {
             body: values.message,
             delivery: values.delivery,
           });
-        if (values['run-in-thread']) {
+        if (prompt !== undefined) {
           const issue = await service.edit(
             userId,
             id!,
@@ -169,7 +175,7 @@ export function createIssueTool(resolve?: ResolveIssues) {
               signal,
             },
           );
-          return submitTask(issue, false);
+          return submitTask(issue, prompt, false);
         }
         // Validate the entire command before making any changes.
         let issue;

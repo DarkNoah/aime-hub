@@ -13,7 +13,7 @@ metadata:
 
 - **获取当前可用 Agent 列表、查询默认 Agent 或选择 Agent 配置**：阅读 [应用 API](references/app-api.md) 的“可用 Agent”部分，通过 `node "$APP_API_SCRIPT"` 查询 `agents.available`。当前项目会话使用 `APP_PROJECT_ID` 指定范围；个人会话不传项目。使用接口返回的真实配置 ID。
 
-- **创建、查询、更新或完结 Issue，启动/继续/停止任务线程，处理 Bot 的 Issue 事件**：阅读 [Issue 使用指南](references/issues.md)。使用 `issue` 工具的 `command` 参数；`create` 默认仅记录 Issue，添加无值开关 `--run-in-thread` 才创建独立任务线程并提交任务。已有 Issue 使用 `edit <id> --run-in-thread`：没有线程则创建并绑定，有线程则复用，然后发送最新任务详情和 Issue ID。指南包含全部命令、参数、状态、手动创建、事件通知及故障处理。简单问答无需建单，相关工作优先复用已有 Issue。
+- **创建、查询、更新或完结 Issue，启动/继续/停止任务线程，处理 Bot 的 Issue 事件**：阅读 [Issue 使用指南](references/issues.md)。使用 `issue` 工具的 `command` 参数；`create` 默认仅记录 Issue，添加 `--prompt "任务消息"` 会创建独立任务线程并直接投递指定文本。已有 Issue 使用 `edit <id> --prompt "任务消息"`，没有线程则创建并绑定，有线程则复用。指南包含全部命令、参数、状态、手动创建、事件通知及故障处理。简单问答无需建单，相关工作优先复用已有 Issue。
 
 - **新增、修改、查询或删除个人及项目环境变量**：阅读 [环境变量](references/environment-variables.md)。个人入口为“个人设置 → 环境变量”，API 为 `personalEnvironmentVariables.*`；项目入口为“项目仪表盘 → 环境变量”，API 为 `projectEnvironmentVariables.*`，需项目管理权限。先确认作用范围并查变量 ID，再按用户要求修改，不回显密钥。
 
