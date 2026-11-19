@@ -142,3 +142,4 @@ plugins/vibe-quant/**/__pycache__/
 !apps/server/src/modules/threads/runner-abort-reply.test.ts
 !apps/server/src/modules/threads/session-stream-error.test.ts
 !scripts/interrupted-thread-messages.test.ts
+!apps/server/src/modules/knowledge/embedding-lifecycle.test.ts

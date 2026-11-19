@@ -31,6 +31,7 @@ import {
 } from '@aime/shared/providers';
 import { ProviderError, requestProviderJson } from './network.js';
 import type { requestWebResource } from '../../mastra/web/request.js';
+import type { ProviderConfig } from '../../mastra/providers/base-provider.js';
 
 const settingsId = 'models';
 const modelKeys = defaultModelKeys;
@@ -60,6 +61,7 @@ const catalogSchema = z.record(
   z.object({ models: z.record(z.string(), z.record(z.string(), z.unknown())) }),
 );
 type RequestJson = typeof requestProviderJson;
+type RequestTiming = Pick<ProviderConfig, 'timeoutMs'>;
 
 function catalogLookup(catalog: unknown) {
   const parsed = catalogSchema.safeParse(catalog);
@@ -290,10 +292,10 @@ export class ProviderService {
       requestResource: this.requestResource,
     });
   }
-  async getProviderInstance(id: string) {
+  async getProviderInstance(id: string, options?: RequestTiming) {
     const provider = await this.getProviderRecord(id);
     if (!provider.enabled) throw new ProviderError('INVALID_MODEL');
-    return this.createProviderInstance(provider);
+    return this.createProviderInstance({ ...provider, ...options });
   }
 
   private async resolveDefaultModel(
@@ -305,6 +307,7 @@ export class ProviderService {
       | 'model3dModel'
       | 'ocrModel',
     reference?: string,
+    options?: RequestTiming,
   ) {
     const ref = reference ?? (await this.getDefaults())[key];
     if (!ref) throw new ProviderError('INVALID_MODEL');
@@ -312,7 +315,7 @@ export class ProviderService {
     if (!model.enabled || !modelSupportsType(model, defaultModelTypes[key]))
       throw new ProviderError('INVALID_MODEL');
     return {
-      provider: await this.getProviderInstance(model.providerId),
+      provider: await this.getProviderInstance(model.providerId, options),
       modelId: model.id,
       modelName: model.name,
       metadata: model.metadata,
@@ -320,10 +323,11 @@ export class ProviderService {
     };
   }
 
-  async getEmbeddingModel(reference?: string) {
+  async getEmbeddingModel(reference?: string, options?: RequestTiming) {
     const { provider, modelId } = await this.resolveDefaultModel(
       'embeddingModel',
       reference,
+      options,
     );
     return provider.embeddingModel(modelId);
   }
@@ -336,9 +340,9 @@ export class ProviderService {
     return provider.rerankingModel(modelId);
   }
 
-  async getImageEmbeddingModel(reference?: string) {
+  async getImageEmbeddingModel(reference?: string, options?: RequestTiming) {
     const { provider, modelId, modalitiesInput } =
-      await this.resolveDefaultModel('embeddingModel', reference);
+      await this.resolveDefaultModel('embeddingModel', reference, options);
     return modalitiesInput.includes('image')
       ? provider.imageEmbeddingModel(modelId)
       : null;

@@ -174,31 +174,36 @@ export function createKnowledgeTools(service?: KnowledgeService) {
           )
           .optional(),
       }),
-      outputSchema: z.object({ base: baseOutput }),
-      execute: async (input, context) => {
-        const { userId, projectId } = actor(context);
-        const base = await kb().create(
-          userId,
-          projectId ? { scope: 'project', projectId } : { scope: 'personal' },
-          {
-            ...input,
-            embeddingModel:
-              input.embeddingModel === '' ? null : input.embeddingModel,
-            rerankModel:
-              input.rerankerModel === ''
-                ? null
-                : input.rerankerModel !== undefined
-                  ? input.rerankerModel
-                  : input.rerankModel,
-            fields:
-              input.extendColumns?.map((f) => ({
-                name: f.name,
-                type: f.columnType,
-              })) ?? input.fields,
-          },
-        );
-        return { base: baseView(base) };
-      },
+      outputSchema: z.union([
+        z.object({ base: baseOutput }),
+        z.object({ cancelled: z.literal(true), message: z.string() }),
+      ]),
+      execute: (input, context) =>
+        withKnowledgeCancellation(context?.abortSignal, async () => {
+          const { userId, projectId } = actor(context);
+          const base = await kb().create(
+            userId,
+            projectId ? { scope: 'project', projectId } : { scope: 'personal' },
+            {
+              ...input,
+              embeddingModel:
+                input.embeddingModel === '' ? null : input.embeddingModel,
+              rerankModel:
+                input.rerankerModel === ''
+                  ? null
+                  : input.rerankerModel !== undefined
+                    ? input.rerankerModel
+                    : input.rerankModel,
+              fields:
+                input.extendColumns?.map((f) => ({
+                  name: f.name,
+                  type: f.columnType,
+                })) ?? input.fields,
+            },
+            context?.abortSignal,
+          );
+          return { base: baseView(base) };
+        }),
     }),
     knowledge_get_document: createTool({
       id: 'knowledge_get_document',

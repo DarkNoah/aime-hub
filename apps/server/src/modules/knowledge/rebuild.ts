@@ -4,22 +4,27 @@ import { createReadStream } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { embedMany } from 'ai';
 import {
   KnowledgeBaseRecord as Base,
   KnowledgeDocumentRecord as Document,
 } from '@aime/db';
 import { ThreadError } from '../threads/errors.js';
-import { createKnowledgeEmbedder } from './embedding.js';
+import {
+  createKnowledgeEmbedder,
+  probeEmbeddingDimension,
+} from './embedding.js';
 import { activeKnowledgeIndex, type KnowledgeService } from './service.js';
 import { vectorTableName, type StoredChunk } from './vector-store.js';
-import { withSearchTimeout } from './retrieval.js';
 
 type VectorBatch = { chunks: StoredChunk[]; vectors: number[][] | null };
 
 // Invoked only while KnowledgeWorker owns its PostgreSQL advisory session lock.
 // Persisted job + per-attempt fencing also protects against a lost lock session.
-export async function rebuildKnowledge(service: KnowledgeService, id: string) {
+export async function rebuildKnowledge(
+  service: KnowledgeService,
+  id: string,
+  signal?: AbortSignal,
+) {
   const { database, providers, vectors } = service;
   const attempt = randomUUID();
   let indexName: string | undefined;
@@ -62,9 +67,12 @@ export async function rebuildKnowledge(service: KnowledgeService, id: string) {
       const embedChunks = createKnowledgeEmbedder(
         providers,
         job.embeddingModel,
+        0,
+        signal,
       );
       let after = '';
       while (true) {
+        signal?.throwIfAborted();
         const chunks = await service.store.chunks(claimed, {
           after,
           limit: 32,
@@ -109,19 +117,11 @@ export async function rebuildKnowledge(service: KnowledgeService, id: string) {
         if (!updated.length) throw new Error('Rebuild superseded');
       }
       if (job.embeddingModel && dimension === null) {
-        const result = await withSearchTimeout(
-          async (signal) =>
-            embedMany({
-              model: await providers.getEmbeddingModel(job.embeddingModel!),
-              values: ['dimension probe'],
-              maxRetries: 0,
-              abortSignal: signal,
-            }),
-          30_000,
+        dimension = await probeEmbeddingDimension(
+          providers,
+          job.embeddingModel,
+          signal,
         );
-        dimension = result.embeddings[0]?.length ?? null;
-        if (!dimension || result.embeddings[0].some((n) => !Number.isFinite(n)))
-          throw new Error('Invalid embeddings');
       }
       if (completed !== job.total) throw new Error('Rebuild corpus changed');
     } finally {
@@ -129,6 +129,7 @@ export async function rebuildKnowledge(service: KnowledgeService, id: string) {
     }
 
     // No vector database writes occur until every embedding has succeeded.
+    signal?.throwIfAborted();
     stage = 'KNOWLEDGE_INDEX_FAILED';
     indexName = vectorTableName(dimension ?? 0);
     const assigned: { id: string }[] = await database.query(
@@ -192,6 +193,8 @@ export async function rebuildKnowledge(service: KnowledgeService, id: string) {
       await m.save(Base, base);
     });
   } catch (error) {
+    // The next worker reclaims a rebuild interrupted before index writes.
+    if (signal?.aborted && error === signal.reason) return;
     // Failure preserves the current model/index; the worker will clean any shadow index.
     await database.transaction(async (m) => {
       const base = await m.findOne(Base, {

@@ -475,13 +475,12 @@ export class XinferenceProvider extends BaseProvider {
       timeoutMs?: number;
     } = {},
   ) {
+    const timeoutMs = options.timeoutMs ?? this.provider.timeoutMs ?? 60_000;
     const signal =
-      options.timeoutMs === 0
+      timeoutMs === 0
         ? (options.abortSignal ?? new AbortController().signal)
         : AbortSignal.any([
-            AbortSignal.timeout(
-              this.provider.timeoutMs ?? options.timeoutMs ?? 60_000,
-            ),
+            AbortSignal.timeout(timeoutMs),
             ...(options.abortSignal ? [options.abortSignal] : []),
           ]);
     signal.throwIfAborted();
@@ -495,7 +494,7 @@ export class XinferenceProvider extends BaseProvider {
     const response = await this.request(`${this.baseUrl}/${path}`, {
       method: options.body === undefined ? 'GET' : 'POST',
       signal,
-      ...(options.timeoutMs === 0 ? { timeoutMs: 0 } : {}),
+      ...(timeoutMs === 0 ? { timeoutMs: 0 } : {}),
       headers: Object.fromEntries(headers),
       body: options.body,
       maxBytes: options.maxBytes ?? 20_000_000,

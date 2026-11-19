@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { embed } from 'ai';
 import type { DataSource } from 'typeorm';
 import type { Auth } from '@aime/auth';
 import {
@@ -204,4 +205,56 @@ test('configuration discovery is admin-only and needs neither stored credentials
   assert.deepEqual(data.xinference.fields, []);
   assert.equal(data['alibaba-cn'].fields[0].key, 'workspaceId');
   assert.ok(!JSON.stringify(data).includes('apiKey'));
+});
+
+test('embedding providers honor a disabled request deadline and caller cancellation', async (t) => {
+  t.mock.method(AbortSignal, 'timeout', () => {
+    throw new Error('Unexpected embedding deadline');
+  });
+  for (const type of ['xinference', 'openai', 'newapi']) {
+    const controller = new AbortController();
+    let cancelDuringRequest = false;
+    const provider = createProviderInstance(
+      {
+        id: type,
+        type,
+        baseUrl: 'https://example.test/v1',
+        apiKey: 'test',
+        timeoutMs: 0,
+      },
+      {
+        requestResource: async (url, options) => {
+          assert.equal(options.timeoutMs, 0);
+          if (cancelDuringRequest) {
+            controller.abort(new Error('Embedding cancelled'));
+            options.signal.throwIfAborted();
+            assert.fail('Embedding transport ignored the caller signal');
+          }
+          return {
+            url,
+            status: 200,
+            headers: {},
+            body: Buffer.from('{"data":[{"index":0,"embedding":[1,2]}]}'),
+          };
+        },
+      },
+    );
+    const options = {
+      model: provider.embeddingModel('embedding'),
+      value: 'text',
+      maxRetries: 0,
+      abortSignal: controller.signal,
+    };
+    assert.deepEqual((await embed(options)).embedding, [1, 2]);
+    if (type !== 'xinference') {
+      const model = provider.imageEmbeddingModel('embedding')!;
+      const result = await model.doEmbedImages({
+        images: [{ data: Uint8Array.of(1), mimeType: 'image/png' }],
+        abortSignal: controller.signal,
+      });
+      assert.deepEqual(result.embeddings, [[1, 2]]);
+    }
+    cancelDuringRequest = true;
+    await assert.rejects(embed(options), /Embedding cancelled/);
+  }
 });

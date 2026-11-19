@@ -52,6 +52,7 @@ import type { ProviderService } from '../providers/service.js';
 import type { ProjectThreadAccess } from '../projects/service.js';
 import { ThreadError } from '../threads/errors.js';
 import { validateKnowledgeFile } from './parse.js';
+import { probeEmbeddingDimension } from './embedding.js';
 import {
   fuseRanks,
   mergeVectorRanks,
@@ -174,6 +175,7 @@ export class KnowledgeService {
     userId: string,
     scope: KnowledgeScope,
     data: z.input<typeof knowledgeBaseInputSchema>,
+    signal?: AbortSignal,
   ) {
     if (!(await this.acl.canCreate(userId, scope)))
       throw new ThreadError('FORBIDDEN', 403);
@@ -191,23 +193,17 @@ export class KnowledgeService {
     let dimension = 0;
     if (embeddingModel) {
       try {
-        const result = await withSearchTimeout(
-          async (signal) =>
-            embed({
-              model: await this.providers.getEmbeddingModel(embeddingModel),
-              value: 'dimension probe',
-              maxRetries: 0,
-              abortSignal: signal,
-            }),
-          30_000,
+        dimension = await probeEmbeddingDimension(
+          this.providers,
+          embeddingModel,
+          signal,
         );
-        dimension = result.embedding.length;
-        if (!dimension || result.embedding.some((n) => !Number.isFinite(n)))
-          throw new Error('Invalid dimension probe');
       } catch {
+        signal?.throwIfAborted();
         throw new ThreadError('KNOWLEDGE_EMBED_FAILED');
       }
     }
+    signal?.throwIfAborted();
     const index = vectorTableName(dimension);
     try {
       await this.store.create(index, dimension, input.fields);

@@ -1,4 +1,4 @@
-import { embedMany } from 'ai';
+import { embed, embedMany } from 'ai';
 import { withAbortSignal } from '../../lib/abort.js';
 import type { ProviderService } from '../providers/service.js';
 import { ThreadError } from '../threads/errors.js';
@@ -10,11 +10,35 @@ type Providers = Pick<
   'getEmbeddingModel' | 'getImageEmbeddingModel'
 >;
 
+// Indexing can wait for a queued model. Only the caller cancels these requests.
+const indexingRequest = { timeoutMs: 0 };
+
+export function probeEmbeddingDimension(
+  providers: Providers,
+  reference: string,
+  signal?: AbortSignal,
+) {
+  return withAbortSignal(signal, async () => {
+    const model = await providers.getEmbeddingModel(reference, indexingRequest);
+    signal?.throwIfAborted();
+    const { embedding } = await embed({
+      model,
+      value: 'dimension probe',
+      maxRetries: 0,
+      abortSignal: signal,
+    });
+    if (!embedding.length || embedding.some((n) => !Number.isFinite(n)))
+      throw new Error('Invalid embedding dimension');
+    return embedding.length;
+  });
+}
+
 /** Keep image bytes on the image path, including when rebuilding mixed corpora. */
 export function createKnowledgeEmbedder(
   providers: Providers,
   reference: string | null,
   maxRetries = 0,
+  signal?: AbortSignal,
 ) {
   let textModel: ReturnType<Providers['getEmbeddingModel']> | undefined;
   let imageModel: ReturnType<Providers['getImageEmbeddingModel']> | undefined;
@@ -28,7 +52,6 @@ export function createKnowledgeEmbedder(
         throw new ThreadError('KNOWLEDGE_IMAGE_MODEL_REQUIRED', 400);
       return null;
     }
-    const signal = AbortSignal.timeout(180_000);
     return withAbortSignal(signal, async () => {
       const vectors: number[][] = new Array(chunks.length);
       const textIndexes = chunks.flatMap((chunk, i) =>
@@ -36,9 +59,9 @@ export function createKnowledgeEmbedder(
       );
       for (let i = 0; i < textIndexes.length; i += 32) {
         const indexes = textIndexes.slice(i, i + 32);
-        textModel ??= providers.getEmbeddingModel(reference);
+        textModel ??= providers.getEmbeddingModel(reference, indexingRequest);
         const model = await textModel;
-        signal.throwIfAborted();
+        signal?.throwIfAborted();
         const result = await embedMany({
           model,
           values: indexes.map((index) => chunks[index]!.text),
@@ -53,14 +76,17 @@ export function createKnowledgeEmbedder(
         });
       }
       for (const [index, chunk] of chunks.entries()) {
-        signal.throwIfAborted();
+        signal?.throwIfAborted();
         if (chunk.inputType !== 'image') continue;
-        imageModel ??= providers.getImageEmbeddingModel(reference);
+        imageModel ??= providers.getImageEmbeddingModel(
+          reference,
+          indexingRequest,
+        );
         const model = await imageModel;
         if (!model)
           throw new ThreadError('KNOWLEDGE_IMAGE_MODEL_REQUIRED', 400);
         const image = await loadImage(chunk.documentId);
-        signal.throwIfAborted();
+        signal?.throwIfAborted();
         const info = validateKnowledgeFile(image.name, image.data);
         if (!info) throw new ThreadError('KNOWLEDGE_FILE_TYPE', 400);
         try {
@@ -72,6 +98,7 @@ export function createKnowledgeEmbedder(
             throw new Error('Invalid image embeddings');
           vectors[index] = result.embeddings[0]!;
         } catch {
+          signal?.throwIfAborted();
           throw new ThreadError('KNOWLEDGE_IMAGE_EMBED_FAILED');
         }
       }

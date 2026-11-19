@@ -17,7 +17,7 @@ import { cleanupKnowledgeIndexes, rebuildKnowledge } from './rebuild.js';
 export class KnowledgeWorker {
   private timer?: ReturnType<typeof setInterval>;
   private running?: Promise<void>;
-  private stopped = false;
+  private readonly shutdown = new AbortController();
   constructor(private service: KnowledgeService) {}
   start() {
     this.timer = setInterval(() => this.wake(), 2000);
@@ -25,7 +25,7 @@ export class KnowledgeWorker {
     this.wake();
   }
   wake() {
-    if (this.stopped || this.running) return;
+    if (this.shutdown.signal.aborted || this.running) return;
     this.running = this.drain()
       .catch((error: unknown) => {
         console.error(
@@ -38,7 +38,7 @@ export class KnowledgeWorker {
       });
   }
   async stop() {
-    this.stopped = true;
+    this.shutdown.abort();
     clearInterval(this.timer);
     await this.running;
   }
@@ -54,7 +54,7 @@ export class KnowledgeWorker {
       acquired = rows[0].acquired;
       if (!acquired) return;
       await cleanupKnowledgeIndexes(this.service);
-      for (let n = 0; n < 5 && !this.stopped; n++) {
+      for (let n = 0; n < 5 && !this.shutdown.signal.aborted; n++) {
         const rebuilding = await database
           .getRepository(Base)
           .createQueryBuilder('b')
@@ -62,7 +62,11 @@ export class KnowledgeWorker {
           .orderBy('b.created_at', 'ASC')
           .getOne();
         if (rebuilding) {
-          await rebuildKnowledge(this.service, rebuilding.id);
+          await rebuildKnowledge(
+            this.service,
+            rebuilding.id,
+            this.shutdown.signal,
+          );
           continue;
         }
         const next = await database.manager.findOne(Document, {
@@ -131,6 +135,7 @@ export class KnowledgeWorker {
         providers,
         base.embeddingModel,
         1,
+        this.shutdown.signal,
       )(chunks, async () => ({
         name: doc.sourceName ?? doc.name,
         data: doc.sourceData,
@@ -159,6 +164,9 @@ export class KnowledgeWorker {
         });
       });
     } catch (error) {
+      // A new worker can resume a document interrupted during embedding.
+      if (this.shutdown.signal.aborted && error === this.shutdown.signal.reason)
+        return;
       if (staged.length)
         await this.service.vectors
           .deleteVectors({ indexName, ids: staged })

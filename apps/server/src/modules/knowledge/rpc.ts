@@ -51,8 +51,8 @@ export function knowledgeRouter(service?: KnowledgeService) {
     list: p.list.handler(({ context, input }) =>
       kb().list(context.userId, input),
     ),
-    create: p.create.handler(({ context, input }) =>
-      kb().create(context.userId, input.scope, input.data),
+    create: p.create.handler(({ context, input, signal }) =>
+      kb().create(context.userId, input.scope, input.data, signal),
     ),
     update: p.update.handler(({ context, input }) =>
       kb().update(context.userId, input.id, input.data),

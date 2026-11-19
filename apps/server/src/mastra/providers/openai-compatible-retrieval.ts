@@ -51,10 +51,14 @@ function createRequest(
     schema: z.ZodType<T>,
     options: RequestOptions,
   ) => {
-    const signal = AbortSignal.any([
-      AbortSignal.timeout(provider.timeoutMs ?? 60_000),
-      ...(options.abortSignal ? [options.abortSignal] : []),
-    ]);
+    const timeoutMs = provider.timeoutMs ?? 60_000;
+    const signal =
+      timeoutMs === 0
+        ? (options.abortSignal ?? new AbortController().signal)
+        : AbortSignal.any([
+            AbortSignal.timeout(timeoutMs),
+            ...(options.abortSignal ? [options.abortSignal] : []),
+          ]);
     signal.throwIfAborted();
     const headers = new Headers();
     for (const [name, value] of Object.entries(options.headers ?? {}))
@@ -65,6 +69,7 @@ function createRequest(
     const response = await request(`${baseUrl}/${path}`, {
       method: 'POST',
       signal,
+      ...(timeoutMs === 0 ? { timeoutMs: 0 } : {}),
       headers: Object.fromEntries(headers),
       body: JSON.stringify(options.body),
       maxBytes: 20_000_000,
