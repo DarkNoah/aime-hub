@@ -30,6 +30,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createMastraRuntime } from './mastra/index.js';
 import { createChatRunner } from './modules/threads/runner.js';
+import { NetworkCaptureStore } from './modules/threads/browser/network-store.js';
 import { LanguageModelService } from './modules/models/language-model.js';
 import { installChatRequestLogging } from './modules/models/request-logging.js';
 import { RequestLogService } from './modules/request-logs/service.js';
@@ -268,6 +269,7 @@ const threads = new ThreadService(
     plugins,
     groupChats,
     async () => (await systemSettings.get()).messageCompressionTokens,
+    new NetworkCaptureStore({ secret: env.BETTER_AUTH_SECRET }),
   ),
   projects,
   mastra.backgroundTaskManager,

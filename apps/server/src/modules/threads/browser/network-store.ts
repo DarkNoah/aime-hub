@@ -1,29 +1,18 @@
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  randomBytes,
-  randomUUID,
-} from 'node:crypto';
-import { constants } from 'node:fs';
-import {
-  mkdir,
-  lstat,
-  readdir,
-  open,
-  rename,
-  rm,
-  writeFile,
-} from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, lstat, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  NetworkRecordCodec,
+  NetworkRecordIntegrityError,
+  legacyRecordName,
+  parseNetworkRecordName,
+  type NetworkRecordFile,
+} from './network-record-file.js';
 
 export const networkRetentionMs = 15 * 60_000;
 const maxPerScope = 512;
 const maxRecords = 2048;
-const maxRecordBytes = 512 * 1024;
-const ownedDirectory = /^(\d+)-[a-f0-9]{64}-[a-f0-9-]{36}$/;
-
 export type NetworkCaptureScope = {
   userId: string;
   threadId: string;
@@ -80,15 +69,10 @@ export type NetworkListFilters = {
   offset?: number;
 };
 
-type Entry = {
-  handle: NetworkRequestHandle;
-  scope: NetworkCaptureScope;
-  scopeKey: string;
-  startedAt: number;
-  summary: NetworkRequestSummary;
-  directory: string;
+type Entry = NetworkRecordFile & {
   writes: Promise<void>;
   timer: NodeJS.Timeout;
+  published: boolean;
 };
 
 function scopeKey(scope: NetworkCaptureScope) {
@@ -107,10 +91,12 @@ function logCleanupFailure() {
   console.warn('Could not clean temporary browser network records');
 }
 
-/** Only the live index can resolve request IDs. Expired files can also be reaped after a restart. */
+/** The disk index survives restarts. Only the originating recorder can append to an in-flight request. */
 export class NetworkCaptureStore {
   private readonly directory: string;
-  private readonly encryptionKey = randomBytes(32);
+  private readonly codec: NetworkRecordCodec;
+  private readonly handles = new WeakMap<NetworkRequestHandle, Entry>();
+  private readonly deleting = new Set<string>();
   private readonly now: () => number;
   private readonly active = new Map<
     string,
@@ -129,7 +115,10 @@ export class NetworkCaptureStore {
   private readonly sweepTimer: NodeJS.Timeout;
   private sweeping?: Promise<void>;
 
-  constructor(options: { directory?: string; now?: () => number } = {}) {
+  constructor(
+    options: { directory?: string; now?: () => number; secret?: string } = {},
+  ) {
+    this.codec = new NetworkRecordCodec(options.secret);
     this.directory =
       options.directory ??
       join(tmpdir(), 'chat-browser-network-' + (process.getuid?.() ?? 'user'));
@@ -154,59 +143,32 @@ export class NetworkCaptureStore {
     }
   }
 
-  // Workspace commands may share the server's OS account. The file alone must
-  // not reveal the traffic, and swapping files must not change their owner.
-  private seal(key: string, record: NetworkRequestDetail) {
-    const json = JSON.stringify(record);
-    if (Buffer.byteLength(json) > maxRecordBytes)
-      throw new Error('Network record is too large');
-    const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', this.encryptionKey, iv);
-    cipher.setAAD(Buffer.from(key + ':' + record.id));
-    const ciphertext = Buffer.concat([
-      cipher.update(json, 'utf8'),
-      cipher.final(),
-    ]);
-    return Buffer.concat([iv, cipher.getAuthTag(), ciphertext]);
+  private remember(file: NetworkRecordFile, published: boolean): Entry {
+    const timer = setTimeout(
+      () => this.discard(entry),
+      Math.max(1, file.startedAt + networkRetentionMs - this.now()),
+    );
+    timer.unref();
+    const entry = { ...file, timer, published, writes: Promise.resolve() };
+    this.entries.set(file.name, entry);
+    return entry;
   }
 
-  private async load(entry: Entry): Promise<NetworkRequestDetail> {
-    const file = await open(
-      join(entry.directory, 'record.bin'),
-      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  private trim() {
+    if (this.entries.size <= maxPerScope) return;
+    const counts = new Map<string, number>();
+    const sorted = [...this.entries.values()].sort(
+      (a, b) => b.startedAt - a.startedAt || b.id.localeCompare(a.id),
     );
-    try {
-      const info = await file.stat();
-      if (!info.isFile() || info.size <= 28 || info.size > maxRecordBytes + 28)
-        throw new Error('Invalid record length');
-      const data = Buffer.allocUnsafe(info.size);
-      let offset = 0;
-      while (offset < data.length) {
-        const { bytesRead } = await file.read(
-          data,
-          offset,
-          data.length - offset,
-          offset,
-        );
-        if (!bytesRead) throw new Error('Incomplete record');
-        offset += bytesRead;
+    let kept = 0;
+    for (const entry of sorted) {
+      const count = counts.get(entry.scopeTag) ?? 0;
+      if (count >= maxPerScope || kept >= maxRecords) {
+        this.discard(entry);
+      } else {
+        counts.set(entry.scopeTag, count + 1);
+        kept++;
       }
-      const decipher = createDecipheriv(
-        'aes-256-gcm',
-        this.encryptionKey,
-        data.subarray(0, 12),
-      );
-      decipher.setAAD(Buffer.from(entry.scopeKey + ':' + entry.handle.id));
-      decipher.setAuthTag(data.subarray(12, 28));
-      const plain = Buffer.concat([
-        decipher.update(data.subarray(28)),
-        decipher.final(),
-      ]);
-      return JSON.parse(plain.toString('utf8'));
-    } catch {
-      throw new Error('Network record failed integrity verification');
-    } finally {
-      await file.close();
     }
   }
 
@@ -229,6 +191,7 @@ export class NetworkCaptureStore {
     }
     try {
       await capture.ready;
+      await this.cleanup();
       return { captureId: capture.id };
     } catch (error) {
       if (this.active.get(key) === capture) this.active.delete(key);
@@ -262,9 +225,13 @@ export class NetworkCaptureStore {
   }
 
   isRetained(handle: NetworkRequestHandle) {
-    const entry = this.entries.get(handle.id);
+    const entry = this.handles.get(handle);
+    return !!entry && this.retained(entry);
+  }
+
+  private retained(entry: Entry) {
     return (
-      entry?.handle === handle &&
+      this.entries.get(entry.name) === entry &&
       entry.startedAt + networkRetentionMs > this.now()
     );
   }
@@ -298,50 +265,26 @@ export class NetworkCaptureStore {
       state: 'pending',
       redirectedFrom: input.redirectedFrom,
     };
-    const initial = this.seal(key, { ...input, ...summary });
-    const hash = createHash('sha256').update(key).digest('hex');
-    const directory = join(
-      this.directory,
-      startedAt + '-' + hash + '-' + handle.id,
+    const scopeTag = this.codec.scopeTag(key);
+    const threadTag = this.codec.threadTag(scope.threadId);
+    const { serviceTag } = this.codec;
+    const name = [startedAt, scopeTag, serviceTag, threadTag, handle.id].join(
+      '-',
     );
-
-    let count = 0;
-    let oldest: Entry | undefined;
-    for (const entry of this.entries.values()) {
-      if (entry.scopeKey === key) {
-        oldest ??= entry;
-        count++;
-      }
-    }
-    if (oldest && count >= maxPerScope) this.discard(oldest);
-    if (this.entries.size >= maxRecords)
-      this.discard(this.entries.values().next().value!);
-
-    const timer = setTimeout(
-      () => {
-        this.discard(entry);
-      },
-      startedAt + networkRetentionMs - now,
+    const initial = this.codec.encode(name, { ...input, ...summary });
+    const entry = this.remember(
+      { name, startedAt, scopeTag, serviceTag, threadTag, id: handle.id },
+      false,
     );
-    timer.unref();
-    const entry: Entry = {
-      handle,
-      scope: { ...scope },
-      scopeKey: key,
-      startedAt,
-      summary,
-      directory,
-      timer,
-      writes: capture.ready.then(async () => {
-        if (!this.isRetained(handle)) return;
-        await mkdir(directory, { mode: 0o700 });
-        await writeFile(join(directory, 'record.bin'), initial, {
-          mode: 0o600,
-          flag: 'wx',
-        });
-      }),
-    };
-    this.entries.set(handle.id, entry);
+    this.handles.set(handle, entry);
+    const directory = join(this.directory, name);
+    entry.writes = capture.ready.then(async () => {
+      if (!this.retained(entry)) return;
+      await mkdir(directory, { mode: 0o700 });
+      await this.writeRecord(directory, initial);
+      entry.published = true;
+    });
+    this.trim();
     // begin is synchronous so the request event can immediately pair its response.
     void entry.writes.catch(() => {
       this.discard(entry);
@@ -349,54 +292,89 @@ export class NetworkCaptureStore {
     return handle;
   }
 
+  private async writeRecord(directory: string, data: Buffer) {
+    const temporary = join(directory, randomUUID() + '.tmp');
+    try {
+      await writeFile(temporary, data, { mode: 0o600, flag: 'wx' });
+      await rename(temporary, join(directory, 'record.bin'));
+    } finally {
+      await rm(temporary, { force: true });
+    }
+  }
+
   async update(handle: NetworkRequestHandle, patch: NetworkRequestPatch) {
-    const entry = this.entries.get(handle.id);
-    if (!entry || !this.isRetained(handle)) return;
+    const entry = this.handles.get(handle);
+    if (this.disposed || !entry || !this.retained(entry)) return;
     const write = entry.writes.then(async () => {
-      if (!this.isRetained(handle)) return;
-      const previous = await this.load(entry);
-      const data = this.seal(entry.scopeKey, { ...previous, ...patch });
-      const temporary = join(entry.directory, randomUUID() + '.tmp');
-      try {
-        await writeFile(temporary, data, { mode: 0o600, flag: 'wx' });
-        await rename(temporary, join(entry.directory, 'record.bin'));
-      } finally {
-        await rm(temporary, { force: true });
-      }
-      if (patch.status !== undefined) entry.summary.status = patch.status;
-      if (patch.durationMs !== undefined)
-        entry.summary.durationMs = patch.durationMs;
-      if (patch.state !== undefined) entry.summary.state = patch.state;
+      if (!this.retained(entry)) return;
+      const previous = await this.codec.read(
+        this.directory,
+        entry.name,
+        'detail',
+      );
+      const data = this.codec.encode(entry.name, {
+        ...previous,
+        ...patch,
+      });
+      await this.writeRecord(join(this.directory, entry.name), data);
     });
-    // Keep the last valid on-disk version usable if a patch fails.
     entry.writes = write.catch(() => {});
     return write;
   }
 
   async list(scope: NetworkCaptureScope, filters: NetworkListFilters = {}) {
-    const key = scopeKey(scope);
-    const matching = [...this.entries.values()].filter(
-      (entry) => entry.scopeKey === key,
+    const tag = this.codec.scopeTag(scopeKey(scope));
+    await this.cleanup();
+    const candidates = [...this.entries.values()].filter(
+      (entry) => entry.scopeTag === tag && this.retained(entry),
     );
-    await Promise.all(matching.map((entry) => entry.writes));
-    const matches = matching
-      .filter(
-        ({ handle, summary }) =>
-          this.isRetained(handle) &&
-          (!filters.url || summary.url.includes(filters.url)) &&
-          (!filters.method ||
-            summary.method.toUpperCase() === filters.method.toUpperCase()) &&
-          (filters.status === undefined || summary.status === filters.status),
-      )
-      .sort((a, b) => b.startedAt - a.startedAt);
+    const matches: { entry: Entry; summary: NetworkRequestSummary }[] = [];
+    // Bound open file descriptors during a filtered history query.
+    for (let i = 0; i < candidates.length; i += 16) {
+      await Promise.all(
+        candidates.slice(i, i + 16).map(async (entry) => {
+          try {
+            await entry.writes;
+            const summary = await this.codec.read(
+              this.directory,
+              entry.name,
+              'summary',
+            );
+            if (
+              (!filters.url || summary.url.includes(filters.url)) &&
+              (!filters.method ||
+                summary.method.toUpperCase() ===
+                  filters.method.toUpperCase()) &&
+              (filters.status === undefined ||
+                summary.status === filters.status)
+            )
+              matches.push({ entry, summary });
+          } catch (error) {
+            if (
+              error instanceof NetworkRecordIntegrityError ||
+              (error as NodeJS.ErrnoException).code === 'ENOENT'
+            )
+              return;
+            throw error;
+          }
+        }),
+      );
+    }
+    const current = matches
+      .filter(({ entry }) => this.retained(entry))
+      .sort(
+        (a, b) =>
+          b.entry.startedAt - a.entry.startedAt ||
+          b.entry.id.localeCompare(a.entry.id),
+      );
     const offset = Math.max(0, Math.trunc(filters.offset ?? 0));
     const limit = Math.min(100, Math.max(1, Math.trunc(filters.limit ?? 50)));
     return {
       active: this.isActive(scope),
-      total: matches.length,
-      entries: matches
+      total: current.length,
+      entries: current
         .slice(offset, offset + limit)
-        .map((entry) => ({ ...entry.summary })),
+        .map(({ summary }) => summary),
     };
   }
 
@@ -404,18 +382,20 @@ export class NetworkCaptureStore {
     scope: NetworkCaptureScope,
     id: string,
   ): Promise<NetworkRequestDetail> {
-    const entry = this.entries.get(id);
-    if (
-      !entry ||
-      entry.scopeKey !== scopeKey(scope) ||
-      !this.isRetained(entry.handle)
-    )
-      throw notFound();
-    await entry.writes;
-    if (!this.isRetained(entry.handle)) throw notFound();
+    const tag = this.codec.scopeTag(scopeKey(scope));
+    await this.cleanup();
+    const entry = [...this.entries.values()].find(
+      (item) => item.id === id && item.scopeTag === tag && this.retained(item),
+    );
+    if (!entry) throw notFound();
     try {
-      const record = await this.load(entry);
-      if (!this.isRetained(entry.handle)) throw notFound();
+      await entry.writes;
+      const record = await this.codec.read(
+        this.directory,
+        entry.name,
+        'detail',
+      );
+      if (!this.retained(entry)) throw notFound();
       return record;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw notFound();
@@ -424,26 +404,34 @@ export class NetworkCaptureStore {
   }
 
   private discard(entry: Entry) {
-    if (!this.entries.delete(entry.handle.id)) return;
+    if (this.entries.get(entry.name) !== entry) return;
+    this.entries.delete(entry.name);
     clearTimeout(entry.timer);
+    this.deleting.add(entry.name);
     const removal = entry.writes
       .catch(() => {})
-      .then(() => rm(entry.directory, { recursive: true, force: true }));
+      .then(() =>
+        rm(join(this.directory, entry.name), { recursive: true, force: true }),
+      );
     this.removals.add(removal);
-    void removal
-      .catch(logCleanupFailure)
-      .finally(() => this.removals.delete(removal));
+    void removal.catch(logCleanupFailure).finally(() => {
+      this.removals.delete(removal);
+      this.deleting.delete(entry.name);
+    });
   }
 
   async removeThread(threadId: string) {
     for (const [key, capture] of this.active)
       if (capture.scope.threadId === threadId) this.active.delete(key);
+    const tag = this.codec.threadTag(threadId);
+    await this.cleanup();
     for (const entry of this.entries.values())
-      if (entry.scope.threadId === threadId) this.discard(entry);
+      if (entry.threadTag === tag) this.discard(entry);
     await Promise.all(this.removals);
   }
 
   cleanup(): Promise<void> {
+    if (this.disposed) return Promise.resolve();
     if (this.sweeping) return this.sweeping;
     const sweep = this.sweep().finally(() => {
       this.sweeping = undefined;
@@ -459,19 +447,40 @@ export class NetworkCaptureStore {
     await Promise.all(this.removals);
     try {
       await this.checkDirectory();
+      const previouslyPublished = [...this.entries.values()].filter(
+        (entry) => entry.published,
+      );
       const directories = await readdir(this.directory, {
         withFileTypes: true,
       });
-      // The timestamp never changes on updates. Other instances' live directories are never entered.
+      const found = new Set<string>();
       for (const directory of directories) {
-        const match =
-          directory.isDirectory() && ownedDirectory.exec(directory.name);
-        if (match && Number(match[1]) <= cutoff)
+        if (!directory.isDirectory()) continue;
+        const file = parseNetworkRecordName(directory.name);
+        const startedAt =
+          file?.startedAt ?? Number(legacyRecordName.exec(directory.name)?.[1]);
+        // Expired files from an older format or key are still eligible for cleanup.
+        if (startedAt <= cutoff) {
           await rm(join(this.directory, directory.name), {
             recursive: true,
             force: true,
           });
+        } else if (
+          file?.serviceTag === this.codec.serviceTag &&
+          startedAt <= this.now()
+        ) {
+          found.add(file.name);
+          if (!this.entries.has(file.name) && !this.deleting.has(file.name))
+            this.remember(file, true);
+        }
       }
+      for (const entry of previouslyPublished) {
+        if (!found.has(entry.name) && this.entries.get(entry.name) === entry) {
+          this.entries.delete(entry.name);
+          clearTimeout(entry.timer);
+        }
+      }
+      this.trim();
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
@@ -481,9 +490,14 @@ export class NetworkCaptureStore {
     this.disposed = true;
     clearInterval(this.sweepTimer);
     this.active.clear();
-    for (const entry of this.entries.values()) this.discard(entry);
-    await Promise.all(this.removals);
     await this.sweeping;
-    this.encryptionKey.fill(0);
+    // Flush queued events but leave retained history for the next service instance.
+    await Promise.allSettled(
+      [...this.entries.values()].map((entry) => entry.writes),
+    );
+    await Promise.all(this.removals);
+    for (const entry of this.entries.values()) clearTimeout(entry.timer);
+    this.entries.clear();
+    this.codec.dispose();
   }
 }

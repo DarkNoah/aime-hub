@@ -56,9 +56,9 @@ pnpm dev
 
 **遇到问题？** 先通过[健康检查](http://127.0.0.1:5173/api/health)确认前端能连通 API。如果局域网访问可以打开页面但无法登录，将浏览器的实际来源（协议、主机和端口）加入 `WEB_ORIGINS`，然后重启服务。只有使用浏览器工具时才需额外安装 Chromium：`pnpm --filter @aime/server exec playwright-core install chromium`；Linux 还需要对应的系统库。
 
-聊天中的 `exec` 可录制当前线程浏览器的 HTTP(S) 请求，包括手动操作触发的请求。导航或点击前调用 `await browser.start()`，操作后用 `await browser.list({ method: 'POST' })` 查找请求，再用 `await browser.read(id)` 查看请求和响应详情。`await browser.stop()` 停止接收新请求，已开始的请求仍可补齐响应。
+聊天中的 `exec` 可录制当前线程浏览器的 HTTP(S) 请求，包括手动操作触发的请求。查询历史时直接调用 `await browser.list({ method: 'POST' })`，用返回的请求 ID 调用 `await browser.read(id)` 查看详情。停止录制或关闭浏览器后仍可反复查询。要捕获新流量，在导航或点击前调用 `await browser.start()`，用 `await browser.stop()` 停止接收新请求，已开始的请求仍可补齐响应。
 
-每条记录加密写入以请求开始时间命名的临时目录，15 分钟后自动删除，服务重启后无法再查询。每个线程最多保留 512 条，每个服务进程最多 2048 条，达到上限时会提前淘汰旧记录。常见凭据字段会脱敏。小型 JSON、URL 编码表单和纯文本可查看正文，省略正文时详情会给出原因。
+每条记录加密写入以请求开始时间命名的临时目录，15 分钟后自动删除，查询不会延长保留时间。服务重启后，只要临时目录仍在且 `BETTER_AUTH_SECRET` 保持一致，即可查询有效期内的历史。每个线程最多保留 512 条，每个服务进程最多 2048 条，达到上限时会提前淘汰旧记录。常见凭据字段会脱敏。小型 JSON、URL 编码表单和纯文本可查看正文，省略正文时详情会给出原因。
 
 ## 生产部署
 

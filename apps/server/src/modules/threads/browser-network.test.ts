@@ -34,15 +34,17 @@ test(
   { skip: process.env.BROWSER_INTEGRATION !== '1', timeout: 45_000 },
   async (t) => {
     const root = await mkdtemp(join(tmpdir(), 'network-browser-test-'));
-    const store = new NetworkCaptureStore({
-      directory: join(root, 'captures'),
-    });
-    const browsers = new ThreadBrowsers(
-      join(root, 'profiles'),
-      undefined,
-      undefined,
-      store,
-    );
+    const createBrowsers = () =>
+      new ThreadBrowsers(
+        join(root, 'profiles'),
+        undefined,
+        undefined,
+        new NetworkCaptureStore({
+          directory: join(root, 'captures'),
+          secret: 'test-secret-for-chat-browser-history',
+        }),
+      );
+    let browsers = createBrowsers();
     let holdResponse!: (send: () => void) => void;
     const delayed = new Promise<() => void>((resolve) => {
       holdResponse = resolve;
@@ -181,7 +183,20 @@ test(
       201,
     );
     assert.equal(((await second('list', {})) as Listing).active, false);
+    await browsers.dispose();
+    browsers = createBrowsers();
+    const restored = browsers.execForThread('first', 'owner', 'project');
+    requestContext.set('execBrowser', restored);
+    assert.deepEqual(
+      await inChat(`
+        const history = await browser.list({ method: 'POST', status: 201 });
+        const record = await browser.read(history.entries[0].id);
+        text([history.active, record.id, JSON.parse(record.responseBody).saved]);
+      `),
+      [{ type: 'text', text: JSON.stringify([false, submitted.id, true]) }],
+    );
+    assert.equal(browsers.get('first', 'owner'), undefined);
     await browsers.remove('first');
-    await assert.rejects(first('read', { id: submitted.id }));
+    await assert.rejects(restored('read', { id: submitted.id }));
   },
 );

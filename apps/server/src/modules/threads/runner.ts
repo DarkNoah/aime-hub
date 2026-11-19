@@ -61,6 +61,7 @@ import { threadScope } from './scope.js';
 import { listChatSkills, resolveAgentSkillPaths } from './skills.js';
 import { getChatUsage } from './usage.js';
 import { ThreadBrowsers } from './browser/registry.js';
+import type { NetworkCaptureStore } from './browser/network-store.js';
 import { resolve } from 'node:path';
 import { threadMessages } from './message-conversion.js';
 import { consumeSessionStream } from './session-stream.js';
@@ -123,6 +124,7 @@ export function createChatRunner(
   groupChats?: GroupChatService,
   getMessageCompressionTokens: () => Promise<number> = async () =>
     defaultSystemSettings.messageCompressionTokens,
+  browserCaptures?: NetworkCaptureStore,
 ): ChatRunner {
   const getConfig = async (
     id?: string | null,
@@ -182,6 +184,7 @@ export function createChatRunner(
             projectId,
           )
       : undefined,
+    browserCaptures,
   );
   const projectFilesystem = async (userId: string, projectId: string) => {
     const config = projects
