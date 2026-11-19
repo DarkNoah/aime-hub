@@ -58,6 +58,8 @@ pnpm dev
 
 聊天中的 `exec` 可录制当前线程浏览器的 HTTP(S) 请求，包括手动操作触发的请求。查询历史时直接调用 `await browser.list({ method: 'POST' })`，用返回的请求 ID 调用 `await browser.read(id)` 查看详情。停止录制或关闭浏览器后仍可反复查询。要捕获新流量，在导航或点击前调用 `await browser.start()`，用 `await browser.stop()` 停止接收新请求，已开始的请求仍可补齐响应。
 
+要找含有特定内容的记录，可以调用 `await browser.list({ method: 'POST', pattern: '(?i)timeout|retry' })`。可直接传入关键字，也可使用 RE2 正则表达式，默认区分大小写，`(?i)` 可忽略大小写。搜索范围包括已脱敏的 URL、方法、状态码、请求头、响应头、已保存的正文和错误信息。`pattern` 可与 `url`、`method`、`status` 组合使用，匹配完成后再按 `offset` 和 `limit` 分页。每条结果的 `match.field` 和 `match.snippet` 给出首个命中字段和片段。
+
 每条记录加密写入以请求开始时间命名的临时目录，15 分钟后自动删除，查询不会延长保留时间。服务重启后，只要临时目录仍在且 `BETTER_AUTH_SECRET` 保持一致，即可查询有效期内的历史。每个线程最多保留 512 条，每个服务进程最多 2048 条，达到上限时会提前淘汰旧记录。常见凭据字段会脱敏。小型 JSON、URL 编码表单和纯文本可查看正文，省略正文时详情会给出原因。
 
 ## 生产部署

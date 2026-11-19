@@ -83,6 +83,7 @@ test('records isolate users, threads and projects and finish after stopping', as
   assert.equal(result.active, false);
   assert.equal(result.entries[0].state, 'finished');
   assert.equal('requestBody' in result.entries[0], false);
+  assert.equal('match' in result.entries[0], false);
   for (const other of [bob, project, { ...alice, threadId: 'other' }]) {
     assert.equal((await store.list(other)).total, 0);
     await assert.rejects(store.read(other, handle.id), /not found or expired/);
@@ -107,6 +108,58 @@ test('records isolate users, threads and projects and finish after stopping', as
   )!;
   await writeFile(join(directory, destination, 'record.bin'), data);
   await assert.rejects(store.read(bob, other.id), /integrity verification/);
+});
+
+test('patterns find request and response fields and return only a short matching excerpt', async (t) => {
+  const { store } = await setup(t);
+  await assert.rejects(store.list(alice, { pattern: '[' }));
+  await store.start(alice);
+  const handle = store.begin(alice, {
+    ...request,
+    requestHeaders: { 'x-checkout-id': 'Track-723' },
+    requestBody: '{"message":"下单成功"}',
+  })!;
+  const padding = '填'.repeat(1200);
+  await store.update(handle, {
+    state: 'failed',
+    status: 503,
+    mimeType: 'application/problem+json',
+    error: 'net::ERR_CONNECTION_RESET',
+    responseHeaders: { 'x-routing-region': 'Region-EU' },
+    responseBody: padding + '库存 Order-452 [denied]' + padding,
+  });
+  await store.stop(alice);
+
+  for (const [pattern, field, fragment] of [
+    ['/it[eE]ms', 'url', '/items'],
+    ['P(OS|U)T', 'method', 'POST'],
+    ['5[0-9]{2}', 'status', '503'],
+    ['f.tch', 'resourceType', 'fetch'],
+    ['fai[l]ed', 'state', 'failed'],
+    ['(?i)X-checkout', 'requestHeaders', 'x-checkout'],
+    ['Track-[0-9]+', 'requestHeaders', 'Track-723'],
+    ['下单(失败|成功)', 'requestBody', '下单成功'],
+    ['routing-reg.on', 'responseHeaders', 'routing-region'],
+    ['Region-(US|EU)', 'responseHeaders', 'Region-EU'],
+    ['problem\\+json', 'mimeType', 'problem+json'],
+    ['ERR_CONNECTION_[A-Z]+', 'error', 'ERR_CONNECTION_RESET'],
+    [
+      '(?i)库存 order-[0-9]+ \\[denied\\]',
+      'responseBody',
+      '库存 Order-452 [denied]',
+    ],
+  ]) {
+    const result = await store.list(alice, { pattern });
+    assert.equal(result.total, 1, pattern);
+    const entry = result.entries[0];
+    assert.equal(entry.id, handle.id);
+    assert.ok(entry.match, pattern);
+    assert.equal(entry.match.field, field, pattern);
+    assert.ok(entry.match.snippet.includes(fragment), pattern);
+    assert.ok(entry.match.snippet.length < padding.length);
+    assert.equal('responseBody' in entry, false);
+  }
+  assert.equal((await store.list(alice, { pattern: 'order-452' })).total, 0);
 });
 
 test('a stopped recording cannot capture delayed events into a new generation', async (t) => {
@@ -247,6 +300,21 @@ test('a fresh process can query earlier captures without starting a recording', 
     page.entries.map((entry) => entry.id),
     [first],
   );
+  const pattern = '(?i)RESPONSE 20[01]';
+  const results = await reader.list(alice, {
+    url: '/items',
+    method: 'post',
+    pattern,
+    offset: 1,
+    limit: 1,
+  });
+  assert.equal(results.total, 2);
+  assert.deepEqual(
+    results.entries.map((entry) => entry.id),
+    [first],
+  );
+  assert.equal(results.entries[0].match?.field, 'responseBody');
+  assert.equal((await reader.list(alice, { pattern, status: 403 })).total, 0);
   const history = await reader.list(alice);
   assert.deepEqual(
     history.entries.map((entry) => entry.id),
@@ -258,12 +326,17 @@ test('a fresh process can query earlier captures without starting a recording', 
   );
   for (const unrelated of [bob, project, { ...alice, threadId: 'other' }]) {
     assert.equal((await reader.list(unrelated)).total, 0);
+    assert.equal((await reader.list(unrelated, { pattern })).total, 0);
     await assert.rejects(reader.read(unrelated, first), /not found or expired/);
   }
   advance(networkRetentionMs - 2001);
   assert.equal((await reader.read(alice, first)).status, 201);
   advance(1);
   await assert.rejects(reader.read(alice, first), /not found or expired/);
+  assert.deepEqual(
+    (await reader.list(alice, { pattern })).entries.map((entry) => entry.id),
+    [second],
+  );
   assert.deepEqual(
     (await reader.list(alice)).entries.map((entry) => entry.id),
     [third, second],

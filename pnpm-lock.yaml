@@ -215,6 +215,9 @@ importers:
       quickjs-emscripten:
         specifier: 0.31.0
         version: 0.31.0
+      re2js:
+        specifier: 2.10.0
+        version: 2.10.0
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2

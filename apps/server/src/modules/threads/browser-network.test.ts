@@ -189,11 +189,25 @@ test(
     requestContext.set('execBrowser', restored);
     assert.deepEqual(
       await inChat(`
-        const history = await browser.list({ method: 'POST', status: 201 });
-        const record = await browser.read(history.entries[0].id);
-        text([history.active, record.id, JSON.parse(record.responseBody).saved]);
+        const history = await browser.list({ method: 'POST', status: 201, pattern: '(?i)"SAVED":(true|false)' });
+        const { id, match } = history.entries[0];
+        const record = await browser.read(id);
+        const hidden = await browser.list({ pattern: 'private-(url|header|request|response)-' });
+        text([history.active, record.id, JSON.parse(record.responseBody).saved, match.field, match.snippet.includes('private-response-token'), hidden.total]);
       `),
-      [{ type: 'text', text: JSON.stringify([false, submitted.id, true]) }],
+      [
+        {
+          type: 'text',
+          text: JSON.stringify([
+            false,
+            submitted.id,
+            true,
+            'responseBody',
+            false,
+            0,
+          ]),
+        },
+      ],
     );
     assert.equal(browsers.get('first', 'owner'), undefined);
     await browsers.remove('first');

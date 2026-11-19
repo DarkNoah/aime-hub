@@ -14,6 +14,7 @@ import {
 } from './session.js';
 
 const listFilters = z.object({
+  pattern: z.string().optional(),
   url: z.string().optional(),
   method: z.string().optional(),
   status: z.number().int().optional(),
@@ -74,7 +75,7 @@ export class ThreadBrowsers {
           return this.captures.stop(scope);
         case 'list':
           return withAbortSignal(signal, () =>
-            this.captures.list(scope, listFilters.parse(input)),
+            this.captures.list(scope, listFilters.parse(input), signal),
           );
         case 'read':
           return withAbortSignal(signal, () =>

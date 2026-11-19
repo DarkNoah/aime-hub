@@ -6,9 +6,14 @@ import {
   NetworkRecordCodec,
   NetworkRecordIntegrityError,
   legacyRecordName,
+  networkRequestSummary,
   parseNetworkRecordName,
   type NetworkRecordFile,
 } from './network-record-file.js';
+import {
+  compileNetworkPattern,
+  type NetworkPatternMatch,
+} from './network-pattern.js';
 
 export const networkRetentionMs = 15 * 60_000;
 const maxPerScope = 512;
@@ -62,12 +67,29 @@ export type NetworkRequestSummary = NetworkRequestHandle & {
 
 export type NetworkRequestDetail = NetworkRequestSummary & NetworkRequestPatch;
 export type NetworkListFilters = {
+  pattern?: string;
   url?: string;
   method?: string;
   status?: number;
   limit?: number;
   offset?: number;
 };
+
+type NetworkListEntry = NetworkRequestSummary & {
+  match?: NetworkPatternMatch;
+};
+
+function matchesListFilters(
+  record: NetworkRequestSummary,
+  filters: NetworkListFilters,
+) {
+  return (
+    (!filters.url || record.url.includes(filters.url)) &&
+    (!filters.method ||
+      record.method.toUpperCase() === filters.method.toUpperCase()) &&
+    (filters.status === undefined || record.status === filters.status)
+  );
+}
 
 type Entry = NetworkRecordFile & {
   writes: Promise<void>;
@@ -322,33 +344,58 @@ export class NetworkCaptureStore {
     return write;
   }
 
-  async list(scope: NetworkCaptureScope, filters: NetworkListFilters = {}) {
+  async list(
+    scope: NetworkCaptureScope,
+    filters: NetworkListFilters = {},
+    signal?: AbortSignal,
+  ) {
+    signal?.throwIfAborted();
+    const search =
+      filters.pattern === undefined
+        ? undefined
+        : compileNetworkPattern(filters.pattern);
+    const prefilter =
+      search && (filters.url || filters.method || filters.status !== undefined);
     const tag = this.codec.scopeTag(scopeKey(scope));
     await this.cleanup();
     const candidates = [...this.entries.values()].filter(
       (entry) => entry.scopeTag === tag && this.retained(entry),
     );
-    const matches: { entry: Entry; summary: NetworkRequestSummary }[] = [];
+    const matches: { entry: Entry; summary: NetworkListEntry }[] = [];
     // Bound open file descriptors during a filtered history query.
     for (let i = 0; i < candidates.length; i += 16) {
+      signal?.throwIfAborted();
       await Promise.all(
         candidates.slice(i, i + 16).map(async (entry) => {
           try {
             await entry.writes;
-            const summary = await this.codec.read(
+            // Eliminate unrelated requests before decrypting bodies when filters are combined.
+            if (prefilter) {
+              const summary = await this.codec.read(
+                this.directory,
+                entry.name,
+                'summary',
+              );
+              if (!matchesListFilters(summary, filters)) return;
+            }
+            signal?.throwIfAborted();
+            const record = await this.codec.read(
               this.directory,
               entry.name,
-              'summary',
+              search ? 'detail' : 'summary',
             );
-            if (
-              (!filters.url || summary.url.includes(filters.url)) &&
-              (!filters.method ||
-                summary.method.toUpperCase() ===
-                  filters.method.toUpperCase()) &&
-              (filters.status === undefined ||
-                summary.status === filters.status)
-            )
-              matches.push({ entry, summary });
+            if (!matchesListFilters(record, filters)) return;
+            signal?.throwIfAborted();
+            if (search) {
+              const match = search(record);
+              if (match)
+                matches.push({
+                  entry,
+                  summary: { ...networkRequestSummary(record), match },
+                });
+            } else {
+              matches.push({ entry, summary: record });
+            }
           } catch (error) {
             if (
               error instanceof NetworkRecordIntegrityError ||

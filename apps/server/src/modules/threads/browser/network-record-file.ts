@@ -36,6 +36,32 @@ export type NetworkRecordFile = NonNullable<
   ReturnType<typeof parseNetworkRecordName>
 >;
 
+export function networkRequestSummary({
+  id,
+  captureId,
+  startedAt,
+  url,
+  method,
+  resourceType,
+  state,
+  status,
+  durationMs,
+  redirectedFrom,
+}: NetworkRequestDetail): NetworkRequestSummary {
+  return {
+    id,
+    captureId,
+    startedAt,
+    url,
+    method,
+    resourceType,
+    state,
+    status,
+    durationMs,
+    redirectedFrom,
+  };
+}
+
 async function readBytes(file: FileHandle, start: number, length: number) {
   const bytes = Buffer.allocUnsafe(length);
   let count = 0;
@@ -108,32 +134,12 @@ export class NetworkRecordCodec {
   }
 
   encode(name: string, record: NetworkRequestDetail) {
-    const {
-      id,
-      captureId,
-      startedAt,
-      url,
-      method,
-      resourceType,
-      state,
-      status,
-      durationMs,
-      redirectedFrom,
-    } = record;
-    const summary: NetworkRequestSummary = {
-      id,
-      captureId,
-      startedAt,
-      url,
-      method,
-      resourceType,
-      state,
-      status,
-      durationMs,
-      redirectedFrom,
-    };
     // The authenticated filename binds the scope, request ID and original expiry.
-    const head = this.encrypt(summary, 'summary:' + name, maxSummaryBytes);
+    const head = this.encrypt(
+      networkRequestSummary(record),
+      'summary:' + name,
+      maxSummaryBytes,
+    );
     const detail = this.encrypt(record, 'detail:' + name, maxDetailBytes);
     const length = Buffer.alloc(4);
     length.writeUInt32BE(head.length);
