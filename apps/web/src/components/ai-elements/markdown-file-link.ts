@@ -6,6 +6,20 @@ const hasControlCharacters = (value: string) =>
   );
 const URI_SCHEME = /^[a-z][a-z\d+.-]*:/i;
 
+function resolveSegments(parts: string[], segments: string[]) {
+  for (const segment of parts) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      if (!segments.length) return;
+      segments.pop();
+    } else {
+      if (segment.includes(':')) return;
+      segments.push(segment);
+    }
+  }
+  return segments;
+}
+
 function normalizeWorkspacePath(path: string): string | undefined {
   if (
     !path ||
@@ -29,17 +43,8 @@ function normalizeWorkspacePath(path: string): string | undefined {
     prefix = '../shared';
     parts.splice(0, 2);
   }
-  const segments: string[] = [];
-  for (const segment of parts) {
-    if (!segment || segment === '.') continue;
-    if (segment === '..') {
-      if (segments.length === 0) return undefined;
-      segments.pop();
-      continue;
-    }
-    if (segment.includes(':')) return undefined;
-    segments.push(segment);
-  }
+  const segments = resolveSegments(parts, []);
+  if (!segments) return undefined;
 
   if (prefix === '../shared')
     return `${prefix}${segments.length ? '/' + segments.join('/') : ''}`;
@@ -49,6 +54,15 @@ function normalizeWorkspacePath(path: string): string | undefined {
 }
 
 export type WorkspaceFileTarget = { path: string; line?: number };
+
+function splitFileLine(value: string): WorkspaceFileTarget | undefined {
+  const suffix = /:(\d+)$/.exec(value);
+  if (!suffix) return { path: value };
+  const line = Number(suffix[1]);
+  const path = value.slice(0, suffix.index);
+  if (path && Number.isSafeInteger(line) && line >= 1 && !/[/\\]$/.test(path))
+    return { path, line };
+}
 
 export function getWorkspaceFileTarget(
   href?: string,
@@ -68,15 +82,9 @@ export function getWorkspaceFileTarget(
   }
 
   try {
-    const decoded = decodeURIComponent(href);
-    const suffix = /:(\d+)$/.exec(decoded);
-    const line = suffix ? Number(suffix[1]) : undefined;
-    if (line !== undefined && (!Number.isSafeInteger(line) || line < 1))
-      return undefined;
-    const rawPath = suffix ? decoded.slice(0, suffix.index) : decoded;
-    if (line !== undefined && /[/\\]$/.test(rawPath)) return undefined;
-    const path = normalizeWorkspacePath(rawPath);
-    return path ? { path, ...(line !== undefined ? { line } : {}) } : undefined;
+    const target = splitFileLine(decodeURIComponent(href));
+    const path = target && normalizeWorkspacePath(target.path);
+    return path ? { ...target, path } : undefined;
   } catch {
     return undefined;
   }
@@ -114,9 +122,65 @@ type HastNode = {
   type: string;
 };
 
+function visitMarkdownNodes(node: HastNode, visit: (node: HastNode) => void) {
+  visit(node);
+  node.children?.forEach((child) => visitMarkdownNodes(child, visit));
+}
+
+function isDocumentRelativeHref(href: unknown): href is string {
+  return (
+    typeof href === 'string' &&
+    !!href &&
+    !/^[/#?]/.test(href) &&
+    !URI_SCHEME.test(href)
+  );
+}
+
+// Keep the original href until the preview can resolve it against its own file.
+// Absolute URLs and fragment-only links still go through Streamdown's hardening.
+export function rehypePreviewFileLinks() {
+  return (tree: HastNode) =>
+    visitMarkdownNodes(tree, (node) => {
+      if (
+        node.tagName === 'a' &&
+        isDocumentRelativeHref(node.properties?.href)
+      ) {
+        node.tagName = 'preview-file-link';
+      }
+    });
+}
+
+export function resolvePreviewFileLink(
+  sourcePath: string,
+  href: string,
+): (WorkspaceFileTarget & { kind: 'file' | 'directory' }) | undefined {
+  if (!isDocumentRelativeHref(href)) return;
+  let target: WorkspaceFileTarget | undefined;
+  try {
+    target = splitFileLine(decodeURIComponent(href.split(/[?#]/, 1)[0]));
+  } catch {
+    return;
+  }
+  if (
+    !target ||
+    /^[\\/]/.test(target.path) ||
+    hasControlCharacters(target.path)
+  )
+    return;
+  const parts = target.path.split(/[/\\]/);
+  const segments = resolveSegments(parts, sourcePath.split('/').slice(0, -1));
+  const directory = ['', '.', '..'].includes(parts.at(-1)!);
+  if (!segments || (directory && target.line !== undefined)) return;
+  return {
+    ...target,
+    path: segments.join('/'),
+    kind: directory ? 'directory' : 'file',
+  };
+}
+
 export function rehypeWorkspaceFileLinks() {
-  return (tree: HastNode) => {
-    const visit = (node: HastNode) => {
+  return (tree: HastNode) =>
+    visitMarkdownNodes(tree, (node) => {
       if (node.type === 'element' && node.tagName === 'a') {
         const href = node.properties?.href;
         if (typeof href === 'string') {
@@ -148,10 +212,5 @@ export function rehypeWorkspaceFileLinks() {
           }
         }
       }
-
-      node.children?.forEach(visit);
-    };
-
-    visit(tree);
-  };
+    });
 }

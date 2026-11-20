@@ -207,7 +207,9 @@ export function RoomAgentThreadDrawer({
                         className="min-w-0 truncate text-xs text-muted-foreground"
                         title={filePath}
                       >
-                        {filePath.split('/').pop()}
+                        {filePath === '.'
+                          ? t('files.root')
+                          : filePath.split('/').filter(Boolean).at(-1)}
                       </span>
                     </header>
                     <div className="min-h-0 flex-1 overflow-hidden">

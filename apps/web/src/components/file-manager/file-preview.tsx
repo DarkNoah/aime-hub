@@ -22,6 +22,7 @@ import type { FileEdits } from './use-file-edits';
 import { DiscardEditsDialog } from './discard-edits-dialog';
 import { useFileWrap } from './use-file-wrap';
 import { getPreviewKind } from './preview/preview-kind';
+import type { PreviewLinkNavigation } from './preview/types';
 
 const TextEditor = lazy(() => import('./preview/text-editor'));
 type PreviewMode = 'rendered' | 'source' | 'edit';
@@ -34,6 +35,7 @@ export function FilePreview({
   revision,
   edits,
   readOnly = false,
+  onOpenLink,
 }: {
   client: FilePreviewClient;
   path: string;
@@ -42,6 +44,7 @@ export function FilePreview({
   revision: number;
   edits: FileEdits;
   readOnly?: boolean;
+  onOpenLink?: PreviewLinkNavigation['onOpenLink'];
 }) {
   const { t } = useTranslation();
   const [wrap, setWrap] = useFileWrap();
@@ -130,6 +133,8 @@ export function FilePreview({
         data={edit ? { ...data, text: edit.text } : data}
         url={url}
         downloadUrl={client.raw(path, true)}
+        getFileUrl={client.raw}
+        onOpenLink={onOpenLink}
         line={line}
         navigation={navigation}
         wrap={wrap}

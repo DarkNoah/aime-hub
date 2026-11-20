@@ -34,6 +34,7 @@ import {
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { fileErrorKey } from './api';
+import { useScopedWorkspaceFile } from './context';
 import { EntryActions, type EntryAction } from './entry-actions';
 import { rootEntry } from './state';
 import { EntryDialog } from './entry-dialog';
@@ -145,6 +146,7 @@ function FileManagerPane({
   directoryMenu?: ReactNode;
 }) {
   const { t } = useTranslation();
+  const openLink = useScopedWorkspaceFile(state.scope);
   const [action, setAction] = useState<EntryAction | null>(null);
   const [closing, setClosing] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -530,6 +532,7 @@ function FileManagerPane({
                     navigation={activeTab.navigation}
                     revision={revision}
                     edits={state.edits}
+                    onOpenLink={openLink}
                   />
                 </TabsContent>
               </Tabs>

@@ -115,9 +115,12 @@ export function SkillPreviewDialog({
               className="min-h-0 min-w-0"
             >
               <FilePreview
-                key={state.selected}
+                key={state.file.path}
                 client={client}
-                path={state.selected}
+                path={state.file.path}
+                line={state.file.line}
+                navigation={state.file.navigation}
+                onOpenLink={state.openLink}
                 revision={0}
                 edits={edits}
                 readOnly={!!skill.sharing && !skill.sharing.legacyMoved}

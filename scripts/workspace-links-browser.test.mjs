@@ -43,12 +43,22 @@ test(
       '[Report at 100](</workspace/My Project/My Report.md:100>)',
       '[HTML at 80](/workspace/page.html:80)',
       '[Shared at 90](../shared/shared.txt:90)',
+      '[Shared guide](../shared/docs/guide/index.md)',
       '[Plain file](/workspace/plain.txt)',
       '[Directory](/workspace/src/)',
       '[Website](https://example.com/guide:12)',
       '~~Removed~~',
       '| Feature | Supported |\n| --- | --- |\n| GFM | yes |',
     ].join('\n\n');
+    const sharedDocuments = {
+      'docs/guide/index.md': [
+        '# Shared guide',
+        '[Next page](../chapters/中文%20说明.md)',
+        '[HTTP guide](http://example.com/guide)',
+        '[HTTPS guide](https://example.com/guide)',
+      ].join('\n\n'),
+      'docs/chapters/中文 说明.md': '# Chapter\n\n[Browse assets](assets)',
+    };
     const entry = `import React from 'react';
 import {createRoot} from 'react-dom/client';
 import {createRouter,createRootRoute,createMemoryHistory,RouterProvider} from '@tanstack/react-router';
@@ -65,15 +75,20 @@ import {initializeI18n} from '/src/i18n';
 import '/src/index.css';
 window.fileCalls=[];
 const markdown=${JSON.stringify(markdown)};
+const sharedDocuments=${JSON.stringify(sharedDocuments)};
 filesApi.resolve=async(threadId,path)=>{
   window.fileCalls.push({operation:'resolve',threadId,path});
   const scope=path.startsWith('../shared/')?'shared':'thread';
-  return {scope,kind:path.endsWith('/')?'directory':'file',path:path.replace(/^\\/workspace\\//,'').replace(/^\\.\\.\\/shared\\//,'').replace(/\\/$/,'')};
+  const relative=path.replace(/^\\/workspace\\//,'').replace(/^\\.\\.\\/shared\\//,'').replace(/\\/$/,'');
+  return {scope,kind:path.endsWith('/')||relative==='docs/chapters/assets'?'directory':'file',path:relative};
 };
-filesApi.list=async()=>({entries:[],truncated:false});
+filesApi.list=async(_threadId,path,_signal,scope)=>({
+  entries:scope==='shared' && path==='docs/chapters/assets' ? [{path:path+'/image.png',name:'image.png',kind:'file'}] : [],
+  truncated:false,
+});
 filesApi.preview=async(threadId,path,_signal,scope)=>{
   window.fileCalls.push({operation:'preview',threadId,path,scope});
-  const text=Array.from({length:180},(_,i)=>'line '+(i+1)).join('\\n');
+  const text=(scope==='shared' && sharedDocuments[path]) || Array.from({length:180},(_,i)=>'line '+(i+1)).join('\\n');
   return {path,kind:'text',text,mime:path.endsWith('.html')?'text/html':'text/plain',size:text.length,modifiedAt:'fixture',version:'fixture'};
 };
 const group=new URLSearchParams(location.search).has('room');
@@ -257,6 +272,24 @@ createRoot(document.getElementById('root')).render(<ThemeProvider><SessionContex
     await link('HTML at 80').click();
     await assertLine(80);
     await page.screenshot({ path: '/tmp/workspace-file-links-readonly.png' });
+    const preview = page.getByTestId('readonly');
+    await link('Shared guide').click();
+    await preview.getByRole('heading', { name: 'Shared guide' }).waitFor();
+    for (const protocol of ['http', 'https']) {
+      const external = preview.getByRole('link', {
+        name: protocol.toUpperCase() + ' guide',
+        exact: true,
+      });
+      assert.equal(
+        await external.getAttribute('href'),
+        protocol + '://example.com/guide',
+      );
+      assert.equal(await external.getAttribute('target'), '_blank');
+    }
+    await preview.getByRole('link', { name: 'Next page' }).click();
+    await preview.getByRole('heading', { name: 'Chapter' }).waitFor();
+    await preview.getByRole('link', { name: 'Browse assets' }).click();
+    await preview.getByRole('button', { name: 'image.png' }).waitFor();
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(url + '/?room');
     await link('Code at 120').click();

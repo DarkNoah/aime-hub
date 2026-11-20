@@ -59,7 +59,7 @@ import { cn } from '@/lib/utils';
 import { useFileManager } from '@/components/file-manager/use-file-manager';
 import { WorkspaceFileContext } from '@/components/file-manager/context';
 import { WorkspaceDragContext } from '@/components/file-manager/drag-context';
-import { filesApi, fileErrorKey } from '@/components/file-manager/api';
+import { fileErrorKey } from '@/components/file-manager/api';
 import { FloatingWindow } from '@/components/floating-window';
 import { BrowserStatusIcon } from '@/components/browser/status-icon';
 import { usePluginRightSidebar } from '@/features/plugins/use-right-sidebar';
@@ -278,12 +278,12 @@ export function ChatWorkspace({
   useEffect(() => () => fileNavigation.current?.abort(), [threadId]);
   const openWorkspaceFile = useCallback(
     (path: string, _kind?: 'file' | 'directory', line?: number) => {
-      if (!threadId) return;
+      if (!files.available) return;
       fileNavigation.current?.abort();
       const controller = new AbortController();
       fileNavigation.current = controller;
-      void filesApi
-        .resolve(threadId, path, controller.signal)
+      void files.client
+        .resolve(path, controller.signal)
         .then((target) => {
           if (controller.signal.aborted) return;
           setFileScope(target.scope);
@@ -305,7 +305,8 @@ export function ChatWorkspace({
         });
     },
     [
-      threadId,
+      files.available,
+      files.client,
       compact,
       expandInspector,
       revealDirectory,

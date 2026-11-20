@@ -19,6 +19,8 @@ export function createWorkspaceFileClient(
     },
     list: (path: string, signal?: AbortSignal) =>
       api.list(accessThread(), path, signal, scope),
+    resolve: (reference: string, signal?: AbortSignal) =>
+      api.resolve(accessThread(), reference, signal),
     preview: (path: string, signal?: AbortSignal) =>
       api.preview(accessThread(), path, signal, scope),
     search: (query: string, signal?: AbortSignal) =>

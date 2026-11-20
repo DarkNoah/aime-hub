@@ -5,8 +5,40 @@ import {
   getWorkspaceFileTarget,
   isWorkspaceDirectoryLink,
   rehypeWorkspaceFileLinks,
+  resolvePreviewFileLink,
   toWorkspaceFileLink,
 } from '../apps/web/src/components/ai-elements/markdown-file-link.js';
+
+test('file previews resolve links relative to the Markdown document', () => {
+  const resolve = (href: string) =>
+    resolvePreviewFileLink('docs/100%/index.md', href);
+  assert.deepEqual(resolve('./%E8%AF%B4%E6%98%8E%20v2.md'), {
+    path: 'docs/100%/说明 v2.md',
+    kind: 'file',
+  });
+  assert.deepEqual(resolve('../assets/notes.txt:3'), {
+    path: 'docs/assets/notes.txt',
+    kind: 'file',
+    line: 3,
+  });
+  assert.deepEqual(resolve('assets/'), {
+    path: 'docs/100%/assets',
+    kind: 'directory',
+  });
+  assert.deepEqual(resolve('../..'), { path: '', kind: 'directory' });
+  for (const href of [
+    '../../../outside',
+    '%2F%2Fsite.test',
+    '%00',
+    '%ZZ',
+    '#section',
+    'https://example.com',
+    'file:///example',
+  ]) {
+    assert.equal(resolve(href), undefined, href);
+  }
+});
+
 for (const [href, expected] of [
   ['./notes/readme.md', 'notes/readme.md'],
   ['notes/../readme.md', 'readme.md'],
