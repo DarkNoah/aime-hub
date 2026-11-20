@@ -8,7 +8,7 @@ import sys
 
 from repository import SkillError, directory, handle_termination, installed, parse_source, repository, skill_home
 from archive import archive
-from project import check_ancestors, group_parts, locate_project, project_snapshot, read_project
+from project import check_ancestors, ensure_archive_migrated, group_parts, locate_project, project_snapshot, read_archive_group, read_project
 
 
 def main(argv: list[str]) -> int:
@@ -40,11 +40,16 @@ def main(argv: list[str]) -> int:
                     file = next(file for file in snapshot.files if file["path"] == rows[0]["manifest"])
                     print(snapshot.read(file).decode("utf-8"))
                     return 0
-                parts = group_parts(snapshot, args.whole_project)
+                parts = group_parts(snapshot)
+                ensure_archive_migrated(root, snapshot)
                 check_ancestors(root, parts)
                 if not args.whole_project:
                     group = directory(root, parts)
                     project = read_project(group, legacy=len(parts) == 2)
+                archive_group = read_archive_group(group)
+                group_conflict = (snapshot.source.kind == "archive" and not args.whole_project
+                                  and group.exists() and not archive_group and any(group.iterdir()))
+                group_conflict = group_conflict or (snapshot.source.kind != "archive" and archive_group)
                 for row in rows:
                     project_root = group / (project["root"] if project else ".")
                     target = project_root / row["path"] if args.whole_project else group / row["name"]
@@ -54,8 +59,8 @@ def main(argv: list[str]) -> int:
                         row["installed"] = project is not None and any(entry["path"] == row["manifest"] for entry in project["entries"])
                         row["conflict"] = group.exists() or group.is_symlink()
                     else:
-                        row["installed"] = project is None and target.is_dir() and not target.is_symlink() and (target / "SKILL.md").is_file()
-                        row["conflict"] = project is not None or target.exists() or target.is_symlink()
+                        row["installed"] = project is None and not group_conflict and target.is_dir() and not target.is_symlink() and (target / "SKILL.md").is_file()
+                        row["conflict"] = project is not None or group_conflict or target.exists() or target.is_symlink()
         else:
             if args.path or args.ref or args.preview or args.whole_project:
                 raise SkillError("--path, --ref, --preview and --whole-project require a source.")

@@ -37,6 +37,8 @@ import { RequestLogService } from './modules/request-logs/service.js';
 import { ThreadService } from './modules/threads/service.js';
 import { ProjectService } from './modules/projects/service.js';
 import { SkillService } from './modules/skills/service.js';
+import { migrateSkillLayouts } from './modules/skills/layout-migration.js';
+import { migrateAgentSkillReferences } from './modules/agents/skill-reference-migration.js';
 import { LocalAgentService } from './modules/agents/local-service.js';
 import { syncBuiltinSkills } from './modules/skills/builtin.js';
 import { EnvironmentVariableService } from './modules/environment-variables/service.js';
@@ -195,6 +197,27 @@ const { mastra, storage, memory } = createMastraRuntime(
   await getMemoryConfig(),
 );
 await storage.init();
+// Multiple replicas can share the same skill volume and Mastra database.
+const layoutLock = await pool.connect();
+try {
+  await layoutLock.query(
+    "SELECT pg_advisory_lock(hashtext('skill-layout-migration'))",
+  );
+  const conflicts = await migrateSkillLayouts(
+    workspaceRoot,
+    (paths, migrationId) =>
+      migrateAgentSkillReferences(pool, {
+        scope: 'global',
+        paths,
+        migrationId,
+      }),
+  );
+  for (const conflict of conflicts) console.warn(conflict);
+} finally {
+  await layoutLock
+    .query("SELECT pg_advisory_unlock(hashtext('skill-layout-migration'))")
+    .finally(() => layoutLock.release());
+}
 const skills = new SkillService(
   workspaceRoot,
   undefined,

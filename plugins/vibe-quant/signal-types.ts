@@ -4,7 +4,7 @@ import type { BacktestInput, TradeRecord } from './strategy-types.js';
 import type { Engine } from './shared.js';
 import { DURATIONS, MONTH_DURATION } from './shared.js';
 
-/** Published parameters set the calculation period independently of chart zoom. */
+/** Strategy parameters set the calculation period independently of chart zoom. */
 export function strategyHintDuration(parameters?: Record<string, unknown>) {
   const value = parameters?.duration;
   const duration =
@@ -12,6 +12,17 @@ export function strategyHintDuration(parameters?: Record<string, unknown>) {
       ? Number(value)
       : NaN;
   return DURATIONS.find((item) => item !== MONTH_DURATION && item === duration);
+}
+
+/** The runner injects the instrument and execution model from the monitor. */
+export function monitorParameters(
+  parameters: Record<string, unknown>,
+  duration: number = strategyHintDuration(parameters) ?? 60,
+): Record<string, unknown> {
+  const editable = { ...parameters };
+  delete editable.symbol;
+  delete editable.execution_model;
+  return { ...editable, duration };
 }
 
 export interface SignalMonitorInput extends Pick<
@@ -53,6 +64,8 @@ export function isIndexSymbol(symbol: string) {
 }
 export interface SignalMonitor {
   id: string;
+  /** Stable chart attachment across recalculations with fresh monitor histories. */
+  attachment_id?: string;
   strategy_id: string;
   version_number: number;
   version_name?: string;

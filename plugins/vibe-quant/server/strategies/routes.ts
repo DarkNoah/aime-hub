@@ -80,6 +80,34 @@ export function strategyRoutes(
     if (!body.success) return c.json({ code: 'VALIDATION_ERROR' }, 400);
     return c.json(await getRecords().save(c.get('userId'), body.data), 201);
   });
+  api.get('/favorites', async (c) => {
+    const rows = await context.database.query<{ strategy_id: string }[]>(
+      'SELECT strategy_id FROM plugin_vibe_quant_strategy_favorites WHERE user_id = $1',
+      [c.get('userId')],
+    );
+    return c.json(rows.map((row) => row.strategy_id));
+  });
+  api.put('/:id/favorite', async (c) => {
+    const id = readId(c.req.param('id'));
+    const body = z
+      .object({ favorite: z.boolean() })
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ code: 'VALIDATION_ERROR' }, 400);
+    const params = [c.get('userId'), id];
+    if (body.data.favorite) {
+      await getRecords().storedStrategy(id);
+      await context.database.query(
+        'INSERT INTO plugin_vibe_quant_strategy_favorites (user_id, strategy_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        params,
+      );
+    } else {
+      await context.database.query(
+        'DELETE FROM plugin_vibe_quant_strategy_favorites WHERE user_id = $1 AND strategy_id = $2',
+        params,
+      );
+    }
+    return c.json({ favorite: body.data.favorite });
+  });
   api.get('/:id', async (c) =>
     c.json(
       await getRecords().detail(c.get('userId'), readId(c.req.param('id'))),

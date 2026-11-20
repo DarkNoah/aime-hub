@@ -18,6 +18,7 @@ import type { Auth } from '@aime/auth';
 import { scanSkillsSchema } from '@aime/shared/skills';
 import { createApp } from '../apps/server/src/app.js';
 import { SkillService } from '../apps/server/src/modules/skills/service.js';
+import { migrateSkillLayouts } from '../apps/server/src/modules/skills/layout-migration.js';
 import {
   readSkillProject,
   SKILL_META_DIRECTORY,
@@ -609,7 +610,36 @@ test('group locks serialize installer mutations and release after failed imports
   assert.equal(f.disposed(), 1);
 });
 
-test('legacy projects retain their version, physical paths and source metadata across updates and removal', async (t) => {
+test('ordinary archive containers and GitHub owners reject each other including cached scans', async (t) => {
+  const f = await fixture(t);
+  const data = Buffer.from(
+    zipSync({ 'SKILL.md': Buffer.from(manifest('archive')) }),
+  );
+  const scans = await Promise.all([
+    f.service.scan(url),
+    f.service.scan(url, undefined, 'project'),
+  ]);
+  const archive = await f.service.scanArchive('owner.zip', data);
+  await f.service.install(archive.id, ['SKILL.md']);
+  for (const scan of scans)
+    await assert.rejects(f.service.install(scan.id, [main]), {
+      code: 'SKILL_CONFLICT',
+    });
+  for (const mode of ['skills', 'project'] as const)
+    await assert.rejects(f.service.scan(url, undefined, mode), {
+      code: 'SKILL_CONFLICT',
+    });
+  await f.service.removeGroup('owner', ['owner/archive']);
+  const stale = await f.service.scanArchive('owner.zip', data);
+  const github = await f.service.scan(url);
+  await f.service.install(github.id, [main]);
+  await assert.rejects(f.service.install(stale.id, ['SKILL.md']), {
+    code: 'SKILL_CONFLICT',
+  });
+  assert.equal((await f.service.list()).skills[0]?.path, 'owner/repo/rea-toon');
+});
+
+test('legacy projects require migration before updates use the flattened project path', async (t) => {
   const f = await fixture(t);
   const directory = await legacyProject(f);
   assert.equal(await readSkillProject(directory), undefined);
@@ -620,33 +650,29 @@ test('legacy projects retain their version, physical paths and source metadata a
   const installed = (await f.service.list()).skills;
   assert.equal(installed[0].path, 'owner/repo/project/skills/rea-toon');
   assert.equal(installed[0].projectRoot, 'owner/repo/project');
+  await assert.rejects(f.service.updateGroup('owner/repo'), {
+    code: 'SKILL_CONFLICT',
+  });
+  await migrateSkillLayouts(f.workspace, async () => {});
+  const migrated = (await f.service.list()).skills;
+  assert.equal(migrated[0].path, 'owner/repo/skills/rea-toon');
+  assert.equal(migrated[0].projectRoot, 'owner/repo');
+  assert.equal((await readSkillProject(directory))?.version, 2);
   f.files.set('rea_toon/cli.py', '# new legacy application');
-  f.files.set(
-    '.skill-meta/config.txt',
-    'upstream metadata remains inside legacy project',
-  );
-  assert.deepEqual(await f.service.updateGroup('owner/repo'), installed);
+  assert.deepEqual(await f.service.updateGroup('owner/repo'), migrated);
   assert.equal(
-    await readFile(join(directory, 'project/rea_toon/cli.py'), 'utf8'),
+    await readFile(join(directory, 'rea_toon/cli.py'), 'utf8'),
     '# new legacy application',
   );
-  assert.equal(
-    await readFile(join(directory, 'project/.skill-meta/config.txt'), 'utf8'),
-    f.files.get('.skill-meta/config.txt'),
-  );
-  assert.deepEqual((await readdir(directory)).sort(), [
-    SKILL_PROJECT_FILE,
-    SKILL_SOURCES_FILE,
-    'project',
-  ]);
+  await assert.rejects(readdir(join(directory, 'project')), { code: 'ENOENT' });
   await f.service.removeGroup(
     'owner/repo',
-    installed.map((skill) => skill.path),
+    migrated.map((skill) => skill.path),
   );
   await assert.rejects(readdir(directory), { code: 'ENOENT' });
 });
 
-test('legacy archive projects prevent duplicate imports under the new single-directory destination', async (t) => {
+test('migrated archive projects prevent duplicate imports under their canonical destination', async (t) => {
   const f = await fixture(t);
   const data = Buffer.from(
     zipSync(
@@ -662,6 +688,7 @@ test('legacy archive projects prevent duplicate imports under the new single-dir
     'project',
   );
   await legacyProject(f, '@local/archive', false);
+  await migrateSkillLayouts(f.workspace, async () => {});
   await assert.rejects(f.service.install(stale.id, [main]), {
     code: 'SKILL_CONFLICT',
   });
@@ -671,18 +698,18 @@ test('legacy archive projects prevent duplicate imports under the new single-dir
     undefined,
     'project',
   );
-  assert.equal(scan.project?.destination, '@local/archive/project');
+  assert.equal(scan.project?.destination, 'archive');
   assert.ok(scan.skills.every((skill) => skill.installed));
   await assert.rejects(f.service.install(scan.id, [main]), {
     code: 'SKILL_CONFLICT',
   });
-  await assert.rejects(readdir(join(f.service.root, 'archive')), {
+  await assert.rejects(readdir(join(f.service.root, '@local')), {
     code: 'ENOENT',
   });
   const installed = (await f.service.list()).skills;
   assert.equal(installed[0].sourceType, 'archive');
   await f.service.removeGroup(
-    '@local/archive',
+    'archive',
     installed.map((skill) => skill.path),
   );
   const next = await f.service.scanArchive(
@@ -692,26 +719,14 @@ test('legacy archive projects prevent duplicate imports under the new single-dir
     'project',
   );
   assert.equal(next.project?.destination, 'archive');
-  const legacyLock = join(f.service.root, '.@local.skill-install.lock');
-  await mkdir(legacyLock);
-  await assert.rejects(f.service.install(next.id, [main]), {
-    code: 'SKILL_CONFLICT',
-  });
-  await rm(legacyLock, { recursive: true });
-  const retry = await f.service.scanArchive(
-    'archive.zip',
-    data,
-    undefined,
-    'project',
-  );
-  await f.service.install(retry.id, [main]);
+  await f.service.install(next.id, [main]);
   assert.equal(
     (await f.service.list()).skills[0].path,
     'archive/skills/rea-toon',
   );
 });
 
-test('legacy archive scans preserve an existing ZIP wrapper in entry locations', async (t) => {
+test('migrated archive projects retain wrapper resources at their installed locations', async (t) => {
   const f = await fixture(t);
   const mainPath = `repo-main/${main}`;
   const group = join(f.service.root, '@local/wrapped');
@@ -731,6 +746,9 @@ test('legacy archive scans preserve an existing ZIP wrapper in entry locations',
       'repo-main/pyproject.toml': Buffer.from('config'),
     }),
   );
+  await migrateSkillLayouts(f.workspace, async () => {});
+  const installed = (await f.service.list()).skills;
+  assert.equal(installed[0].path, 'wrapped/repo-main/skills/rea-toon');
   const scan = await f.service.scanArchive(
     'wrapped.zip',
     data,
@@ -738,10 +756,7 @@ test('legacy archive scans preserve an existing ZIP wrapper in entry locations',
     'project',
   );
   assert.equal(scan.skills[0].path, mainPath);
-  assert.equal(
-    scan.skills[0].destination,
-    '@local/wrapped/project/repo-main/skills/rea-toon',
-  );
+  assert.equal(scan.skills[0].destination, installed[0].path);
   assert.equal(scan.skills[0].installed, true);
   await assert.rejects(f.service.install(scan.id, [mainPath]), {
     code: 'SKILL_CONFLICT',

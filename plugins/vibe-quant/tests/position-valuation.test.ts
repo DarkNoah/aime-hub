@@ -84,13 +84,32 @@ test('notification chart links roundtrip symbol, source candle, monitor and peri
 });
 
 test('monitor navigation authorizes owner, source symbol and source engine without a watchlist mutation', async () => {
-  let deleted = false;
+  let state: 'active' | 'deleted' | 'replaced' = 'active';
   const reads: unknown[][] = [];
   const monitors = {
     get: async (id: string, owner: string) => {
       assert.equal(id, 'monitor');
       if (owner !== 'alice') throw new Error('MONITOR_NOT_FOUND');
-      return { id, engine: 'tdx', deleted, config: { symbol: 'SSE.000852' } };
+      return {
+        id,
+        engine: 'tdx',
+        deleted: state !== 'active',
+        strategy_id: 's1',
+        attachment_id: state === 'replaced' ? 'monitor' : undefined,
+        config: { symbol: 'SSE.000852' },
+      };
+    },
+    list: async (owner: string, strategy: string) => {
+      assert.equal(owner, 'alice');
+      assert.equal(strategy, 's1');
+      return [
+        {
+          id: 'new-run',
+          attachment_id: 'monitor',
+          engine: 'tdx',
+          config: { symbol: 'SSE.000852' },
+        },
+      ];
     },
     history: {
       hasSymbol: async (_id: string, symbol: string) =>
@@ -147,7 +166,7 @@ test('monitor navigation authorizes owner, source symbol and source engine witho
       query,
     ),
   );
-  deleted = true;
+  state = 'deleted';
   await assert.rejects(
     readMonitorMarketBars(
       monitors,
@@ -159,4 +178,18 @@ test('monitor navigation authorizes owner, source symbol and source engine witho
     ),
   );
   assert.equal(reads.length, 2);
+  state = 'replaced';
+  await readMonitorMarketBars(
+    monitors,
+    market,
+    'alice',
+    'monitor',
+    'SSE.000852',
+    query,
+  );
+  assert.equal(
+    reads.length,
+    3,
+    'a bookmarked chart still opens after parameter recalculation',
+  );
 });

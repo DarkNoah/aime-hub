@@ -1,5 +1,5 @@
 import { runVersionName, strategyVersionName } from '../../strategy-version';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { pluginRequest } from '@app/plugin-sdk/web';
 import {
   Badge,
@@ -79,11 +79,13 @@ export function StrategyEditor({
   initial,
   pluginId,
   canRun,
+  favoriteAction,
   onUpdate,
 }: {
   initial: StrategyDetail;
   pluginId: string;
   canRun: boolean;
+  favoriteAction: ReactNode;
   onUpdate: (item: StrategySummary) => void;
 }) {
   const cacheKey = `vibe-quant:strategy-draft:${initial.id}`;
@@ -287,6 +289,7 @@ export function StrategyEditor({
               <h2 className="truncate text-base font-semibold">
                 {record.name}
               </h2>
+              {favoriteAction}
               <Badge variant="outline">Python SDK</Badge>
               {readOnly && (
                 <Badge

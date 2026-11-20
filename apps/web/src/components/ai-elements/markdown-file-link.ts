@@ -1,4 +1,5 @@
 const WORKSPACE_FILE_LINK_PREFIX = 'streamdown:workspace-file/';
+const SANDBOX_FILE_PREFIX = /^sandbox:\/(?![/\\])/i;
 const hasControlCharacters = (value: string) =>
   [...value].some(
     (character) =>
@@ -48,9 +49,7 @@ function normalizeWorkspacePath(path: string): string | undefined {
 
   if (prefix === '../shared')
     return `${prefix}${segments.length ? '/' + segments.join('/') : ''}`;
-  return prefix || segments.length
-    ? `${prefix}${segments.join('/')}`
-    : undefined;
+  return `${prefix}${segments.join('/')}` || '.';
 }
 
 export type WorkspaceFileTarget = { path: string; line?: number };
@@ -115,6 +114,19 @@ export function toWorkspaceFileLink(
   return `${WORKSPACE_FILE_LINK_PREFIX}${encodeURIComponent(`${path}${directory ? '/' : line !== undefined ? `:${line}` : ''}`)}`;
 }
 
+/** A chat message resolves sandbox paths from the active workspace root. */
+export function getSandboxFileLink(href: string): string | undefined {
+  if (!SANDBOX_FILE_PREFIX.test(href)) return;
+  const relative = href.replace(SANDBOX_FILE_PREFIX, './');
+  const target = getWorkspaceFileTarget(relative);
+  if (target)
+    return toWorkspaceFileLink(
+      target.path,
+      target.path === '.' || isWorkspaceDirectoryLink(relative),
+      target.line,
+    );
+}
+
 type HastNode = {
   children?: HastNode[];
   properties?: Record<string, unknown>;
@@ -137,7 +149,9 @@ function isDocumentRelativeHref(href: unknown): href is string {
 }
 
 // Normalize URL shortcuts before sanitization or workspace path resolution.
-export function rehypeMarkdownLinkUrls(options?: { sandboxFiles?: boolean }) {
+export function rehypeMarkdownLinkUrls(options?: {
+  relativeToDocument?: boolean;
+}) {
   return (tree: HastNode) =>
     visitMarkdownNodes(tree, ({ tagName, properties }) => {
       if (tagName === 'a' && typeof properties?.href === 'string') {
@@ -147,11 +161,11 @@ export function rehypeMarkdownLinkUrls(options?: { sandboxFiles?: boolean }) {
           )
         ) {
           properties.href = `http://${properties.href}`;
-        } else if (options?.sandboxFiles) {
-          properties.href = properties.href.replace(
-            /^sandbox:\/(?![/\\])/i,
-            './',
-          );
+        } else if (options?.relativeToDocument) {
+          properties.href = properties.href.replace(SANDBOX_FILE_PREFIX, './');
+        } else {
+          properties.href =
+            getSandboxFileLink(properties.href) ?? properties.href;
         }
       }
     });

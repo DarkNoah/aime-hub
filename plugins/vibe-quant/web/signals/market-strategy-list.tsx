@@ -1,6 +1,17 @@
 import { runVersionName } from '../../strategy-version';
-import { Badge, Label, ScrollArea, Skeleton, Switch } from '@app/plugin-ui';
-import type { MarketPositionsPage } from '../../market-positions';
+import {
+  Badge,
+  Button,
+  Label,
+  ScrollArea,
+  Skeleton,
+  Switch,
+} from '@app/plugin-ui';
+import { SlidersHorizontal } from 'lucide-react';
+import type {
+  MarketPositionMonitor,
+  MarketPositionsPage,
+} from '../../market-positions';
 import { durationLabel } from '../../shared';
 import { dateTime } from '../strategies/format';
 
@@ -18,6 +29,7 @@ export function MarketStrategyList({
   error,
   hiddenStrategyIds,
   onVisibleChange,
+  onEditParameters,
 }: {
   data?: MarketPositionsPage;
   filtered?: boolean;
@@ -25,6 +37,7 @@ export function MarketStrategyList({
   error: string;
   hiddenStrategyIds: ReadonlySet<string>;
   onVisibleChange: (id: string, visible: boolean) => void;
+  onEditParameters: (item: MarketPositionMonitor) => void;
 }) {
   const openCounts = new Map<string, number>();
   for (const row of data?.open ?? [])
@@ -42,7 +55,8 @@ export function MarketStrategyList({
       ) : data?.monitors.length ? (
         <ul aria-label="已加载策略列表" className="divide-y">
           {data.monitors.map((monitor) => {
-            const visible = !hiddenStrategyIds.has(monitor.id);
+            const attachmentId = monitor.attachment_id ?? monitor.id;
+            const visible = !hiddenStrategyIds.has(attachmentId);
             const displaySymbol =
               monitor.config.display_symbol ?? monitor.config.symbol;
             const status = !monitor.enabled ? 'paused' : monitor.status;
@@ -113,7 +127,7 @@ export function MarketStrategyList({
                       checked={visible}
                       aria-label={`${monitor.strategy_name} ${runVersionName(monitor)} 图表显示`}
                       onCheckedChange={(checked) =>
-                        onVisibleChange(monitor.id, checked)
+                        onVisibleChange(attachmentId, checked)
                       }
                     />
                   </span>
@@ -125,11 +139,22 @@ export function MarketStrategyList({
                     {monitor.message}
                   </p>
                 )}
-                <p className="text-[11px] text-muted-foreground">
-                  {monitor.through == null
-                    ? '尚未完成持仓计算'
-                    : `计算至 ${dateTime(monitor.through)}（北京时间）`}
-                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-muted-foreground">
+                    {monitor.through == null
+                      ? '尚未完成持仓计算'
+                      : `计算至 ${dateTime(monitor.through)}（北京时间）`}
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="shrink-0 text-xs"
+                    aria-label={`编辑 ${monitor.strategy_name} 参数`}
+                    onClick={() => onEditParameters(monitor)}
+                  >
+                    <SlidersHorizontal className="size-3.5" /> 参数
+                  </Button>
+                </div>
               </li>
             );
           })}

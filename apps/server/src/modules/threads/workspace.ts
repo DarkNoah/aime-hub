@@ -19,7 +19,12 @@ import { directorySkillConfig, ScopedSkillsWorkspace } from './skill-source.js';
 import { workspaceLspConfig, workspaceLspHooks } from './workspace-lsp.js';
 import type { EnvironmentVariableService } from '../environment-variables/service.js';
 import { BUILTIN_SKILL_GROUP } from '../skills/builtin.js';
-import { readSkillProject, type SkillProject } from '../skills/project.js';
+import { migrateMountedProjectSkills } from '../skills/layout-migration.js';
+import {
+  readSkillProject,
+  readSkillArchiveGroup,
+  type SkillProject,
+} from '../skills/project.js';
 import {
   projectSharedSkillsRoot,
   resolveSkillShareLink,
@@ -325,10 +330,13 @@ async function discover(
       });
   }
 
-  async function visit(directory: string) {
+  async function visit(directory: string, archiveParent = false) {
     const group = relative(root, directory);
     const depth = group ? group.split(/[\\/]/).length : 0;
-    if (shares !== 'project' && (depth === 1 || depth === 2)) {
+    const archive =
+      archiveParent ||
+      (depth === 1 && (await readSkillArchiveGroup(directory)));
+    if (!archive && shares !== 'project' && (depth === 1 || depth === 2)) {
       const project = await readSkillProject(directory, {
         legacy: depth === 2,
       });
@@ -354,7 +362,7 @@ async function discover(
     for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       if (entry.name.startsWith('.')) continue;
       const child = resolve(directory, entry.name);
-      if (entry.isDirectory()) await visit(child);
+      if (entry.isDirectory()) await visit(child, archive);
       else if (shares && entry.isSymbolicLink()) {
         const link = await resolveSkillShareLink(
           workspaceRoot,
@@ -524,7 +532,21 @@ export class AgentFSMounts {
   }
 }
 
-export const projectAgentMounts = new AgentFSMounts();
+export const projectAgentMounts = new AgentFSMounts(
+  async (directory, database) => {
+    const mount = await mountAgentFS(directory, database);
+    try {
+      if (database === directory + '.db') {
+        for (const warning of await migrateMountedProjectSkills(directory))
+          console.warn(warning);
+      }
+      return mount;
+    } catch (error) {
+      await mount.stop();
+      throw error;
+    }
+  },
+);
 
 async function initializeAgentDatabase(database: string) {
   // The native SDK can retain its database lock after close(). Use a short-lived

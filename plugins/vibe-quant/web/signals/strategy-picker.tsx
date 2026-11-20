@@ -22,14 +22,11 @@ import {
   ScrollArea,
 } from '@app/plugin-ui';
 import { InstrumentInput } from '../components/instrument-input';
-import { durationLabel } from '../../shared';
 import type { SignalMonitor } from '../../signal-types';
-import {
-  monitorExecutionModel,
-  strategyHintDuration,
-} from '../../signal-types';
+import { monitorExecutionModel, monitorParameters } from '../../signal-types';
 import type { StrategySummary, StrategyVersion } from '../../strategy-types';
-import { errorText } from '../strategies/format';
+import { errorText, parseObject } from '../strategies/format';
+import { MonitorParameterFields } from './monitor-parameters';
 
 export function StrategyPicker({
   pluginId,
@@ -60,13 +57,12 @@ export function StrategyPicker({
   const native = simulationEngine === 'tqsdk';
   const [selected, setSelected] = useState('');
   const [primaryVersion, setPrimaryVersion] = useState<StrategyVersion>();
+  const [parameters, setParameters] = useState('');
   const [canRun, setCanRun] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const version =
     primaryVersion?.strategy_id === selected ? primaryVersion : undefined;
-  const versionDuration = strategyHintDuration(version?.parameters);
-  const calculationDuration = versionDuration ?? 60;
 
   useEffect(() => {
     const abort = new AbortController();
@@ -111,6 +107,9 @@ export function StrategyPicker({
       .then((version) => {
         if (abort.signal.aborted) return;
         setPrimaryVersion(version);
+        setParameters(
+          JSON.stringify(monitorParameters(version.parameters), null, 2),
+        );
       })
       .catch((error) => {
         if (!abort.signal.aborted) setError(errorText(error));
@@ -130,6 +129,8 @@ export function StrategyPicker({
         {
           method: 'POST',
           body: JSON.stringify({
+            version_id: version.id,
+            parameter_overrides: parseObject(parameters),
             symbol: sourceSymbol.trim(),
             display_symbol: symbol,
             simulation_engine: simulationEngine,
@@ -170,15 +171,10 @@ export function StrategyPicker({
         <DialogHeader>
           <DialogTitle>添加策略提示 · {symbolName}</DialogTitle>
           <DialogDescription>
-            自动使用主要版本的默认参数
-            {version ? `，按 ${durationLabel(calculationDuration)} 周期` : ''}
+            可为本次加载调整策略参数。
             {native
               ? '由天勤回放合约历史，随后持续模拟交易，成交与账户记录入库。'
               : '计算全部已存行情，完成后持续实时更新。'}
-            {version &&
-              (versionDuration !== undefined
-                ? '计算周期取自主要版本参数，不受图表周期影响。'
-                : '版本未配置周期，使用默认 1 分钟，不受图表周期影响。')}
             {!native &&
               monitorExecutionModel({ symbol: sourceSymbol }) === 'points' &&
               '指数按固定 1 单位模拟多空，收益以点数统计。'}
@@ -312,9 +308,18 @@ export function StrategyPicker({
                     </p>
                   )}
                   <p className="text-xs text-muted-foreground">
-                    可在策略页面切换主要版本，添加时使用当前主要版本。
+                    本次加载使用此版本。
                   </p>
                 </div>
+                {version && (
+                  <MonitorParameterFields
+                    key={version.id}
+                    value={parameters}
+                    onChange={setParameters}
+                    defaults={monitorParameters(version.parameters)}
+                    readOnly={busy || !canRun}
+                  />
+                )}
               </>
             ) : (
               <p className="text-sm text-muted-foreground">

@@ -8,6 +8,7 @@ import type { PluginContext, PluginHttpEnv } from '@app/plugin-sdk/server';
 import type { Bar, Instrument } from '../shared.js';
 import type { BacktestInput } from '../strategy-types.js';
 import { StrategyManagement1792600000000 } from '../server/strategies/migration.js';
+import { StrategyFavorites1795132800000 } from '../server/database.js';
 import { StrategyStore } from '../server/strategies/store.js';
 import { strategyRoutes } from '../server/strategies/routes.js';
 import { BacktestWorker } from '../server/strategies/runner.js';
@@ -66,6 +67,7 @@ export async function strategyFixture() {
   await db.query("INSERT INTO users VALUES ('alice'),('bob')");
   const migration = db.createQueryRunner();
   await new StrategyManagement1792600000000().up(migration);
+  await new StrategyFavorites1795132800000().up(migration);
   await migration.release();
   const workspace = await mkdtemp(join(tmpdir(), 'quant-strategy-'));
   const runtime = createPluginRuntime(

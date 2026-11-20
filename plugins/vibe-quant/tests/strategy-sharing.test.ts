@@ -53,6 +53,37 @@ test(
       const list = await f.request('/strategies', 'GET', undefined, bob);
       assert.equal(list.status, 200);
       assert.equal((await list.json())[0].id, created.id);
+      const favoritePath = `/strategies/${created.id}/favorite`;
+      const favorites = async (headers = {}) =>
+        (
+          await f.request('/strategies/favorites', 'GET', undefined, headers)
+        ).json();
+      const setFavorite = (favorite: boolean, headers = {}) =>
+        f.request(favoritePath, 'PUT', { favorite }, headers);
+      assert.deepEqual(await favorites(), []);
+      for (const result of await Promise.all([
+        setFavorite(true, bob),
+        setFavorite(true, bob),
+      ]))
+        assert.equal(result.status, 200);
+      assert.deepEqual(await favorites(bob), [created.id]);
+      assert.deepEqual(await favorites(), []);
+      assert.equal((await setFavorite(true)).status, 200);
+      assert.equal((await setFavorite(false, bob)).status, 200);
+      assert.deepEqual(await favorites(bob), []);
+      assert.deepEqual(await favorites(), [created.id]);
+      assert.equal(
+        (await f.request(favoritePath, 'PUT', { favorite: 'yes' })).status,
+        400,
+      );
+      assert.equal(
+        (
+          await f.request(`/strategies/${randomUUID()}/favorite`, 'PUT', {
+            favorite: true,
+          })
+        ).status,
+        404,
+      );
       const changed = await f.request(
         `/strategies/${created.id}`,
         'PUT',

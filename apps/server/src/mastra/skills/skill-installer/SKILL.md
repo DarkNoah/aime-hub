@@ -26,7 +26,7 @@ Check `SKILL_HOME` first. If it is missing or is not an absolute path, stop writ
 
 Ordinary skill imports install at `$SKILL_HOME/<owner>/<repo>/<skill-name>/SKILL.md`. Skill names use normalized package directory names; a repository-root package uses its manifest name, falling back to the repository name. Bundled scripts, references, and assets are preserved. The group's `.skill-sources.json` records the source and installation mode so management-page updates retain the original branch, path, and package boundary. Whole-project imports use the flat project layout described below.
 
-Local archive packages are installed at `$SKILL_HOME/@local/<archive-filename-without-extension>/<skill-name>/SKILL.md`, with normalized directory names. They have no GitHub source record or automatic upstream update. Existing destinations are never overwritten.
+Local archive packages are installed at `$SKILL_HOME/<archive-filename-without-extension>/<skill-name>/SKILL.md`, with normalized directory names. Their group marker is `.skill-meta/.skill-archive.json`; they have no GitHub source record or automatic upstream update. Existing destinations are never overwritten. An archive group and a GitHub owner directory cannot share the same name.
 
 ## Workflow
 
@@ -101,7 +101,7 @@ python3 "$BUILTIN_SKILLS_ROOT/skill-installer/scripts/install-skill.py" --repo J
 python3 "$BUILTIN_SKILLS_ROOT/skill-installer/scripts/install-skill.py" --archive "/path/to/project.zip" --whole-project --path skills/chosen-skill
 ```
 
-Whole-project imports retain every regular source file directly under `$SKILL_HOME/<owner>/<repo>/`, preserving its project-relative path. Local archive projects use `$SKILL_HOME/<archive-name>/`; ordinary archive skill imports still use `@local/<archive-name>/<skill-name>`. For example, the GitHub project root for `JuneYaooo/rea-toon` is `$SKILL_HOME/juneyaooo/rea-toon/`, and the root for `rea-toon.zip` is `$SKILL_HOME/rea-toon/`.
+Whole-project imports retain every regular source file directly under `$SKILL_HOME/<owner>/<repo>/`, preserving its project-relative path. Local archive projects use `$SKILL_HOME/<archive-name>/`; ordinary archive skill imports use `<archive-name>/<skill-name>`. For example, the GitHub project root for `JuneYaooo/rea-toon` is `$SKILL_HOME/juneyaooo/rea-toon/`, and the root for `rea-toon.zip` is `$SKILL_HOME/rea-toon/`.
 
 In whole-project mode only, if every retained archive file belongs to one top-level directory and no file is at the archive root, that one wrapper directory is removed. For example, `rea-toon-main/pyproject.toml` from `rea-toon.zip` becomes `$SKILL_HOME/rea-toon/pyproject.toml`, so the project root is suitable for project commands. This removes at most one directory level; archives with root files or multiple top-level directories keep their paths. Use the paths returned by `list-skills.py --whole-project` for `--path` selections and previews.
 
@@ -109,7 +109,7 @@ The group's `.skill-meta/.skill-project.json` records enabled `SKILL.md` entries
 
 Omitting `--path` enables all independent entries discovered across the project. With `--whole-project`, `--path` chooses which entries to enable; the complete project is still copied, including unselected skill directories and shared files. A scoped GitHub URL retains its resolved branch, tag, or commit while importing the entire repository. Use repository-relative paths to select entries. Git metadata, symbolic links, and submodules are excluded.
 
-The destination group must not already exist; ordinary skill packages and a whole project cannot share a group, and no import can write inside an existing project. Use management-page group updates for an existing project. GitHub updates retain the recorded entries and source revision; archives have no upstream update. Older installations with a `project/` directory and root metadata remain readable at their original paths, including archives under `@local/`; importing the same legacy archive project again reports a conflict. A failed import publishes no partial project.
+The destination group must not already exist; ordinary skill packages and a whole project cannot share a group, and no import can write inside an existing project or use an archive skill group as a GitHub owner directory. Use management-page group updates for an existing project. GitHub updates retain the recorded entries and source revision; archives have no upstream update. Older installations remain readable until the application service migrates their layout and saved references at startup. When a script detects an archive installation under the legacy `@local/` directory, it asks for the service to be restarted instead of creating another copy or moving application-managed files itself. A failed import publishes no partial project.
 
 Importing a project only stores its files and enables its skill entries. Read its installation instructions and report any required environment, dependencies, model downloads, or service configuration separately. The import scripts never run package installation, downloaded code, or project setup commands. When a later task needs project commands, run them from the recorded project root so sibling resources resolve correctly, and follow the user's authorized scope for that setup.
 

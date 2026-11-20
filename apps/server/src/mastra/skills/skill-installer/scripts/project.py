@@ -13,6 +13,7 @@ from repository import SkillError, Snapshot, directory, safe_path
 PROJECT_FILE = ".skill-project.json"
 METADATA_DIR = ".skill-meta"
 SOURCES_FILE = ".skill-sources.json"
+ARCHIVE_FILE = ".skill-archive.json"
 
 
 class ArchiveProjectSnapshot(Snapshot):
@@ -37,7 +38,7 @@ def project_snapshot(snapshot: Snapshot, existing: dict | None = None) -> Snapsh
     if (snapshot.source.kind != "archive" or isinstance(snapshot, ArchiveProjectSnapshot)
             or not snapshot.files):
         return snapshot
-    if existing is not None and existing["version"] == 1:
+    if existing is not None:
         original_paths = {file["path"] for file in snapshot.files}
         if all(entry["path"] in original_paths for entry in existing["entries"]):
             return snapshot
@@ -72,10 +73,32 @@ def validate_entries(entries) -> list[dict]:
     return entries
 
 
+def read_archive_group(group: Path) -> bool:
+    metadata = group / METADATA_DIR
+    if metadata.is_symlink() or (metadata.exists() and not metadata.is_dir()):
+        raise SkillError("Invalid archive installation record.")
+    marker = metadata / ARCHIVE_FILE
+    if not marker.exists() and not marker.is_symlink():
+        return False
+    try:
+        if (group.is_symlink() or not group.is_dir() or marker.is_symlink() or not marker.is_file()
+                or (metadata / PROJECT_FILE).exists() or (metadata / PROJECT_FILE).is_symlink()):
+            raise ValueError()
+        value = json.loads(marker.read_text(encoding="utf-8"))
+        if (not isinstance(value, dict) or set(value) != {"version"}
+                or type(value["version"]) is not int or value["version"] != 1):
+            raise ValueError()
+        return True
+    except (ValueError, TypeError, UnicodeError) as exc:
+        raise SkillError("Invalid archive installation record.") from exc
+
+
 def read_project(group: Path, legacy: bool = False) -> dict | None:
     metadata = group / METADATA_DIR
     if metadata.is_symlink() or (metadata.exists() and not metadata.is_dir()):
         raise SkillError("Invalid project installation record.")
+    if read_archive_group(group):
+        return None
     marker = metadata / PROJECT_FILE
     version, project_root = 2, "."
     if not marker.exists() and not marker.is_symlink():
@@ -113,8 +136,8 @@ def read_project(group: Path, legacy: bool = False) -> dict | None:
         raise SkillError("Invalid project installation record.") from exc
 
 
-def group_parts(snapshot: Snapshot, whole_project: bool = False) -> list[str]:
-    if whole_project and snapshot.source.kind == "archive":
+def group_parts(snapshot: Snapshot) -> list[str]:
+    if snapshot.source.kind == "archive":
         return [snapshot.source.repo]
     return [snapshot.source.owner, snapshot.source.repo]
 
@@ -128,18 +151,27 @@ def check_ancestors(root: Path, parts: list[str]):
             raise SkillError("A parent directory already contains a skill; nested installs would be hidden.")
         if depth in (1, 2) and read_project(parent, legacy=depth == 2) is not None:
             raise SkillError("A parent directory contains a whole project; nested installs are not allowed.")
+        if depth in (1, 2) and read_archive_group(parent):
+            raise SkillError("A parent directory contains an archive skill group; nested repository installs are not allowed.")
+
+
+def ensure_archive_migrated(root: Path, snapshot: Snapshot):
+    if snapshot.source.kind != "archive":
+        return
+    legacy_lock = root / f".{snapshot.source.owner}.skill-install.lock"
+    if legacy_lock.exists() or legacy_lock.is_symlink():
+        raise SkillError("Another install or legacy archive migration is active. Try again when it finishes.")
+    old_group = directory(root, [snapshot.source.owner, snapshot.source.repo])
+    if old_group.exists() and any(old_group.iterdir()):
+        raise SkillError("Legacy archive skills need migration. Restart the application service to migrate them before importing again.")
 
 
 def locate_project(root: Path, snapshot: Snapshot) -> tuple[Path, dict | None]:
-    parts = group_parts(snapshot, True)
+    ensure_archive_migrated(root, snapshot)
+    parts = group_parts(snapshot)
     check_ancestors(root, parts)
     group = directory(root, parts)
     project = read_project(group, legacy=len(parts) == 2)
-    if project is None and snapshot.source.kind == "archive":
-        old_group = directory(root, [snapshot.source.owner, snapshot.source.repo])
-        old_project = read_project(old_group, legacy=True)
-        if old_project is not None and old_project["version"] == 1:
-            return old_group, old_project
     return group, project
 
 
@@ -167,12 +199,9 @@ def installation_lock(root: Path, parts: list[str]):
 
 def install_project(root: Path, snapshot, selected: list[dict]) -> list[Path]:
     """Called under the shared group lock; stage all bytes and records before one rename."""
-    parts = group_parts(snapshot, True)
+    parts = group_parts(snapshot)
     check_ancestors(root, parts)
-    if snapshot.source.kind == "archive":
-        legacy_lock = root / f".{snapshot.source.owner}.skill-install.lock"
-        if legacy_lock.exists() or legacy_lock.is_symlink():
-            raise SkillError("Another install is active for this group. Try again when it finishes.")
+    ensure_archive_migrated(root, snapshot)
     group, _ = locate_project(root, snapshot)
     if group.exists() or group.is_symlink():
         raise SkillError("The project group already exists. Remove or update the entire group first.")

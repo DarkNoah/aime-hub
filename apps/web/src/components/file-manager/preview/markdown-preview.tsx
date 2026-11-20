@@ -20,7 +20,7 @@ const DocumentContext = createContext<PreviewLinkNavigation & { path: string }>(
 const linkClassName = 'font-medium text-primary underline underline-offset-4';
 const rehypePlugins: StreamdownProps['rehypePlugins'] = [
   defaultRehypePlugins.raw,
-  [rehypeMarkdownLinkUrls, { sandboxFiles: true }],
+  [rehypeMarkdownLinkUrls, { relativeToDocument: true }],
   defaultRehypePlugins.sanitize,
   rehypePreviewFileLinks,
   defaultRehypePlugins.harden,

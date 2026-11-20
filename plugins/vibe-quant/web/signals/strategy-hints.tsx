@@ -23,6 +23,7 @@ import {
   ChartNoAxesCombined,
   ChevronDown,
   Pencil,
+  SlidersHorizontal,
   Plus,
   Trash2,
 } from 'lucide-react';
@@ -52,12 +53,14 @@ export function StrategyHints({
   instrument,
   hints,
   onJumpToEntry,
+  onEditParameters,
   replay,
 }: {
   pluginId: string;
   instrument: Instrument;
   hints: ReturnType<typeof useStrategyHints>;
   onJumpToEntry: (time: number) => Promise<boolean>;
+  onEditParameters: (item: MarketStrategyHint) => void;
   replay?: StrategyReplayView;
 }) {
   const [adding, setAdding] = useState(false);
@@ -158,6 +161,20 @@ export function StrategyHints({
                       title="历史记录"
                     >
                       <ChartNoAxesCombined className="size-3.5" />
+                    </Button>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    asChild
+                    onSelect={() => onEditParameters(item)}
+                  >
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="shrink-0"
+                      aria-label={`编辑 ${item.strategy_name} 参数`}
+                      title="策略参数"
+                    >
+                      <SlidersHorizontal className="size-3.5" />
                     </Button>
                   </DropdownMenuItem>
                   <DropdownMenuItem

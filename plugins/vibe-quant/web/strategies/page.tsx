@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { pluginRequest, type PluginPageProps } from '@app/plugin-sdk/web';
 import {
   Badge,
@@ -31,11 +31,13 @@ import {
 } from '../../strategy-types';
 import { errorText } from './format';
 import { StrategyEditor } from './editor';
+import { StrategyFavoriteButton, useStrategyFavorites } from './favorites';
 
 type Template = ScriptDraft & { canRun: boolean };
 export default function StrategiesPage({ pluginId }: PluginPageProps) {
   const [items, setItems] = useState<StrategySummary[] | null>(null);
   const [template, setTemplate] = useState<Template | null>(null);
+  const favorites = useStrategyFavorites(pluginId);
   const [selected, setSelected] = useState(
     () => new URLSearchParams(window.location.search).get('strategy') ?? '',
   );
@@ -55,6 +57,7 @@ export default function StrategiesPage({ pluginId }: PluginPageProps) {
       }),
     ])
       .then(([rows, example]) => {
+        if (abort.signal.aborted) return;
         setItems(rows);
         setTemplate(example);
         setSelected(
@@ -81,10 +84,8 @@ export default function StrategiesPage({ pluginId }: PluginPageProps) {
         .toLowerCase()
         .includes(query.toLowerCase()),
   );
-  const selectedId =
-    filtered?.find((item) => item.id === selected)?.id ??
-    filtered?.[0]?.id ??
-    '';
+  const selectedItem =
+    filtered?.find((item) => item.id === selected) ?? filtered?.[0];
   return (
     <ScrollArea
       className="h-full"
@@ -163,54 +164,59 @@ export default function StrategiesPage({ pluginId }: PluginPageProps) {
                     </div>
                   ) : (
                     filtered?.map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => setSelected(item.id)}
-                        className={`w-full rounded-md border p-3 text-left transition-colors ${selectedId === item.id ? 'border-border bg-background shadow-xs' : 'border-transparent hover:bg-accent'}`}
-                        aria-current={
-                          selectedId === item.id ? 'page' : undefined
-                        }
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                            {item.name}
-                          </span>
-                          <Badge
-                            variant={
-                              item.status === 'deleted'
-                                ? 'destructive'
-                                : item.status === 'active' && item.enabled
-                                  ? 'secondary'
-                                  : 'outline'
-                            }
-                            className="text-[10px]"
-                          >
-                            {item.status === 'deleted'
-                              ? '已删除'
-                              : item.status === 'archived'
-                                ? '已归档'
-                                : item.enabled
-                                  ? '启用'
-                                  : '停用'}
-                          </Badge>
-                        </div>
-                        <p className="mt-1.5 truncate text-xs text-muted-foreground">
-                          {item.description || '暂无描述'}
-                        </p>
-                        <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
-                          <span>
-                            {item.version_count
-                              ? `${item.version_count} 个版本`
-                              : '尚未发布'}
-                          </span>
-                          <span>
-                            {new Date(item.updated_at).toLocaleDateString(
-                              'zh-CN',
-                            )}
-                          </span>
-                        </div>
-                      </button>
+                      <div key={item.id} className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setSelected(item.id)}
+                          className={`block w-full rounded-md border p-3 text-left transition-colors ${selectedItem?.id === item.id ? 'border-border bg-background shadow-xs' : 'border-transparent hover:bg-accent'}`}
+                          aria-current={
+                            selectedItem?.id === item.id ? 'page' : undefined
+                          }
+                        >
+                          <div className="flex items-center gap-2 pr-7">
+                            <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                              {item.name}
+                            </span>
+                            <Badge
+                              variant={
+                                item.status === 'deleted'
+                                  ? 'destructive'
+                                  : item.status === 'active' && item.enabled
+                                    ? 'secondary'
+                                    : 'outline'
+                              }
+                              className="text-[10px]"
+                            >
+                              {item.status === 'deleted'
+                                ? '已删除'
+                                : item.status === 'archived'
+                                  ? '已归档'
+                                  : item.enabled
+                                    ? '启用'
+                                    : '停用'}
+                            </Badge>
+                          </div>
+                          <p className="mt-1.5 truncate text-xs text-muted-foreground">
+                            {item.description || '暂无描述'}
+                          </p>
+                          <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
+                            <span>
+                              {item.version_count
+                                ? `${item.version_count} 个版本`
+                                : '尚未发布'}
+                            </span>
+                            <span>
+                              {new Date(item.updated_at).toLocaleDateString(
+                                'zh-CN',
+                              )}
+                            </span>
+                          </div>
+                        </button>
+                        <StrategyFavoriteButton
+                          item={item}
+                          favorites={favorites}
+                        />
+                      </div>
                     ))
                   )}
                   {items && !filtered?.length && (
@@ -228,11 +234,18 @@ export default function StrategiesPage({ pluginId }: PluginPageProps) {
               </ScrollArea>
             </aside>
             <main className="min-h-[32rem] min-w-0 lg:min-h-0">
-              {selectedId && template ? (
+              {selectedItem && template ? (
                 <DetailLoader
-                  key={selectedId}
+                  key={selectedItem.id}
                   pluginId={pluginId}
-                  id={selectedId}
+                  id={selectedItem.id}
+                  favoriteAction={
+                    <StrategyFavoriteButton
+                      item={selectedItem}
+                      favorites={favorites}
+                      withLabel
+                    />
+                  }
                   canRun={template.canRun}
                   onUpdate={update}
                 />
@@ -413,11 +426,13 @@ function DetailLoader({
   pluginId,
   id,
   canRun,
+  favoriteAction,
   onUpdate,
 }: {
   pluginId: string;
   id: string;
   canRun: boolean;
+  favoriteAction: ReactNode;
   onUpdate: (item: StrategySummary) => void;
 }) {
   const [item, setItem] = useState<StrategyDetail | null>(null);
@@ -455,6 +470,7 @@ function DetailLoader({
       initial={item}
       pluginId={pluginId}
       canRun={canRun}
+      favoriteAction={favoriteAction}
       onUpdate={onUpdate}
     />
   ) : (

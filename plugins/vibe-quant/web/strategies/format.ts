@@ -59,6 +59,10 @@ const errors: Record<string, string> = {
   MONITOR_CONFLICT: '监控设置已更新，请稍后重试',
   MONITOR_LIMIT: '每位用户最多保留 8 条策略提示，请先移除不需要的提示',
   INVALID_MONITOR_CONFIG: '请检查信号标的、版本、周期与交易规则',
+  INVALID_MONITOR_DURATION:
+    'duration 支持的秒数为 60、180、300、900、1800、3600 或 86400',
+  MONITOR_RESERVED_PARAMETER:
+    'symbol 和 execution_model 由标的和模拟设置决定，请移除这两个参数',
   STRATEGY_ARCHIVED: '策略已归档，请恢复后再编辑、发布或新建任务',
   STRATEGY_DELETED: '策略已移入回收站，请恢复后再编辑、发布或新建任务',
   RUN_NOT_FOUND: '回测记录不存在或已删除',

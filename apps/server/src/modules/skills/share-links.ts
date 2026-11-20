@@ -14,6 +14,7 @@ import { pruneEmptySkillParents } from './transfer.js';
 import { safeRepositoryPath } from './github.js';
 import {
   readSkillProject,
+  readSkillArchiveGroup,
   SKILL_META_DIRECTORY,
   SKILL_PROJECT_FILE,
   type SkillProject,
@@ -26,6 +27,7 @@ export type SkillShareLink = {
 };
 export type InstalledSkillShareLink = SkillShareLink & {
   project?: SkillProject;
+  archive?: boolean;
 };
 
 export function projectSharedSkillsRoot(root: string, projectId: string) {
@@ -112,9 +114,14 @@ export async function resolveSkillShareLink(
   if (!link || !(await checkedPath(root, link.directory))) return;
   const parts = unit.split('/');
   let dir = resolve(root, 'users', link.userId, '.agents', 'skills');
+  let archive = false;
   try {
     for (let index = 0; index < parts.length; index++) {
       if (await info(join(dir, 'SKILL.md'))) return;
+      if (index === 1 && (await readSkillArchiveGroup(dir))) {
+        if (parts.length !== 2) return;
+        archive = true;
+      }
       if (
         index > 0 &&
         index <= 2 &&
@@ -124,7 +131,7 @@ export async function resolveSkillShareLink(
       dir = join(dir, parts[index]);
     }
     const project =
-      parts.length <= 2
+      !archive && parts.length <= 2
         ? await readSkillProject(dir, { legacy: parts.length === 2 })
         : undefined;
     if (project) {
@@ -135,7 +142,8 @@ export async function resolveSkillShareLink(
       return { ...link, project };
     }
     const manifest = await info(join(dir, 'SKILL.md'));
-    if (manifest?.isFile() && manifest.nlink === 1) return link;
+    if (manifest?.isFile() && manifest.nlink === 1)
+      return { ...link, ...(archive && { archive }) };
   } catch (error) {
     if (error instanceof SkillError && error.code === 'SKILL_PROJECT_INVALID')
       return;
@@ -159,11 +167,13 @@ export async function listSkillShareLinks(
         throw error;
       },
     );
+    const archive = depth === 1 && (await readSkillArchiveGroup(dir));
     if (
       items.some(
         (entry) =>
           (entry.name === 'SKILL.md' && entry.isFile()) ||
-          ((depth === 1 || depth === 2) &&
+          (!archive &&
+            (depth === 1 || depth === 2) &&
             entry.name === SKILL_META_DIRECTORY) ||
           (depth === 2 && entry.name === SKILL_PROJECT_FILE),
       )

@@ -134,6 +134,8 @@ plugins/vibe-quant/**/__pycache__/
 !scripts/chat-tool-group-pages.test.ts
 !scripts/chat-tool-groups-browser.test.mjs
 !scripts/skill-projects.test.ts
+!scripts/skill-layout-migration.test.ts
+!apps/server/src/modules/agents/skill-reference-migration.test.ts
 !scripts/skill-transfers.test.ts
 !scripts/skill-installer-projects.test.ts
 !scripts/skill-projects-browser.test.mjs

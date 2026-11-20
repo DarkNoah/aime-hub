@@ -13,7 +13,7 @@ import {
 import { dirname, join, sep } from 'node:path';
 import type { InstalledSkill } from '@aime/shared/skills';
 import { SkillError } from './errors.js';
-import { SKILL_META_DIRECTORY } from './project.js';
+import { SKILL_META_DIRECTORY, pruneSkillArchiveGroup } from './project.js';
 import {
   readSkillSources,
   serializeSkillSources,
@@ -37,6 +37,10 @@ async function optionalStat(path: string) {
 // the first retained file, sibling group, or directory we cannot remove.
 export async function pruneEmptySkillParents(path: string, root: string) {
   while (path.startsWith(root + sep)) {
+    if (await pruneSkillArchiveGroup(path).catch(() => false)) {
+      path = dirname(path);
+      continue;
+    }
     const removed = await rmdir(path).then(
       () => true,
       () => false,
@@ -157,7 +161,7 @@ async function transferSources(
 ): Promise<SourceChange[]> {
   // Whole-project metadata travels inside the package. Ordinary GitHub
   // installations keep provenance in the parent shared by sibling entries.
-  if (skill.projectRoot) return [];
+  if (skill.projectRoot || skill.sourceType === 'archive') return [];
   const previous = await readSkillSources(source);
   const records = previous.filter(
     ({ installation }) =>

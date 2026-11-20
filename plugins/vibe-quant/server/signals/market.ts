@@ -13,7 +13,14 @@ export async function readMonitorMarketBars(
   symbol: string,
   query: z.infer<typeof marketBarsQuery>,
 ) {
-  const monitor = await monitors.get(id, owner);
+  let monitor = await monitors.get(id, owner);
+  // Signal notifications and bookmarked chart URLs retain the original run ID.
+  if (monitor.deleted && monitor.attachment_id) {
+    const active = (await monitors.list(owner, monitor.strategy_id)).find(
+      (row) => row.attachment_id === monitor.attachment_id,
+    );
+    if (active) monitor = active;
+  }
   if (
     monitor.deleted ||
     (symbol !== monitor.config.symbol &&

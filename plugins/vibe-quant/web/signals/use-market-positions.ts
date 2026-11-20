@@ -3,7 +3,11 @@ import { pluginRequest } from '@app/plugin-sdk/web';
 import type { MarketPositionsPage } from '../../market-positions';
 import { errorText } from '../strategies/format';
 
-export function useMarketPositions(pluginId: string, engine?: string) {
+export function useMarketPositions(
+  pluginId: string,
+  engine?: string,
+  changedMonitor?: string,
+) {
   const [{ strategyIds, cursors }, setQuery] = useState<{
     strategyIds: string[];
     cursors: string[];
@@ -65,7 +69,7 @@ export function useMarketPositions(pluginId: string, engine?: string) {
       abort.abort();
       clearTimeout(timer);
     };
-  }, [pluginId, engine, context, scope, path, revision]);
+  }, [pluginId, engine, context, scope, path, revision, changedMonitor]);
   // Keep the last successful page only within the same strategy selection.
   const data = state?.scope === scope ? state.data : undefined;
   const historyReady = !!data && state?.path === path;

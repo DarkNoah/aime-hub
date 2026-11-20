@@ -235,6 +235,8 @@ export function MarketPositionsPanel({
   onNavigate,
   hiddenStrategyIds,
   onStrategyVisibleChange,
+  onEditParameters,
+  changedMonitor,
 }: {
   pluginId: string;
   engine?: string;
@@ -243,8 +245,10 @@ export function MarketPositionsPanel({
   onNavigate: (target: MarketChartTarget) => void;
   hiddenStrategyIds: ReadonlySet<string>;
   onStrategyVisibleChange: (id: string, visible: boolean) => void;
+  onEditParameters: (item: MarketPositionMonitor) => void;
+  changedMonitor?: string;
 }) {
-  const positions = useMarketPositions(pluginId, engine);
+  const positions = useMarketPositions(pluginId, engine, changedMonitor);
   const viewportRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     viewportRef.current?.scrollTo({ top: 0 });
@@ -451,6 +455,7 @@ export function MarketPositionsPanel({
             error={positions.error}
             hiddenStrategyIds={hiddenStrategyIds}
             onVisibleChange={onStrategyVisibleChange}
+            onEditParameters={onEditParameters}
           />
         </TabsContent>
         {marketOverview && (

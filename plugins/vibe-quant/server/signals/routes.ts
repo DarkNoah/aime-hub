@@ -1,4 +1,5 @@
 import { strategyVersionName } from '../../strategy-version.js';
+import { isDeepStrictEqual } from 'node:util';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { PluginHttpEnv } from '@app/plugin-sdk/server';
@@ -14,6 +15,7 @@ import { supports } from '../symbols.js';
 import type { MonitorStore } from './store.js';
 import {
   isIndexSymbol,
+  monitorParameters,
   monitorExecutionModel,
   strategyHintDuration,
 } from '../../signal-types.js';
@@ -24,6 +26,7 @@ import { readMarketPositionMonths, readMarketPositions } from './positions.js';
 import type { MarketPositionsPage } from '../../market-positions.js';
 
 const shape = backtestSchema.shape;
+const overridesSchema = z.record(z.string(), z.json()).optional();
 export const monitorSchema = z.object({
   simulation_engine: z.enum(['builtin', 'tqsdk']).optional(),
   display_symbol: shape.symbol.optional(),
@@ -47,16 +50,35 @@ export const monitorSchema = z.object({
     .object({ entry: z.boolean(), exit: z.boolean() })
     .default({ entry: true, exit: true }),
 });
-// Market hints use the published version's timeframe, independently of the chart.
-// Keep full input support for existing callers and immutable stored monitors.
+// Legacy callers can still submit a full config with a separate explicit duration.
 const createMonitorSchema = monitorSchema.extend({
-  // Market additions resolve the primary version at submission time.
+  // Callers may omit the version to use the current primary version.
   version_id: shape.version_id.optional(),
   duration: shape.duration.optional(),
   parameters: shape.parameters.optional(),
+  parameter_overrides: overridesSchema,
   rules: shape.rules.optional(),
   initial_cash: shape.initial_cash.optional(),
 });
+
+function resolveMonitorParameters(
+  defaults: Record<string, unknown>,
+  overrides: Record<string, unknown>,
+) {
+  const duration = Object.hasOwn(overrides, 'duration')
+    ? strategyHintDuration(overrides)
+    : (strategyHintDuration(defaults) ?? 60);
+  if (!duration) throw new StrategyError('INVALID_MONITOR_DURATION');
+  if (
+    Object.hasOwn(overrides, 'symbol') ||
+    Object.hasOwn(overrides, 'execution_model')
+  )
+    throw new StrategyError('MONITOR_RESERVED_PARAMETER');
+  return {
+    parameters: { ...defaults, ...overrides, duration },
+    duration,
+  };
+}
 export function signalRoutes(
   get: () => {
     records: StrategyStore;
@@ -141,6 +163,22 @@ export function signalRoutes(
       monitors.view(monitor),
     ]);
     return c.json({ ...history, monitor: view });
+  });
+  api.get('/monitors/:id/parameters', async (c) => {
+    const { monitors, records } = get();
+    const owner = c.get('userId');
+    const row = await monitors.get(c.req.param('id'), owner);
+    if (row.deleted) throw new StrategyError('MONITOR_NOT_FOUND', 404);
+    const version = await records.version(owner, row.config.version_id);
+    return c.json({
+      defaults: monitorParameters(version.parameters),
+      current: monitorParameters(
+        { ...version.parameters, ...row.config.parameters },
+        row.config.duration,
+      ),
+      revision: row.revision,
+      canEdit: !!c.get('isAdmin'),
+    });
   });
   api.get('/monitors', async (c) => {
     const { monitors, records, config } = get();
@@ -273,6 +311,21 @@ export function signalRoutes(
         sell_tax_rate: 0,
       },
     };
+    const calculation = parsed.data.parameter_overrides
+      ? resolveMonitorParameters(
+          version.parameters,
+          parsed.data.parameter_overrides,
+        )
+      : {
+          parameters: parsed.data.parameters ?? version.parameters,
+          // Older chart clients sent their chart period without parameters.
+          duration:
+            (parsed.data.parameters === undefined
+              ? undefined
+              : parsed.data.duration) ??
+            strategyHintDuration(version.parameters) ??
+            60,
+        };
     const { notifications, notifications_enabled, ...monitorConfig } =
       monitorSchema.parse({
         ...parsed.data,
@@ -293,16 +346,8 @@ export function signalRoutes(
               slippage_ticks: parsed.data.slippage_ticks ?? 0,
             }
           : {}),
-        // The simple market picker reuses the published version. Full legacy
-        // callers supply explicit parameters and retain their requested period.
-        duration:
-          parsed.data.parameters === undefined
-            ? (strategyHintDuration(version.parameters) ?? 60)
-            : (parsed.data.duration ??
-              strategyHintDuration(version.parameters) ??
-              60),
+        ...calculation,
         ...(points ? { execution_model: 'points' } : {}),
-        parameters: parsed.data.parameters ?? version.parameters,
         initial_cash: points ? 1 : (parsed.data.initial_cash ?? 1_000_000),
         rules:
           points || native
@@ -341,17 +386,41 @@ export function signalRoutes(
         enabled: z.boolean().optional(),
         notifications_enabled: z.boolean().optional(),
         notifications: strategyNotificationsSchema.optional(),
+        parameter_overrides: overridesSchema,
         deleted: z.boolean().optional(),
       })
       .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw new StrategyError('INVALID_MONITOR_CONFIG');
-    const { monitors, wake } = get();
+    const { monitors, records, wake } = get();
     const owner = c.get('userId'),
       row = await monitors.get(c.req.param('id'), owner);
-    if (parsed.data.enabled && !parsed.data.deleted && !row.enabled) {
+    const overrides = parsed.data.parameter_overrides;
+    if (overrides && parsed.data.deleted)
+      throw new StrategyError('INVALID_MONITOR_CONFIG');
+    if (
+      overrides ||
+      (parsed.data.enabled && !parsed.data.deleted && !row.enabled)
+    ) {
       if (!c.get('isAdmin'))
         throw new StrategyError('SCRIPT_EXECUTION_ADMIN_REQUIRED', 403);
       await editable(row.strategy_id);
+    }
+    let calculation;
+    if (overrides) {
+      if (row.deleted) throw new StrategyError('MONITOR_NOT_FOUND', 404);
+      const version = await records.version(owner, row.config.version_id);
+      const next = resolveMonitorParameters(version.parameters, overrides);
+      const current = monitorParameters(
+        { ...version.parameters, ...row.config.parameters },
+        row.config.duration,
+      );
+      if (
+        !isDeepStrictEqual(
+          current,
+          monitorParameters(next.parameters, next.duration),
+        )
+      )
+        calculation = next;
     }
     const result = await monitors.update(
       owner,
@@ -367,6 +436,7 @@ export function signalRoutes(
           ? {}
           : { notifications_enabled: parsed.data.notifications_enabled }),
       },
+      calculation,
     );
     wake();
     return c.json(result);

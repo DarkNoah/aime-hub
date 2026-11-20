@@ -77,14 +77,14 @@ def directory(root: Path, parts: list[str], create: bool = False) -> Path:
 
 
 def installed(root: Path) -> list[dict]:
-    from project import read_project
+    from project import read_archive_group, read_project
 
     result = []
     if not root.exists():
         return result
-    def visit(folder: Path):
+    def visit(folder: Path, archive_container: bool = False):
         depth = len(folder.relative_to(root).parts)
-        if depth in (1, 2):
+        if depth in (1, 2) and not archive_container:
             project = read_project(folder, legacy=depth == 2)
             if project is not None:
                 for entry in project["entries"]:
@@ -92,13 +92,14 @@ def installed(root: Path) -> list[dict]:
                     result.append({"name": entry["name"], "path": str(target.relative_to(root)),
                                    "installed": True, "projectRoot": str((folder / project["root"]).relative_to(root))})
                 return
+            archive_container = read_archive_group(folder)
         manifest = folder / "SKILL.md"
         if manifest.is_file() and not manifest.is_symlink():
             result.append({"name": folder.name, "path": str(folder.relative_to(root)), "installed": True})
             return
         for child in sorted(folder.iterdir()):
             if child.is_dir() and not child.is_symlink() and not child.name.startswith("."):
-                visit(child)
+                visit(child, archive_container)
     visit(root)
     return result
 

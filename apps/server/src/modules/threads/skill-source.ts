@@ -20,7 +20,7 @@ import {
   type Skill,
 } from '@mastra/core/workspace';
 import { validateSkillContent } from '@mastra/core/skills';
-import { readSkillProject } from '../skills/project.js';
+import { readSkillProject, readSkillArchiveGroup } from '../skills/project.js';
 import {
   SharedSkillReader,
   SkillShareUnavailable,
@@ -239,6 +239,7 @@ class DirectorySkillSource extends LocalSkillSource {
         for (const depth of [1, 2]) {
           if (parts.length < depth) break;
           const group = resolve(base, ...parts.slice(0, depth));
+          if (depth === 1 && (await readSkillArchiveGroup(group))) break;
           let pending = projects.get(group);
           if (!pending) {
             pending = readSkillProject(group, { legacy: depth === 2 });

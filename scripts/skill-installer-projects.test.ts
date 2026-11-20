@@ -273,15 +273,18 @@ test('whole-project roots suppress bundled entries and hidden or duplicate paths
   await f.clean();
 });
 
-test('flat archive projects reject existing destinations and share locks while ordinary archive groups retain their layout', async (t) => {
+test('ordinary and whole-project archives share the same flat group and cannot mix', async (t) => {
   const f = await fixture(t);
   const archive = await f.archive('conflict.zip', projectFiles);
   const args = ['--archive', archive];
   await f.run('install-skill.py', [...args, '--path', 'skills/rea-toon']);
-  assert.deepEqual(await readdir(join(f.home, '@local/conflict')), [
-    'rea-toon',
-  ]);
   const group = join(f.home, 'conflict');
+  assert.deepEqual((await readdir(group)).sort(), ['.skill-meta', 'rea-toon']);
+  await assert.rejects(
+    f.run('install-skill.py', [...args, '--whole-project']),
+    /group already exists/,
+  );
+  await rm(group, { recursive: true });
   await mkdir(group);
   await assert.rejects(
     f.run('install-skill.py', [...args, '--whole-project']),
@@ -317,12 +320,10 @@ test('flat archive projects reject existing destinations and share locks while o
     join(group, '.skill-meta/.skill-project.json'),
     'utf8',
   );
-  // Ordinary archives keep their established @local/<archive>/<skill> layout.
-  await f.run('install-skill.py', [...args, '--path', 'skills/other']);
-  assert.deepEqual((await readdir(join(f.home, '@local/conflict'))).sort(), [
-    'other',
-    'rea-toon',
-  ]);
+  await assert.rejects(
+    f.run('install-skill.py', [...args, '--path', 'skills/other']),
+    /whole project/,
+  );
   await assert.rejects(
     f.run('install-skill.py', [...args, '--whole-project']),
     /group already exists/,
@@ -716,7 +717,7 @@ print(json.dumps(installer.read_sources(pathlib.Path(sys.argv[2]))))
   await f.clean();
 });
 
-test('legacy archive project groups stay readable at their original paths and block duplicate flat imports', async (t) => {
+test('legacy archive project groups remain read-only until service startup migrates their disk and application references', async (t) => {
   const f = await fixture(t);
   const legacyFiles = projectFiles.map((file) => ({
     ...file,
@@ -740,13 +741,7 @@ test('legacy archive project groups stay readable at their original paths and bl
     }),
   );
   const args = ['--archive', archive, '--whole-project'];
-  const rows = await f.rows(args);
-  assert.equal(
-    rows.find((row) => row.name === 'rea-toon')?.destination,
-    join(group, 'project/legacy-main/skills/rea-toon'),
-  );
-  assert.equal(rows.find((row) => row.name === 'rea-toon')?.installed, true);
-  assert.equal(rows.find((row) => row.name === 'other')?.installed, false);
+  await assert.rejects(f.rows(args), /Restart the application service/);
   assert.deepEqual(
     (await f.rows()).map((row) => [row.path, row.projectRoot]),
     [
@@ -756,36 +751,22 @@ test('legacy archive project groups stay readable at their original paths and bl
       ],
     ],
   );
-  await assert.rejects(f.run('install-skill.py', args), /group already exists/);
-  await assert.rejects(stat(join(f.home, 'legacy')), { code: 'ENOENT' });
-  const service = new SkillService(f.workspace);
-  t.after(() => service.dispose());
-  const personal = service.forUser('alice');
-  assert.deepEqual(
-    (await personal.list()).skills.map((skill) => skill.path),
-    ['@local/legacy/project/legacy-main/skills/rea-toon'],
-  );
-  const scan = await personal.scanArchive(
-    'legacy.zip',
-    await readFile(archive),
-    undefined,
-    'project',
-  );
-  assert.equal(
-    scan.skills.find((skill) => skill.name === 'rea-toon')?.destination,
-    '@local/legacy/project/legacy-main/skills/rea-toon',
+  await assert.rejects(
+    f.run('install-skill.py', args),
+    /Restart the application service/,
   );
   await assert.rejects(
-    personal.install(scan.id, ['legacy-main/skills/rea-toon/SKILL.md']),
-    /SKILL_CONFLICT/,
+    f.run('install-skill.py', ['--archive', archive]),
+    /Restart the application service/,
   );
+  await assert.rejects(stat(join(f.home, 'legacy')), { code: 'ENOENT' });
   const lock = join(f.home, '.@local.skill-install.lock');
   await mkdir(lock);
   const saved = join(f.root, 'legacy-update-backup');
   await rename(group, saved);
   await assert.rejects(
     f.run('install-skill.py', args),
-    /Another install is active/,
+    /legacy archive migration is active/,
   );
   await assert.rejects(stat(join(f.home, 'legacy')), { code: 'ENOENT' });
   await rename(saved, group);

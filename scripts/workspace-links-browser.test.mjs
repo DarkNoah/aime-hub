@@ -48,6 +48,7 @@ test(
       '[HTML at 80](/workspace/page.html:80)',
       '[Shared at 90](../shared/shared.txt:90)',
       '[Shared guide](../shared/docs/guide/index.md)',
+      '[Chat export](sandbox:/exports/季度%20报告.txt:12)',
       '[Plain file](/workspace/plain.txt)',
       '[Directory](/workspace/src/)',
       '[Website](https://example.com/guide:12)',
@@ -55,6 +56,10 @@ test(
       '~~Removed~~',
       '| Feature | Supported |\n| --- | --- |\n| GFM | yes |',
     ].join('\n\n');
+    const userText = [
+      '**Plain text** [Open notes](sandbox:/notes/manual.txt)',
+      'Example: `[Sample](sandbox:/skip.txt)`',
+    ].join('\n');
     const sharedDocuments = {
       'docs/guide/index.md': [
         '# Shared guide',
@@ -71,6 +76,7 @@ test(
 import {createRoot} from 'react-dom/client';
 import {createRouter,createRootRoute,createMemoryHistory,RouterProvider} from '@tanstack/react-router';
 import {ChatWorkspace} from '/src/components/chat/chat-workspace';
+import {ChatMessages} from '/src/components/chat/chat-messages';
 import {MessageResponse} from '/src/components/ai-elements/message';
 import {RoomMessage} from '/src/pages/group-chats/components/room-message';
 import {ThreadFilePreview} from '/src/components/chat/message-preview/thread-file-preview';
@@ -83,6 +89,7 @@ import {initializeI18n} from '/src/i18n';
 import '/src/index.css';
 window.fileCalls=[];
 const markdown=${JSON.stringify(markdown)};
+const userText=${JSON.stringify(userText)};
 const sharedDocuments=${JSON.stringify(sharedDocuments)};
 filesApi.resolve=async(threadId,path)=>{
   window.fileCalls.push({operation:'resolve',threadId,path});
@@ -100,8 +107,12 @@ filesApi.preview=async(threadId,path,_signal,scope)=>{
   return {path,kind:'text',text,mime:path.endsWith('.html')?'text/html':'text/plain',size:text.length,modifiedAt:'fixture',version:'fixture'};
 };
 const group=new URLSearchParams(location.search).has('room');
+const fromUser=new URLSearchParams(location.search).has('user');
 const readOnly=new URLSearchParams(location.search).has('readonly');
-function Message(){return group?<RoomMessage message={{id:'message',roomId:'room',sequence:'1',revision:'1',senderId:'bot',senderKind:'agent',text:markdown,files:[],reactions:[],createdAt:'2026-11-01T00:00:00Z'}} userId="alice" label="Bot" onReply={()=>{}} onJumpToReply={()=>{}} loadingReply={false} onReact={async()=>{}} onRespondUi={async()=>{}} onRespondChoices={async()=>{}}/>:<MessageResponse mode="static">{markdown}</MessageResponse>;}
+function Message(){
+  if (!group && fromUser) return <ChatMessages threadId="bot-thread" messages={[{id:'user-message',role:'user',parts:[{type:'text',text:userText}]}]} running={false} activeMessageId={null}/>;
+  return group?<RoomMessage message={{id:'message',roomId:'room',sequence:'1',revision:'1',senderId:fromUser?'alice':'bot',senderKind:fromUser?'user':'agent',text:fromUser?userText:markdown,files:[],reactions:[],createdAt:'2026-11-01T00:00:00Z'}} userId="alice" label={fromUser?'Alice':'Bot'} onReply={()=>{}} onJumpToReply={()=>{}} loadingReply={false} onReact={async()=>{}} onRespondUi={async()=>{}} onRespondChoices={async()=>{}}/>:<MessageResponse mode="static">{markdown}</MessageResponse>;
+}
 function App(){
   const [file,setFile]=React.useState(null);
   const message=<section className="p-5" data-testid="message"><Message/></section>;
@@ -181,6 +192,19 @@ createRoot(document.getElementById('root')).render(<ThemeProvider><SessionContex
     }
     for (const query of ['', '?room']) {
       await page.goto(url + '/' + query);
+      await link('Chat export').click();
+      await assertLine(12);
+      assert.deepEqual(
+        await page.evaluate(() =>
+          window.fileCalls.find((call) => call.operation === 'preview'),
+        ),
+        {
+          operation: 'preview',
+          threadId: 'bot-thread',
+          path: 'exports/季度 报告.txt',
+          scope: 'thread',
+        },
+      );
       await link('Code at 120').click();
       await assertLine(120);
       assert.equal(
@@ -273,6 +297,17 @@ createRoot(document.getElementById('root')).render(<ThemeProvider><SessionContex
             call.operation === 'resolve' && call.path === '/workspace/src',
         ),
       );
+    }
+    for (const query of ['?user', '?user&room']) {
+      await page.goto(url + '/' + query);
+      await link('Open notes').click();
+      await page
+        .getByRole('tab', { name: 'manual.txt', exact: true })
+        .waitFor();
+      assert.equal(await link('Sample').count(), 0);
+      const messageText = await page.getByTestId('message').innerText();
+      assert.ok(messageText.includes('**Plain text**'));
+      assert.ok(messageText.includes('[Sample](sandbox:/skip.txt)'));
     }
     await page.goto(url);
     const navigationCalls = [];

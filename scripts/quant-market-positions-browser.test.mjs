@@ -705,6 +705,114 @@ createRoot(document.getElementById('root')!).render(<main className="p-4 sm:ml-5
       .getByText('尚未添加策略', { exact: true })
       .filter({ visible: true })
       .waitFor();
+    empty = false;
+    const defaults = { fast: 10, slow: 30, duration: 60 };
+    const strategy = {
+      id: 'custom',
+      name: '参数测试',
+      status: 'active',
+      enabled: true,
+      version_count: 1,
+    };
+    const version = {
+      id: 'pinned-version',
+      strategy_id: strategy.id,
+      number: 2,
+      parameters: defaults,
+    };
+    let loaded;
+    await page.route('**/strategies', (route) =>
+      route.fulfill({ json: [strategy] }),
+    );
+    await page.route('**/strategies/template', (route) =>
+      route.fulfill({ json: { canRun: true } }),
+    );
+    await page.route('**/strategies/custom/primary-version', (route) =>
+      route.fulfill({ json: version }),
+    );
+    await page.route('**/strategies/custom/monitors', (route) => {
+      const input = route.request().postDataJSON();
+      assert.equal(input.version_id, version.id);
+      assert.deepEqual(input.parameter_overrides, { ...defaults, fast: 7 });
+      loaded = {
+        ...monitors[0],
+        id: 'custom-run',
+        attachment_id: 'custom-run',
+        revision: 1,
+        strategy_name: strategy.name,
+        strategy_id: strategy.id,
+        signals: [],
+        overlay: { updated_at: null, levels: [] },
+        config: {
+          ...monitors[0].config,
+          symbol: input.symbol,
+          display_symbol: input.display_symbol,
+          parameters: input.parameter_overrides,
+        },
+      };
+      monitors.push(loaded);
+      return route.fulfill({ json: loaded, status: 201 });
+    });
+    await page.route('**/strategies/monitors?*', (route) =>
+      route.fulfill({ json: loaded ? [loaded] : [] }),
+    );
+    await page.route('**/strategies/monitors/custom-run/parameters', (route) =>
+      route.fulfill({
+        json: {
+          defaults,
+          current: loaded.config.parameters,
+          revision: 1,
+          canEdit: true,
+        },
+      }),
+    );
+    await page.route('**/strategies/monitors/custom-run', (route) => {
+      const input = route.request().postDataJSON();
+      assert.deepEqual(input, {
+        revision: 1,
+        parameter_overrides: { ...defaults, duration: 300 },
+      });
+      loaded = {
+        ...loaded,
+        id: 'recalculated',
+        revision: 2,
+        status: 'starting',
+        config: {
+          ...loaded.config,
+          duration: 300,
+          parameters: input.parameter_overrides,
+        },
+      };
+      monitors[monitors.length - 1] = loaded;
+      return route.fulfill({ json: loaded });
+    });
+    await page.getByRole('button', { name: '策略菜单' }).click();
+    await page.getByRole('menuitem', { name: '添加策略提示' }).click();
+    const picker = page.getByRole('dialog', { name: /添加策略提示/ });
+    await picker.getByRole('spinbutton', { name: 'fast' }).fill('7');
+    await picker.getByRole('button', { name: '添加', exact: true }).click();
+    await picker.waitFor({ state: 'hidden' });
+    const card = strategies
+      .getByRole('listitem')
+      .filter({ hasText: strategy.name });
+    const visibility = card.getByRole('switch');
+    await visibility.click();
+    await card.getByRole('button', { name: '编辑 参数测试 参数' }).click();
+    const editor = page.getByRole('dialog', { name: '策略参数 · 参数测试' });
+    assert.equal(
+      await editor.getByRole('spinbutton', { name: 'fast' }).inputValue(),
+      '7',
+    );
+    await editor.getByRole('button', { name: '恢复版本默认值' }).click();
+    assert.equal(
+      await editor.getByRole('spinbutton', { name: 'fast' }).inputValue(),
+      '10',
+    );
+    await editor.getByRole('spinbutton', { name: 'duration' }).fill('300');
+    await editor.getByRole('button', { name: '应用并重新计算' }).click();
+    await editor.waitFor({ state: 'hidden' });
+    await card.getByText('准备中', { exact: true }).waitFor();
+    assert.equal(await visibility.getAttribute('aria-checked'), 'false');
     assert.deepEqual(errors, []);
   },
 );

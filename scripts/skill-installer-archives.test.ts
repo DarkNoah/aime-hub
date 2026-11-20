@@ -72,7 +72,17 @@ async function fixture(t: test.TestContext) {
       });
       return path;
     },
-    clean: async () => assert.deepEqual(await readdir(temporary), []),
+    clean: async () => {
+      assert.deepEqual(await readdir(temporary), []);
+      const contents = await readdir(home).catch(() => []);
+      assert.ok(
+        contents.every(
+          (name) =>
+            !name.startsWith('.skill-archive-') &&
+            !name.endsWith('.skill-install.lock'),
+        ),
+      );
+    },
   };
 }
 
@@ -83,6 +93,7 @@ test('local .skill root packages preview and install without Git while preservin
     { path: 'scripts/run.sh', content: '#!/bin/sh\nexit 0\n', mode: 0o100755 },
     { path: 'nested/SKILL.md', content: manifest('bundled') },
     { path: 'assets/unicode.txt', content: '资源\u0000数据\n' },
+    { path: '.skill-meta/source.json', content: '{"source":"resource"}' },
     { path: '.git/config', content: 'ignored' },
     { path: '__MACOSX/._SKILL.md', content: 'ignored' },
     { path: '.DS_Store', content: 'ignored' },
@@ -96,7 +107,7 @@ test('local .skill root packages preview and install without Git while preservin
   assert.deepEqual(listing[0].bundledSkills, ['nested/SKILL.md']);
   assert.equal(
     listing[0].destination,
-    join(f.home, '@local/my-package/whole-package'),
+    join(f.home, 'my-package/whole-package'),
   );
   assert.equal(
     (await f.run('list-skills.py', [...args, '--preview'])).stdout.trim(),
@@ -117,18 +128,36 @@ test('local .skill root packages preview and install without Git while preservin
     0o755,
   );
   assert.deepEqual((await readdir(target)).sort(), [
+    '.skill-meta',
     'SKILL.md',
     'assets',
     'nested',
     'scripts',
   ]);
-  assert.deepEqual(await readdir(join(f.home, '@local/my-package')), [
+  assert.deepEqual((await readdir(join(f.home, 'my-package'))).sort(), [
+    '.skill-meta',
     'whole-package',
   ]);
+  assert.deepEqual(
+    JSON.parse(
+      await readFile(
+        join(f.home, 'my-package/.skill-meta/.skill-archive.json'),
+        'utf8',
+      ),
+    ),
+    { version: 1 },
+  );
+  await assert.rejects(stat(join(f.home, '@local')), { code: 'ENOENT' });
   const installed = JSON.parse(
     (await f.run('list-skills.py', ['--format', 'json'])).stdout,
   );
-  assert.equal(installed[0].path, '@local/my-package/whole-package');
+  assert.equal(installed[0].path, 'my-package/whole-package');
+  const service = new SkillService(join(f.root, 'workspace'));
+  t.after(() => service.dispose());
+  assert.deepEqual(
+    (await service.forUser('alice').list()).skills.map((skill) => skill.path),
+    ['my-package/whole-package'],
+  );
   await f.clean();
 });
 
@@ -152,26 +181,28 @@ test('wrapped collections keep archive paths, support scoped batch imports and p
   );
   await f.run('install-skill.py', [...args, '--path', 'wrapper/catalog/alpha']);
   await assert.rejects(f.run('install-skill.py', args), /already exists/);
-  assert.deepEqual(await readdir(join(f.home, '@local/collection')), ['alpha']);
+  assert.deepEqual((await readdir(join(f.home, 'collection'))).sort(), [
+    '.skill-meta',
+    'alpha',
+  ]);
   await f.run('install-skill.py', [
     ...args,
     '--path',
     'wrapper/catalog/beta/SKILL.md',
   ]);
-  assert.deepEqual((await readdir(join(f.home, '@local/collection'))).sort(), [
+  assert.deepEqual((await readdir(join(f.home, 'collection'))).sort(), [
+    '.skill-meta',
     'alpha',
     'beta',
   ]);
   assert.equal(
-    await readFile(
-      join(f.home, '@local/collection/alpha/refs/guide.txt'),
-      'utf8',
-    ),
+    await readFile(join(f.home, 'collection/alpha/refs/guide.txt'), 'utf8'),
     'alpha guide',
   );
   const project = join(f.root, 'workspace/projects/project/.agents/skills');
   await f.run('install-skill.py', args, project);
-  assert.deepEqual((await readdir(join(project, '@local/collection'))).sort(), [
+  assert.deepEqual((await readdir(join(project, 'collection'))).sort(), [
+    '.skill-meta',
     'alpha',
     'beta',
   ]);
@@ -186,9 +217,12 @@ test('an outer package retains its nested resources and is installed as one dire
     { path: 'wrapped/shared.py', content: '# shared' },
   ]);
   await f.run('install-skill.py', ['--archive', archive]);
-  assert.deepEqual(await readdir(join(f.home, '@local/outer')), ['wrapped']);
+  assert.deepEqual((await readdir(join(f.home, 'outer'))).sort(), [
+    '.skill-meta',
+    'wrapped',
+  ]);
   assert.equal(
-    await readFile(join(f.home, '@local/outer/wrapped/child/SKILL.md'), 'utf8'),
+    await readFile(join(f.home, 'outer/wrapped/child/SKILL.md'), 'utf8'),
     manifest('child'),
   );
   await f.clean();
@@ -214,12 +248,12 @@ test('management imports and Python archive installs recognize each other and sh
   assert.deepEqual(
     scan.skills.map((skill) => [skill.destination, skill.installed]),
     [
-      ['@local/shared-archive/alpha', true],
-      ['@local/shared-archive/beta', false],
+      ['shared-archive/alpha', true],
+      ['shared-archive/beta', false],
     ],
   );
   const installed = await personal.install(scan.id, ['wrapped/beta/SKILL.md']);
-  assert.equal(installed[0].path, '@local/shared-archive/beta');
+  assert.equal(installed[0].path, 'shared-archive/beta');
   const listing = JSON.parse(
     (await f.run('list-skills.py', ['--archive', archive, '--format', 'json']))
       .stdout,
@@ -228,13 +262,14 @@ test('management imports and Python archive installs recognize each other and sh
     listing.map((row: { installed: boolean }) => row.installed),
     [true, true],
   );
-  assert.deepEqual(
-    (await readdir(join(f.home, '@local/shared-archive'))).sort(),
-    ['alpha', 'beta'],
-  );
+  assert.deepEqual((await readdir(join(f.home, 'shared-archive'))).sort(), [
+    '.skill-meta',
+    'alpha',
+    'beta',
+  ]);
   assert.deepEqual(
     (await personal.list()).skills.map((skill) => skill.path),
-    ['@local/shared-archive/alpha', '@local/shared-archive/beta'],
+    ['shared-archive/alpha', 'shared-archive/beta'],
   );
   await f.clean();
 });
@@ -413,10 +448,141 @@ with installer.archive(sys.argv[2]) as snapshot:
     else: raise AssertionError("expected failure")
 `;
   await f.python(['-c', code, scripts, archive]);
-  assert.deepEqual(await readdir(join(f.home, '@local/batch')), ['existing']);
+  assert.deepEqual((await readdir(join(f.home, 'batch'))).sort(), [
+    '.skill-meta',
+    'existing',
+  ]);
   assert.equal(
-    await readFile(join(f.home, '@local/batch/existing/SKILL.md'), 'utf8'),
+    await readFile(join(f.home, 'batch/existing/SKILL.md'), 'utf8'),
     manifest('existing'),
+  );
+  await f.clean();
+});
+
+test('new archive groups publish their marker atomically and restore an existing empty destination after failure', async (t) => {
+  const f = await fixture(t);
+  const archive = await f.archive('atomic.skill', [
+    { path: 'SKILL.md', content: manifest('root') },
+  ]);
+  const group = join(f.home, 'atomic');
+  const code = `import importlib.util, pathlib, sys
+sys.path.insert(0, sys.argv[1])
+spec = importlib.util.spec_from_file_location("installer", pathlib.Path(sys.argv[1]) / "install-skill.py")
+installer = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(installer)
+rename = pathlib.Path.rename
+def fail(self, target):
+    if self.name == "next": raise OSError("injected group publication failure")
+    return rename(self, target)
+pathlib.Path.rename = fail
+with installer.archive(sys.argv[2]) as snapshot:
+    try: installer.install(installer.skill_home(), snapshot, None)
+    except OSError as error: assert str(error) == "injected group publication failure"
+    else: raise AssertionError("expected failure")
+`;
+  await f.python(['-c', code, scripts, archive]);
+  await assert.rejects(stat(group), { code: 'ENOENT' });
+  assert.deepEqual(await readdir(f.home), []);
+  await mkdir(group);
+  await f.python(['-c', code, scripts, archive]);
+  assert.deepEqual(await readdir(group), []);
+  await f.clean();
+  await f.run('install-skill.py', ['--archive', archive]);
+  assert.deepEqual((await readdir(group)).sort(), ['.skill-meta', 'root']);
+  assert.deepEqual(
+    JSON.parse(
+      await readFile(join(group, '.skill-meta/.skill-archive.json'), 'utf8'),
+    ),
+    { version: 1 },
+  );
+  await f.clean();
+});
+
+test('legacy ordinary archive installations require service migration without creating duplicate flat groups', async (t) => {
+  const f = await fixture(t);
+  const archive = await f.archive('legacy.zip', [
+    { path: 'alpha/SKILL.md', content: manifest('alpha') },
+  ]);
+  const oldSkill = join(f.home, '@local/legacy/alpha');
+  await mkdir(oldSkill, { recursive: true });
+  await writeFile(join(oldSkill, 'SKILL.md'), manifest('alpha'));
+  for (const args of [
+    ['--archive', archive],
+    ['--archive', archive, '--whole-project'],
+  ]) {
+    await assert.rejects(
+      f.run('list-skills.py', args),
+      /Restart the application service/,
+    );
+    await assert.rejects(
+      f.run('install-skill.py', args),
+      /Restart the application service/,
+    );
+  }
+  const installed = JSON.parse(
+    (await f.run('list-skills.py', ['--format', 'json'])).stdout,
+  );
+  assert.deepEqual(
+    installed.map((skill: { path: string }) => skill.path),
+    ['@local/legacy/alpha'],
+  );
+  assert.equal(
+    await readFile(join(oldSkill, 'SKILL.md'), 'utf8'),
+    manifest('alpha'),
+  );
+  await assert.rejects(stat(join(f.home, 'legacy')), { code: 'ENOENT' });
+  await f.clean();
+});
+
+test('archive markers protect GitHub owner namespaces in both directions and reject mixed installation metadata', async (t) => {
+  const f = await fixture(t);
+  const archive = await f.archive('owner.zip', [
+    { path: 'alpha/SKILL.md', content: manifest('alpha') },
+  ]);
+  const existing = join(f.home, 'owner/repo/existing');
+  await mkdir(existing, { recursive: true });
+  await writeFile(join(existing, 'SKILL.md'), manifest('existing'));
+  await assert.rejects(
+    f.run('install-skill.py', ['--archive', archive]),
+    /not an archive skill group/,
+  );
+  assert.equal(
+    await readFile(join(existing, 'SKILL.md'), 'utf8'),
+    manifest('existing'),
+  );
+  await rm(join(f.home, 'owner'), { recursive: true });
+  await f.run('install-skill.py', ['--archive', archive]);
+  const code = `import importlib.util, pathlib, sys
+sys.path.insert(0, sys.argv[1])
+from repository import Source, SkillError
+spec = importlib.util.spec_from_file_location("installer", pathlib.Path(sys.argv[1]) / "install-skill.py")
+installer = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(installer)
+with installer.archive(sys.argv[2]) as snapshot:
+    snapshot.source = Source("owner", "repo", "https://github.com/owner/repo")
+    for whole in [False, True]:
+        try: installer.install(installer.skill_home(), snapshot, None, whole)
+        except SkillError as error: assert "archive skill group" in str(error)
+        else: raise AssertionError("archive group cannot be a repository owner")
+`;
+  await f.python(['-c', code, scripts, archive]);
+  await assert.rejects(stat(join(f.home, 'owner/repo')), { code: 'ENOENT' });
+  const metadata = join(f.home, 'owner/.skill-meta');
+  await writeFile(
+    join(metadata, '.skill-project.json'),
+    JSON.stringify({
+      version: 2,
+      root: '.',
+      entries: [{ path: 'alpha/SKILL.md', name: 'alpha' }],
+    }),
+  );
+  await assert.rejects(
+    f.run('list-skills.py', ['--format', 'json']),
+    /Invalid archive installation record/,
+  );
+  await assert.rejects(
+    f.run('install-skill.py', ['--archive', archive]),
+    /Invalid archive installation record/,
   );
   await f.clean();
 });

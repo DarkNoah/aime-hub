@@ -159,6 +159,94 @@ test('monitor creation uses shared strategies and enforces administrator, versio
     60,
     'versions without a configured duration use the SDK minute default, independently of chart period',
   );
+  versionParameters = { fast: 10, slow: 30, duration: 60 };
+  const custom = { ...value, parameter_overrides: { fast: 5, duration: 300 } };
+  assert.equal((await request(custom)).status, 201);
+  const loaded = (calls.at(-2) as unknown[])[4] as ReturnType<typeof config>;
+  assert.deepEqual(loaded.parameters, { fast: 5, slow: 30, duration: 300 });
+  assert.equal(loaded.duration, 300);
+  assert.deepEqual(versionParameters, { fast: 10, slow: 30, duration: 60 });
+  for (const parameter_overrides of [[], { duration: 17 }, { symbol: actual }])
+    assert.equal(
+      (await request({ ...value, parameter_overrides })).status,
+      400,
+    );
+});
+
+test('editing market parameters uses the loaded version and rebuilds only when effective inputs change', async () => {
+  const cfg = { ...config(), duration: 180, parameters: { fast: 5 } };
+  const version = { slow: 30, duration: 60, fast: 10, symbol: 'from-version' };
+  let calculation: unknown;
+  let writes = 0;
+  const app = new Hono<PluginHttpEnv>();
+  app.use('*', async (c, next) => {
+    c.set('userId', 'alice');
+    c.set('isAdmin', c.req.header('admin') === 'yes');
+    await next();
+  });
+  app.route(
+    '/strategies',
+    signalRoutes(() => ({
+      config: {} as QuantConfig,
+      state: {} as StateStore,
+      records: {
+        storedStrategy: async () => ({ enabled: true, status: 'active' }),
+        version: async (owner: string, id: string) => {
+          assert.equal(owner, 'alice');
+          assert.equal(id, cfg.version_id);
+          return { parameters: version };
+        },
+      } as unknown as StrategyStore,
+      monitors: {
+        get: async (id: string, owner: string) => {
+          assert.equal(id, 'monitor');
+          assert.equal(owner, 'alice');
+          return {
+            id,
+            strategy_id: 'strategy',
+            config: cfg,
+            revision: 7,
+            enabled: true,
+            deleted: false,
+          };
+        },
+        update: async (...args: Parameters<MonitorStore['update']>) => {
+          writes++;
+          calculation = args[6];
+          assert.deepEqual(args.slice(0, 4), ['alice', 'monitor', 7, true]);
+          return { id: calculation ? 'fresh' : 'monitor' };
+        },
+      } as unknown as MonitorStore,
+      wake: () => {},
+    })),
+  );
+  const path = '/strategies/monitors/monitor';
+  const response = await app.request(path + '/parameters');
+  assert.deepEqual(await response.json(), {
+    defaults: { fast: 10, slow: 30, duration: 60 },
+    current: { fast: 5, slow: 30, duration: 180 },
+    revision: 7,
+    canEdit: false,
+  });
+  const patch = (parameter_overrides: unknown, admin = 'yes') =>
+    app.request(path, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', admin },
+      body: JSON.stringify({ revision: 7, parameter_overrides }),
+    });
+  assert.equal((await patch({ fast: 7 }, 'no')).status, 403);
+  assert.equal((await patch({ duration: 17 })).status, 400);
+  assert.equal(writes, 0);
+  assert.equal((await patch({ slow: 30, fast: 5, duration: 180 })).status, 200);
+  assert.equal(calculation, undefined);
+  assert.equal((await patch({ fast: 7, duration: '300' })).status, 200);
+  assert.deepEqual(calculation, {
+    parameters: { ...version, fast: 7, duration: 300 },
+    duration: 300,
+  });
+  assert.equal((await patch({})).status, 200);
+  assert.deepEqual(calculation, { parameters: version, duration: 60 });
+  assert.deepEqual(cfg.parameters, { fast: 5 });
 });
 
 for (const [monitorSymbol, executionModel] of [
@@ -878,6 +966,59 @@ test(
         7,
       );
       assert.equal((await store.list('alice')).length, 8);
+      assert.equal(await store.acquire(readded.id, 'old-run'), true);
+      await store.heartbeat(
+        readded.id,
+        'old-run',
+        'running',
+        '',
+        'old checkpoint',
+      );
+      await store.history.save(readded.id, 'old-run', batch);
+      const edit = () =>
+        store.update(
+          'alice',
+          readded.id,
+          readded.revision,
+          true,
+          false,
+          {},
+          {
+            duration: 300,
+            parameters: { fast: 1 },
+          },
+        );
+      const editsAtLimit = await Promise.allSettled([edit(), edit()]);
+      const [success] = editsAtLimit.filter(
+        (result) => result.status === 'fulfilled',
+      );
+      assert.equal(
+        editsAtLimit.filter((result) => result.status === 'rejected').length,
+        1,
+      );
+      const next = success.value;
+      assert.equal(next.attachment_id, readded.id);
+      assert.notEqual(next.id, readded.id);
+      assert.equal(next.config.version_id, readded.config.version_id);
+      assert.equal(next.config.duration, 300);
+      assert.deepEqual(next.config.parameters, { fast: 1 });
+      assert.equal((await store.list('alice')).length, 8);
+      assert.equal(await store.acquire(readded.id, 'late-worker'), false);
+      assert.equal(
+        await store.heartbeat(readded.id, 'old-run', 'running', '', 'stale'),
+        false,
+      );
+      await assert.rejects(
+        store.history.save(readded.id, 'old-run', batch),
+        /租约/,
+      );
+      assert.equal(await store.acquire(next.id, 'new-run'), true);
+      assert.equal((await store.runtime(next.id, true))?.checkpoint, '');
+      assert.deepEqual((await store.history.read(next.id)).trades, []);
+      await store.history.save(next.id, 'new-run', batch);
+      await store.cleanupDeleted();
+      assert.equal((await store.history.read(readded.id)).trades.length, 0);
+      assert.equal((await store.history.read(next.id)).trades.length, 50);
     } finally {
       await store.request(`DROP DATABASE ${database}`);
     }

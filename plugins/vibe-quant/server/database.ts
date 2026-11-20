@@ -53,6 +53,19 @@ class TdxServerList1792100002000 implements MigrationInterface {
     // A list of endpoints cannot be represented by the obsolete single-host fields.
   }
 }
+export class StrategyFavorites1795132800000 implements MigrationInterface {
+  async up(runner: QueryRunner) {
+    // Strategy IDs belong to the shared ClickHouse library, users to this host.
+    await runner.query(`CREATE TABLE plugin_vibe_quant_strategy_favorites (
+      user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      strategy_id uuid NOT NULL,
+      PRIMARY KEY (user_id, strategy_id)
+    )`);
+  }
+  async down(runner: QueryRunner) {
+    await runner.query('DROP TABLE plugin_vibe_quant_strategy_favorites');
+  }
+}
 export default {
   entities: [],
   migrations: [
@@ -61,5 +74,6 @@ export default {
     TdxServerList1792100002000,
     StrategyManagement1792600000000,
     SignalServiceScope1793318400000,
+    StrategyFavorites1795132800000,
   ],
 } satisfies PluginDatabase;

@@ -40,6 +40,7 @@ import { Button } from '@/components/ui/button';
 import { PreviewImage } from '@/components/image-viewer/preview-image';
 import { ChatBackgroundTask } from './chat-background-task';
 import { ChatMessageActions } from './chat-message-actions';
+import { UserMessageText } from './user-message-text';
 import { ChatMessageAttachments } from './chat-message-attachments';
 import { splitMessageAttachments } from './message-attachments';
 import { ChatMessageCompression } from './chat-message-compression';
@@ -443,7 +444,7 @@ export const ChatMessage = memo(function ChatMessage({
             if (part.type === 'text')
               return message.role === 'user' ? (
                 <p key={index} className="whitespace-pre-wrap">
-                  {part.text}
+                  <UserMessageText text={part.text} />
                 </p>
               ) : (
                 <MessageResponse

@@ -9,6 +9,7 @@ import {
   MessageResponse,
 } from '@/components/ai-elements/message';
 import { IntelligentUI } from '@/components/chat/tool-renderers/intelligent-ui';
+import { UserMessageText } from '@/components/chat/user-message-text';
 import { MemberAvatar } from '@/components/member-avatar';
 import { WorkspaceAttachment } from '@/components/file-manager/workspace-attachment';
 import { Badge } from '@/components/ui/badge';
@@ -155,7 +156,9 @@ export function RoomMessage({
                 {message.text}
               </MessageResponse>
             ) : (
-              <span className="whitespace-pre-wrap">{message.text}</span>
+              <span className="whitespace-pre-wrap">
+                <UserMessageText text={message.text} />
+              </span>
             )}
           </MessageContent>
         )}

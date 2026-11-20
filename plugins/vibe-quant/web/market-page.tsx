@@ -39,6 +39,10 @@ import { useStrategyVisibility } from './signals/use-strategy-visibility';
 import { StrategyHints } from './signals/strategy-hints';
 import { MarketPositionsPanel } from './signals/market-positions-panel';
 import {
+  MonitorParametersDialog,
+  type NamedMonitor,
+} from './signals/monitor-parameters';
+import {
   readMarketChartTarget,
   type MarketChartTarget,
 } from '../market-navigation';
@@ -86,6 +90,8 @@ const timeText = (value?: string | null) =>
 
 export function MarketPage({ pluginId }: PluginPageProps) {
   const strategyVisibility = useStrategyVisibility();
+  const [parameterMonitor, setParameterMonitor] = useState<NamedMonitor>();
+  const [recalculatedMonitor, setRecalculatedMonitor] = useState<string>();
   const [chartTarget, setChartTarget] = useState(() =>
     readMarketChartTarget(window.location.search),
   );
@@ -491,6 +497,7 @@ export function MarketPage({ pluginId }: PluginPageProps) {
                     instrument={item}
                     hints={hints}
                     onJumpToEntry={marketBars.navigate}
+                    onEditParameters={setParameterMonitor}
                     replay={replay}
                   />
                 )}
@@ -539,6 +546,8 @@ export function MarketPage({ pluginId }: PluginPageProps) {
           onNavigate={navigateChart}
           hiddenStrategyIds={strategyVisibility.hiddenStrategyIds}
           onStrategyVisibleChange={strategyVisibility.setVisible}
+          onEditParameters={setParameterMonitor}
+          changedMonitor={recalculatedMonitor}
           marketOverview={
             item ? (
               <div aria-label="行情概览与盘口">
@@ -597,6 +606,25 @@ export function MarketPage({ pluginId }: PluginPageProps) {
           </a>
         </span>
       </footer>
+      {parameterMonitor && (
+        <MonitorParametersDialog
+          key={parameterMonitor.id}
+          pluginId={pluginId}
+          item={parameterMonitor}
+          busy={!!hints.busy}
+          onClose={() => setParameterMonitor(undefined)}
+          onSave={async (parameter_overrides, revision) => {
+            const next = await hints.change(
+              { ...parameterMonitor, revision },
+              { parameter_overrides },
+            );
+            if (!next) return;
+            if (next.id !== parameterMonitor.id)
+              setRecalculatedMonitor(next.id);
+            setParameterMonitor(undefined);
+          }}
+        />
+      )}
       <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>

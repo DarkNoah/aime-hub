@@ -480,6 +480,8 @@ export class SignalWorker {
             current.notifications ?? strategy.notifications,
           ).channels;
           if (
+            !current.deleted &&
+            current.enabled &&
             current.notifications_enabled !== false &&
             current.config.events[event.type]
           ) {

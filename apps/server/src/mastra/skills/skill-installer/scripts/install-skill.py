@@ -12,13 +12,15 @@ import tempfile
 
 from repository import SkillError, directory, handle_termination, parse_source, repository, skill_home
 from archive import archive
-from project import METADATA_DIR, check_ancestors, group_parts, install_project, installation_lock, locate_project, project_snapshot, read_project, validate_entries
+from project import ARCHIVE_FILE, METADATA_DIR, check_ancestors, ensure_archive_migrated, group_parts, install_project, installation_lock, locate_project, project_snapshot, read_archive_group, read_project, validate_entries
 
 
 SOURCES_FILE = ".skill-sources.json"
 
 
 def read_sources(group: Path) -> list[dict]:
+    if read_archive_group(group):
+        return []
     project = read_project(group)
     path = group / METADATA_DIR / SOURCES_FILE if project is not None else group / SOURCES_FILE
     if path.is_symlink() or (path.exists() and not path.is_file()):
@@ -64,20 +66,78 @@ def read_sources(group: Path) -> list[dict]:
 
 def install(root: Path, snapshot, paths: list[str] | None, whole_project: bool = False) -> list[Path]:
     # Selection and destination validation happen before creating lock directories.
+    ensure_archive_migrated(root, snapshot)
     if whole_project:
         snapshot = project_snapshot(snapshot)
     selected = snapshot.select_project(paths) if whole_project else snapshot.select(paths)[0]
-    parts = group_parts(snapshot, whole_project)
+    parts = group_parts(snapshot)
     check_ancestors(root, parts)
     group = locate_project(root, snapshot)[0] if whole_project else directory(root, parts)
     if whole_project and (group.exists() or group.is_symlink()):
         raise SkillError("The project group already exists. Remove or update the entire group first.")
     with installation_lock(root, parts):
+        ensure_archive_migrated(root, snapshot)
         if whole_project:
             return install_project(root, snapshot, selected)
         if read_project(group, legacy=len(parts) == 2) is not None:
             raise SkillError("This group contains a whole project. Manage it as an entire project.")
+        if snapshot.source.kind == "archive":
+            return install_archive_skills(root, snapshot, selected)
+        if read_archive_group(group):
+            raise SkillError("This group contains archive skills. Repository imports cannot share it.")
         return install_skills(root, snapshot, paths)
+
+
+def install_archive_skills(root: Path, snapshot, selected: list[dict]) -> list[Path]:
+    """Publish a new archive container atomically, or append a rollback-safe batch."""
+    parts = group_parts(snapshot)
+    group = directory(root, parts)
+    existing = read_archive_group(group)
+    if group.exists() and not existing and any(group.iterdir()):
+        raise SkillError("The archive group already exists and is not an archive skill group.")
+    targets = [group / skill["name"] for skill in selected]
+    for target in targets:
+        if target.exists() or target.is_symlink():
+            raise SkillError(f"Skill already exists: {target}. Use the management page to update it.")
+    with tempfile.TemporaryDirectory(prefix=".skill-archive-", dir=group.parent) as temporary:
+        staged = Path(temporary) / "next"
+        staged.mkdir()
+        for skill in selected:
+            snapshot.copy(skill, staged / skill["name"])
+        if not existing:
+            metadata = staged / METADATA_DIR
+            metadata.mkdir()
+            (metadata / ARCHIVE_FILE).write_text('{"version": 1}\n', encoding="utf-8")
+        check_ancestors(root, parts)
+        ensure_archive_migrated(root, snapshot)
+        directory(root, parts)
+        if existing:
+            if not read_archive_group(group):
+                raise SkillError("The archive group changed during installation.")
+            written = []
+            try:
+                for skill, target in zip(selected, targets):
+                    if target.exists() or target.is_symlink():
+                        raise SkillError(f"Skill already exists: {target}")
+                    (staged / skill["name"]).rename(target)
+                    written.append(target)
+            except BaseException:
+                for target in reversed(written):
+                    shutil.rmtree(target)
+                raise
+        else:
+            empty = group.exists()
+            if empty:
+                if any(group.iterdir()):
+                    raise SkillError("The archive group already exists; existing contents were preserved.")
+                group.rmdir()
+            try:
+                staged.rename(group)
+            except BaseException:
+                if empty and not group.exists():
+                    group.mkdir()
+                raise
+    return targets
 
 
 def install_skills(root: Path, snapshot, paths: list[str] | None) -> list[Path]:

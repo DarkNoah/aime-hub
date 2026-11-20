@@ -109,6 +109,7 @@ export class MonitorStore extends ClickHouseClient {
     const runtime = await this.runtime(row.id);
     return {
       id: row.id,
+      attachment_id: row.attachment_id,
       strategy_id: row.strategy_id,
       version_number: row.version_number,
       version_name: row.version_name,
@@ -180,6 +181,7 @@ export class MonitorStore extends ClickHouseClient {
       SignalMonitor,
       'notifications' | 'notifications_enabled'
     > = {},
+    calculation?: Pick<SignalMonitorInput, 'parameters' | 'duration'>,
   ) {
     const previous = await this.get(id, owner);
     if (previous.deleted) {
@@ -196,9 +198,32 @@ export class MonitorStore extends ClickHouseClient {
       revision: revision + 1,
       updated_at: new Date().toISOString(),
     };
+    // A new calculation must never resume a previous worker's checkpoint.
+    // Swap both rows in one block under the existing revision check, even at
+    // the monitor limit. The worker's normal tombstone cleanup retires old data.
+    const active = calculation
+      ? {
+          ...row,
+          id: randomUUID(),
+          attachment_id: previous.attachment_id ?? previous.id,
+          config: { ...previous.config, ...calculation },
+        }
+      : row;
+    const changes = calculation
+      ? [
+          {
+            ...row,
+            attachment_id: active.attachment_id,
+            deleted: true,
+            enabled: false,
+          },
+          active,
+        ]
+      : [row];
     const result = await this.execute(
       `INSERT INTO ${this.table('quant_signal_monitors')}
-      SELECT {id:String}, {owner:String}, payload, {next:UInt64} FROM input('payload String')
+      SELECT JSONExtractString(payload,'id'), {owner:String}, payload, {next:UInt64}
+      FROM input('payloads Array(String)') ARRAY JOIN payloads AS payload
       WHERE EXISTS (SELECT 1 FROM ${this.table('quant_signal_monitors')} FINAL WHERE id={id:String} AND revision={revision:UInt64}) FORMAT JSONEachRow`,
       {
         id,
@@ -206,11 +231,14 @@ export class MonitorStore extends ClickHouseClient {
         next: String(row.revision),
         revision: String(revision),
       },
-      JSON.stringify({ payload: JSON.stringify(row) }),
+      JSON.stringify({
+        payloads: changes.map((change) => JSON.stringify(change)),
+      }),
       'signal-monitor-config',
     );
-    if (!result.writtenRows) throw new StrategyError('MONITOR_CONFLICT', 409);
-    return this.view(deleted ? await this.finishDelete(row) : row);
+    if (result.writtenRows !== changes.length)
+      throw new StrategyError('MONITOR_CONFLICT', 409);
+    return this.view(deleted ? await this.finishDelete(row) : active);
   }
   /** The caller must first find this legacy monitor's user in its host database. */
   async bindService(row: StoredMonitor): Promise<StoredMonitor | undefined> {

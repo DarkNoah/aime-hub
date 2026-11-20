@@ -557,7 +557,9 @@ export function MarketChart({
     const markers = createSeriesMarkers(
       series,
       strategyHintMarkers(
-        strategyHints.filter((hint) => !hiddenStrategyIds?.has(hint.id)),
+        strategyHints.filter(
+          (hint) => !hiddenStrategyIds?.has(hint.attachment_id ?? hint.id),
+        ),
         bars,
         duration,
         priceTick,
@@ -582,7 +584,9 @@ export function MarketChart({
         ? tradeRiskDrawings(trade, riskLevels, bars, duration, priceTick)
         : []),
       ...strategyHintDrawings(
-        strategyHints?.filter((hint) => !hiddenStrategyIds?.has(hint.id)) ?? [],
+        strategyHints?.filter(
+          (hint) => !hiddenStrategyIds?.has(hint.attachment_id ?? hint.id),
+        ) ?? [],
         bars,
         duration,
         priceTick,

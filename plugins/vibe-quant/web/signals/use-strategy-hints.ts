@@ -74,10 +74,10 @@ export function useStrategyHints(
     }));
   }
   async function change(
-    item: MarketStrategyHint,
+    item: SignalMonitor,
     patch: Partial<
       Pick<SignalMonitor, 'enabled' | 'notifications_enabled' | 'notifications'>
-    > & { deleted?: boolean },
+    > & { deleted?: boolean; parameter_overrides?: Record<string, unknown> },
   ) {
     if (pending.current) return false;
     pending.current = true;
@@ -104,6 +104,12 @@ export function useStrategyHints(
                       ? {
                           ...row,
                           ...next,
+                          ...(next.id !== row.id && {
+                            signals: [],
+                            trades: [],
+                            trades_truncated: false,
+                            overlay: { updated_at: null, levels: [] },
+                          }),
                           notifications:
                             next.notifications ?? row.notifications,
                         }
@@ -112,9 +118,15 @@ export function useStrategyHints(
             },
       );
       toast.success(
-        patch.deleted ? '已移除策略提示并清除历史记录' : '策略提示已更新',
+        patch.deleted
+          ? '已移除策略提示并清除历史记录'
+          : next.id !== item.id
+            ? next.enabled
+              ? '参数已更新，已提交历史重算'
+              : '参数已更新，启用计算后将重新计算历史'
+            : '策略提示已更新',
       );
-      return true;
+      return next;
     } catch (error) {
       toast.error(errorText(error));
       return false;

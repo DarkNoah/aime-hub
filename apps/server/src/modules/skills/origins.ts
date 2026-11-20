@@ -1,5 +1,12 @@
-import { createHash } from 'node:crypto';
-import { lstat, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import {
+  lstat,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import type {
   InstalledSkill,
@@ -8,6 +15,7 @@ import type {
 } from '@aime/shared/skills';
 import { SkillError } from './errors.js';
 import type { SkillService } from './service.js';
+import { safeRepositoryPath } from './github.js';
 
 type Origin = { sharing: SkillSharing; unit: string; token: string };
 type ProjectTarget = { id: string; name: string };
@@ -52,6 +60,91 @@ async function matches(directory: string, origin: Origin) {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
     throw error;
+  }
+}
+
+/** Update prior move-to-share provenance after the owning archive directory moves. */
+export async function migrateSkillOriginUnits(
+  workspaceRoot: string,
+  target: SkillDestination,
+  storeRoot: string,
+  moves: ReadonlyMap<string, string>,
+) {
+  if (!moves.size) return;
+  const registry = join(workspaceRoot, '.agents', 'skill-origins');
+  const info = await stat(registry);
+  if (!info) return;
+  if (!info.isDirectory()) throw new SkillError('SKILL_UNSAFE_PATH', 403);
+  const locations = new Set(
+    [...moves.keys()].map((unit) => locationKey(target, unit)),
+  );
+  const files = await readdir(registry);
+  for (const filename of files) {
+    if (!locations.has(filename.split('.')[0])) continue;
+    if (!/^[a-f\d]{64}\.[a-f\d]{64}\.json$/.test(filename)) continue;
+    const oldFile = join(registry, filename);
+    const originalInfo = await stat(oldFile);
+    if (!originalInfo?.isFile()) throw new SkillError('SKILL_UNSAFE_PATH', 403);
+    const original: Origin = JSON.parse(await readFile(oldFile, 'utf8'));
+    if (!original.sharing || scopeKey(original.sharing) !== scopeKey(target))
+      continue;
+    const nextUnit = moves.get(original.unit);
+    if (!nextUnit || nextUnit === original.unit) continue;
+    if (
+      !safeRepositoryPath(original.unit) ||
+      !safeRepositoryPath(nextUnit) ||
+      typeof original.token !== 'string' ||
+      typeof original.sharing.userId !== 'string'
+    )
+      throw new SkillError('SKILL_UNSAFE_PATH', 403);
+    const expected =
+      locationKey(original.sharing, original.unit) +
+      '.' +
+      digest(original.sharing.userId) +
+      '.json';
+    if (filename !== expected) throw new SkillError('SKILL_UNSAFE_PATH', 403);
+    const next: Origin = { ...original, unit: nextUnit };
+    const directory = join(storeRoot, nextUnit);
+    const nextMarker = marker(directory, next);
+    const oldMarker = marker(directory, original);
+    // An old publisher record can outlive its installation. Transfer only a
+    // grant whose on-disk proof still belongs to this package and publisher.
+    if (
+      !(await matches(directory, original)) &&
+      !(await matches(directory, next))
+    )
+      continue;
+    const markerInfo = await stat(nextMarker);
+    if (markerInfo) {
+      if (!(await matches(directory, next)))
+        throw new SkillError('SKILL_CONFLICT', 409);
+    } else await rename(oldMarker, nextMarker);
+    const nextFile = join(
+      registry,
+      locationKey(next.sharing, next.unit) +
+        '.' +
+        digest(next.sharing.userId) +
+        '.json',
+    );
+    const existing = await stat(nextFile);
+    if (existing) {
+      if (
+        !existing.isFile() ||
+        JSON.stringify(JSON.parse(await readFile(nextFile, 'utf8'))) !==
+          JSON.stringify(next)
+      )
+        throw new SkillError('SKILL_CONFLICT', 409);
+    } else {
+      const temporary = nextFile + '.migrating-' + randomUUID();
+      await writeFile(temporary, JSON.stringify(next), { flag: 'wx' });
+      try {
+        await rename(temporary, nextFile);
+      } finally {
+        await rm(temporary, { force: true });
+      }
+    }
+    await rm(oldMarker, { force: true });
+    await rm(oldFile, { force: true });
   }
 }
 

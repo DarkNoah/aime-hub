@@ -262,15 +262,37 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><RouterProv
       await readFile(
         path.join(
           service.forUser('admin').root,
-          '@local/research-pack/archive-demo/scripts/run.py',
+          'research-pack/archive-demo/scripts/run.py',
         ),
         'utf8',
       ),
       'print("archive resource")\n',
     );
     assert.equal((await service.list()).skills.length, 0);
+    const archiveEntry = (await service.forUser('admin').list()).skills.find(
+      (skill) => skill.name === 'archive-demo',
+    );
+    assert.equal(archiveEntry.group, 'research-pack');
+    assert.equal(archiveEntry.sourceType, 'archive');
+    await page
+      .getByRole('region', {
+        name: 'Local archive / research-pack',
+        exact: true,
+      })
+      .waitFor();
     assert.equal(
-      await page.getByRole('button', { name: /Update.*@local/ }).count(),
+      await page
+        .getByRole('button', { name: 'Update research-pack', exact: true })
+        .count(),
+      0,
+    );
+    assert.equal(
+      await page
+        .getByRole('link', {
+          name: 'Open GitHub repository research-pack',
+          exact: true,
+        })
+        .count(),
       0,
     );
 
@@ -345,8 +367,11 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><RouterProv
       .waitFor();
     assert.deepEqual(
       (await service.list()).skills.map((skill) => skill.path),
-      ['@local/team/alpha'],
+      ['team/alpha'],
     );
+    await page
+      .getByRole('region', { name: 'Local archive / team', exact: true })
+      .waitFor();
     await assert.rejects(service.install(scan.id, [scan.skills[1].path]), {
       code: 'SKILL_SCAN_EXPIRED',
     });
