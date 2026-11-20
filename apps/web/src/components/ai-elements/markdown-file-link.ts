@@ -136,6 +136,27 @@ function isDocumentRelativeHref(href: unknown): href is string {
   );
 }
 
+// Normalize URL shortcuts before sanitization or workspace path resolution.
+export function rehypeMarkdownLinkUrls(options?: { sandboxFiles?: boolean }) {
+  return (tree: HastNode) =>
+    visitMarkdownNodes(tree, ({ tagName, properties }) => {
+      if (tagName === 'a' && typeof properties?.href === 'string') {
+        if (
+          /^(?:localhost|127\.0\.0\.1)(?::\d+)?(?:[/?#]|$)/i.test(
+            properties.href,
+          )
+        ) {
+          properties.href = `http://${properties.href}`;
+        } else if (options?.sandboxFiles) {
+          properties.href = properties.href.replace(
+            /^sandbox:\/(?![/\\])/i,
+            './',
+          );
+        }
+      }
+    });
+}
+
 // Keep the original href until the preview can resolve it against its own file.
 // Absolute URLs and fragment-only links still go through Streamdown's hardening.
 export function rehypePreviewFileLinks() {

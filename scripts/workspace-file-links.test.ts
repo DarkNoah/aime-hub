@@ -4,6 +4,7 @@ import {
   getWorkspaceFilePath,
   getWorkspaceFileTarget,
   isWorkspaceDirectoryLink,
+  rehypeMarkdownLinkUrls,
   rehypeWorkspaceFileLinks,
   resolvePreviewFileLink,
   toWorkspaceFileLink,
@@ -36,6 +37,54 @@ test('file previews resolve links relative to the Markdown document', () => {
     'file:///example',
   ]) {
     assert.equal(resolve(href), undefined, href);
+  }
+});
+
+test('sandbox Markdown destinations use the same preview navigation as relative paths', () => {
+  const rewrite = (href: string) => {
+    const link = { type: 'element', tagName: 'a', properties: { href } };
+    rehypeMarkdownLinkUrls({ sandboxFiles: true })(link);
+    return link.properties.href;
+  };
+  for (const [href, expected] of [
+    ['sandbox:/报告%20v2.pdf', { path: 'docs/报告 v2.pdf', kind: 'file' }],
+    ['sandbox:/../assets/', { path: 'assets', kind: 'directory' }],
+    ['sandbox:/code.ts:12', { path: 'docs/code.ts', kind: 'file', line: 12 }],
+    ['sandbox:/', { path: 'docs', kind: 'directory' }],
+  ] as const) {
+    assert.deepEqual(
+      resolvePreviewFileLink('docs/index.md', rewrite(href)),
+      expected,
+    );
+  }
+  assert.equal(
+    resolvePreviewFileLink('docs/index.md', rewrite('sandbox:/../../outside')),
+    undefined,
+  );
+  for (const href of [
+    'sandbox://host/file',
+    'https://example.com',
+    'file:///example',
+  ]) {
+    assert.equal(rewrite(href), href);
+  }
+});
+
+test('Markdown links to bare loopback hosts default to HTTP', () => {
+  for (const [href, expected] of [
+    [
+      'localhost:4173/report?q=1#chart',
+      'http://localhost:4173/report?q=1#chart',
+    ],
+    ['127.0.0.1/app', 'http://127.0.0.1/app'],
+    ['https://localhost:443/app', 'https://localhost:443/app'],
+    ['localhost.example.com/docs', 'localhost.example.com/docs'],
+    ['127.0.0.10/file', '127.0.0.10/file'],
+    ['docs/localhost', 'docs/localhost'],
+  ]) {
+    const node = { type: 'element', tagName: 'a', properties: { href } };
+    rehypeMarkdownLinkUrls()(node);
+    assert.equal(node.properties.href, expected);
   }
 });
 

@@ -29,7 +29,10 @@ import { MarkupCodeBlock } from './markup-code-block';
 import { MarkdownLink } from './markdown-link';
 import { MarkdownImage } from './markdown-image';
 import { WorkspaceFileThreadContext } from '@/components/file-manager/context';
-import { rehypeWorkspaceFileLinks } from './markdown-file-link';
+import {
+  rehypeMarkdownLinkUrls,
+  rehypeWorkspaceFileLinks,
+} from './markdown-file-link';
 import { math } from './math-plugin';
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
@@ -346,6 +349,7 @@ const streamdownComponents = {
 const imageComponents = { img: MarkdownImage };
 const messageRehypePlugins = [
   defaultRehypePlugins.raw,
+  rehypeMarkdownLinkUrls,
   defaultRehypePlugins.sanitize,
   rehypeWorkspaceFileLinks,
   defaultRehypePlugins.harden,

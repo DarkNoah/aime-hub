@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { Link } from '@tanstack/react-router';
 import { ArrowLeft, ExternalLink } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +20,8 @@ import { ThreadFilePreview } from '@/components/chat/message-preview/thread-file
 import { useMessagePreviewController } from '@/components/chat/message-preview/use-message-preview';
 import { WorkspaceFileContext } from '@/components/file-manager/context';
 import { AssetAttachmentContext } from '@/components/generated-assets/context';
+import { BrowserLinkOpenContext } from '@/components/browser/layout-context';
+import { useOpenBrowserLink } from '@/components/browser/use-open-browser-link';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -21,6 +30,8 @@ import {
   SheetDescription,
 } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
+
+const BrowserPanel = lazy(() => import('@/components/browser/panel'));
 
 export function RoomAgentThreadDrawer({
   agent,
@@ -51,22 +62,28 @@ export function RoomAgentThreadDrawer({
   );
   const toolPreview = useRef<HTMLDivElement>(null);
   const filePreview = useRef<HTMLDivElement>(null);
+  const browserPreview = useRef<HTMLDivElement>(null);
+  const [browserOpen, setBrowserOpen] = useState(false);
+  const showBrowser = useCallback(() => setBrowserOpen(true), []);
+  const openBrowserLink = useOpenBrowserLink(agent.threadId, showBrowser);
   const previewOpen = !!filePath || !!preview.selection;
   useEffect(() => {
-    const panel = filePath
-      ? filePreview.current
-      : preview.selection
-        ? toolPreview.current
-        : null;
+    const panel = browserOpen
+      ? browserPreview.current
+      : filePath
+        ? filePreview.current
+        : preview.selection
+          ? toolPreview.current
+          : null;
     if (!panel) return;
     const previous = document.activeElement;
-    panel.querySelector('button')?.focus({ preventScroll: true });
+    (panel.querySelector('button') ?? panel).focus({ preventScroll: true });
     return () => {
       if (previous instanceof HTMLElement && previous.isConnected)
         previous.focus({ preventScroll: true });
     };
-  }, [filePath, preview.selection]);
-  return (
+  }, [browserOpen, filePath, preview.selection]);
+  const drawer = (
     <SheetContent
       container={container}
       showOverlay={false}
@@ -83,6 +100,11 @@ export function RoomAgentThreadDrawer({
         target?.focus({ preventScroll: true });
       }}
       onEscapeKeyDown={(event) => {
+        if (browserOpen) {
+          event.preventDefault();
+          setBrowserOpen(false);
+          return;
+        }
         if (!previewOpen) return;
         event.preventDefault();
         if (filePath) setFile(null);
@@ -134,7 +156,7 @@ export function RoomAgentThreadDrawer({
         <WorkspaceFileContext.Provider value={openFile}>
           <MessagePreviewContext.Provider value={preview.open}>
             <FloatingChatContext.Provider value>
-              <div className="relative min-h-0 flex-1">
+              <div className="relative min-h-0 flex-1" hidden={browserOpen}>
                 <div
                   className={cn(
                     'flex h-full min-h-0 flex-col',
@@ -223,10 +245,35 @@ export function RoomAgentThreadDrawer({
                   </div>
                 )}
               </div>
+              {browserOpen && (
+                <div
+                  ref={browserPreview}
+                  tabIndex={-1}
+                  className="min-h-0 flex-1"
+                >
+                  <Suspense
+                    fallback={
+                      <p role="status" className="p-4 text-sm">
+                        {t('browser.loading')}
+                      </p>
+                    }
+                  >
+                    <BrowserPanel
+                      threadId={agent.threadId}
+                      onClose={() => setBrowserOpen(false)}
+                    />
+                  </Suspense>
+                </div>
+              )}
             </FloatingChatContext.Provider>
           </MessagePreviewContext.Provider>
         </WorkspaceFileContext.Provider>
       </AssetAttachmentContext.Provider>
     </SheetContent>
+  );
+  return (
+    <BrowserLinkOpenContext.Provider value={openBrowserLink}>
+      {drawer}
+    </BrowserLinkOpenContext.Provider>
   );
 }

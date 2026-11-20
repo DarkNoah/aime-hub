@@ -27,7 +27,7 @@ const [
 ]);
 
 test(
-  'file links preserve line navigation in chat, rooms and read-only previews',
+  'Markdown links open files, preview local web apps and link to external pages',
   { timeout: 120000 },
   async (t) => {
     const fixture = await mkdtemp(path.join(webRoot, '.workspace-links-test-'));
@@ -37,6 +37,10 @@ test(
       await vite?.close();
       await rm(fixture, { recursive: true, force: true });
     });
+    const localUrls = [
+      'http://localhost:4173/report?tab=summary#totals',
+      'http://127.0.0.1:8080/preview?mode=full#section',
+    ];
     const markdown = [
       '[Code at 120](/workspace/src/app.ts:120)',
       '[Code at 30](/workspace/src/app.ts:30)',
@@ -47,6 +51,7 @@ test(
       '[Plain file](/workspace/plain.txt)',
       '[Directory](/workspace/src/)',
       '[Website](https://example.com/guide:12)',
+      `[Chat app](${localUrls[0].replace('http://', '')})`,
       '~~Removed~~',
       '| Feature | Supported |\n| --- | --- |\n| GFM | yes |',
     ].join('\n\n');
@@ -54,10 +59,13 @@ test(
       'docs/guide/index.md': [
         '# Shared guide',
         '[Next page](../chapters/中文%20说明.md)',
+        '[Sandbox report](sandbox:/reports/季度%20报告.md)',
         '[HTTP guide](http://example.com/guide)',
         '[HTTPS guide](https://example.com/guide)',
+        ...localUrls.map((url) => `[Preview ${new URL(url).hostname}](${url})`),
       ].join('\n\n'),
       'docs/chapters/中文 说明.md': '# Chapter\n\n[Browse assets](assets)',
+      'docs/guide/reports/季度 报告.md': '# Quarterly report',
     };
     const entry = `import React from 'react';
 import {createRoot} from 'react-dom/client';
@@ -266,6 +274,76 @@ createRoot(document.getElementById('root')).render(<ThemeProvider><SessionContex
         ),
       );
     }
+    await page.goto(url);
+    const navigationCalls = [];
+    await page.route('**/api/rpc/threads/browser/action', (route) => {
+      const { params, body } = route.request().postDataJSON().json;
+      if (body.kind === 'navigate')
+        navigationCalls.push({ threadId: params.threadId, url: body.url });
+      return route.fulfill({ json: {} });
+    });
+    await page.route('**/api/rpc/threads/browser/state', (route) =>
+      route.fulfill({
+        json: {
+          json: {
+            status: 'waiting',
+            url: '',
+            tabs: [],
+            activeTabIndex: 0,
+            busy: false,
+          },
+        },
+      }),
+    );
+    const documentLink = (name) =>
+      page.locator('article').getByRole('link', { name, exact: true });
+    const panel = page.getByRole('region', { name: '浏览器', exact: true });
+    async function expectPanelNavigation(anchor, target) {
+      const count = navigationCalls.length;
+      const [response] = await Promise.all([
+        page.waitForResponse(
+          (res) =>
+            res.url().endsWith('/api/rpc/threads/browser/action') &&
+            res.request().postDataJSON().json.body.kind === 'navigate',
+        ),
+        anchor.click(),
+      ]);
+      assert.ok(response.ok());
+      await panel.getByRole('textbox', { name: '输入网址' }).waitFor();
+      assert.deepEqual(navigationCalls.slice(count), [
+        { threadId: 'bot-thread', url: target },
+      ]);
+      assert.equal(page.context().pages().length, 1);
+    }
+    for (const target of localUrls) {
+      await page
+        .context()
+        .route(target.split('#')[0], (route) => route.abort());
+      await link('Shared guide').click();
+      await expectPanelNavigation(
+        documentLink('Preview ' + new URL(target).hostname),
+        target,
+      );
+    }
+    await expectPanelNavigation(link('Chat app'), localUrls[0]);
+    await link('Shared guide').click();
+    const callsBeforeRemote = navigationCalls.length;
+    const remoteUrl = 'https://example.com/guide';
+    await page.context().route(remoteUrl, (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: '<title>Guide</title>',
+      }),
+    );
+    const [remotePage] = await Promise.all([
+      page.context().waitForEvent('page'),
+      documentLink('HTTPS guide').click(),
+    ]);
+    await remotePage.waitForURL(remoteUrl);
+    assert.equal(await remotePage.title(), 'Guide');
+    await remotePage.close();
+    await page.getByRole('heading', { name: 'Shared guide' }).waitFor();
+    assert.equal(navigationCalls.length, callsBeforeRemote);
     await page.goto(url + '/?readonly');
     await link('Report at 100').click();
     await assertLine(100);
@@ -290,6 +368,9 @@ createRoot(document.getElementById('root')).render(<ThemeProvider><SessionContex
     await preview.getByRole('heading', { name: 'Chapter' }).waitFor();
     await preview.getByRole('link', { name: 'Browse assets' }).click();
     await preview.getByRole('button', { name: 'image.png' }).waitFor();
+    await link('Shared guide').click();
+    await preview.getByRole('link', { name: 'Sandbox report' }).click();
+    await preview.getByRole('heading', { name: 'Quarterly report' }).waitFor();
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(url + '/?room');
     await link('Code at 120').click();

@@ -1,11 +1,13 @@
 import { createContext, useContext, useMemo, type ComponentProps } from 'react';
 import { useTranslation } from 'react-i18next';
-import { defaultRehypePlugins } from 'streamdown';
+import { defaultRehypePlugins, type StreamdownProps } from 'streamdown';
 import {
   rehypePreviewFileLinks,
+  rehypeMarkdownLinkUrls,
   resolvePreviewFileLink,
 } from '@/components/ai-elements/markdown-file-link';
 import { MarkdownImage } from '@/components/ai-elements/markdown-image';
+import { BrowserLink } from '@/components/browser/browser-link';
 import { MarkdownContent } from '@/components/markdown-content';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { PreviewLinkNavigation, PreviewRendererProps } from './types';
@@ -16,8 +18,9 @@ const DocumentContext = createContext<PreviewLinkNavigation & { path: string }>(
   },
 );
 const linkClassName = 'font-medium text-primary underline underline-offset-4';
-const rehypePlugins = [
+const rehypePlugins: StreamdownProps['rehypePlugins'] = [
   defaultRehypePlugins.raw,
+  [rehypeMarkdownLinkUrls, { sandboxFiles: true }],
   defaultRehypePlugins.sanitize,
   rehypePreviewFileLinks,
   defaultRehypePlugins.harden,
@@ -54,7 +57,7 @@ function RelativeLink({ href, title, children }: ComponentProps<'a'>) {
 function DocumentLink({ href, title, children }: ComponentProps<'a'>) {
   const external = href && /^https?:\/\//i.test(href);
   return (
-    <a
+    <BrowserLink
       className={linkClassName}
       href={href}
       title={title}
@@ -62,7 +65,7 @@ function DocumentLink({ href, title, children }: ComponentProps<'a'>) {
       rel={external ? 'noopener noreferrer' : undefined}
     >
       {children}
-    </a>
+    </BrowserLink>
   );
 }
 

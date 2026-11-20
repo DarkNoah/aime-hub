@@ -35,6 +35,11 @@ const jpg = Buffer.from(
   '/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AVL//2Q==',
   'base64',
 );
+// Two frames alternating red and blue every 100 ms.
+const animatedGif = Buffer.from(
+  'R0lGODlhAQABAIEAAP8AAAAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAAAQABAAAIBAABBAQAIfkEAQoAAQAsAAAAAAEAAQCBAAD/AAAAAAAAAAAACAQAAQQEADs=',
+  'base64',
+);
 
 async function workspace(t: TestContext) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'room-avatars-')));
@@ -63,6 +68,7 @@ test('room details discover new avatars by member ID and pick up file replacemen
   const directory = join(root, '.agents/agents');
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, 'artist.jpg'), jpg);
+  await writeFile(join(directory, 'artist.gif'), animatedGif);
   await writeFile(join(directory, 'leader.png'), png);
   await writeFile(join(directory, 'unrelated.png'), png);
   await symlink(join(directory, 'leader.png'), join(directory, 'editor.png'));
@@ -83,6 +89,13 @@ test('room details discover new avatars by member ID and pick up file replacemen
   assert.notEqual((await discover()).artist, preferred);
   await rm(join(directory, 'artist.png'));
   assert.equal((await discover()).artist, urls.artist);
+  await rm(join(directory, 'artist.jpg'));
+  assert.equal(
+    new URL((await discover()).artist, 'http://localhost').searchParams.get(
+      'path',
+    ),
+    '.agents/agents/artist.gif',
+  );
 });
 
 test('composite room avatars resolve through the authenticated thread file route', async (t) => {
@@ -99,9 +112,13 @@ test('composite room avatars resolve through the authenticated thread file route
   t.after(() => filesystem.destroy());
   await filesystem.mkdir('/.uploads/.agents/agents', { recursive: true });
   await filesystem.writeFile('/.uploads/.agents/agents/artist.png', png);
+  await filesystem.writeFile(
+    '/.uploads/.agents/agents/editor.gif',
+    animatedGif,
+  );
   const { threads } = threadFiles(filesystem);
   const urls = await getRoomAgentAvatarUrls(threads, 'viewer', agents);
-  assert.deepEqual(Object.keys(urls), ['artist']);
+  assert.deepEqual(Object.keys(urls).sort(), ['artist', 'editor']);
   const auth = {
     api: {
       getSession: async ({ headers }: { headers: Headers }) =>
@@ -112,13 +129,18 @@ test('composite room avatars resolve through the authenticated thread file route
     '/api/threads/:threadId/files',
     fileRoutes(auth, threads as ThreadService),
   );
-  assert.equal((await app.request(urls.artist)).status, 401);
-  const response = await app.request(urls.artist, {
-    headers: { cookie: 'session=test' },
-  });
-  assert.equal(response.status, 200);
-  assert.equal(response.headers.get('content-type'), 'image/png');
-  assert.deepEqual(Buffer.from(await response.arrayBuffer()), png);
+  for (const [url, mime, bytes] of [
+    [urls.artist, 'image/png', png],
+    [urls.editor, 'image/gif', animatedGif],
+  ] as const) {
+    assert.equal((await app.request(url)).status, 401);
+    const response = await app.request(url, {
+      headers: { cookie: 'session=test' },
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), mime);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
+  }
 });
 
 test('unavailable room storage yields an empty avatar map', async () => {

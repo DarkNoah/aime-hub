@@ -2,6 +2,7 @@ import { memo, type ComponentProps } from 'react';
 import { ExternalLink, FileText, Folder } from 'lucide-react';
 import type { ExtraProps } from 'streamdown';
 import { Badge } from '@/components/ui/badge';
+import { BrowserLink } from '@/components/browser/browser-link';
 import { useWorkspaceFile } from '@/components/file-manager/context';
 import { cn } from '@/lib/utils';
 import {
@@ -102,16 +103,17 @@ export const MarkdownLink = memo(
           className={cn(className, badgeClassName)}
           variant="outline"
         >
-          <a
+          <BrowserLink
             {...props}
             href={webUrl}
+            onClick={onClick}
             rel="noopener noreferrer"
             target="_blank"
             title={props.title ?? webUrl}
           >
             <span className={badgeTextClassName}>{children}</span>
             <ExternalLink className="size-3 shrink-0" aria-hidden="true" />
-          </a>
+          </BrowserLink>
         </Badge>
       );
     }

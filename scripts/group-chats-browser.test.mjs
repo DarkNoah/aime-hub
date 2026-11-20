@@ -380,11 +380,12 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
         url.pathname.startsWith('/api/threads/thread0000000001/files/'),
       );
       if (url.pathname.endsWith('/raw')) {
-        const path = url.searchParams.get('path').replace(/^\.\//, '');
-        const file = uploadedFiles.get(path);
+        const filePath = url.searchParams.get('path').replace(/^\.\//, '');
+        const file = uploadedFiles.get(filePath);
+        const imageTypes = { '.png': 'image/png', '.gif': 'image/gif' };
         return route.fulfill({
           status: file ? 200 : 404,
-          contentType: path.endsWith('.png') ? 'image/png' : 'text/plain',
+          contentType: imageTypes[path.extname(filePath)] ?? 'text/plain',
           body: file ?? '',
         });
       }
@@ -982,10 +983,10 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     await roster.getByText('Room assistant', { exact: true }).waitFor();
     await roster.getByText('领导', { exact: true }).waitFor();
     await t.test(
-      'room avatars appear after creation and fall back on image errors',
+      'animated room avatars play after creation and fall back on image errors',
       async () => {
         const bot = botFor(roomId);
-        const avatarPath = `.agents/agents/${bot.id}.png`;
+        const avatarPath = `.agents/agents/${bot.id}.gif`;
         const url = `/api/threads/${bot.threadId}/files/raw?${new URLSearchParams({ path: avatarPath })}`;
         const member = roster.getByRole('button', {
           name: '提及 Room assistant',
@@ -994,17 +995,22 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
         const message = page.locator('[data-chat-turn="message000000079"]');
         await member.locator('[data-slot="avatar-fallback"]').waitFor();
         await message.locator('[data-slot="avatar-fallback"]').waitFor();
-        const png = await page.evaluate(
-          () =>
-            document
-              .createElement('canvas')
-              .toDataURL('image/png')
-              .split(',')[1],
+        // Two frames alternate between red and blue every 150 ms.
+        const gif = Buffer.from(
+          'R0lGODlhAQABAIAAAExpcf8AACH/C05FVFNDQVBFMi4wAwEAAAAh+QQFDwAAACwAAAAAAQABAAACAkwBACH5BAUPAAAALAAAAAABAAEAgExpcQAA/wICTAEAOw==',
+          'base64',
         );
-        uploadedFiles.set(avatarPath, Buffer.from(png, 'base64'));
+        uploadedFiles.set(avatarPath, gif);
         agentAvatarUrls[bot.id] = `${url}&v=1`;
-        await member.locator('[data-slot="avatar-image"]').waitFor();
+        const memberImage = member.locator('[data-slot="avatar-image"]');
         await message.locator('[data-slot="avatar-image"]').waitFor();
+        const firstFrame = await memberImage.screenshot();
+        await t.waitFor(
+          async () => {
+            assert.notDeepEqual(await memberImage.screenshot(), firstFrame);
+          },
+          { timeout: 5000 },
+        );
         uploadedFiles.set(avatarPath, Buffer.from('invalid image'));
         agentAvatarUrls[bot.id] = `${url}&v=2`;
         await member.locator('[data-slot="avatar-fallback"]').waitFor();

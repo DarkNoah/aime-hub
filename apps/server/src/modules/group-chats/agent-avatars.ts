@@ -31,7 +31,7 @@ export async function getRoomAgentAvatarUrls(
         const urls: Record<string, string> = {};
         await Promise.all(
           agents.map(async ({ id }) => {
-            for (const extension of ['png', 'jpg']) {
+            for (const extension of ['png', 'jpg', 'gif']) {
               const name = `${id}.${extension}`;
               if (!listing.truncated && !files.has(name)) continue;
               const path = `${directory}/${name}`;

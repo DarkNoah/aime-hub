@@ -62,6 +62,8 @@ import { WorkspaceDragContext } from '@/components/file-manager/drag-context';
 import { fileErrorKey } from '@/components/file-manager/api';
 import { FloatingWindow } from '@/components/floating-window';
 import { BrowserStatusIcon } from '@/components/browser/status-icon';
+import { BrowserLinkOpenContext } from '@/components/browser/layout-context';
+import { useOpenBrowserLink } from '@/components/browser/use-open-browser-link';
 import { usePluginRightSidebar } from '@/features/plugins/use-right-sidebar';
 import { PluginRightSidebar } from '@/features/plugins/right-sidebar';
 import {
@@ -218,6 +220,12 @@ export function ChatWorkspace({
     if (compact) setDrawerOpen(true);
     else expandInspector();
   }, [compact, expandInspector]);
+  const showBrowser = useCallback(() => {
+    setView('browser');
+    if (compact) setDrawerOpen(true);
+    else expandInspector();
+  }, [compact, expandInspector]);
+  const openBrowserLink = useOpenBrowserLink(threadId, showBrowser);
   useEffect(() => {
     if (!requestedPanel) handledPanelRequest.current = null;
     if (
@@ -784,7 +792,9 @@ export function ChatWorkspace({
     <WorkspaceDragContext.Provider
       value={`${contentId}:${projectId ?? threadId ?? 'new'}`}
     >
-      {workspace}
+      <BrowserLinkOpenContext.Provider value={openBrowserLink}>
+        {workspace}
+      </BrowserLinkOpenContext.Provider>
     </WorkspaceDragContext.Provider>
   );
 }
