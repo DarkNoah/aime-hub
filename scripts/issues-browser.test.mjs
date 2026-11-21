@@ -45,7 +45,6 @@ test(
 import {createRoot} from 'react-dom/client';
 import {createRootRoute,createRoute,createRouter,RouterProvider,Outlet,useParams} from '@tanstack/react-router';
 import {IssueBoard} from '/src/components/issues/board';
-import {IssueToolResult} from '/src/components/chat/tool-renderers/issue';
 import {validateGroupChatSearch} from '/src/pages/group-chats/search';
 import {PersonalChatSettingsContext} from '/src/components/chat/use-personal-chat-settings';
 import {initializeI18n} from '/src/i18n';
@@ -56,6 +55,14 @@ const snapshot={settings:{model:null,reasoningEffort:'auto'},loading:false,savin
 const preferences={getSnapshot:()=>snapshot,subscribe:()=>()=>{},save:async()=>false,load:async()=>{}};
 const root=createRootRoute({component:()=> <PersonalChatSettingsContext.Provider value={preferences}><main className="mx-auto max-w-7xl p-4"><Outlet/></main><Toaster/></PersonalChatSettingsContext.Provider>});
 function Chat(){const {projectId,threadId}=useParams({strict:false});return <div className="h-[85dvh] w-full max-w-sm"><p data-testid="thread-id">{threadId}</p><IssueBoard compact projectId={projectId} threadId={threadId}/></div>;}
+const ChatMessages=React.lazy(async()=>({default:(await import('/src/components/chat/chat-messages')).ChatMessages}));
+function IssueCalls(){
+ const messages=[{id:'assistant',role:'assistant',parts:[
+  {type:'tool-issue',toolCallId:'view-1',state:'output-available',input:{command:'view 1'},output:{issue:{id:1,title:'工具任务',threadId:null,projectId:null,state:'in_progress'}}},
+  {type:'dynamic-tool',toolName:'issue',toolCallId:'view-2',state:'input-available',input:{command:'view 2'}},
+ ]}];
+ return <React.Suspense><ChatMessages messages={messages} running activeMessageId="assistant"/></React.Suspense>;
+}
 const tree=root.addChildren([
  createRoute({getParentRoute:()=>root,path:'/issues',component:()=> <IssueBoard/>}),
  createRoute({getParentRoute:()=>root,path:'/projects/$projectId',component:()=>{const {projectId}=useParams({strict:false});return <IssueBoard projectId={projectId}/>;}}),
@@ -63,7 +70,7 @@ const tree=root.addChildren([
  createRoute({getParentRoute:()=>root,path:'/projects/$projectId/threads/$threadId',component:Chat}),
  createRoute({getParentRoute:()=>root,path:'/group-chats',validateSearch:validateGroupChatSearch,component:()=> <p>群聊线程目标</p>}),
  createRoute({getParentRoute:()=>root,path:'/projects/$projectId/group-chats',validateSearch:validateGroupChatSearch,component:()=> <p>群聊线程目标</p>}),
- createRoute({getParentRoute:()=>root,path:'/tool',component:()=> <IssueToolResult tool={{type:'tool-issue',toolCallId:'fixture',state:'output-available',input:{command:'view 1'},output:{issue:{id:1,title:'工具任务',threadId:'thread0000000001',projectId:null,state:'todo'}}}}/>})
+ createRoute({getParentRoute:()=>root,path:'/tool',component:IssueCalls})
 ]);
 const router=createRouter({routeTree:tree});
 await initializeI18n();createRoot(document.getElementById('root')).render(<ThemeProvider><RouterProvider router={router}/></ThemeProvider>);`;
@@ -495,8 +502,15 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       /\/projects\/project000000001\/threads\/projectthread001$/,
     );
     await page.goto(origin + '/tool');
-    await page.getByRole('link', { name: /工具任务/ }).click();
-    assert.match(page.url(), /\/threads\/thread0000000001$/);
+    await page.getByRole('button', { name: '工具执行 · 2 次调用' }).click();
+    await page.getByRole('button', { name: /issue.*执行中/ }).waitFor();
+    await page.getByRole('button', { name: /issue.*已完成/ }).click();
+    await page.getByText('参数', { exact: true }).waitFor();
+    await page.getByText('结果', { exact: true }).waitFor();
+    await page
+      .getByText(/in_progress/)
+      .first()
+      .waitFor();
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(origin + '/issues');
     await page.getByRole('link', { name: /确认验收范围/ }).waitFor();
@@ -602,7 +616,7 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       path: '/tmp/issues-record-only.png',
       fullPage: true,
     });
-    // Current cards and legacy stored tool results both resolve room sources.
+    // Personal and project board cards resolve their respective room sources.
     const source = {
       roomId: 'room000000000001',
       agentId: 'bot0000000000001',
@@ -654,15 +668,6 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       await sheet.getByRole('link', { name: '打开任务线程' }).click();
       assert.match(page.url(), new RegExp(`/threads/${item.threadId}$`));
     }
-    await page.goto(origin + '/tool');
-    await page.waitForFunction(() =>
-      document.querySelector('a')?.getAttribute('href')?.includes('agentId='),
-    );
-    await page.getByRole('link', { name: /工具任务/ }).click();
-    assert.equal(
-      new URL(page.url()).searchParams.get('agentId'),
-      source.agentId,
-    );
     assert.deepEqual(errors, []);
   },
 );

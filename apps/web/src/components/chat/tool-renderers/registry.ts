@@ -5,7 +5,6 @@ import { MCP_AUTHORIZATION_TOOL } from '@aime/shared/mcp';
 // Keep this registry free of React imports so message grouping can use it too.
 export const specialToolNames = [
   MCP_AUTHORIZATION_TOOL,
-  'issue',
   'ask_user',
   'submit_plan',
   INTELLIGENT_UI_TOOL,

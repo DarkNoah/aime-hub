@@ -132,7 +132,7 @@ export function McpDialog({
       }}
     >
       <DialogContent
-        className="flex max-h-[90dvh] flex-col sm:max-w-2xl"
+        className="flex max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] flex-col overflow-hidden p-4 sm:max-w-2xl sm:p-6"
         showCloseButton={false}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
@@ -143,11 +143,11 @@ export function McpDialog({
         }}
         onPointerDownOutside={(event) => event.preventDefault()}
       >
-        <DialogHeader>
+        <DialogHeader className="shrink-0">
           <DialogTitle>
             {t(deleting ? 'mcp.delete' : server ? 'mcp.edit' : 'mcp.create')}
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="wrap-anywhere">
             {t(deleting ? 'mcp.deleteHint' : 'mcp.editorHint', {
               name: server?.name ?? '',
             })}
@@ -159,8 +159,8 @@ export function McpDialog({
           className="flex min-h-0 flex-col gap-4"
         >
           <ScrollArea
-            className="min-h-0"
-            viewportProps={{ className: 'max-h-[62dvh]' }}
+            className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] overflow-hidden"
+            viewportProps={{ className: 'min-h-0 [&>div]:block!' }}
           >
             <fieldset disabled={pending} className="min-w-0 space-y-4 p-1">
               {deleting ? (
@@ -185,7 +185,7 @@ export function McpDialog({
                       >
                         {forms.length > 1 ? (
                           <div className="flex items-center justify-between gap-3">
-                            <h3 className="text-sm font-medium">
+                            <h3 className="wrap-anywhere text-sm font-medium">
                               {form.name ||
                                 t('mcp.serverNumber', { index: index + 1 })}
                             </h3>
@@ -263,7 +263,7 @@ export function McpDialog({
               {error}
             </p>
           ) : null}
-          <DialogFooter className="border-t pt-4">
+          <DialogFooter className="shrink-0 flex-row justify-end border-t pt-4">
             <Button
               type="button"
               variant="outline"
