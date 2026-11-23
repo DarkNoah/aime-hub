@@ -1,11 +1,21 @@
 import { isToolUIPart } from 'ai';
-import { Circle, Keyboard, RefreshCw, SquareTerminal } from 'lucide-react';
+import {
+  Circle,
+  Keyboard,
+  Square,
+  RefreshCw,
+  SquareTerminal,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { getStatusBadge } from '@/components/ai-elements/tool';
 import { Badge } from '@/components/ui/badge';
 import { getToolName } from '../tool-renderers/registry';
 import { CommandInput } from './command-input';
-import { commandRecord, parseCommandResult } from './command-data';
+import {
+  commandRecord,
+  commandSessionId,
+  parseCommandResult,
+} from './command-data';
 import { CommandTerminal } from './command-terminal';
 import { StdinInput } from './stdin-input';
 import type { PreviewPart } from './selection';
@@ -16,8 +26,12 @@ export function ExecuteCommandPreview({ part }: { part: PreviewPart }) {
   const name = getToolName(part);
   const stdin = name === 'write_stdin';
   const input = commandRecord(part.input);
+  const terminating = stdin && input?.terminate === true;
   const polling =
-    stdin && input && (input.chars === undefined || input.chars === '');
+    stdin &&
+    !terminating &&
+    input &&
+    (input.chars === undefined || input.chars === '');
   // Legacy execute_command returns literal stdout, including arbitrary JSON.
   const result =
     name === 'execute_command' ? null : parseCommandResult(part.output);
@@ -25,6 +39,8 @@ export function ExecuteCommandPreview({ part }: { part: PreviewPart }) {
     part.state === 'input-streaming' || part.state === 'input-available';
   const failed =
     Boolean(part.errorText) ||
+    result?.status === 'failed' ||
+    result?.status === 'timed_out' ||
     part.state === 'output-error' ||
     (result?.exitCode !== undefined && result.exitCode !== 0);
   const running =
@@ -40,12 +56,16 @@ export function ExecuteCommandPreview({ part }: { part: PreviewPart }) {
   ]
     .filter(Boolean)
     .join('\n');
-  const Icon = stdin ? (polling ? RefreshCw : Keyboard) : SquareTerminal;
+  const Icon = terminating
+    ? Square
+    : stdin
+      ? polling
+        ? RefreshCw
+        : Keyboard
+      : SquareTerminal;
   const sessionId =
     result?.sessionId ??
-    (stdin && typeof input?.session_id === 'number'
-      ? input.session_id
-      : undefined);
+    (stdin ? commandSessionId(input?.session_id) : undefined);
   const empty = pending
     ? t('chat.command.waiting')
     : running
@@ -62,11 +82,13 @@ export function ExecuteCommandPreview({ part }: { part: PreviewPart }) {
           <div className="min-w-0">
             <h3 className="text-sm font-medium">
               {t(
-                stdin
-                  ? polling
-                    ? 'chat.command.poll'
-                    : 'chat.command.sendInput'
-                  : 'chat.command.execute',
+                terminating
+                  ? 'chat.command.terminate'
+                  : stdin
+                    ? polling
+                      ? 'chat.command.poll'
+                      : 'chat.command.sendInput'
+                    : 'chat.command.execute',
               )}
             </h3>
             <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
@@ -74,7 +96,15 @@ export function ExecuteCommandPreview({ part }: { part: PreviewPart }) {
             </p>
           </div>
         </div>
-        {running ? (
+        {result?.status === 'pending' || result?.status === 'cancelled' ? (
+          <Badge variant="secondary">
+            {t(
+              result.status === 'pending'
+                ? 'chat.queuedLabel'
+                : 'chat.command.cancelled',
+            )}
+          </Badge>
+        ) : running ? (
           <Badge variant="secondary" className="gap-1.5">
             <Circle className="size-3" aria-hidden="true" />
             {t('chat.command.runningAtReturn')}

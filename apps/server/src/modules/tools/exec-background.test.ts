@@ -97,16 +97,18 @@ test('deferred exec propagates cancellation to in-flight tools and the task mana
   assert.equal(childSignal?.reason, reason);
 });
 
-test('deferred exec respects an explicit script timeout while discovering tools', async () => {
-  const tool = createExecTool({ getTools: () => new Promise(() => {}) });
-  await assert.rejects(
-    () =>
-      tool.execute!(
-        { code: 'text(1)', yield_time_ms: 10, max_output_tokens: 100 },
-        backgroundContext,
-      ),
-    /exec execution timed out/,
+test('deferred exec ignores a legacy script timeout and delivers the result', async () => {
+  const tool = createExecTool({
+    getTools: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return [];
+    },
+  });
+  const result = await tool.execute!(
+    { code: 'text(1)', yield_time_ms: 1, max_output_tokens: 100 },
+    backgroundContext,
   );
+  assert.deepEqual(result, { content: [{ type: 'text', text: '1' }] });
 });
 
 for (const defaultDisposition of [

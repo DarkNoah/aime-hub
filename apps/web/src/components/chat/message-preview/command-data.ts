@@ -4,9 +4,16 @@ export function commandRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+export function commandSessionId(value: unknown) {
+  if (typeof value === 'string' && value.trim()) return value;
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0)
+    return value;
+}
+
 export type CommandResult = {
   output: string;
-  sessionId?: number;
+  sessionId?: number | string;
+  status?: string;
   exitCode?: number;
   seconds?: number;
   tokens?: number;
@@ -27,12 +34,8 @@ export function parseCommandResult(value: unknown): CommandResult | null {
     typeof value === 'number' && Number.isFinite(value);
   return {
     output: data.output,
-    sessionId:
-      finite(data.session_id) &&
-      Number.isSafeInteger(data.session_id) &&
-      data.session_id > 0
-        ? data.session_id
-        : undefined,
+    sessionId: commandSessionId(data.session_id),
+    status: typeof data.status === 'string' ? data.status : undefined,
     exitCode:
       finite(data.exit_code) && Number.isInteger(data.exit_code)
         ? data.exit_code

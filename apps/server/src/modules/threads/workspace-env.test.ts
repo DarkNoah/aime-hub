@@ -149,11 +149,11 @@ for (const projectId of [undefined, 'project000000001']) {
       );
       assert.ok(started && !isValidationError(started));
       const sessionId = started.session_id;
-      assert.equal(typeof sessionId, 'number');
+      assert.ok(typeof sessionId === 'number');
       const resume = async (chars: string) => {
         const result = await writeStdin.execute!(
           {
-            session_id: sessionId!,
+            session_id: sessionId,
             chars,
             yield_time_ms: 1000,
             max_output_tokens: 2000,

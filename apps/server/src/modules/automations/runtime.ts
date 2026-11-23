@@ -3,6 +3,10 @@ import { resolve } from 'node:path';
 import { Agent, type AgentExecutionOptions } from '@mastra/core/agent';
 import { Memory } from '@mastra/memory';
 import { ChatMemory, type ResolveMemoryConfig } from '../../mastra/memory.js';
+import {
+  commandDisposition,
+  deferredToolContext,
+} from '../../mastra/processors/deferred-tool-context.js';
 import type { RequestContext } from '@mastra/core/request-context';
 import type { ScheduleHooks } from '@mastra/core/schedules';
 import { createObservabilityContext } from '@mastra/core/observability';
@@ -386,6 +390,8 @@ export function createAutomationRuntime({
   const agent = new Agent({
     id: automationAgentId,
     name: 'Scheduled task',
+    inputProcessors: [deferredToolContext()],
+    outputProcessors: [commandDisposition],
     memory: async ({ requestContext }) =>
       // The scheduler also reads thread metadata before it creates a run context.
       typeof requestContext.get('automationExecutionId') === 'string'

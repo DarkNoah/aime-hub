@@ -75,7 +75,10 @@ import { CommandSandbox } from '../../mastra/tools/command/sandbox.js';
 import { agentEnvironment } from './agent-environment.js';
 import { AgentsMDProcessor } from '../../mastra/processors/agents-md.js';
 import { ModelCompatibilityProcessor } from '../../mastra/processors/model-compatibility.js';
-import { deferredToolContext } from '../../mastra/processors/deferred-tool-context.js';
+import {
+  commandDisposition,
+  deferredToolContext,
+} from '../../mastra/processors/deferred-tool-context.js';
 import { MemoryMDProcessor } from '../../mastra/processors/memory-md.js';
 import { IncompleteToolCallsProcessor } from '../../mastra/processors/incomplete-tool-calls.js';
 import { AttachmentProcessor } from './attachment-processor.js';
@@ -535,7 +538,7 @@ export function createChatRunner(
                 compatibility,
                 deferredToolContext(),
               ],
-              outputProcessors: [compatibility],
+              outputProcessors: [compatibility, commandDisposition],
               instructions: async () =>
                 child.instructions +
                 workspaceInstructions +
@@ -854,7 +857,12 @@ export function createChatRunner(
               interrupted,
               deferredToolContext(requestContext),
             ],
-            outputProcessors: [interrupted, compaction, compatibility],
+            outputProcessors: [
+              interrupted,
+              compaction,
+              compatibility,
+              commandDisposition,
+            ],
             ...(additionalPrompt && { system: additionalPrompt }),
             memory: { thread: thread.id, resource: thread.resourceId },
             abortSignal,

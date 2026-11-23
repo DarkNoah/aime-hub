@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { commandRecord } from './command-data';
 import { Badge } from '@/components/ui/badge';
 
 /** The same wait/output options apply to command execution and stdin polling. */
@@ -44,13 +45,19 @@ export function CommandOptions({
       )}
       <dt>{t('chat.command.wait')}</dt>
       <dd>
-        {t('chat.command.milliseconds', {
-          value: number(
-            typeof input.yield_time_ms === 'number'
-              ? input.yield_time_ms
-              : 10000,
-          ),
-        })}
+        {commandRecord(input._background)?.disposition === 'deferred'
+          ? t('chat.command.backgroundWait')
+          : command && typeof input.yield_time_ms !== 'number'
+            ? t('chat.command.waitUntilExit')
+            : t('chat.command.milliseconds', {
+                value: number(
+                  typeof input.yield_time_ms === 'number'
+                    ? input.yield_time_ms
+                    : typeof input.session_id === 'string'
+                      ? 0
+                      : 10000,
+                ),
+              })}
       </dd>
       <dt>{t('chat.command.outputBudget')}</dt>
       <dd>

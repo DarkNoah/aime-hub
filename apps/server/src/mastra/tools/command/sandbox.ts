@@ -1,4 +1,5 @@
 import { randomInt } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { userInfo } from 'node:os';
 import { resolve } from 'node:path';
 import { LocalSandbox, type LocalSandboxOptions } from '@mastra/core/workspace';
@@ -13,6 +14,14 @@ const MAX_BUFFER_BYTES = 1_048_576;
 const MAX_SESSIONS = 32;
 const COMPLETED_TTL_MS = 10 * 60_000;
 
+export class UnknownCommandSessionError extends Error {
+  constructor(id: string | number) {
+    super(
+      `Unknown command session: ${id}. Sessions only exist in the current conversation and server lifetime.`,
+    );
+  }
+}
+
 class CommandSession {
   handle!: CommandHandle;
   ready!: Promise<CommandHandle>;
@@ -24,6 +33,8 @@ class CommandSession {
   exitCode?: number;
   expiry?: ReturnType<typeof setTimeout>;
   busy = false;
+  readonly events = new EventEmitter();
+  private readOffset = 0;
 
   constructor(
     readonly input: CommandInput,
@@ -43,17 +54,29 @@ class CommandSession {
       this.droppedBytes += start;
       this.bytes -= start;
     }
+    this.events.emit('output');
   };
 
-  take(maxTokens: number) {
-    const originalBytes = this.bytes + this.droppedBytes;
+  get hasUnreadOutput() {
+    return this.droppedBytes + this.bytes > this.readOffset;
+  }
+
+  take(maxTokens: number, finalTaskResult = false) {
+    // Incremental readers must not consume the native background task's final result.
+    const offset = finalTaskResult ? 0 : this.readOffset;
+    const originalBytes = this.bytes + this.droppedBytes - offset;
     const buffer = Buffer.from(this.output);
-    let end = Math.min(buffer.length, maxTokens * 4);
+    const start = Math.max(0, offset - this.droppedBytes);
+    let end = Math.min(buffer.length, start + maxTokens * 4);
     while (end < buffer.length && (buffer[end] & 0xc0) === 0x80) end--;
-    const output = buffer.subarray(0, end).toString();
-    const truncated = originalBytes > end;
-    this.output = '';
-    this.bytes = this.droppedBytes = 0;
+    const output = buffer.subarray(start, end).toString();
+    const truncated = originalBytes > end - start;
+    if (this.backgroundTask) {
+      if (!finalTaskResult) this.readOffset = this.droppedBytes + end;
+    } else {
+      this.output = '';
+      this.bytes = this.droppedBytes = 0;
+    }
     return {
       output,
       original_token_count: Math.ceil(originalBytes / 4),
@@ -64,7 +87,7 @@ class CommandSession {
 
 /** Sessions belong to this Workspace instance, never a global PID registry. */
 export class CommandSandbox extends LocalSandbox {
-  private sessions = new Map<number, CommandSession>();
+  private sessions = new Map<number | string, CommandSession>();
   private starting = new Set<Promise<unknown>>();
   private closing = false;
   private listeners = new Set<() => void>();
@@ -78,7 +101,10 @@ export class CommandSandbox extends LocalSandbox {
 
   listCommandSessions(): ThreadCommandSession[] {
     return [...this.sessions]
-      .filter(([, session]) => !session.backgroundTask)
+      .filter(
+        (entry): entry is [number, CommandSession] =>
+          typeof entry[0] === 'number' && !entry[1].backgroundTask,
+      )
       .map(([sessionId, session]) => ({
         sessionId,
         cmd: session.input.cmd,
@@ -116,7 +142,7 @@ export class CommandSandbox extends LocalSandbox {
       // Cleanup can arrive while environment resolution or PTY startup is pending.
       const handle = await session.ready.catch(() => undefined);
       await handle?.kill();
-      this.release(id);
+      this.release(id, session);
     })();
     this.changed();
     try {
@@ -134,7 +160,13 @@ export class CommandSandbox extends LocalSandbox {
       signal,
       userId,
       backgroundTask = false,
-    }: { signal?: AbortSignal; userId?: string; backgroundTask?: boolean } = {},
+      taskId,
+    }: {
+      signal?: AbortSignal;
+      userId?: string;
+      backgroundTask?: boolean;
+      taskId?: string;
+    } = {},
   ) {
     const startedAt = performance.now();
     signal?.throwIfAborted();
@@ -143,16 +175,22 @@ export class CommandSandbox extends LocalSandbox {
       throw new Error(
         'Too many command sessions. Read completed sessions or stop running commands first.',
       );
-    let id: number;
-    do {
-      id = randomInt(1, 2_147_483_647);
-    } while (this.sessions.has(id));
+    let id: number | string;
+    if (backgroundTask && taskId) {
+      if (this.sessions.has(taskId))
+        throw new Error('This background command is already running.');
+      id = taskId;
+    } else {
+      do {
+        id = randomInt(1, 2_147_483_647);
+      } while (this.sessions.has(id));
+    }
     const session = new CommandSession(
       input,
       resolve(this.workingDirectory, input.workdir ?? '.'),
       backgroundTask,
     );
-    session.busy = true;
+    session.busy = !backgroundTask;
     this.sessions.set(id, session);
     const startup = this.spawn(input, session, signal, userId);
     session.ready = startup;
@@ -162,9 +200,15 @@ export class CommandSandbox extends LocalSandbox {
       session.handle = await startup;
       session.handle.done.then((code) => {
         session.exitCode = code;
+        session.events.emit('exit');
         if (this.sessions.get(id) === session) {
-          session.expiry = setTimeout(() => this.release(id), COMPLETED_TTL_MS);
-          session.expiry.unref();
+          if (!backgroundTask && input.yield_time_ms !== undefined) {
+            session.expiry = setTimeout(
+              () => this.release(id, session),
+              COMPLETED_TTL_MS,
+            );
+            session.expiry.unref();
+          }
           this.changed();
         }
       });
@@ -177,43 +221,69 @@ export class CommandSandbox extends LocalSandbox {
         input.max_output_tokens,
         startedAt,
         signal,
+        true,
       );
     } catch (error) {
-      if (this.sessions.has(id)) {
+      try {
         await session.handle?.kill();
-        this.release(id);
+      } finally {
+        this.release(id, session);
       }
       throw error;
     } finally {
       this.starting.delete(startup);
-      session.busy = false;
+      if (!backgroundTask) session.busy = false;
     }
   }
 
   async write(
-    id: number,
+    id: string | number,
     chars: string,
     waitMs: number,
     maxTokens: number,
     signal?: AbortSignal,
+    terminate = false,
   ) {
     const startedAt = performance.now();
     signal?.throwIfAborted();
     const session = this.sessions.get(id);
-    if (!session || session.backgroundTask || this.closing)
-      throw new Error(
-        `Unknown command session: ${id}. Sessions only exist in the current conversation and server lifetime.`,
-      );
-    if (session.busy)
+    if (
+      !session ||
+      this.closing ||
+      (session.backgroundTask
+        ? typeof id !== 'string'
+        : session.input.yield_time_ms === undefined)
+    )
+      throw new UnknownCommandSessionError(id);
+
+    // Termination must be possible while a read or a pipe write is pending.
+    if (!terminate && session.busy)
       throw new Error(
         `Command session ${id} is already being read; wait for that call to finish.`,
       );
-    session.busy = true;
+    if (!terminate) session.busy = true;
     try {
-      if (chars) await session.handle.write(chars);
-      return await this.read(id, session, waitMs, maxTokens, startedAt, signal);
+      const handle = await withAbortSignal(signal, () => session.ready);
+      if (terminate) {
+        await withAbortSignal(signal, () => handle.kill());
+      } else if (chars) {
+        await withAbortSignal(signal, () => handle.write(chars));
+      }
+      return await this.read(
+        id,
+        session,
+        waitMs,
+        maxTokens,
+        startedAt,
+        signal,
+        false,
+      );
+    } catch (error) {
+      if (typeof id === 'number' && signal?.aborted)
+        await this.cleanupCommandSession(id);
+      throw error;
     } finally {
-      session.busy = false;
+      if (!terminate) session.busy = false;
     }
   }
 
@@ -261,45 +331,57 @@ export class CommandSandbox extends LocalSandbox {
   }
 
   private async read(
-    id: number,
+    id: number | string,
     session: CommandSession,
     waitMs: number | undefined,
     maxTokens: number,
     startedAt: number,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    owner: boolean,
   ) {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await withAbortSignal(signal, () => {
-        if (waitMs === undefined) return session.handle.done;
-        return Promise.race([
-          session.handle.done,
-          new Promise<void>((resolve) => {
-            timer = setTimeout(resolve, waitMs);
-          }),
-        ]);
-      });
-      const result = {
-        ...session.take(maxTokens),
-        wall_time_seconds: (performance.now() - startedAt) / 1000,
-        ...(session.exitCode === undefined
-          ? { session_id: id }
-          : { exit_code: session.exitCode }),
-      };
-      if (session.exitCode !== undefined) this.release(id);
-      return result;
-    } catch (error) {
-      await session.handle.kill();
-      this.release(id);
-      throw error;
-    } finally {
-      clearTimeout(timer);
+    if (waitMs === undefined) {
+      await withAbortSignal(signal, () => session.handle.done);
+    } else if (session.exitCode === undefined && waitMs > 0) {
+      const wakeOnOutput = session.backgroundTask && !owner;
+      if (!wakeOnOutput || !session.hasUnreadOutput) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let wake!: () => void;
+        try {
+          await withAbortSignal(
+            signal,
+            () =>
+              new Promise<void>((resolve) => {
+                wake = resolve;
+                session.events.once('exit', wake);
+                if (wakeOnOutput) session.events.once('output', wake);
+                timer = setTimeout(wake, waitMs);
+              }),
+          );
+        } finally {
+          clearTimeout(timer);
+          if (wake) {
+            session.events.off('exit', wake);
+            session.events.off('output', wake);
+          }
+        }
+      }
     }
+    const result = {
+      ...session.take(maxTokens, owner && session.backgroundTask),
+      wall_time_seconds: (performance.now() - startedAt) / 1000,
+      ...(session.exitCode === undefined
+        ? { session_id: id }
+        : { exit_code: session.exitCode }),
+    };
+    if (session.exitCode !== undefined && (owner || !session.backgroundTask))
+      this.release(id, session);
+    return result;
   }
 
-  private release(id: number) {
-    clearTimeout(this.sessions.get(id)?.expiry);
-    this.sessions.get(id)?.handle?.release();
+  private release(id: number | string, session: CommandSession) {
+    if (this.sessions.get(id) !== session) return;
+    clearTimeout(session.expiry);
+    session.handle?.release();
     if (this.sessions.delete(id)) this.changed();
   }
 
@@ -309,7 +391,7 @@ export class CommandSandbox extends LocalSandbox {
     await Promise.all(
       [...this.sessions.values()].map((session) => session.handle?.kill()),
     );
-    for (const id of this.sessions.keys()) this.release(id);
+    for (const [id, session] of this.sessions) this.release(id, session);
   }
 
   override async stop() {

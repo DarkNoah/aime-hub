@@ -2385,6 +2385,10 @@ export const en = {
   'chat.command.exitCode': 'Exit code {{value}}',
   'chat.command.truncated': 'Output truncated',
   'chat.command.execute': 'Run command',
+  'chat.command.cancelled': 'Cancelled',
+  'chat.command.terminate': 'Stop process',
+  'chat.command.waitUntilExit': 'Wait for exit',
+  'chat.command.backgroundWait': 'Background task',
   'chat.command.sendInput': 'Send input',
   'chat.command.poll': 'Read output',
   'chat.command.pollHint':

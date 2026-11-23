@@ -6,14 +6,15 @@ import {
   commandInputSchema,
   commandOutputSchema,
   commandLimits,
+  interruptedCommand,
 } from './command/schema.js';
 
 export const execCommand = createTool({
   id: 'exec_command',
-  description: `Run a shell command in the current conversation workspace. In the default foreground mode, return output and exit_code when finished, or session_id after yield_time_ms if still running. Continue a session with write_stdin; an empty chars value polls new output. Use foreground mode for commands that need input and tty=true for interactive CLIs. Sessions survive tool calls and turns until the workspace closes or the server restarts. For long commands that can finish unattended, call exec_command directly with _background: { disposition: "deferred" }. Mastra reports the final output and exit_code when the command exits, even if it outlasts yield_time_ms. Output in either mode is bounded; truncated=true indicates omitted output.`,
+  description: `Run a shell command in the current conversation workspace. By default wait until exit and return bounded output and exit_code. To wait briefly, pass yield_time_ms: a running command returns a numeric session_id for write_stdin. For background work call exec_command directly with _background: { disposition: "deferred" }; this takes precedence over yield_time_ms. The agent immediately receives a taskId, and Mastra delivers the final output on completion. Use that taskId with write_stdin only for input, on-demand output or termination. Submit unattended work once and await the notification. Use tty=true for terminal programs.`,
   background: {
     enabled: true,
-    defaultDisposition: 'deferred',
+    defaultDisposition: 'foreground',
     timeoutMs: 0,
     maxRetries: 0,
   },
@@ -41,19 +42,13 @@ export const execCommand = createTool({
           signal: abortSignal,
           userId: typeof userId === 'string' ? userId : undefined,
           backgroundTask,
+          taskId: context.background?.taskId,
         },
       );
     } catch (error) {
       if (!abortSignal?.aborted) throw error;
       if (backgroundTask) abortSignal.throwIfAborted();
-      const output = '用户中止了操作';
-      return {
-        output,
-        exit_code: 130,
-        wall_time_seconds: (performance.now() - startedAt) / 1000,
-        original_token_count: Math.ceil(Buffer.byteLength(output) / 4),
-        truncated: false,
-      };
+      return interruptedCommand(startedAt);
     }
   },
 });

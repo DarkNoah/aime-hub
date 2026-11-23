@@ -8,9 +8,9 @@ export const outputBudget = z
   );
 export const yieldTime = z
   .number()
-  .default(10_000)
+  .optional()
   .describe(
-    'Milliseconds to wait before returning (250–30000, default 10000). Does not terminate the process.',
+    'Optional foreground wait in milliseconds (250–30000). Omit on exec_command to wait until exit.',
   );
 
 export const commandInputSchema = z.object({
@@ -39,7 +39,18 @@ export const commandInputSchema = z.object({
 
 export const commandOutputSchema = z.object({
   output: z.string(),
-  session_id: z.number().int().optional(),
+  session_id: z.union([z.number().int(), z.string()]).optional(),
+  status: z
+    .enum([
+      'pending',
+      'running',
+      'completed',
+      'cancelled',
+      'failed',
+      'timed_out',
+      'suspended',
+    ])
+    .optional(),
   exit_code: z.number().int().optional(),
   wall_time_seconds: z.number(),
   original_token_count: z.number().int(),
@@ -49,9 +60,23 @@ export const commandOutputSchema = z.object({
 export type CommandInput = z.infer<typeof commandInputSchema>;
 
 /** Keep resource limits in execution, not in model-facing schemas. */
-export function commandLimits(yieldMs: number, maxTokens: number) {
+export function commandLimits(yieldMs: number | undefined, maxTokens: number) {
   return {
-    yield_time_ms: Math.max(250, Math.min(30_000, Math.floor(yieldMs))),
+    yield_time_ms:
+      yieldMs === undefined
+        ? undefined
+        : Math.max(250, Math.min(30_000, Math.floor(yieldMs))),
     max_output_tokens: Math.max(1, Math.min(100_000, Math.floor(maxTokens))),
+  };
+}
+
+export function interruptedCommand(startedAt: number) {
+  const output = '用户中止了操作';
+  return {
+    output,
+    exit_code: 130,
+    wall_time_seconds: (performance.now() - startedAt) / 1000,
+    original_token_count: Math.ceil(Buffer.byteLength(output) / 4),
+    truncated: false,
   };
 }

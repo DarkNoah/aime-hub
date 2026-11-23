@@ -39,6 +39,7 @@ export function CommandInput({ input }: { input: unknown }) {
     timeout,
     tail,
     background,
+    _background,
     shell,
     login,
     tty,
@@ -88,6 +89,7 @@ export function CommandInput({ input }: { input: unknown }) {
             shell,
             login,
             tty,
+            _background,
             yield_time_ms,
             max_output_tokens,
           }}

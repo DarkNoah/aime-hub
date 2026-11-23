@@ -1,7 +1,7 @@
 import { Fragment } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ToolInput } from '@/components/ai-elements/tool';
-import { commandRecord, stdinSegments } from './command-data';
+import { commandRecord, commandSessionId, stdinSegments } from './command-data';
 import { CommandOptions } from './command-options';
 import { CommandTerminal } from './command-terminal';
 
@@ -10,13 +10,14 @@ export function StdinInput({ input }: { input: unknown }) {
   const data = commandRecord(input);
   if (
     !data ||
-    typeof data.session_id !== 'number' ||
+    commandSessionId(data.session_id) === undefined ||
     (data.chars !== undefined && typeof data.chars !== 'string')
   )
     return input === undefined ? null : <ToolInput input={input} />;
   const {
     session_id,
     chars = '',
+    terminate,
     yield_time_ms,
     max_output_tokens,
     ...extra
@@ -28,9 +29,11 @@ export function StdinInput({ input }: { input: unknown }) {
         <span className="text-muted-foreground">
           {t('chat.command.sessionId')}
         </span>
-        <span className="font-mono tabular-nums">{session_id}</span>
+        <span className="break-all font-mono tabular-nums">
+          {commandSessionId(session_id)}
+        </span>
       </div>
-      {text ? (
+      {terminate === true ? null : text ? (
         <CommandTerminal
           output={text}
           title={t('chat.command.inputText')}
@@ -57,7 +60,9 @@ export function StdinInput({ input }: { input: unknown }) {
           {t('chat.command.pollHint')}
         </p>
       )}
-      <CommandOptions input={{ yield_time_ms, max_output_tokens }} />
+      <CommandOptions
+        input={{ session_id, yield_time_ms, max_output_tokens }}
+      />
       {Object.keys(extra).length > 0 && <ToolInput input={extra} />}
     </div>
   );

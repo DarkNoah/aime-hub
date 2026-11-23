@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { InMemoryStore } from '@mastra/core/storage';
 import { Mastra } from '@mastra/core/mastra';
@@ -14,11 +14,17 @@ import { RequestContext } from '@mastra/core/request-context';
 import { MastraLanguageModelV2Mock } from '@mastra/core/test-utils/llm-mock';
 import { Memory } from '@mastra/memory';
 import { createExecTool } from '../../mastra/tools/exec.js';
-import { deferredToolContext } from '../../mastra/processors/deferred-tool-context.js';
+import {
+  commandDisposition,
+  deferredToolContext,
+} from '../../mastra/processors/deferred-tool-context.js';
 import { commandOutputSchema } from '../../mastra/tools/command/schema.js';
 import { createPersonalWorkspace, getWorkspace } from './workspace.js';
 import { execCommand } from '../../mastra/tools/exec_command.js';
+import { writeStdin } from '../../mastra/tools/write_stdin.js';
+import { createTool, isValidationError } from '@mastra/core/tools';
 import { readFile } from '../../mastra/tools/read_file.js';
+import { z } from 'zod';
 import { createChatRunner } from './runner.js';
 import { ThreadService } from './service.js';
 import type { LanguageModelService } from '../models/language-model.js';
@@ -192,7 +198,7 @@ for (const toolName of ['exec_command', 'exec'] as const) {
     const args =
       toolName === 'exec_command'
         ? {
-            cmd: 'sleep 0.5 && cat probe.txt && printf "/%s" "$CALLING_USER"',
+            cmd: 'printf ready; touch started; read -r answer; cat probe.txt; printf "/%s/%s" "$CALLING_USER" "$answer"',
             login: false,
             shell: '/bin/sh',
             yield_time_ms: 250,
@@ -252,18 +258,50 @@ for (const toolName of ['exec_command', 'exec'] as const) {
       memory: { thread: 'test-thread', resource: 'alice' },
       untilIdle: true,
     });
-    let queued = false;
+    let startedId: string | undefined;
+    let completedId: string | undefined;
     for await (const chunk of output.fullStream) {
+      if (chunk.type === 'background-task-completed')
+        completedId = chunk.payload.taskId;
       if (chunk.type !== 'background-task-started') continue;
       const task = await manager.getTask(chunk.payload.taskId);
       assert.equal(task?.status, 'pending');
-      queued = true;
+      startedId = chunk.payload.taskId;
       // Another author joins the project thread before the worker acquires a slot.
       requestContext.set('userId', 'bob');
       requestContext.set('execBrowser', async () => 'browser-bob');
       release();
+      if (toolName === 'exec_command') {
+        try {
+          for (let i = 0; i < 300; i++) {
+            if (
+              await access(join(directory, 'started')).then(
+                () => true,
+                () => false,
+              )
+            )
+              break;
+            await delay(10);
+          }
+          await access(join(directory, 'started'));
+          const reply = await writeStdin.execute!(
+            {
+              session_id: startedId,
+              chars: 'continue\n',
+              yield_time_ms: 250,
+              max_output_tokens: 1000,
+            },
+            { workspace, mastra, requestContext },
+          );
+          assert.ok(reply && !isValidationError(reply));
+        } catch (error) {
+          await manager.cancel(startedId);
+          throw error;
+        }
+      }
     }
-    assert.ok(queued);
+    assert.ok(startedId);
+    assert.equal(completedId, startedId);
     const { tasks } = await manager.listTasks({
       toolName,
     });
@@ -274,10 +312,29 @@ for (const toolName of ['exec_command', 'exec'] as const) {
     assert.equal(task.resourceId, 'alice');
     if (toolName === 'exec_command') {
       const result = commandOutputSchema.parse(task.result);
-      assert.equal(result.output, `${marker}/alice`);
+      assert.equal(result.output, `ready${marker}/alice/continue`);
       assert.equal(result.exit_code, 0);
       assert.equal(result.session_id, undefined);
       assert.deepEqual(workspace.sandbox?.listCommandSessions(), []);
+      const completed = await writeStdin.execute!(
+        { session_id: task.id, chars: '', max_output_tokens: 100 },
+        {
+          workspace,
+          mastra,
+          agent: {
+            agentId: agent.id,
+            toolCallId: 'finished-read',
+            messages: [],
+            suspend: async () => {},
+            threadId: 'test-thread',
+            resourceId: 'alice',
+          },
+        },
+      );
+      assert.ok(completed && !isValidationError(completed));
+      assert.equal(completed.status, 'completed');
+      assert.equal(completed.exit_code, 0);
+      assert.equal(completed.output, '');
     } else {
       assert.match(JSON.stringify(task.result), new RegExp(marker));
       assert.match(JSON.stringify(task.result), /browser-alice/);
@@ -289,3 +346,129 @@ for (const toolName of ['exec_command', 'exec'] as const) {
     );
   });
 }
+
+test('command scheduling options reach the model and the native dispatcher consistently', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'command-modes-'));
+  const directory = await createPersonalWorkspace(root, 'alice');
+  const workspace = getWorkspace(root, 'alice', directory);
+  const other = createTool({
+    id: 'other',
+    description: 'An independent background-capable tool.',
+    inputSchema: z.object({}),
+    background: { enabled: true, defaultDisposition: 'foreground' },
+    execute: async () => 'other',
+  });
+  const call = (
+    name: 'exec_command' | 'exec' | 'other',
+    id: string,
+    override?: object | null,
+  ) => {
+    const input =
+      name === 'exec_command'
+        ? { cmd: 'echo ' + id + '-ok' }
+        : name === 'exec'
+          ? { code: "text('" + id + "-ok')" }
+          : {};
+    return {
+      toolName: name,
+      toolCallId: id,
+      input: { ...input, _background: override },
+    };
+  };
+  const model = toolCallingModel([
+    call('exec', 'omitted'),
+    call('exec_command', 'null', null),
+    call('exec_command', 'foreground', { disposition: 'foreground' }),
+    call('exec', 'background', { disposition: 'deferred' }),
+    call('exec_command', 'awaited', { disposition: 'awaited' }),
+    call('exec_command', 'legacy', { enabled: true }),
+    call('exec_command', 'overrides', {
+      disposition: 'deferred',
+      timeoutMs: 7000,
+      maxRetries: 3,
+    }),
+    call('other', 'other', {
+      disposition: 'awaited',
+      timeoutMs: 8000,
+      maxRetries: 2,
+    }),
+  ]);
+  const storage = new InMemoryStore();
+  const agent = new Agent({
+    memory: new MockMemory({ storage, enableMessageHistory: true }),
+    id: 'scheduling',
+    name: 'Scheduling',
+    instructions: 'Run tools.',
+    model,
+    workspace,
+    tools: {
+      exec: createExecTool({ getTools: async () => [] }),
+      exec_command: execCommand,
+      other,
+    },
+    inputProcessors: [deferredToolContext()],
+    outputProcessors: [commandDisposition],
+  });
+  const mastra = new Mastra({
+    agents: { agent },
+    storage,
+    logger: false,
+    backgroundTasks: { enabled: true },
+  });
+  t.after(async () => {
+    await mastra.shutdown();
+    await workspace.destroy();
+    await rm(root, { recursive: true, force: true });
+  });
+  const output = await agent.stream('Run the commands', {
+    maxSteps: 16,
+    untilIdle: true,
+    memory: { thread: 'test', resource: 'alice' },
+  });
+  const results = new Map<string, unknown>();
+  for await (const chunk of output.fullStream)
+    if (chunk.type === 'tool-result')
+      results.set(chunk.payload.toolCallId, chunk.payload.result);
+    else if (chunk.type === 'error')
+      assert.fail(JSON.stringify(chunk.payload.error));
+  const request = model.doStreamCalls[0];
+  for (const name of ['exec', 'exec_command', 'other']) {
+    const definition = request.tools?.find((tool) => tool.name === name);
+    assert.ok(definition && definition.type === 'function');
+    const background = JSON.stringify(
+      definition.inputSchema.properties?._background,
+    );
+    assert.ok(background, name);
+    if (name === 'other') assert.match(background, /awaited/);
+    else {
+      assert.match(background, /deferred/);
+      assert.match(background, /null/);
+      assert.doesNotMatch(background, /awaited|timeoutMs|maxRetries/);
+    }
+  }
+  const prompt = JSON.stringify(request.prompt);
+  assert.match(prompt, /- other .default: foreground/);
+  assert.doesNotMatch(prompt, /- exec(?:_command)? .default:/);
+  for (const id of ['foreground', 'omitted', 'null', 'awaited'])
+    assert.match(
+      String(JSON.stringify(results.get(id))),
+      new RegExp(id + '-ok'),
+      id,
+    );
+  const { tasks } = await mastra.backgroundTaskManager!.listTasks({});
+  assert.deepEqual(
+    tasks
+      .map((task) => [task.toolCallId, task.timeoutMs, task.maxRetries])
+      .sort(),
+    [
+      ['background', 0, 0],
+      ['legacy', 0, 0],
+      ['other', 8000, 2],
+      ['overrides', 0, 0],
+    ],
+  );
+  for (const task of tasks) {
+    assert.equal(task.status, 'completed');
+    assert.match(JSON.stringify(task.result), new RegExp(task.toolCallId));
+  }
+});
