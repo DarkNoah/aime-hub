@@ -1,11 +1,22 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
 import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { Agent, MessageList } from '@mastra/core/agent';
+import { Mastra } from '@mastra/core/mastra';
+import { RequestContext } from '@mastra/core/request-context';
 import { InMemoryStore } from '@mastra/core/storage';
 import { createTool } from '@mastra/core/tools';
 import type { ProcessInputStepArgs } from '@mastra/core/processors';
 import { Memory } from '@mastra/memory';
 import { z } from 'zod';
+import type { UsageRecord } from '@aime/db';
+import type { ChatSettings } from '@aime/shared/threads';
+import { buildAgent } from '../../mastra/agents/factory.js';
+import { getAgent } from '../../mastra/agents/index.js';
+import type { LanguageModelService } from '../models/language-model.js';
+import { createChatRunner } from './runner.js';
+import type { ChatSessionEvent } from './session.js';
 import { createDeepSeekResponsesModel } from '../../mastra/providers/deepseek.js';
 import {
   ModelCompatibilityProcessor,
@@ -44,6 +55,8 @@ function deepseekResponse(
   count: number,
   toolInput = '{}',
   toolInputEvent: 'delta' | 'done' = 'delta',
+  toolName = 'lookup',
+  answer = 'done',
 ) {
   const reasoningText = `${thought}${count}`;
   const reasoning = {
@@ -57,7 +70,7 @@ function deepseekResponse(
         type: 'function_call',
         id: `fc_${count}`,
         call_id: `call_${count}`,
-        name: 'lookup',
+        name: toolName,
         arguments: toolInput,
         status: 'completed',
       }
@@ -66,7 +79,7 @@ function deepseekResponse(
         id: `ds_msg_${count}`,
         role: 'assistant',
         status: 'completed',
-        content: [{ type: 'output_text', text: 'done', annotations: [] }],
+        content: [{ type: 'output_text', text: answer, annotations: [] }],
       };
   const response = {
     id: `resp_ds_${count}`,
@@ -133,7 +146,7 @@ function deepseekResponse(
           item_id: output.id,
           output_index: 1,
           content_index: 0,
-          delta: 'done',
+          delta: answer,
         },
     { type: 'response.output_item.done', output_index: 1, item: output },
     { type: 'response.completed', response },
@@ -460,6 +473,340 @@ test('malformed tool arguments remain paired on Responses replay and the model c
   assert.equal(executed, 1);
   assert.equal(requests.length, 4);
 });
+
+test(
+  'an idle native completion reuses the dispatching settings and replays the completed tool on the stateless Responses wire',
+  { timeout: 20000 },
+  async (t) => {
+    const root = await mkdtemp('/tmp/runner-notification-');
+    const storage = new InMemoryStore();
+    const mastra = new Mastra({
+      storage,
+      logger: false,
+      backgroundTasks: { enabled: true },
+    });
+    const memory = new Memory({ storage, options: { generateTitle: false } });
+    const config = getAgent('code')!;
+    const settings = {
+      model: deepseek.reference,
+      reasoningEffort: 'auto',
+    } as const;
+    const requests: { body: Wire; headers: Headers }[] = [];
+    const records: UsageRecord[] = [];
+    function gate() {
+      let release!: () => void;
+      const promise = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return { promise, release };
+    }
+    const toolResult = gate();
+    const dispatchRequest = gate();
+    const allowDispatch = gate();
+    let completed = false;
+    let agent!: Agent;
+    t.mock.method(
+      globalThis,
+      'fetch',
+      async (url: unknown, init?: RequestInit) => {
+        assert.ok(String(url).startsWith('https://processor-fixture.test/'));
+        const body = JSON.parse(String(init?.body)) as Wire;
+        requests.push({ body, headers: new Headers(init?.headers) });
+        if (requests.length === 2) {
+          dispatchRequest.release();
+          await allowDispatch.promise;
+          return deepseekResponse(
+            true,
+            true,
+            2,
+            JSON.stringify({
+              cmd: 'python video.py',
+              _background: { disposition: 'deferred' },
+            }),
+            'delta',
+            'exec_command',
+          );
+        }
+        return deepseekResponse(
+          true,
+          false,
+          requests.length,
+          '{}',
+          'delta',
+          'lookup',
+          completed ? 'Video is ready: video.mp4' : 'done',
+        );
+      },
+    );
+    const runner = createChatRunner(
+      mastra,
+      {
+        getLanguageModel: async (_user: string, selected: ChatSettings) => ({
+          ...(selected.model === gpt.reference ? gpt : deepseek),
+          supportsImages: false,
+          toolCall: true,
+        }),
+      } as unknown as LanguageModelService,
+      root,
+      undefined,
+      {
+        buildTools: async () => ({
+          exec_command: createTool({
+            id: 'exec_command',
+            description: 'Video command',
+            inputSchema: z.object({ cmd: z.string() }),
+            background: { enabled: true, defaultDisposition: 'foreground' },
+            execute: async () => {
+              await toolResult.promise;
+              return { exit_code: 0, output: 'video.mp4' };
+            },
+          }),
+        }),
+      },
+      {
+        getConfig: async () => config,
+        getAgent: async (_id, options) => (agent = buildAgent(config, options)),
+      },
+      {
+        record: async (row) => {
+          records.push(row);
+        },
+      },
+    );
+    const projectId = 'project123456789';
+    await runner.createWorkspace('alice', projectId);
+    const thread = await memory.createThread({
+      resourceId: `project:${projectId}`,
+      title: 'Background completion',
+      metadata: { createdBy: 'alice' },
+    });
+    const events: ChatSessionEvent[] = [];
+    const session = await runner.open({
+      thread,
+      settings,
+      onEvent: (event) => events.push(event),
+    });
+    const notify = agent.__notifyBackgroundTaskFinished.bind(agent);
+    let authorAtCompletion: unknown;
+    t.mock.method(
+      agent,
+      '__notifyBackgroundTaskFinished',
+      (params: Parameters<typeof notify>[0]) => {
+        authorAtCompletion = params.requestContext?.get('userId');
+        return notify(params);
+      },
+    );
+    t.after(async () => {
+      toolResult.release();
+      allowDispatch.release();
+      await session.close();
+      await mastra.shutdown();
+      await rm(root, { recursive: true, force: true });
+    });
+    async function waitForFinish(author: string, after = 0) {
+      for (let i = 0; i < 500; i++) {
+        const error = events.find((event) => event.type === 'error');
+        if (error?.type === 'error') throw error.error;
+        const finished = events.filter(
+          (event) => event.type === 'status' && event.status === 'success',
+        );
+        if (
+          records
+            .slice(after)
+            .some(
+              (row) =>
+                row.userId === author &&
+                finished.some(
+                  (event) =>
+                    event.type === 'status' && event.runId === row.runId,
+                ),
+            )
+        )
+          return;
+        await delay(10);
+      }
+      assert.fail(
+        JSON.stringify({
+          events: events.map((e) => (e.type === 'status' ? e.status : e.type)),
+          models: requests.map((r) => [
+            r.body.model,
+            r.headers.get('x-user-id'),
+          ]),
+          records: records.map((r) => [r.userId, r.modelReference]),
+        }),
+      );
+    }
+    // This older project signal must not override the settings or author of the background call.
+    await session.send({
+      ...settings,
+      id: 'message01',
+      createdBy: 'alice',
+      isImmediate: false,
+      parts: [{ type: 'text', text: 'Earlier request' }],
+    });
+    await waitForFinish('alice');
+    events.length = 0;
+    const target = { threadId: thread.id, resourceId: thread.resourceId };
+    const scope = modelResponseScope(gpt);
+    const reasoning = (
+      itemId: string,
+      origin: string,
+      ciphertext?: string,
+    ) => ({
+      type: 'reasoning' as const,
+      reasoning: itemId,
+      details: [],
+      providerMetadata: {
+        responseOrigin: { scope: origin },
+        openai: {
+          itemId,
+          ...(ciphertext && { reasoningEncryptedContent: ciphertext }),
+        },
+      },
+    });
+    const store = (await storage.getStore('memory'))!;
+    await store.saveMessages({
+      messages: [
+        {
+          ...target,
+          id: 'completed-command',
+          role: 'assistant',
+          createdAt: new Date(),
+          content: {
+            format: 2,
+            parts: [
+              reasoning('rs_encrypted', scope, 'same-account-ciphertext'),
+              reasoning('rs_missing', scope),
+              reasoning(
+                'rs_foreign',
+                modelResponseScope(deepseek),
+                'foreign-ciphertext',
+              ),
+              {
+                type: 'text',
+                text: 'Generating video.',
+                providerMetadata: {
+                  responseOrigin: { scope },
+                  openai: { itemId: 'msg_waiting' },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const requestContext = new RequestContext();
+    requestContext.set('userId', 'bob');
+    requestContext.set('chatSettings', {
+      agentId: config.id,
+      model: gpt.reference,
+      reasoningEffort: 'none',
+    });
+    // Let the dispatching run end while its tool is still running, as after untilIdle expires.
+    const output = await agent.stream('Generate the video.', {
+      memory: { thread: thread.id, resource: thread.resourceId },
+      requestContext,
+    });
+    const chunks: string[] = [];
+    const consuming = (async () => {
+      for await (const chunk of output.fullStream) {
+        if (chunk.type === 'error') throw chunk.payload.error;
+        if (chunk.type === 'tool-error')
+          assert.fail(JSON.stringify(chunk.payload));
+        chunks.push(chunk.type);
+      }
+    })();
+    await dispatchRequest.promise;
+    const queued = agent.queueMessage(
+      {
+        contents: 'My follow-up',
+        metadata: { createdBy: 'alice', chatSettings: settings },
+      },
+      target,
+    );
+    await queued.accepted;
+    allowDispatch.release();
+    await consuming;
+    assert.ok(
+      chunks.includes('background-task-started'),
+      JSON.stringify(chunks),
+    );
+    await waitForFinish('alice', 1);
+    assert.equal(
+      requestContext.get('userId'),
+      'alice',
+      JSON.stringify(
+        records.map((row) => [row.userId, row.modelReference, row.runId]),
+      ),
+    );
+    const countBeforeCompletion = requests.length;
+    assert.ok(
+      requests.slice(2).some((r) => r.headers.get('x-user-id') === 'alice'),
+      JSON.stringify(
+        requests.map((r) => [r.body.model, r.headers.get('x-user-id')]),
+      ),
+    );
+    events.length = 0;
+    completed = true;
+    toolResult.release();
+    await waitForFinish('bob', countBeforeCompletion);
+    assert.equal(
+      authorAtCompletion,
+      'alice',
+      'the native executor still carries the subsequent author when it finishes',
+    );
+    assert.equal(requests.length, countBeforeCompletion + 1);
+    const { body, headers } = requests.at(-1)!;
+    assert.equal(body.model, 'gpt-6.1-sol');
+    assert.equal(body.store, false);
+    assert.deepEqual(body.include, ['reasoning.encrypted_content']);
+    assert.equal(headers.get('x-user-id'), 'bob');
+    assert.equal(headers.get('x-thread-id'), thread.id);
+    const input = body.input as Wire[];
+    assert.ok(!input.some((item) => item.type === 'item_reference'));
+    assert.deepEqual(
+      input
+        .filter((item) => item.type === 'reasoning')
+        .map((item) => item.encrypted_content),
+      ['same-account-ciphertext'],
+    );
+    assert.doesNotMatch(
+      JSON.stringify(input),
+      /rs_missing|rs_foreign|foreign-ciphertext/,
+    );
+    assert.match(JSON.stringify(input), /Generating video/);
+    const call = input.find(
+      (item) => item.type === 'function_call' && item.call_id === 'call_2',
+    );
+    assert.equal(call?.name, 'exec_command');
+    assert.equal(JSON.parse(String(call.arguments)).cmd, 'python video.py');
+    const result = input.find(
+      (item) =>
+        item.type === 'function_call_output' && item.call_id === 'call_2',
+    );
+    assert.match(String(result?.output), /video\.mp4/);
+    assert.equal(records.length, requests.length);
+    assert.ok(
+      records.every(
+        (row) =>
+          row.modelReference ===
+          (row.userId === 'alice' ? deepseek.reference : gpt.reference),
+      ),
+    );
+    assert.equal(records.at(-1)?.userId, 'bob');
+    const saved = await memory.recall({ ...target });
+    assert.ok(
+      saved.messages.some(
+        (message) =>
+          message.role === 'assistant' &&
+          message.content.parts.some(
+            (part) =>
+              part.type === 'text' && part.text === 'Video is ready: video.mp4',
+          ),
+      ),
+    );
+  },
+);
 
 test('legacy UUID metadata is removed after native history conversion without losing text or tool pairs', () => {
   const list = new MessageList();

@@ -28,7 +28,7 @@ import type {
   AgentMessageInput,
   MessageList,
 } from '@mastra/core/agent';
-import type { MastraModelOutput } from '@mastra/core/stream';
+import type { ChunkType, MastraModelOutput } from '@mastra/core/stream';
 import { RequestContext } from '@mastra/core/request-context';
 import { createObservabilityContext } from '@mastra/core/observability';
 import { InterruptedReplyProcessor } from './interrupted-reply.js';
@@ -94,9 +94,8 @@ function latestInputMetadata(
   messageList: MessageList,
   requestContext?: RequestContext,
 ) {
-  // A retry adopts the current selection until a new user signal arrives.
-  // Stored signals retain the model originally used to submit that message.
-  const source = requestContext?.get('chatRetry')
+  // Retries and background completions carry their own selection until a new user signal arrives.
+  const source = requestContext?.get('chatUseInputSettings')
     ? messageList.get.input
     : messageList.get.all;
   const latest = [...source.db()]
@@ -496,6 +495,10 @@ export function createChatRunner(
           ),
           new MemoryMDProcessor(memoryDirectory),
         ];
+        const runOptions = new WeakMap<
+          RequestContext,
+          Awaited<ReturnType<typeof optionsFor>>
+        >();
         const agentOptions: AgentRuntimeOptions = {
           localSubagents: () =>
             loadLocalAgents(workspaceRoot, userId, projectId),
@@ -512,6 +515,21 @@ export function createChatRunner(
               ? '\nThis task is coordinated by a room Bot. Keep working on the authorized task until it is fulfilled and verified. Record meaningful progress, results, artifact paths and verification evidence with issue comment. When blocked or needing a human decision, write the exact question/blocker in an Issue comment, set state decision, explain it in your final response and finish this turn. Do not use suspended question/approval tools or wait for a human here; the Bot receives Issue events, asks in the room and sends the answer back to this same thread. On verified completion close this Issue and include a concise result in the final response. A new follow-up means continue this task, not create another Issue.'
               : ''),
           model: resolved.model,
+          // An idle thread wakes with only a copy of the dispatching request context.
+          // Mastra also resolves defaults for explicit turns and tool assembly.
+          defaultOptions: ({ requestContext }) => {
+            const prepared = runOptions.get(requestContext);
+            if (prepared) return prepared;
+            const carried = chatSettingsSchema.safeParse(
+              requestContext.get('chatSettings'),
+            ).data;
+            const author = requestContext.get('userId');
+            return optionsFor(
+              carried ?? currentSettings,
+              typeof author === 'string' ? author : (actorId ?? userId),
+              { requestContext, mode: carried ? 'completion' : 'turn' },
+            );
+          },
           // Matching native processor IDs suppress Memory's default OM processors.
           // Keep the same processor for input and output so native turn cleanup,
           // response ID rotation and observation context injection remain intact.
@@ -641,6 +659,26 @@ export function createChatRunner(
               build,
             )
           : await build(config.id, agentOptions);
+        // Mastra copies the live run context when a task finishes. A shared turn may
+        // already belong to another author by then. Bind the notification before
+        // native admission, including its blocked-thread retry and permission checks.
+        const notify = agent.__notifyBackgroundTaskFinished.bind(agent);
+        agent.__notifyBackgroundTaskFinished = (params) => {
+          if (!params.requestContext) return notify(params);
+          const origins = params.requestContext.get('chatTaskOrigins') as
+            | Record<string, { userId: string; settings: ChatSettings }>
+            | undefined;
+          if (!origins || !Object.hasOwn(origins, params.taskId))
+            return notify(params);
+          const origin = origins[params.taskId];
+          delete origins[params.taskId];
+          const requestContext = new RequestContext(
+            params.requestContext.entries(),
+          );
+          requestContext.set('userId', origin.userId);
+          requestContext.set('chatSettings', origin.settings);
+          return notify({ ...params, requestContext });
+        };
         const messages = new Map<string, UIMessage>();
         const refreshMessages = async (streamedMessageIds: string[] = []) => {
           await memory.settled();
@@ -724,11 +762,17 @@ export function createChatRunner(
             });
           streams.set(output.runId, consuming);
         };
-        const optionsFor = async (
+        async function optionsFor(
           next: ChatSettings,
           createdBy?: string,
-          retry = false,
-        ): Promise<AgentExecutionOptions> => {
+          {
+            requestContext = new RequestContext(),
+            mode = 'turn',
+          }: {
+            requestContext?: RequestContext;
+            mode?: 'turn' | 'retry' | 'completion';
+          } = {},
+        ) {
           for (const reference of [
             config.id,
             ...(roomBinding ? [] : Object.values(config.agents)),
@@ -755,13 +799,20 @@ export function createChatRunner(
                 ).additionalPrompt?.trim()
               : undefined;
           const abortSignal = runAbort.signal;
-          const requestContext = new RequestContext();
+          // The native executor can copy this context while creating its tool step.
+          // Keep one shared table per run; unrelated runs and threads never share it.
+          const taskOrigins: Record<
+            string,
+            { userId: string; settings: ChatSettings }
+          > = Object.create(null);
+          requestContext.set('chatTaskOrigins', taskOrigins);
           if (
             roomBinding ||
             typeof thread.metadata?.issueSourceThreadId === 'string'
           )
             requestContext.set('nonInteractiveTools', true);
-          requestContext.set('chatRetry', retry);
+          requestContext.set('chatUseInputSettings', mode !== 'turn');
+          if (mode === 'completion') requestContext.delete('chatInputMetadata');
           requestContext.set('speechPlayback', speechPlayback);
           // Queued messages in the same project conversation can have different authors.
           const setAuthor = (author: string) => {
@@ -791,6 +842,7 @@ export function createChatRunner(
             startedAt: performance.now(),
             userId: createdBy ?? userId,
             model: selection,
+            settings: next,
             number: 0,
           };
           const headers = {
@@ -813,13 +865,20 @@ export function createChatRunner(
               const fromMessage = metadata?.chatSettings;
               // Queued project messages can have different authors in one stream.
               const author =
-                latestInputMetadata(messageList)?.createdBy ??
-                metadata?.createdBy;
+                mode === 'completion'
+                  ? metadata?.createdBy
+                  : (latestInputMetadata(messageList)?.createdBy ??
+                    metadata?.createdBy);
               const authorId =
                 typeof author === 'string' ? author : (createdBy ?? userId);
               setAuthor(authorId);
               currentSettings =
                 chatSettingsSchema.safeParse(fromMessage).data ?? next;
+              requestContext.set('chatSettings', {
+                agentId: config.id,
+                model: currentSettings.model,
+                reasoningEffort: currentSettings.reasoningEffort,
+              });
               resolved = await sessionModel(currentSettings);
               environmentPrompt = agentEnvironment(
                 commands.workingDirectory,
@@ -835,6 +894,7 @@ export function createChatRunner(
                 startedAt: performance.now(),
                 userId: authorId,
                 model: resolved,
+                settings: currentSettings,
                 number: stepNumber,
               };
               headers['X-USER-ID'] = step.userId;
@@ -850,7 +910,7 @@ export function createChatRunner(
             },
           );
           const interrupted = new InterruptedReplyProcessor(interruptedIds);
-          return {
+          const options = {
             inputProcessors: [
               ...inputProcessors,
               compatibility,
@@ -875,6 +935,18 @@ export function createChatRunner(
               headers,
             },
             savePerStep: true,
+            onChunk: (chunk: ChunkType<unknown> | ChunkType<undefined>) => {
+              if (chunk.type === 'background-task-started') {
+                taskOrigins[chunk.payload.taskId] = {
+                  userId: step.userId,
+                  settings: {
+                    agentId: config.id,
+                    model: step.settings.model,
+                    reasoningEffort: step.settings.reasoningEffort,
+                  },
+                };
+              }
+            },
             delegation: {
               // Each child supplies its own model identity in its environment block.
               messageFilter: ({ messages }) =>
@@ -922,8 +994,10 @@ export function createChatRunner(
             onError: ({ error }) => {
               if (!abortSignal.aborted) onEvent({ type: 'error', error });
             },
-          };
-        };
+          } satisfies AgentExecutionOptions;
+          runOptions.set(requestContext, options);
+          return options;
+        }
         const prepareSubmission = async (input: RunInput) => {
           await sessionModel(input);
           const message: AgentMessageInput = {
@@ -1127,7 +1201,7 @@ export function createChatRunner(
             consume(
               await agent.streamUntilIdle(
                 [],
-                await optionsFor(next, undefined, true),
+                await optionsFor(next, undefined, { mode: 'retry' }),
               ),
             );
           },
