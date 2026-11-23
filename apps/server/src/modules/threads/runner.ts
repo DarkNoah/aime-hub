@@ -741,6 +741,16 @@ export function createChatRunner(
               await plugins?.access.assertAllowed(plugin, createdBy ?? userId);
           }
           const selection = await sessionModel(next);
+          const additionalPrompt =
+            roomBinding?.role === 'bot'
+              ? (
+                  await groupChats!.getAgent(
+                    createdBy ?? userId,
+                    roomBinding.roomId,
+                    roomBinding.memberId,
+                  )
+                ).additionalPrompt?.trim()
+              : undefined;
           const abortSignal = runAbort.signal;
           const requestContext = new RequestContext();
           if (
@@ -845,6 +855,7 @@ export function createChatRunner(
               deferredToolContext(requestContext),
             ],
             outputProcessors: [interrupted, compaction, compatibility],
+            ...(additionalPrompt && { system: additionalPrompt }),
             memory: { thread: thread.id, resource: thread.resourceId },
             abortSignal,
             requestContext,

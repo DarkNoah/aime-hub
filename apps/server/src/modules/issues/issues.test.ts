@@ -21,6 +21,7 @@ import { IssueSourceThread1780000036000 } from '../../../../../packages/db/src/m
 import { CreateGroupChats1780000024000 } from '../../../../../packages/db/src/migrations/1780000024000-create-group-chats.js';
 import { GroupChatAgents1780000026000 } from '../../../../../packages/db/src/migrations/1780000026000-group-chat-agents.js';
 import { GroupChatIdleWake1780000029000 } from '../../../../../packages/db/src/migrations/1780000029000-group-chat-idle-wake.js';
+import { GroupChatBotPrompt1780000045000 } from '../../../../../packages/db/src/migrations/1780000045000-group-chat-bot-prompt.js';
 import { IssueEvents1780000038000 } from '../../../../../packages/db/src/migrations/1780000038000-issue-events.js';
 import { IssueOptionalThread1780000039000 } from '../../../../../packages/db/src/migrations/1780000039000-issue-optional-thread.js';
 import { fakeMemory } from '../../../../../scripts/fixtures/thread-memory.js';
@@ -368,6 +369,7 @@ test(
     await new CreateGroupChats1780000024000().up(migration);
     await new GroupChatAgents1780000026000().up(migration);
     await new GroupChatIdleWake1780000029000().up(migration);
+    await new GroupChatBotPrompt1780000045000().up(migration);
     await new PluginGroupChats1780000042000().up(migration);
     await new CreateIssues1780000035000().up(migration);
     await new IssueSourceThread1780000036000().up(migration);

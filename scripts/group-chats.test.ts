@@ -25,6 +25,7 @@ import { CreateGeneratedAssets1780000009000 } from '../packages/db/src/migration
 import { AddGeneratedAssetCreator1780000010000 } from '../packages/db/src/migrations/1780000010000-add-generated-asset-creator.js';
 import { AddGeneratedAssetMetadata1780000011000 } from '../packages/db/src/migrations/1780000011000-add-generated-asset-metadata.js';
 import { GroupChatIdleWake1780000029000 } from '../packages/db/src/migrations/1780000029000-group-chat-idle-wake.js';
+import { GroupChatBotPrompt1780000045000 } from '../packages/db/src/migrations/1780000045000-group-chat-bot-prompt.js';
 import { GroupChatAgents1780000026000 } from '../packages/db/src/migrations/1780000026000-group-chat-agents.js';
 import { GroupChatMembers1780000027000 } from '../packages/db/src/migrations/1780000027000-group-chat-members.js';
 import { GroupChatMemberRoles1780000043000 } from '../packages/db/src/migrations/1780000043000-group-chat-member-roles.js';
@@ -193,6 +194,7 @@ test(
     await memberRolesMigration.down(runner);
     await memberRolesMigration.up(runner);
     await new GroupChatIdleWake1780000029000().up(runner);
+    await new GroupChatBotPrompt1780000045000().up(runner);
     await new PluginGroupChats1780000042000().up(runner);
     await new GroupChatA2aMembers1780000030000().up(runner);
     await new GroupChatA2aMemberDeletion1780000031000().up(runner);
@@ -1154,11 +1156,40 @@ test(
     );
 
     await t.test(
-      'lead agents remain enabled and only model/reasoning can change',
+      'lead agents retain their identity and managers can save or clear room-specific instructions',
       async () => {
         const room = await rooms.create('alice', { title: 'Fixed leader' });
         const bot = room.agents[0];
         await rooms.addMember('alice', room.id, 'bob');
+        assert.equal(bot.additionalPrompt, null);
+        await assert.rejects(
+          rooms.updateAgent('bob', room.id, bot.id, {
+            additionalPrompt: 'test',
+          }),
+          code('FORBIDDEN'),
+        );
+        const worker = await rooms.addAgent('alice', room.id, {
+          name: 'Worker',
+          settings: bot.settings,
+        });
+        await assert.rejects(
+          rooms.updateAgent('alice', room.id, worker.id, {
+            additionalPrompt: 'test',
+          }),
+          code('BAD_REQUEST'),
+        );
+        await rooms.updateAgent('alice', room.id, bot.id, {
+          additionalPrompt: '  Use numbered steps.  ',
+        });
+        assert.equal(
+          (await rooms.getAgent('alice', room.id, bot.id)).additionalPrompt,
+          'Use numbered steps.',
+        );
+        assert.equal(
+          (await rooms.getAgent('alice', project.id, project.botAgentId))
+            .additionalPrompt,
+          null,
+        );
         assert.equal(
           await rooms.agentAvatarThread('alice', room.id, bot.id),
           bot.threadId,
@@ -1194,6 +1225,15 @@ test(
           },
         });
         assert.equal(updated.settings.model, 'provider/test-model');
+        assert.equal(updated.additionalPrompt, 'Use numbered steps.');
+        assert.equal(
+          (
+            await rooms.updateAgent('alice', room.id, bot.id, {
+              additionalPrompt: '  ',
+            })
+          ).additionalPrompt,
+          null,
+        );
         assert.equal(updated.settings.reasoningEffort, 'high');
         assert.equal(updated.name, bot.name);
         assert.equal(updated.enabled, true);

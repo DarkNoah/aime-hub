@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Dialog,
@@ -58,7 +59,9 @@ export function RoomAgentEditor({
   const catalog = useAvailableAgents(projectId, true);
   const [pending, setPending] = useState(false);
   const [avatar, setAvatar] = useState<File>();
-  const [generating, setGenerating] = useState(false);
+  const [additionalPrompt, setAdditionalPrompt] = useState(
+    agent.additionalPrompt ?? '',
+  );
   const [lastSaved, setLastSaved] = useState(agent);
   const [idleWakeEnabled, setIdleWakeEnabled] = useState(
     agent.idleWakeHours != null,
@@ -89,6 +92,8 @@ export function RoomAgentEditor({
   );
   const fixedModel = isBot ? undefined : selected?.model;
   const changes: GroupChatAgentUpdate = {};
+  if (isBot && additionalPrompt.trim() !== (lastSaved.additionalPrompt ?? ''))
+    changes.additionalPrompt = additionalPrompt.trim();
   if (
     form.settings.model !== lastSaved.settings.model ||
     form.settings.reasoningEffort !== lastSaved.settings.reasoningEffort ||
@@ -105,7 +110,6 @@ export function RoomAgentEditor({
   const settingsChanged = Object.keys(changes).length > 0;
   const canSave =
     !pending &&
-    !generating &&
     !!form.name.trim() &&
     validIdleHours &&
     (!!avatar || settingsChanged);
@@ -164,8 +168,6 @@ export function RoomAgentEditor({
                 name={form.name}
                 image={avatarUrl}
                 disabled={pending}
-                generating={generating}
-                onGeneratingChange={setGenerating}
                 onChange={setAvatar}
               />
               {!isBot && (
@@ -219,6 +221,31 @@ export function RoomAgentEditor({
               )}
               {localFile && (
                 <RoomAgentInstructions key={localId} file={localFile} />
+              )}
+              {isBot && (
+                <div className="space-y-2">
+                  <Label htmlFor={`${id}-additional-prompt`}>
+                    {t('groupChat.botAdditionalPrompt')}
+                  </Label>
+                  <Textarea
+                    id={`${id}-additional-prompt`}
+                    aria-describedby={`${id}-prompt-hint`}
+                    rows={3}
+                    maxLength={32000}
+                    className="field-sizing-fixed resize-y"
+                    value={additionalPrompt}
+                    disabled={pending}
+                    onChange={(event) =>
+                      setAdditionalPrompt(event.target.value)
+                    }
+                  />
+                  <p
+                    id={`${id}-prompt-hint`}
+                    className="text-xs text-muted-foreground"
+                  >
+                    {t('groupChat.botAdditionalPromptHint')}
+                  </p>
+                </div>
               )}
               <div className="space-y-2">
                 <Label htmlFor={`${id}-model`}>{t('chat.model')}</Label>

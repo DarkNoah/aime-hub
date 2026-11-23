@@ -41,6 +41,7 @@ const member: GroupChatAgent = {
   error: null,
   lastReadSequence: '0',
   idleWakeHours: null,
+  additionalPrompt: null,
 };
 function toolReply(name: string, input: unknown, call: number) {
   return {
@@ -106,6 +107,8 @@ async function nativeRoom(t: TestContext, pluginId?: string) {
   const prompts: string[] = [];
   const catalogs: string[][] = [];
   const catalogReads: unknown[] = [];
+  const customPrompt = 'Use the cobalt room glossary.';
+  let additionalPrompt = customPrompt;
   let event = 1;
   const page: GroupChatMessages = {
     messages: [],
@@ -122,7 +125,7 @@ async function nativeRoom(t: TestContext, pluginId?: string) {
       assert.equal(userId, 'alice');
       assert.equal(roomId, member.roomId);
       assert.equal(memberId, member.id);
-      return member;
+      return { ...member, additionalPrompt };
     },
     recentMessages: async (userId: string) => {
       recentReads.push(userId);
@@ -173,6 +176,13 @@ async function nativeRoom(t: TestContext, pluginId?: string) {
   } as unknown as GroupChatService;
   const model = new MastraLanguageModelV2Mock({
     doStream: async ({ prompt, tools }) => {
+      const system = prompt
+        .filter((message) => message.role === 'system')
+        .map((message) => message.content)
+        .join('\n');
+      assert.match(system, /dedicated leader/);
+      assert.equal(system.split(customPrompt).length - 1, event === 1 ? 1 : 0);
+      assert.equal(system.includes('Use the amber glossary.'), event === 2);
       const call = prompts.push(JSON.stringify(prompt));
       catalogs.push(
         (tools ?? []).flatMap((tool) => ('name' in tool ? [tool.name] : [])),
@@ -379,6 +389,7 @@ async function nativeRoom(t: TestContext, pluginId?: string) {
     );
   }
   event = 2;
+  additionalPrompt = 'Use the amber glossary.';
   await writeFile(
     join(memoryDirectory, 'MEMORY.md'),
     'Updated durable room fact: amber-garden-842',
@@ -405,6 +416,7 @@ async function nativeRoom(t: TestContext, pluginId?: string) {
     ),
   );
   event = 3;
+  additionalPrompt = '  ';
   await run();
   await settled(threads);
   assert.deepEqual(catalogReads, [{ userId: 'alice', projectId: undefined }]);

@@ -95,6 +95,7 @@ export const groupChatAgentUpdateSchema = groupChatAgentCreateSchema
   .partial()
   .extend({
     idleWakeHours: z.number().positive().max(8760).nullable().optional(),
+    additionalPrompt: z.string().trim().max(32000).optional(),
   });
 export type GroupChatAgentInput = z.infer<typeof groupChatAgentCreateSchema>;
 export type GroupChatAgentUpdate = z.infer<typeof groupChatAgentUpdateSchema>;
@@ -165,6 +166,7 @@ export type GroupChatAgent = {
   lastReadSequence: string;
   /** Bot-only inactivity interval; null disables proactive idle wake-ups. */
   idleWakeHours: number | null;
+  additionalPrompt: string | null;
 };
 export type GroupChatMemberRole = 'owner' | 'admin' | 'member';
 export type GroupChatMember = {

@@ -13,6 +13,7 @@ import type { GroupChatAgent } from '@aime/shared/group-chats';
 import { CreateGroupChats1780000024000 } from '../../../../../packages/db/src/migrations/1780000024000-create-group-chats.js';
 import { GroupChatAgents1780000026000 } from '../../../../../packages/db/src/migrations/1780000026000-group-chat-agents.js';
 import { GroupChatIdleWake1780000029000 } from '../../../../../packages/db/src/migrations/1780000029000-group-chat-idle-wake.js';
+import { GroupChatBotPrompt1780000045000 } from '../../../../../packages/db/src/migrations/1780000045000-group-chat-bot-prompt.js';
 import { CreateIssues1780000035000 } from '../../../../../packages/db/src/migrations/1780000035000-create-issues.js';
 import { IssueSourceThread1780000036000 } from '../../../../../packages/db/src/migrations/1780000036000-issue-source-thread.js';
 import { IssueEvents1780000038000 } from '../../../../../packages/db/src/migrations/1780000038000-issue-events.js';
@@ -103,6 +104,7 @@ for (const mode of ['create', 'manual', 'existing'] as const)
         new CreateGroupChats1780000024000(),
         new GroupChatAgents1780000026000(),
         new GroupChatIdleWake1780000029000(),
+        new GroupChatBotPrompt1780000045000(),
         new PluginGroupChats1780000042000(),
         new CreateIssues1780000035000(),
         new IssueSourceThread1780000036000(),
@@ -127,6 +129,7 @@ for (const mode of ['create', 'manual', 'existing'] as const)
         error: null,
         lastReadSequence: '0',
         idleWakeHours: null,
+        additionalPrompt: null,
       };
       await db.query(
         "INSERT INTO group_chats(id,title,created_by) VALUES($1,'Room','alice')",

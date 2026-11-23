@@ -94,7 +94,7 @@ type RoomRow = Omit<GroupChat, 'createdAt' | 'updatedAt'> & {
 };
 type MessageRow = Omit<GroupChatMessage, 'createdAt'> & { createdAt: Date };
 const roomColumns = `id, title, project_id AS "projectId", plugin_id AS "pluginId", created_by AS "createdBy", created_at AS "createdAt", updated_at AS "updatedAt"`;
-const agentColumns = `id,room_id AS "roomId",thread_id AS "threadId",name,role,settings,enabled,status,error,last_read_sequence::text AS "lastReadSequence",idle_wake_hours AS "idleWakeHours"`;
+const agentColumns = `id,room_id AS "roomId",thread_id AS "threadId",name,role,settings,enabled,status,error,last_read_sequence::text AS "lastReadSequence",idle_wake_hours AS "idleWakeHours",additional_prompt AS "additionalPrompt"`;
 // A pending plan blocks idle work even when its deadline is far in the future.
 const idleAgentReady = `a.role='bot' AND a.enabled AND NOT a.deleting AND a.status IN ('idle','failed')
   AND a.idle_wake_hours IS NOT NULL AND a.idle_since + a.idle_wake_hours * interval '1 hour' <= now()
@@ -1305,14 +1305,20 @@ export class GroupChatService {
           previous.role === 'bot' &&
           (parsed.name !== undefined ||
             parsed.enabled !== undefined ||
-            (!parsed.settings && parsed.idleWakeHours === undefined) ||
+            (!parsed.settings &&
+              parsed.idleWakeHours === undefined &&
+              parsed.additionalPrompt === undefined) ||
             (parsed.settings &&
               (parsed.settings.agentId ?? null) !==
                 (previous.settings.agentId ?? null)))
         )
           throw new ORPCError('FORBIDDEN', {
             message:
-              'Only the bot model, reasoning effort and idle wake interval can be changed',
+              'Only the bot model, reasoning effort, additional prompt and idle wake interval can be changed',
+          });
+        if (previous.role !== 'bot' && parsed.additionalPrompt !== undefined)
+          throw new ORPCError('BAD_REQUEST', {
+            message: 'Additional prompts are only available for the bot',
           });
         if (previous.role !== 'bot' && parsed.idleWakeHours !== undefined)
           throw new ORPCError('BAD_REQUEST', {
@@ -1325,7 +1331,7 @@ export class GroupChatService {
         const rows: GroupChatAgent[] = await manager.query(
           `WITH updated AS (UPDATE group_chat_agents SET name=$3,settings=$4,enabled=$5,error=NULL,
             idle_since=CASE WHEN idle_wake_hours IS DISTINCT FROM $6::double precision AND status<>'running' THEN now() ELSE idle_since END,
-            idle_wake_hours=$6 WHERE room_id=$1 AND id=$2 RETURNING ${agentColumns}) SELECT * FROM updated`,
+            idle_wake_hours=$6,additional_prompt=$7 WHERE room_id=$1 AND id=$2 RETURNING ${agentColumns}) SELECT * FROM updated`,
           [
             roomId,
             memberId,
@@ -1333,6 +1339,7 @@ export class GroupChatService {
             JSON.stringify(parsed.settings ?? previous.settings),
             parsed.enabled ?? previous.enabled,
             idleWakeHours,
+            (parsed.additionalPrompt ?? previous.additionalPrompt) || null,
           ],
         );
         if (idleWakeHours !== previous.idleWakeHours)

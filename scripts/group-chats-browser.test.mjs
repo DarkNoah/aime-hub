@@ -1149,10 +1149,26 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
           exact: true,
         });
         const save = editor.getByRole('button', { name: '保存配置' });
+        const generator = page.getByRole('dialog', {
+          name: '生成头像',
+          exact: true,
+        });
+        const generatePreview = async () => {
+          await editor.getByRole('button', { name: '生成头像' }).click();
+          const generate = generator.getByRole('button', { name: '生成预览' });
+          assert.equal(await generate.isEnabled(), false);
+          await generator.getByLabel('头像生成提示词').fill('戴眼镜的橘猫');
+          await generate.click();
+          await generator.getByAltText('生成的头像预览').waitFor();
+        };
         await open.click();
         assert.equal(await save.isEnabled(), false);
-        await editor.getByLabel('头像生成提示词').fill('戴眼镜的橘猫');
-        await editor.getByRole('button', { name: '生成预览' }).click();
+        assert.equal(await editor.getByLabel('头像生成提示词').count(), 0);
+        await generatePreview();
+        await generator.getByRole('button', { name: '取消' }).click();
+        assert.equal(await save.isEnabled(), false);
+        await generatePreview();
+        await generator.getByRole('button', { name: '使用头像' }).click();
         await editor.locator('img[src^="blob:"]').waitFor();
         await editor.getByRole('button', { name: '取消' }).click();
         assert.equal(agentAvatarUrls[bot.id], undefined);
@@ -1165,8 +1181,9 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
               buffer: previewPng,
             });
           } else {
-            await editor.getByLabel('头像生成提示词').fill('戴眼镜的橘猫');
-            await editor.getByRole('button', { name: '生成预览' }).click();
+            await generatePreview();
+            await generator.getByRole('button', { name: '重新生成' }).click();
+            await generator.getByRole('button', { name: '使用头像' }).click();
           }
           await editor.locator('img[src^="blob:"]').waitFor();
           await save.click();
@@ -1215,6 +1232,10 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       0,
     );
     assert.equal(await leaderEditor.getByRole('switch').count(), 1);
+    const additionalPrompt = leaderEditor.getByRole('textbox', {
+      name: '附加提示词',
+    });
+    await additionalPrompt.fill('  汇报时先列结论。  ');
     await leaderEditor.getByRole('switch', { name: '空闲时主动启动' }).check();
     await leaderEditor
       .getByRole('spinbutton', { name: '空闲启动时间（小时）' })
@@ -1239,6 +1260,7 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       (update) => update.params.agentId === 'bot0000000000001',
     );
     assert.deepEqual(leaderUpdate.body, {
+      additionalPrompt: '汇报时先列结论。',
       idleWakeHours: 0.5,
       settings: {
         agentId: null,
@@ -1262,9 +1284,13 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       '0.5',
     );
     await page.screenshot({ path: '/tmp/group-chat-idle-settings.png' });
+    assert.equal(await additionalPrompt.inputValue(), '汇报时先列结论。');
+    await additionalPrompt.fill('   ');
     await leaderEditor
-      .getByRole('button', { name: '取消', exact: true })
+      .getByRole('button', { name: '保存配置', exact: true })
       .click();
+    await leaderEditor.waitFor({ state: 'hidden' });
+    assert.deepEqual(agentUpdates.at(-1).body, { additionalPrompt: '' });
     await roster
       .getByRole('button', { name: '添加 Agent', exact: true })
       .click();
@@ -1338,13 +1364,11 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
         const save = config.getByRole('button', { name: '保存配置' });
         await config.getByRole('combobox', { name: '思考等级' }).click();
         await page.getByRole('option', { name: '高', exact: true }).click();
-        await config
-          .locator('input[type=file]')
-          .setInputFiles({
-            name: 'avatar.png',
-            mimeType: 'image/png',
-            buffer: previewPng,
-          });
+        await config.locator('input[type=file]').setInputFiles({
+          name: 'avatar.png',
+          mimeType: 'image/png',
+          buffer: previewPng,
+        });
         const workerId = 'worker0000000001';
         const before = agentUpdates.length;
         failNextAvatarSave = true;

@@ -1,6 +1,7 @@
 import { PluginGroupChats1780000042000 } from './migrations/1780000042000-plugin-group-chats.js';
 import { GroupChatMemberRoles1780000043000 } from './migrations/1780000043000-group-chat-member-roles.js';
 import { McpOAuth1780000044000 } from './migrations/1780000044000-mcp-oauth.js';
+import { GroupChatBotPrompt1780000045000 } from './migrations/1780000045000-group-chat-bot-prompt.js';
 import { AutomationBotEvents1780000040000 } from './migrations/1780000040000-automation-bot-events.js';
 import { IssueOptionalThread1780000039000 } from './migrations/1780000039000-issue-optional-thread.js';
 import { IssueEvents1780000038000 } from './migrations/1780000038000-issue-events.js';
@@ -100,6 +101,7 @@ export function createDataSource(
       GeneratedAsset,
     ],
     migrations: [
+      GroupChatBotPrompt1780000045000,
       McpOAuth1780000044000,
       GroupChatMemberRoles1780000043000,
       PluginGroupChats1780000042000,

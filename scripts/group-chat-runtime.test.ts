@@ -37,6 +37,7 @@ const member: GroupChatAgent = {
   error: null,
   lastReadSequence: '0',
   idleWakeHours: null,
+  additionalPrompt: null,
 };
 const room: GroupChatDetail = {
   id: member.roomId,

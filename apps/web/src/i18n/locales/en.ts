@@ -189,7 +189,10 @@ export const en = {
   'groupChat.reconnecting': 'Message sync interrupted. Reconnecting…',
 
   'groupChat.botSettingsHint':
-    'The lead agent is always enabled. Configure its model, reasoning effort and idle wake interval.',
+    'The lead agent is always enabled and coordinates work in this room.',
+  'groupChat.botAdditionalPrompt': 'Additional instructions',
+  'groupChat.botAdditionalPromptHint':
+    'Appended to this room’s bot system prompt from its next run. Leave blank to clear.',
   'groupChat.idleWake': 'Start proactively when idle',
   'groupChat.bookmark': 'Bookmark',
   'groupChat.idleWakeHours': 'Idle wake interval (hours)',
@@ -288,6 +291,12 @@ export const en = {
   'groupChat.avatarPromptExample':
     'For example, an orange cat with round glasses against a pale blue background',
   'groupChat.avatarGenerate': 'Generate preview',
+  'groupChat.avatarGenerator': 'Generate avatar',
+  'groupChat.avatarGeneratorHint':
+    'Describe the avatar you want, then preview it before using it.',
+  'groupChat.avatarPreview': 'Generated avatar preview',
+  'groupChat.avatarRegenerate': 'Regenerate',
+  'groupChat.avatarUse': 'Use avatar',
   'groupChat.avatarGenerating': 'Generating…',
   'groupChat.avatarInvalid': 'Choose a readable JPG, PNG, WebP or GIF image.',
   'groupChat.avatarToolDisabled':

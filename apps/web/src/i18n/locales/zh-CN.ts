@@ -173,8 +173,10 @@ export const zhCN = {
   'groupChat.failed': '操作失败，请重试。输入内容已保留。',
   'groupChat.reconnecting': '消息同步暂时中断，正在重新连接…',
 
-  'groupChat.botSettingsHint':
-    '领导 Agent 始终启用，可调整模型、思考等级和空闲启动时间。',
+  'groupChat.botSettingsHint': '领导 Agent 始终启用，负责协调本聊天室的任务。',
+  'groupChat.botAdditionalPrompt': '附加提示词',
+  'groupChat.botAdditionalPromptHint':
+    '仅用于本聊天室。下次运行时会追加到 Bot 的系统提示词，留空即可清除。',
   'groupChat.idleWake': '空闲时主动启动',
   'groupChat.bookmark': '收藏',
   'groupChat.idleWakeHours': '空闲启动时间（小时）',
@@ -268,6 +270,11 @@ export const zhCN = {
   'groupChat.avatarPrompt': '头像生成提示词',
   'groupChat.avatarPromptExample': '例如，一只戴着圆框眼镜的橘猫，浅蓝色背景',
   'groupChat.avatarGenerate': '生成预览',
+  'groupChat.avatarGenerator': '生成头像',
+  'groupChat.avatarGeneratorHint': '描述想要的头像，预览满意后再使用。',
+  'groupChat.avatarPreview': '生成的头像预览',
+  'groupChat.avatarRegenerate': '重新生成',
+  'groupChat.avatarUse': '使用头像',
   'groupChat.avatarGenerating': '正在生成…',
   'groupChat.avatarInvalid':
     '无法读取这张头像，请选择有效的 JPG、PNG、WebP 或 GIF 图片。',
