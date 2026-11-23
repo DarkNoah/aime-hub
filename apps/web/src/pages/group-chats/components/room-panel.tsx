@@ -97,7 +97,8 @@ export function RoomPanel({
             text: [
               message.text,
               ...(message.files ?? []).map(
-                (file) => `${file.name}: ${file.path}`,
+                (file) =>
+                  `${file.name}: ${'url' in file ? file.url : file.path}`,
               ),
             ]
               .filter(Boolean)
@@ -172,7 +173,7 @@ export function RoomPanel({
         ),
       }}
       assetRevision={state.messages
-        .filter((message) => message.files?.length)
+        .filter((message) => message.files?.some((file) => 'path' in file))
         .map((message) => message.id)
         .join(',')}
     >

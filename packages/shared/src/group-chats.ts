@@ -26,11 +26,34 @@ export const groupChatFileSchema = z.object({
   path: z.string().min(1).max(2048),
   name: z.string().min(1).max(255),
 });
+export function parseGroupChatFileUrl(value: string) {
+  if (!/^https?:\/\//i.test(value) || !URL.canParse(value)) return;
+  const url = new URL(value);
+  if (!url.username && !url.password) return url;
+}
+
+const groupChatUrlFileSchema = z.strictObject({
+  url: z
+    .string()
+    .max(16_384)
+    .refine(
+      parseGroupChatFileUrl,
+      'Expected an HTTP(S) URL without credentials',
+    ),
+  name: groupChatFileSchema.shape.name,
+  mimeType: z.string().trim().min(1).max(255).optional(),
+});
 export const groupChatMessageSchema = z.object({
   id: z.string().regex(/^[a-zA-Z0-9_-]{16,32}$/),
   text: z.string().trim().min(1).max(20_000),
   replyToId: z.string().optional(),
   files: z.array(groupChatFileSchema).max(20).optional(),
+});
+export const groupChatAgentMessageSchema = groupChatMessageSchema.extend({
+  files: z
+    .array(z.union([groupChatFileSchema.strict(), groupChatUrlFileSchema]))
+    .max(20)
+    .optional(),
 });
 export const groupChatChoicesSchema = z.object({
   options: z
@@ -117,6 +140,8 @@ export type GroupChatA2AMember = {
 };
 export type GroupChatUi = z.infer<typeof groupChatUiSchema>;
 export type GroupChatFile = z.infer<typeof groupChatFileSchema>;
+export type GroupChatUrlFile = z.infer<typeof groupChatUrlFileSchema>;
+export type GroupChatAttachment = GroupChatFile | GroupChatUrlFile;
 export type GroupChat = {
   id: string;
   title: string;
@@ -226,7 +251,7 @@ export type GroupChatMessage = {
   senderUsername: string | null;
   text: string;
   replyToId: string | null;
-  files: GroupChatFile[];
+  files: GroupChatAttachment[];
   ui: GroupChatUi | null;
   choices?: GroupChatChoices | null;
   choiceResponse?: {

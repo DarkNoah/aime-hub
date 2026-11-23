@@ -184,6 +184,36 @@ test('send_message returns a plain-text success receipt for every successful act
   );
 });
 
+test('send_message forwards URL attachments in file-only messages and mixed replies', async () => {
+  const { tools, calls, message } = fixture();
+  const url = {
+    url: 'https://example.org/media?id=42',
+    name: '演示视频',
+    mimeType: 'video/mp4',
+  };
+  const local = { path: 'slides.pdf', name: '讲义' };
+  for (const input of [
+    { action: 'file', files: [url] },
+    { action: 'reply', messageId: message.id, files: [local, url] },
+  ]) {
+    const parsed =
+      await tools.send_message.inputSchema!['~standard'].validate(input);
+    assert.ok(!parsed.issues);
+    assert.equal(
+      await invoke(tools.send_message, parsed.value),
+      `Send message success Id: ${message.id}`,
+    );
+    const sent = calls.at(-1)?.args[3] as {
+      files: unknown[];
+      text: string;
+      replyToId?: string;
+    };
+    assert.deepEqual(sent.files, input.files);
+    assert.equal(sent.text, input.files.map((file) => file.name).join(', '));
+    assert.equal(sent.replyToId, input.messageId);
+  }
+});
+
 test('send_message publishes single and multiple choices without suspending', async () => {
   const { tools, calls, message } = fixture();
   assert.equal(tools.send_message.suspendSchema, undefined);

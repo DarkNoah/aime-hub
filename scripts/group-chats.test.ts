@@ -10,6 +10,7 @@ import type { Auth } from '@aime/auth';
 import {
   groupChatCreateSchema,
   groupChatMessageSchema,
+  groupChatAgentMessageSchema,
   mentionedRoomAgentIds,
   roomAgentMention,
   type GroupChatAgent,
@@ -105,6 +106,42 @@ test('room mentions match exact local names, multiple members and unambiguous ID
   );
   assert.deepEqual(mentionedRoomAgentIds('@同名 @d @e', agents), ['d', 'e']);
   assert.equal(roomAgentMention(agents[3], agents), '@d');
+});
+
+test('agent attachments accept mixed workspace files and HTTP(S) references', () => {
+  const message = { id: 'abcdefghijklmnop', text: 'Sources' };
+  const local = { path: 'report.pdf', name: 'Report' };
+  const remote = {
+    url: 'https://example.org/download?id=42#page=3',
+    name: 'Guide',
+    mimeType: 'application/pdf',
+  };
+  assert.deepEqual(
+    groupChatAgentMessageSchema.parse({ ...message, files: [remote, local] })
+      .files,
+    [remote, local],
+  );
+  for (const file of [
+    { ...remote, path: local.path },
+    ...[
+      'javascript:alert(1)',
+      'data:text/html,hi',
+      'file:///report.pdf',
+      '//example.org',
+      'http://',
+      'https://me:secret@example.org/',
+    ].map((url) => ({ ...remote, url })),
+  ]) {
+    assert.equal(
+      groupChatAgentMessageSchema.safeParse({ ...message, files: [file] })
+        .success,
+      false,
+    );
+  }
+  assert.equal(
+    groupChatMessageSchema.safeParse({ ...message, files: [remote] }).success,
+    false,
+  );
 });
 
 test(
@@ -1325,7 +1362,14 @@ test(
           const input = {
             id: `media${randomBytes(8).toString('hex')}`,
             text: 'Media delivery',
-            files,
+            files: [
+              ...files,
+              {
+                url: 'https://example.org/download?id=123',
+                name: 'Hosted video',
+                mimeType: 'video/mp4',
+              },
+            ],
             toolCallId: 'send-media-call',
           };
           // An image already registered by its generator keeps its provenance.
@@ -1346,6 +1390,12 @@ test(
             input,
           );
           assert.equal(replay.sequence, sent.sequence);
+          assert.deepEqual(sent.files, input.files);
+          assert.deepEqual(
+            (await fileRooms.messages(actor, room.id, { limit: 1 })).messages[0]
+              .files,
+            input.files,
+          );
           assert.equal(await repository.countBy({ threadId: bot.threadId }), 3);
           const gallery = await assets.list(
             threads,

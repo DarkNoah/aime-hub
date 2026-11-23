@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "apps/web/src/pages/group-chats/components/room-message.tsx"
+        ],
+        "createdAt": "2026-11-23T07:59:57.346Z",
+        "reason": "Codex review: the 2px border marks the quoted original in the reply navigation button; it is visible only when replyToId is set."
+      }
+    ]
+  }
+}

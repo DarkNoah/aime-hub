@@ -236,7 +236,7 @@ export function createGroupChatTools(context: GroupChatAgentContext) {
     send_message: createTool({
       id: 'send_message',
       description:
-        'Publish a visible room message, reply or file. For a simple question, put the question in text and add choices: { options: ["Option A", "Option B"], multiple: false }. Single choice sends on click; multiple: true lets the user select several options then send. Returns immediately without waiting for an answer; a human selection becomes a new user message delivered immediately to the bot thread. Returns plain text: Send message success Id: <id>. To delegate, include the exact @mention from get_room_info in text; each mentioned room agent wakes in its own existing thread. Use action send for delegation too. Your final assistant response stays private. Use messageId for replies and the separate reaction tool for reactions. File paths must belong to this room workspace. Images, videos and audio delivered through files are automatically added to the resource gallery.',
+        'Publish a visible room message, reply or file. For a simple question, put the question in text and add choices: { options: ["Option A", "Option B"], multiple: false }. Single choice sends on click; multiple: true lets the user select several options then send. Returns immediately without waiting for an answer; a human selection becomes a new user message delivered immediately to the bot thread. Returns plain text: Send message success Id: <id>. To delegate, include the exact @mention from get_room_info in text; each mentioned room agent wakes in its own existing thread. Use action send for delegation too. Your final assistant response stays private. Use messageId for replies and the separate reaction tool for reactions. In files, use {path, name} for existing room workspace files or {url, name, mimeType?} for HTTP(S) webpages, PDFs and media. Both can appear in one message. Supply mimeType for media URLs without a filename extension. Workspace images, videos and audio are added to the resource gallery.',
       inputSchema: z.object({
         action: z.enum(['send', 'reply', 'file']).default('send'),
         text: z.string().optional(),
@@ -248,7 +248,16 @@ export function createGroupChatTools(context: GroupChatAgentContext) {
           })
           .optional(),
         files: z
-          .array(z.object({ path: z.string(), name: z.string() }))
+          .array(
+            z.union([
+              z.strictObject({ path: z.string(), name: z.string() }),
+              z.strictObject({
+                url: z.string(),
+                name: z.string(),
+                mimeType: z.string().optional(),
+              }),
+            ]),
+          )
           .optional(),
       }),
       execute: async (input, execution) =>
@@ -256,11 +265,11 @@ export function createGroupChatTools(context: GroupChatAgentContext) {
           if (input.action === 'reply' && !input.messageId)
             throw new Error('Provide messageId for the message to reply to.');
           if (input.action === 'file' && !input.files?.length)
-            throw new Error('Provide at least one workspace file.');
+            throw new Error('Provide at least one attachment.');
           if (input.choices && !input.text?.trim())
             throw new Error('Provide the question in text when using choices.');
           if (!input.text?.trim() && !input.files?.length)
-            throw new Error('Provide message text or a workspace file.');
+            throw new Error('Provide message text or an attachment.');
           const message = await service.sendAgent(userId, roomId, memberId, {
             id: operationId(context, execution, 'message'),
             ...(execution.agent?.toolCallId

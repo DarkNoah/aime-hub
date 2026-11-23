@@ -23,6 +23,7 @@ import { groupChatErrorKey } from '../api';
 import { useReactionFeedback } from './use-reaction-feedback';
 import { RoomAgentAvatar } from './room-agent-avatar';
 import { RoomMessageChoices } from './room-message-choices';
+import { RoomUrlAttachment } from './room-url-attachment';
 
 const emojiChoices = ['👍', '❤️', '🎉', '👀', '✅', '🤔', '⭐'];
 
@@ -169,13 +170,17 @@ export function RoomMessage({
         )}
         {!!message.files?.length && (
           <div className="grid min-w-0 gap-2 py-1">
-            {message.files.map((file) => (
-              <WorkspaceAttachment
-                key={file.path}
-                threadId={fileThreadId}
-                file={file}
-              />
-            ))}
+            {message.files.map((file, index) =>
+              'url' in file ? (
+                <RoomUrlAttachment key={`${index}:${file.url}`} file={file} />
+              ) : (
+                <WorkspaceAttachment
+                  key={`${index}:${file.path}`}
+                  threadId={fileThreadId}
+                  file={file}
+                />
+              ),
+            )}
           </div>
         )}
         {message.ui && (

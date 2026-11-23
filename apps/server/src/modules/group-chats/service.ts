@@ -17,6 +17,7 @@ import type {
   GroupChatA2AMemberInput,
   GroupChatA2AMemberUpdate,
   GroupChatFile,
+  GroupChatAttachment,
   GroupChatUi,
   GroupChatChoices,
   GroupChatEvent,
@@ -29,6 +30,7 @@ import {
   groupChatCreateSchema,
   groupChatReadSchema,
   groupChatMessageSchema,
+  groupChatAgentMessageSchema,
   groupChatAgentCreateSchema,
   groupChatAgentUpdateSchema,
   groupChatReactionSchema,
@@ -69,7 +71,7 @@ export type GroupChatLifecycle = {
     settings: ChatSettings,
     role: GroupChatAgent['role'],
   ): Promise<void>;
-  /** Validate all attachments and return normalized metadata for media files. */
+  /** Validate workspace files and return normalized metadata for local media. */
   validateFiles?(
     userId: string,
     agent: GroupChatAgent,
@@ -80,7 +82,7 @@ export type AgentRoomMessageInput = {
   id: string;
   text: string;
   replyToId?: string;
-  files?: GroupChatFile[];
+  files?: GroupChatAttachment[];
   ui?: GroupChatUi;
   choices?: GroupChatChoices;
   targetAgentId?: string;
@@ -1030,7 +1032,7 @@ export class GroupChatService {
     memberId: string,
     input: AgentRoomMessageInput,
   ): Promise<GroupChatMessage> {
-    groupChatMessageSchema.parse(input);
+    input = { ...input, ...groupChatAgentMessageSchema.parse(input) };
     const agent = await this.getAgent(userId, roomId, memberId);
     if (input.ui) input = { ...input, ui: groupChatUiSchema.parse(input.ui) };
     if (input.choices)
@@ -1048,7 +1050,8 @@ export class GroupChatService {
           'Shorten the question or options so its answer fits in a room message',
       });
     let mediaAssets: RoomMediaAsset[] | void;
-    if (input.files?.length) {
+    const workspaceFiles = input.files?.filter((file) => 'path' in file);
+    if (workspaceFiles?.length) {
       if (!this.lifecycle?.validateFiles)
         throw new ORPCError('CONFLICT', {
           message: 'Room file delivery is unavailable',
@@ -1056,7 +1059,7 @@ export class GroupChatService {
       mediaAssets = await this.lifecycle.validateFiles(
         userId,
         agent,
-        input.files,
+        workspaceFiles,
       );
     }
     return this.database.transaction(async (manager) => {

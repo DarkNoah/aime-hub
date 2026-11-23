@@ -367,6 +367,20 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     Object.assign(messages[78], {
       senderKind: 'agent',
       senderId: 'bot0000000000001',
+      files: [
+        { url: 'https://room-files.test/guide', name: '项目指南' },
+        {
+          url: 'https://room-files.test/report.PDF?download=1#page=2',
+          name: '分析报告',
+        },
+        {
+          url: 'https://room-files.test/image?id=23',
+          name: '设计原图',
+          mimeType: 'image/png',
+        },
+        { url: 'https://room-files.test/clip.mp4?token=123', name: '演示视频' },
+        { url: 'https://room-files.test/intro.mp3', name: '音频简介' },
+      ],
     });
     const users = [
       { id: 'alice', name: '林然', username: 'alice', image: null },
@@ -387,6 +401,9 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     );
     let failUpload = true;
     let failNextAvatarSave = false;
+    await page.route('https://room-files.test/**', (route) =>
+      route.fulfill({ contentType: 'image/png', body: previewPng }),
+    );
     await page.route('**/api/threads/*/files/**', async (route) => {
       const request = route.request();
       const url = new URL(request.url());
@@ -963,6 +980,33 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto(url);
     await page.getByText('消息 80', { exact: true }).waitFor();
+    await t.test(
+      'agent URL attachments link to the original and render inline media',
+      async () => {
+        const row = page.locator(`[data-chat-turn="${messages[78].id}"]`);
+        for (const file of messages[78].files) {
+          const link = row.getByRole('link', {
+            name: new RegExp('^' + file.name),
+          });
+          assert.equal(await link.getAttribute('href'), file.url);
+        }
+        await row.getByText('PDF · room-files.test', { exact: true }).waitFor();
+        const image = row.getByRole('img', { name: '设计原图' });
+        await image.scrollIntoViewIfNeeded();
+        await page.waitForFunction(
+          (img) => img.naturalWidth > 0,
+          await image.elementHandle(),
+        );
+        assert.equal(
+          await row.locator('video[controls]').getAttribute('src'),
+          messages[78].files[3].url,
+        );
+        assert.equal(
+          await row.locator('audio').getAttribute('src'),
+          messages[78].files[4].url,
+        );
+      },
+    );
     assert.equal(await page.locator('aside').count(), 1);
     assert.equal(
       await page
