@@ -114,7 +114,7 @@ export const groupChatApi = {
     roomId: string,
     agentId: string,
     file: File,
-    signal: AbortSignal,
+    signal?: AbortSignal,
   ) =>
     api.groupChats.saveAgentAvatar(
       { params: { roomId, agentId }, body: file },
@@ -169,11 +169,18 @@ export function mergeMessages(
   );
 }
 
-export type GroupChatErrorKey =
-  'groupChat.unavailable' | 'groupChat.invalid' | 'groupChat.failed';
+export type GroupChatErrorKey = ReturnType<typeof groupChatErrorKey>;
 
-export function groupChatErrorKey(error: unknown): GroupChatErrorKey {
+export function groupChatErrorKey(error: unknown) {
   switch (apiErrorCode(error)) {
+    case 'IMAGE_TOOL_DISABLED':
+      return 'groupChat.avatarToolDisabled';
+    case 'IMAGE_GENERATION_FAILED':
+      return 'groupChat.avatarGenerateFailed';
+    case 'AVATAR_TOO_LARGE':
+      return 'errors.avatarTooLarge';
+    case 'AVATAR_INVALID':
+      return 'groupChat.avatarInvalid';
     case 'NOT_FOUND':
     case 'FORBIDDEN':
       return 'groupChat.unavailable';

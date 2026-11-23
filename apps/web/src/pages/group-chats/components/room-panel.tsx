@@ -160,7 +160,6 @@ export function RoomPanel({
             onA2aUpdated={state.updateA2aMember}
             onA2aRemoved={state.removeA2aMember}
             onAgentUpdated={state.updateAgent}
-            onAvatarSaved={state.updateAgentAvatar}
             onAgentRemoved={state.removeAgent}
             onMention={(agent) => {
               onClose(() => composer.current?.mention(agent));
@@ -201,6 +200,8 @@ export function RoomPanel({
           roomId={roomId}
           projectId={projectId}
           agent={editor}
+          avatarUrl={state.room.agentAvatarUrls?.[editor.id]}
+          onAvatarSaved={state.updateAgentAvatar}
           onSaved={state.updateAgent}
           onClose={() => setEditor(null)}
         />

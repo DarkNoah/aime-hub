@@ -262,8 +262,7 @@ export const zhCN = {
   'groupChat.a2a.neverUsed': '尚未连接',
   'groupChat.agentRemoved': 'Agent 已移除',
   'groupChat.editAgent': '配置 Agent',
-  'groupChat.editAvatar': '更换 {{name}} 的头像',
-  'groupChat.avatarDescription': '上传图片或根据提示词生成，预览满意后保存。',
+  'groupChat.agentAvatar': 'Agent 头像',
   'groupChat.avatarUpload': '上传图片',
   'groupChat.avatarFormats': 'JPG、PNG、WebP 或 GIF，最大 10 MB',
   'groupChat.avatarPrompt': '头像生成提示词',
@@ -276,8 +275,7 @@ export const zhCN = {
     '图片生成工具已停用，请联系管理员启用或上传图片。',
   'groupChat.avatarGenerateFailed':
     '头像生成失败，请检查图片生成模型配置后重试。',
-  'groupChat.avatarSaved': '头像已更新',
-  'groupChat.avatarSave': '保存头像',
+  'groupChat.avatarSavePartial': '其他配置已保存，可以重试保存头像。',
   'groupChat.agentInstructions': 'Agent 提示词',
   'groupChat.editInstructions': '编辑 Agent 提示词',
   'groupChat.instructionsHint':

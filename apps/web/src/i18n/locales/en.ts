@@ -281,9 +281,7 @@ export const en = {
   'groupChat.a2a.neverUsed': 'Not connected yet',
   'groupChat.agentRemoved': 'Agent removed',
   'groupChat.editAgent': 'Configure agent',
-  'groupChat.editAvatar': 'Change avatar for {{name}}',
-  'groupChat.avatarDescription':
-    'Upload an image or generate one from a prompt. Preview it before saving.',
+  'groupChat.agentAvatar': 'Agent avatar',
   'groupChat.avatarUpload': 'Upload image',
   'groupChat.avatarFormats': 'JPG, PNG, WebP or GIF, up to 10 MB',
   'groupChat.avatarPrompt': 'Avatar prompt',
@@ -296,8 +294,8 @@ export const en = {
     'Image generation is disabled. Ask an administrator to enable it or upload an image.',
   'groupChat.avatarGenerateFailed':
     'Avatar generation failed. Check the image model configuration and try again.',
-  'groupChat.avatarSaved': 'Avatar updated',
-  'groupChat.avatarSave': 'Save avatar',
+  'groupChat.avatarSavePartial':
+    'Other settings were saved. You can retry saving the avatar.',
   'groupChat.agentInstructions': 'Agent instructions',
   'groupChat.editInstructions': 'Edit agent instructions',
   'groupChat.instructionsHint':

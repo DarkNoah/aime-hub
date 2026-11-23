@@ -386,6 +386,7 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       'base64',
     );
     let failUpload = true;
+    let failNextAvatarSave = false;
     await page.route('**/api/threads/*/files/**', async (route) => {
       const request = route.request();
       const url = new URL(request.url());
@@ -438,7 +439,19 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
         '/api/rpc/',
       )[1];
       calls.push(endpoint);
+      const failure = (code, status) =>
+        route.fulfill({
+          status,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            json: { defined: false, code, status, message: code },
+          }),
+        });
       if (endpoint === 'groupChats/saveAgentAvatar') {
+        if (failNextAvatarSave) {
+          failNextAvatarSave = false;
+          return failure('AVATAR_INVALID', 400);
+        }
         const form = await new Response(route.request().postDataBuffer(), {
           headers: route.request().headers(),
         }).formData();
@@ -451,14 +464,6 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
         return route.fulfill({ json: { json: { url } } });
       }
       const input = route.request().postDataJSON()?.json ?? {};
-      const failure = (code, status) =>
-        route.fulfill({
-          status,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            json: { defined: false, code, status, message: code },
-          }),
-        });
       if (
         revoked &&
         endpoint.startsWith('groupChats/') &&
@@ -1087,13 +1092,19 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       'managers preview, cancel and save uploaded or generated room avatars',
       async () => {
         const bot = botFor(roomId);
+        assert.equal(
+          await roster.getByRole('button', { name: /更换.*头像/ }).count(),
+          0,
+        );
         const open = roster.getByRole('button', {
-          name: '更换 Room assistant 的头像',
+          name: '配置 Room assistant',
+          exact: true,
         });
         const editor = page.getByRole('dialog', {
-          name: '更换 Room assistant 的头像',
+          name: '配置 Agent',
+          exact: true,
         });
-        const save = editor.getByRole('button', { name: '保存头像' });
+        const save = editor.getByRole('button', { name: '保存配置' });
         await open.click();
         assert.equal(await save.isEnabled(), false);
         await editor.getByLabel('头像生成提示词').fill('戴眼镜的橘猫');
@@ -1123,6 +1134,7 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
             .locator(avatar)
             .waitFor();
         }
+        assert.equal(agentUpdates.length, 0);
         uploadedFiles.delete(`.agents/agents/${bot.id}.png`);
         delete agentAvatarUrls[bot.id];
       },
@@ -1267,6 +1279,47 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
           agentUpdates.some((entry) => 'instructions' in entry.body),
           false,
         );
+      },
+    );
+    await t.test(
+      'save settings and avatar together and retry a failed avatar without resaving settings',
+      async () => {
+        await roster
+          .getByRole('button', { name: '配置 调研助手', exact: true })
+          .click();
+        const config = page.getByRole('dialog', {
+          name: '配置 Agent',
+          exact: true,
+        });
+        const save = config.getByRole('button', { name: '保存配置' });
+        await config.getByRole('combobox', { name: '思考等级' }).click();
+        await page.getByRole('option', { name: '高', exact: true }).click();
+        await config
+          .locator('input[type=file]')
+          .setInputFiles({
+            name: 'avatar.png',
+            mimeType: 'image/png',
+            buffer: previewPng,
+          });
+        const workerId = 'worker0000000001';
+        const before = agentUpdates.length;
+        failNextAvatarSave = true;
+        const failure = page.waitForResponse(
+          (r) => r.url().endsWith('/saveAgentAvatar') && r.status() === 400,
+        );
+        await save.click();
+        await failure;
+        await t.waitFor(async () => assert.equal(await save.isEnabled(), true));
+        assert.equal(agentUpdates.length, before + 1);
+        assert.equal(agentUpdates.at(-1).body.settings.reasoningEffort, 'high');
+        assert.equal(agentAvatarUrls[workerId], undefined);
+        await config.locator('img[src^="blob:"]').waitFor();
+        await save.click();
+        await config.waitFor({ state: 'hidden' });
+        assert.equal(agentUpdates.length, before + 1);
+        await roster
+          .locator(`img[src="${agentAvatarUrls[workerId]}"]`)
+          .waitFor();
       },
     );
     await input.fill('@调');

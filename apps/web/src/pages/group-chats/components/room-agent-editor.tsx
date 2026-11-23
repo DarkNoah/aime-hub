@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import type {
   GroupChatAgent,
   GroupChatAgentInput,
+  GroupChatAgentUpdate,
 } from '@aime/shared/group-chats';
 import { localAgentFileReference } from '@aime/shared/agents';
 import { reasoningEfforts, type ReasoningEffort } from '@aime/shared/threads';
@@ -31,18 +32,23 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { groupChatApi, groupChatErrorKey } from '../api';
+import { RoomAgentAvatarEditor } from './room-agent-avatar-editor';
 import { RoomAgentInstructions } from './room-agent-instructions';
 
 export function RoomAgentEditor({
   roomId,
   projectId,
   agent,
+  avatarUrl,
+  onAvatarSaved,
   onSaved,
   onClose,
 }: {
   roomId: string;
   projectId?: string;
   agent: GroupChatAgent;
+  avatarUrl?: string;
+  onAvatarSaved: (agentId: string, url: string) => void;
   onSaved: (agent: GroupChatAgent) => void;
   onClose: () => void;
 }) {
@@ -51,6 +57,9 @@ export function RoomAgentEditor({
   const isBot = agent.role === 'bot';
   const catalog = useAvailableAgents(projectId, true);
   const [pending, setPending] = useState(false);
+  const [avatar, setAvatar] = useState<File>();
+  const [generating, setGenerating] = useState(false);
+  const [lastSaved, setLastSaved] = useState(agent);
   const [idleWakeEnabled, setIdleWakeEnabled] = useState(
     agent.idleWakeHours != null,
   );
@@ -79,29 +88,55 @@ export function RoomAgentEditor({
     [localId],
   );
   const fixedModel = isBot ? undefined : selected?.model;
+  const changes: GroupChatAgentUpdate = {};
+  if (
+    form.settings.model !== lastSaved.settings.model ||
+    form.settings.reasoningEffort !== lastSaved.settings.reasoningEffort ||
+    form.settings.agentId !== lastSaved.settings.agentId
+  )
+    changes.settings = form.settings;
+  if (!isBot && form.name.trim() !== lastSaved.name)
+    changes.name = form.name.trim();
+  if (!isBot && form.enabled !== lastSaved.enabled)
+    changes.enabled = form.enabled;
+  const hours = idleWakeEnabled ? Number(idleWakeHours) : null;
+  if (isBot && hours !== (lastSaved.idleWakeHours ?? null))
+    changes.idleWakeHours = hours;
+  const settingsChanged = Object.keys(changes).length > 0;
+  const canSave =
+    !pending &&
+    !generating &&
+    !!form.name.trim() &&
+    validIdleHours &&
+    (!!avatar || settingsChanged);
   async function save(event: React.FormEvent) {
     event.preventDefault();
-    if (pending || !form.name.trim() || !validIdleHours) return;
+    if (!canSave) return;
     setPending(true);
+    let settingsSaved = false;
     try {
-      const saved = await groupChatApi.updateAgent(
-        roomId,
-        agent.id,
-        isBot
-          ? {
-              idleWakeHours: idleWakeEnabled ? Number(idleWakeHours) : null,
-              settings: {
-                ...form.settings,
-                agentId: agent.settings.agentId,
-              },
-            }
-          : form,
-      );
-      onSaved(saved);
+      if (settingsChanged) {
+        const saved = await groupChatApi.updateAgent(roomId, agent.id, changes);
+        setLastSaved(saved);
+        onSaved(saved);
+        settingsSaved = true;
+      }
+      if (avatar) {
+        const { url } = await groupChatApi.saveAgentAvatar(
+          roomId,
+          agent.id,
+          avatar,
+        );
+        onAvatarSaved(agent.id, url);
+      }
       toast.success(t('groupChat.agentSaved'));
       onClose();
     } catch (cause) {
-      toast.error(t(groupChatErrorKey(cause)));
+      toast.error(t(groupChatErrorKey(cause)), {
+        description: settingsSaved
+          ? t('groupChat.avatarSavePartial')
+          : undefined,
+      });
     } finally {
       setPending(false);
     }
@@ -123,6 +158,16 @@ export function RoomAgentEditor({
         <form onSubmit={(event) => void save(event)} className="min-h-0">
           <ScrollArea viewportProps={{ className: 'max-h-[60dvh]' }}>
             <div className="space-y-5 px-6 py-4">
+              <RoomAgentAvatarEditor
+                roomId={roomId}
+                agentId={agent.id}
+                name={form.name}
+                image={avatarUrl}
+                disabled={pending}
+                generating={generating}
+                onGeneratingChange={setGenerating}
+                onChange={setAvatar}
+              />
               {!isBot && (
                 <>
                   <div className="space-y-2">
@@ -296,10 +341,7 @@ export function RoomAgentEditor({
             >
               {t('agents.cancel')}
             </Button>
-            <Button
-              type="submit"
-              disabled={pending || !form.name.trim() || !validIdleHours}
-            >
+            <Button type="submit" disabled={!canSave}>
               {t(pending ? 'agents.saving' : 'agents.save')}
             </Button>
           </DialogFooter>
