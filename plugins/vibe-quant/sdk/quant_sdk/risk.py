@@ -12,21 +12,42 @@ class RiskLevels:
 
     entry_id accepts the ID from orders.target_position or an opening fill's
     signal_id. Omit it to update all currently open entries for this symbol.
+    pnl_override is the final net P&L for each protected entry. A side-specific
+    stop_loss_pnl or take_profit_pnl takes precedence, including zero.
     """
     symbol: str
     stop_loss: float | None = None
     take_profit: float | None = None
     entry_id: str | None = None
+    stop_loss_note: str = ''
+    take_profit_note: str = ''
+    pnl_override: float | None = None
+    stop_loss_pnl: float | None = None
+    take_profit_pnl: float | None = None
 
     def __post_init__(self):
         if not self.symbol or (self.entry_id is not None and not self.entry_id):
             raise ValueError('Risk levels require a symbol and a valid entry ID')
-        for name in ('stop_loss', 'take_profit'):
+        for name in ('stop_loss_note', 'take_profit_note'):
+            if not isinstance(getattr(self, name), str):
+                raise ValueError(f'Invalid {name}: expected text')
+        for name in ('stop_loss', 'take_profit', 'pnl_override', 'stop_loss_pnl', 'take_profit_pnl'):
             value = getattr(self, name)
             if value is not None:
                 if isinstance(value, bool):
                     raise ValueError(f'Invalid {name}')
                 finite(value, name)
+
+
+def exit_terms(record: dict, reason: str) -> dict:
+    """Keep legacy signal identities when the triggered side uses the defaults."""
+    terms = {}
+    if note := record.get(f'{reason}_note'):
+        terms['exit_note'] = note
+    amount = record.get(f'{reason}_pnl')
+    if amount is not None:
+        terms['pnl_override'] = amount
+    return terms
 
 
 def publish(context, levels: RiskLevels) -> None:
@@ -47,9 +68,20 @@ def publish(context, levels: RiskLevels) -> None:
                 or not signal.get('target')):
             raise ValueError('Risk levels must reference a nonzero target_position for this instrument')
         entries = [entry]
+    terms = {}
+    for side in ('stop_loss', 'take_profit'):
+        if getattr(levels, side) is None:
+            continue
+        if note := getattr(levels, f'{side}_note'):
+            terms[f'{side}_note'] = note
+        amount = getattr(levels, f'{side}_pnl')
+        if amount is None:
+            amount = levels.pnl_override
+        if amount is not None:
+            terms[f'{side}_pnl'] = amount
     for entry in entries:
         payload = {'event_id': context.event_id, 'time': context.now, 'symbol': levels.symbol,
-                   'entry_signal_id': entry, 'stop_loss': levels.stop_loss, 'take_profit': levels.take_profit}
+                   'entry_signal_id': entry, 'stop_loss': levels.stop_loss, 'take_profit': levels.take_profit, **terms}
         identity = sha256(json.dumps([runner.source_hash, runner.manifest['params'], payload, len(runner.risk_levels)],
                                     sort_keys=True, allow_nan=False).encode()).hexdigest()
         record = {'id': identity, **payload}

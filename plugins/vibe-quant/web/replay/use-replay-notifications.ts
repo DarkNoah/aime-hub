@@ -6,7 +6,7 @@ import {
   showMarketSignalToast,
 } from '@app/plugin-ui';
 import { toast } from 'sonner';
-import type { MarketStrategyHint } from '../../signal-types';
+import { signalPnlLabels, type MarketStrategyHint } from '../../signal-types';
 import type { SignalHistoryPage } from '../../signal-history';
 import { replayBarEnd } from '../../replay-types';
 import { strategyNotifications } from '../../strategy-notifications';
@@ -99,9 +99,17 @@ export function useReplayNotifications(
         const title = `回放 · ${hint.strategy_name} · ${side}${signal.type === 'entry' ? '入场' : '离场'}信号`;
         const pnl = signal.pnl;
         const pnlText = pnl
-          ? ` · ${pnl.basis === 'realized' ? '净盈亏' : '参考盈亏'} ${pnl.value > 0 ? '+' : ''}${number(pnl.value)} ${pnl.unit === 'points' ? '点' : '元'}`
+          ? ` · ${signalPnlLabels[pnl.basis]} ${pnl.value > 0 ? '+' : ''}${number(pnl.value)} ${pnl.unit === 'points' ? '点' : '元'}`
           : '';
-        const body = `${signal.symbol} · ${runVersionName(hint)} · ${dateTime(signal.time)}${signal.price === null ? '' : ` · 参考价 ${number(signal.price)}`}${pnlText}${signal.reason ? ` · ${signal.type === 'exit' ? exitReasonLabel(signal.reason) : signal.reason}` : ''}`;
+        const reason = [
+          signal.type === 'exit' && signal.reason
+            ? exitReasonLabel(signal.reason)
+            : signal.reason,
+          signal.exit_note,
+        ]
+          .filter(Boolean)
+          .join(' · ');
+        const body = `${signal.symbol} · ${runVersionName(hint)} · ${dateTime(signal.time)}${signal.price === null ? '' : ` · 参考价 ${number(signal.price)}`}${pnlText}${reason ? ` · ${reason}` : ''}`;
         if (channels.toast?.enabled)
           showMarketSignalToast({
             id,
@@ -115,10 +123,7 @@ export function useReplayNotifications(
               symbol: signal.symbol,
               time: signal.time,
               price: signal.price,
-              reason:
-                signal.type === 'exit'
-                  ? exitReasonLabel(signal.reason)
-                  : signal.reason,
+              reason,
               replay: true,
               pnl,
             },

@@ -85,6 +85,14 @@ class OrderAliasLifetime(Cycle):
 
 
 class MonitorHistoryTests(unittest.TestCase):
+    def test_risk_compaction_retains_changes_to_instructions_at_the_same_price(self):
+        original = {'symbol': 'IM', 'entry_signal_id': 'entry', 'stop_loss': 90, 'take_profit': 110}
+        values = [{}, {'stop_loss_note': '保本'}, {'stop_loss_note': '保本', 'stop_loss_pnl': 0},
+                  {'stop_loss_note': '保本', 'stop_loss_pnl': 0}, {}]
+        snapshots = {str(i): {**original, **value, 'id': str(i), 'time': i} for i, value in enumerate(values)}
+        history = MonitorHistory(None, None, 0, saved={'risk_levels': snapshots})
+        self.assertEqual([record['id'] for record in history.levels('IM', 'entry')], ['0', '1', '2', '4'])
+
     def test_order_alias_retention_is_bounded_and_preserves_active_entries(self):
         for close in (False, True):
             with self.subTest(close=close), tempfile.TemporaryDirectory() as directory:

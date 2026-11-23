@@ -32,7 +32,7 @@ import type {
 import { useBacktestResource } from './use-backtest-resource';
 import { ResultLogs } from './result-logs';
 import { dateTime, holdingDuration, number, percent } from './format';
-import { exitReasonLabel } from '../trade-exit';
+import { TradeExitBadge } from '../trade-exit-badge';
 import { PeriodReturns } from './period-returns';
 const EquityChart = lazy(() => import('./equity-chart'));
 const BacktestMarketChart = lazy(() => import('./backtest-market-chart'));
@@ -89,6 +89,7 @@ export function ResultView({
   const result = data?.result;
   const points = run.config.execution_model === 'points';
   const native = run.config.backtest_engine === 'tqsdk';
+  const adjustedNative = result?.metrics_source === 'quant_sdk/TqSim';
   const tqRules = data?.manifest?.tq_rules as
     Record<string, number> | undefined;
   const winRate = result?.closed_win_rate;
@@ -246,8 +247,8 @@ export function ResultView({
       </details>
       {native && (
         <p className="text-xs leading-5 text-muted-foreground">
-          资金与成交取自
-          TqSim。委托按对手价加滑点提交，不模拟部分成交或成交量参与率；止盈止损按回放行情最新价触发，K
+          成交取自
+          TqSim。委托按对手价加滑点提交，不模拟部分成交或成交量参与率。止盈止损按回放行情最新价触发，K
           线回放不还原完整盘中路径。手续费与保证金采用上方记录的设置，不代表历史费率表。
         </p>
       )}
@@ -265,11 +266,13 @@ export function ResultView({
               : native
                 ? metricLabels.map(([key, label, ratio]) =>
                     key === 'profit_factor'
-                      ? (['profit_loss_ratio', '盈亏额比例（天勤）', false] as [
-                          string,
-                          string,
-                          boolean?,
-                        ])
+                      ? ([
+                          'profit_loss_ratio',
+                          adjustedNative
+                            ? '盈亏额比例（调整后）'
+                            : '盈亏额比例（天勤）',
+                          false,
+                        ] as [string, string, boolean?])
                       : key === 'trade_count'
                         ? ([key, '平仓成交笔数（天勤）', ratio] as [
                             string,
@@ -297,9 +300,11 @@ export function ResultView({
             ))}
           </dl>
           <p className="text-xs text-muted-foreground">
-            {native
-              ? '绩效指标直接使用天勤报告：胜率按平仓手数及毛盈亏计算，持平计为盈利；回撤、年化与风险指标采用天勤口径。'
-              : '胜率按已平仓交易的净盈亏计算，盈亏持平计入交易总数，未平仓交易不计入。'}
+            {adjustedNative
+              ? '胜率按平仓手数计算，指定了净盈亏的交易按该金额判断盈亏，其余交易沿用天勤的毛盈亏口径，持平计为盈利。收益和回撤使用调整后的账户权益。'
+              : native
+                ? '绩效指标直接使用天勤报告：胜率按平仓手数及毛盈亏计算，持平计为盈利；回撤、年化与风险指标采用天勤口径。'
+                : '胜率按已平仓交易的净盈亏计算，盈亏持平计入交易总数，未平仓交易不计入。'}
           </p>
           <section className="space-y-3">
             <div className="flex items-center justify-between">
@@ -444,9 +449,10 @@ export function ResultView({
                             {item.status === 'open' ? (
                               '—'
                             ) : (
-                              <Badge variant="outline" title={item.exit_reason}>
-                                {exitReasonLabel(item.exit_reason)}
-                              </Badge>
+                              <TradeExitBadge
+                                reason={item.exit_reason}
+                                note={item.exit_note}
+                              />
                             )}
                             {item.trigger_price != null && (
                               <div className="mt-1 text-xs text-muted-foreground">
@@ -464,6 +470,11 @@ export function ResultView({
                             className={`text-right tabular-nums ${item.net_pnl === null ? 'text-muted-foreground' : item.net_pnl >= 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}
                           >
                             {number(item.net_pnl)}
+                            {item.pnl_override != null && (
+                              <div className="text-xs text-muted-foreground">
+                                策略指定
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell className="sticky right-0 bg-background text-right">
                             <Button
@@ -567,9 +578,11 @@ export function ResultView({
           <p className="text-xs leading-5 text-muted-foreground">
             {points
               ? '点数收益已扣单边成本与滑点，未平仓头寸按最新价计入累计点数。每个标的固定 1 单位，忽略下单数量大小及资金、保证金、乘数、成交量、T+1 限制；不表示真实资金收益。未平仓净收益含已付开仓成本。'
-              : native
-                ? '资金、保证金与逐日结算取自 TqSim；交易明细按实际成交进行 FIFO 归并，手续费计入净收益。未平仓记录显示剩余数量及对应开仓手续费。'
-                : '收益已扣费用，未平仓头寸按最新价计入权益；交易笔数按 FIFO 平仓片段统计。期货逐日结算采用前一交易日最后观测价。未平仓记录显示剩余数量及对应开仓手续费，净收益在平仓后记录。'}
+              : adjustedNative
+                ? '成交价、手续费和保证金取自 TqSim。指定了净盈亏的平仓按策略金额计入账户权益及绩效。'
+                : native
+                  ? '资金、保证金与逐日结算取自 TqSim；交易明细按实际成交进行 FIFO 归并，手续费计入净收益。未平仓记录显示剩余数量及对应开仓手续费。'
+                  : '收益已扣费用，未平仓头寸按最新价计入权益；交易笔数按 FIFO 平仓片段统计。期货逐日结算采用前一交易日最后观测价。未平仓记录显示剩余数量及对应开仓手续费，净收益在平仓后记录。'}
             “—”表示样本不足或指标无定义。
           </p>
           {!native && data.manifest?.risk_model != null && (

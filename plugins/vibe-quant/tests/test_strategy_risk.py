@@ -53,6 +53,18 @@ class QuoteRisk(DynamicRisk):
         return RiskLevels(quote.symbol, entry_id=ctx.state['entry'], stop_loss=quote.last - 5)
 
 
+class AnnotatedRisk(DynamicRisk):
+    def on_bar(self, ctx, bar):
+        if 'entry' not in ctx.state:
+            entry = ctx.orders.target_position(bar.symbol, 1)
+            ctx.state['entry'] = entry
+            ctx.set_risk_levels(bar.symbol, stop_loss=90, take_profit=110, entry_id=entry,
+                                stop_loss_note='止损备注', take_profit_note='止盈备注',
+                                pnl_override=-40, take_profit_pnl=0)
+        else:
+            return RiskLevels(bar.symbol, 91, 111, ctx.state['entry'], pnl_override=35)
+
+
 class StrategyRiskTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -123,6 +135,25 @@ class StrategyRiskTest(unittest.TestCase):
         self.assertEqual(legacy['status'], 'succeeded', legacy['message'])
         self.assertTrue(legacy['fills'])
         self.assertEqual(legacy['risk_levels'], [])
+
+    def test_note_and_pnl_snapshot_uses_side_override_and_resets_on_update(self):
+        result = backtest.run(AnnotatedRisk(), Dataset([self.item], self.events[:2]), **self.kwargs)
+        self.assertEqual(result['status'], 'succeeded', result['message'])
+        first, updated = result['risk_levels']
+        self.assertEqual((first['stop_loss_note'], first['take_profit_note']), ('止损备注', '止盈备注'))
+        self.assertEqual((first['stop_loss_pnl'], first['take_profit_pnl']), (-40, 0))
+        self.assertEqual((updated['stop_loss_pnl'], updated['take_profit_pnl']), (35, 35))
+        self.assertFalse(updated.get('stop_loss_note'))
+        self.assertFalse(updated.get('take_profit_note'))
+
+    def test_custom_terms_require_text_and_finite_amounts(self):
+        for key in ('stop_loss_note', 'take_profit_note'):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                RiskLevels(self.item.symbol, **{key: 42})
+        for key in ('pnl_override', 'stop_loss_pnl', 'take_profit_pnl'):
+            for invalid in (float('nan'), float('inf'), True):
+                with self.subTest(key=key, invalid=invalid), self.assertRaises(ValueError):
+                    RiskLevels(self.item.symbol, **{key: invalid})
 
 
 if __name__ == '__main__': unittest.main()

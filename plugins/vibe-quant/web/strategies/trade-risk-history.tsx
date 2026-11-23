@@ -12,16 +12,18 @@ import {
   TableRow,
 } from '@app/plugin-ui';
 import type { RiskLevelRecord } from '../../strategy-types';
-import { dateTime, number } from './format';
+import { dateTime, number, riskLevelDetails } from './format';
 
 export function TradeRiskHistory({
   records,
+  points,
   triggeredId,
   visible,
   onVisibleChange,
   onNavigate,
 }: {
   records: readonly RiskLevelRecord[];
+  points: boolean;
   triggeredId?: string | null;
   visible: boolean;
   onVisibleChange: (visible: boolean) => void;
@@ -83,16 +85,21 @@ export function TradeRiskHistory({
                       </Badge>
                     )}
                   </TableCell>
-                  <TableCell>
-                    {record.take_profit === null
-                      ? '未设置'
-                      : number(record.take_profit)}
-                  </TableCell>
-                  <TableCell>
-                    {record.stop_loss === null
-                      ? '未设置'
-                      : number(record.stop_loss)}
-                  </TableCell>
+                  {(['take_profit', 'stop_loss'] as const).map((side) => {
+                    const details = riskLevelDetails(record, side, points);
+                    return (
+                      <TableCell key={side}>
+                        {record[side] === null
+                          ? '未设置'
+                          : number(record[side])}
+                        {details && (
+                          <div className="whitespace-normal break-words text-xs text-muted-foreground">
+                            {details}
+                          </div>
+                        )}
+                      </TableCell>
+                    );
+                  })}
                 </TableRow>
               ))}
             </TableBody>

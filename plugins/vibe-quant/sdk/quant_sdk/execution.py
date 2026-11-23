@@ -6,6 +6,7 @@ from typing import Callable
 from .data import DataView
 from .models import Bar, Instrument, RunConfig
 from .protection import ProtectionBook, trigger
+from .risk import exit_terms
 
 
 @dataclass
@@ -36,6 +37,22 @@ class Order:
     trigger_time: float | None = None
     trigger_bar_time: float | None = None
     trigger_time_precision: str | None = None
+    exit_note: str = ''
+    pnl_override: float | None = None
+    risk_remaining_quantity: int = 0
+    risk_allocated_pnl: float = 0.0
+
+    def allocate_pnl(self, size: int) -> float | None:
+        """Allocate the entry's net override once across its protective closing fills."""
+        if self.pnl_override is None:
+            return None
+        if not 0 < size <= self.risk_remaining_quantity:
+            raise ValueError('Closing fill exceeds the remaining protected quantity')
+        remaining = self.pnl_override - self.risk_allocated_pnl
+        amount = remaining if size == self.risk_remaining_quantity else remaining * (size / self.risk_remaining_quantity)
+        self.risk_remaining_quantity -= size
+        self.risk_allocated_pnl += amount
+        return amount
 
 
 class PaperBroker:
@@ -228,10 +245,11 @@ class PaperBroker:
             if hit is None:
                 continue
             reason, threshold, base, time, precision = hit
+            terms = exit_terms(record, reason)
             signal_id = self.risk_signal(symbol=bar.symbol, entry_signal_id=entry,
                                          risk_level_id=record['id'], reason=reason, trigger_price=threshold,
                                          trigger_time=time, trigger_bar_time=bar.time,
-                                         trigger_time_precision=precision)
+                                         trigger_time_precision=precision, **terms)
             # Cancel an unfilled entry/reversal remainder before protective exit.
             for pending in list(self.orders):
                 if pending.symbol == bar.symbol and pending.status == 'pending' and not pending.risk_entry_signal_id:
@@ -239,7 +257,9 @@ class PaperBroker:
             order = Order(f'risk:{record["id"]}', bar.symbol, self.position(bar.symbol) - quantity,
                           self.data.now, signal_id, exit_reason=reason, risk_entry_signal_id=entry,
                           risk_level_id=record['id'], trigger_price=threshold, trigger_time=time,
-                          trigger_bar_time=bar.time, trigger_time_precision=precision)
+                          trigger_bar_time=bar.time, trigger_time_precision=precision,
+                          risk_remaining_quantity=abs(quantity) if terms.get('pnl_override') is not None else 0,
+                          **terms)
             self.orders.append(order)
             self.notify('order', asdict(order))
             budget = self._protective_fill(order, bar, budget, base, time, precision)
@@ -280,21 +300,29 @@ class PaperBroker:
         entry_fee = lot.entry_fee * size / abs(lot.quantity)
         multiplier = 1 if self.points else item.multiplier
         gross = (price - lot.entry_price) * side * size * multiplier
+        fees = entry_fee + fee
+        net = gross - entry_fee - fee
+        override = order.allocate_pnl(size)
         if item.kind == 'stock' and not self.points:
             self.cash -= signed * price * item.multiplier + fee
         else:
             self.cash += (price - lot.basis) * side * size * multiplier - fee
+        if override is not None:
+            # Normal settlement already accounts for entry fees and any previous daily marks.
+            self.cash += override - net
+            gross, net = override + fees, override
         exit_details = {'exit_reason': order.exit_reason, 'exit_bar_time': bar.time,
                         'exit_time_precision': precision, 'risk_level_id': order.risk_level_id,
                         'trigger_price': order.trigger_price, 'trigger_time': order.trigger_time,
                         'trigger_bar_time': order.trigger_bar_time,
-                        'trigger_time_precision': order.trigger_time_precision}
+                        'trigger_time_precision': order.trigger_time_precision,
+                        'exit_note': order.exit_note, 'pnl_override': override, 'net_pnl': net}
         self.trade_sequence += 1
         self.trades.append({'id': f'trade-{self.trade_sequence}', 'symbol': bar.symbol,
                             'side': 'long' if side > 0 else 'short', 'quantity': size,
                             'entry_time': lot.entry_time, 'exit_time': time,
                             'entry_price': lot.entry_price, 'exit_price': price,
-                            'gross_pnl': gross, 'fees': entry_fee + fee, 'net_pnl': gross - entry_fee - fee,
+                            'gross_pnl': gross, 'fees': fees,
                             'entry_signal_id': lot.signal_id, 'exit_signal_id': order.signal_id, **exit_details})
         lot.entry_fee -= entry_fee
         lot.quantity += signed

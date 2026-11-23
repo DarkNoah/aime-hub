@@ -6,7 +6,7 @@ import type {
   TradeRecord,
 } from '../../strategy-types';
 import { tradeExitAnchor } from '../../strategy-types';
-import { exitReasonLabel } from '../trade-exit';
+import { TradeExitBadge } from '../trade-exit-badge';
 import { parseChartPeriod } from '../chart-period';
 import { MarketChartPanel } from '../components/market-chart-panel';
 import { dateTime, number } from './format';
@@ -134,9 +134,10 @@ export default function BacktestMarketChart({
               </Button>
             )}
             {trade.status !== 'open' && (
-              <Badge variant="outline" title={trade.exit_reason}>
-                {exitReasonLabel(trade.exit_reason)}
-              </Badge>
+              <TradeExitBadge
+                reason={trade.exit_reason}
+                note={trade.exit_note}
+              />
             )}
             {trade.trigger_price != null && (
               <span className="text-xs text-muted-foreground">
@@ -146,7 +147,7 @@ export default function BacktestMarketChart({
             <span className="ml-auto text-xs tabular-nums">
               {trade.status === 'open'
                 ? `未平仓数量 ${trade.quantity}`
-                : `净收益 ${number(trade.net_pnl)}${points ? ' 点' : ''}`}
+                : `${trade.pnl_override != null ? '策略指定净收益' : '净收益'} ${number(trade.net_pnl)}${points ? ' 点' : ''}`}
             </span>
           </div>
           {trade.exit_time_precision === 'bar' && (
@@ -179,6 +180,7 @@ export default function BacktestMarketChart({
             </p>
           ) : (
             <TradeRiskHistory
+              points={points}
               key={trade.id}
               records={levels}
               triggeredId={trade.risk_level_id}

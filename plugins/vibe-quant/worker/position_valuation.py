@@ -25,7 +25,13 @@ def exit_valuation(runner, signal, side, price):
 
     Includes paid entry fees. Exit costs and slippage are not yet known.
     """
-    if runner is None or price is None or not isfinite(price) or side == 'unknown':
+    if runner is None:
+        return None
+    points = getattr(runner.broker, 'points', False)
+    unit = 'points' if points else 'currency'
+    if signal['kind'] == 'risk_exit' and signal.get('pnl_override') is not None:
+        return {'value': signal['pnl_override'], 'unit': unit, 'basis': 'override'}
+    if price is None or not isfinite(price) or side == 'unknown':
         return None
     symbol = signal['symbol']
     direction = 1 if side == 'long' else -1
@@ -36,7 +42,6 @@ def exit_valuation(runner, signal, side, price):
         quantity = max(0, quantity - max(0, signal['target'] * direction))
     if not quantity:
         return None
-    points = getattr(runner.broker, 'points', False)
     multiplier = 1 if points else runner.data.instrument(symbol).multiplier
     value = 0
     for lot in lots:
@@ -45,4 +50,4 @@ def exit_valuation(runner, signal, side, price):
         quantity -= size
         if not quantity:
             break
-    return {'value': value, 'unit': 'points' if points else 'currency', 'basis': 'estimate'}
+    return {'value': value, 'unit': unit, 'basis': 'estimate'}

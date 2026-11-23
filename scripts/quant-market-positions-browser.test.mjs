@@ -90,6 +90,11 @@ const closedPositions = Array.from({ length: 53 }, (_, index) => ({
     exit_time:
       index < 51 ? start + 120 : Date.parse('2026-09-30T15:00:00+08:00') / 1000,
     net_pnl: [120, -45, 0][index % 3],
+    ...(index === 2 && {
+      exit_reason: 'stop_loss',
+      exit_note: '移动止损保本',
+      pnl_override: 0,
+    }),
   },
 }));
 function monthlySummary(rows) {
@@ -355,6 +360,9 @@ createRoot(document.getElementById('root')!).render(<main className="p-4 sm:ml-5
       3,
     );
     await history.nth(49).waitFor();
+    const breakeven = history.filter({ hasText: '移动止损保本' });
+    await breakeven.getByText('止损', { exact: true }).waitFor();
+    await breakeven.getByText('净盈亏 0 元', { exact: true }).waitFor();
     await monthly.waitFor();
     assert.match(await monthPicker.innerText(), /2026.*10/);
     const octoberSummary = await monthly.innerText();
@@ -813,6 +821,37 @@ createRoot(document.getElementById('root')!).render(<main className="p-4 sm:ml-5
     await editor.waitFor({ state: 'hidden' });
     await card.getByText('准备中', { exact: true }).waitFor();
     assert.equal(await visibility.getAttribute('aria-checked'), 'false');
+
+    let removeAttempts = 0;
+    await page.route('**/strategies/monitors/recalculated', (route) => {
+      assert.equal(route.request().method(), 'PATCH');
+      assert.deepEqual(route.request().postDataJSON(), {
+        revision: 2,
+        deleted: true,
+        enabled: false,
+      });
+      if (++removeAttempts === 1)
+        return route.fulfill({
+          status: 409,
+          json: { code: 'MONITOR_CONFLICT' },
+        });
+      const deleted = { ...loaded, deleted: true, enabled: false };
+      monitors.splice(monitors.indexOf(loaded), 1);
+      loaded = undefined;
+      return route.fulfill({ json: deleted });
+    });
+    const remove = card.getByRole('button', { name: /移除 参数测试/ });
+    await Promise.all([
+      page.waitForResponse((response) => response.status() === 409),
+      remove.click(),
+    ]);
+    assert.equal(await card.isVisible(), true);
+    await remove.click();
+    await card.waitFor({ state: 'detached' });
+    assert.equal(removeAttempts, 2);
+    assert.equal(await strategies.getByRole('listitem').count(), 3);
+    const menu = page.getByRole('button', { name: '策略菜单' });
+    assert.match(await menu.innerText(), /0/);
     assert.deepEqual(errors, []);
   },
 );

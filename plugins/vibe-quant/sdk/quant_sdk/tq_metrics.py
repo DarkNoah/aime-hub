@@ -1,6 +1,46 @@
-"""Presentation mapping only: every performance statistic is calculated by TqSdk."""
+"""TqSim reporting, including optional strategy-specified protective exit P&L."""
+from dataclasses import dataclass, field
 from math import isfinite
 from copy import deepcopy
+
+
+@dataclass
+class ExitAccounting:
+    daily_adjustments: dict[str, float] = field(default_factory=dict)
+    total_adjustment: float = 0.0
+    win_volume: int = 0
+    loss_volume: int = 0
+    profits: float = 0.0
+    losses: float = 0.0
+
+    def record(self, day, size, gross, fees, override):
+        outcome = gross
+        if override is not None:
+            adjustment = override - (gross - fees)
+            self.daily_adjustments[day] = self.daily_adjustments.get(day, 0.0) + adjustment
+            self.total_adjustment += adjustment
+            outcome = override
+        if outcome >= 0:
+            self.win_volume += size
+            self.profits += outcome
+        else:
+            self.loss_volume += size
+            self.losses -= outcome
+
+    def apply(self, logs):
+        # These are private copies of the provider's daily account snapshots.
+        prior = 0.0
+        for day, value in sorted(logs.items()):
+            account = value['account']
+            account['pre_balance'] += prior
+            prior += self.daily_adjustments.get(day, 0)
+            account['balance'] += prior
+
+    @classmethod
+    def from_native(cls, stats):
+        # Legacy live checkpoints may already have compacted their closed lots.
+        return cls(win_volume=stats.get('profit_volumes') or 0, loss_volume=stats.get('loss_volumes') or 0,
+                   profits=stats.get('profit_value') or 0.0, losses=-(stats.get('loss_value') or 0.0))
 
 
 def clean(value):
@@ -15,7 +55,7 @@ def clean(value):
     return value
 
 
-def performance(sim, quote=None):
+def performance(sim, quote=None, accounting=None):
     # tqsdk_stat is authoritative after an ordinary TqBacktest finishes.
     stats = dict(getattr(sim, 'tqsdk_stat', {}))
     logs = deepcopy(getattr(sim, 'trade_log', {}))
@@ -29,7 +69,26 @@ def performance(sim, quote=None):
         report = lambda rows: TqReport('strategy', trade_log=rows, quotes=quotes).default_metrics
         if not stats:
             stats = report(logs)
-    stats = clean(stats)
+    native_stats = clean(stats)
+    adjusted = accounting is not None and bool(accounting.daily_adjustments)
+    if adjusted and report:
+        accounting.apply(logs)
+        stats = clean(report(logs))
+    else:
+        stats = dict(native_stats)
+    if adjusted:
+        if not report and stats.get('balance') is not None:
+            # Providers exposing only aggregate statistics have no daily risk series.
+            stats['balance'] += accounting.total_adjustment
+            initial = stats.get('init_balance')
+            stats['ror'] = stats['balance'] / initial - 1 if initial else None
+            for key in ('annual_yield', 'max_drawdown', 'sharpe_ratio', 'sortino_ratio', 'calmar_ratio'):
+                stats[key] = None
+        volume = accounting.win_volume + accounting.loss_volume
+        stats['winning_rate'] = accounting.win_volume / volume if volume else None
+        avg_profit = accounting.profits / accounting.win_volume if accounting.win_volume else 0.0
+        avg_loss = accounting.losses / accounting.loss_volume if accounting.loss_volume else 0.0
+        stats['profit_loss_ratio'] = avg_profit / avg_loss if avg_loss else None
     mapping = {'total_return': 'ror', 'annual_return': 'annual_yield', 'max_drawdown': 'max_drawdown',
                'sharpe': 'sharpe_ratio', 'sortino': 'sortino_ratio', 'calmar': 'calmar_ratio',
                'win_rate': 'winning_rate', 'trade_count': 'close_times', 'final_equity': 'balance',
@@ -51,9 +110,11 @@ def performance(sim, quote=None):
                            'pnl': values['balance'] - values['init_balance']})
         return result
     return {'metrics': metrics, 'monthly_returns': periods(7), 'yearly_returns': periods(4),
-            'native_metrics': stats, 'metrics_source': 'TqSim/TqReport',
-            'metric_notes': {'source': 'TqSim.tqsdk_stat / tqsdk.report.TqReport',
+            'native_metrics': native_stats, 'metrics_source': 'quant_sdk/TqSim' if adjusted else 'TqSim/TqReport',
+            'metric_notes': {'source': ('TqReport on daily balances adjusted by realized protective exit overrides'
+                                        if adjusted else 'TqSim.tqsdk_stat / tqsdk.report.TqReport'),
                 'trade_count': 'native close fills, not FIFO fragments',
-                'win_rate': 'TqSdk winning_rate: per-lot, before fees; flat lots count as wins',
+                'win_rate': ('Per attributed lot: final specified P&L for overridden exits, otherwise gross P&L; flat lots count as wins'
+                             if adjusted else 'TqSdk winning_rate: per-lot, before fees; flat lots count as wins'),
                 'annualization': 'TqSdk defaults (250 trading days); no local annualization/risk-free override',
                 'undefined': 'non-finite/unsupported values are null'}}

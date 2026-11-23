@@ -6,7 +6,7 @@ import { errorText } from '../strategies/format';
 export function useMarketPositions(
   pluginId: string,
   engine?: string,
-  changedMonitor?: string,
+  positionsRevision?: number,
 ) {
   const [{ strategyIds, cursors }, setQuery] = useState<{
     strategyIds: string[];
@@ -69,7 +69,7 @@ export function useMarketPositions(
       abort.abort();
       clearTimeout(timer);
     };
-  }, [pluginId, engine, context, scope, path, revision, changedMonitor]);
+  }, [pluginId, engine, context, scope, path, revision, positionsRevision]);
   // Keep the last successful page only within the same strategy selection.
   const data = state?.scope === scope ? state.data : undefined;
   const historyReady = !!data && state?.path === path;

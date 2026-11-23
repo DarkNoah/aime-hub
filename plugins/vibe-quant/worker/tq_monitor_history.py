@@ -23,6 +23,8 @@ class NativeSignalOutput(SignalOutput):
             "reason": value.get("exit_reason") or "strategy_signal"}
         if not opened and value.get('net_pnl') is not None:
             record['pnl'] = {'value': value['net_pnl'], 'unit': 'currency', 'basis': 'realized'}
+        if not opened and value.get('exit_note'):
+            record['exit_note'] = value['exit_note']
         self.targets[value["symbol"]] = self.runner.broker.position(value["symbol"])
         self.dirty = True
         self.history.signal(record)
@@ -90,6 +92,9 @@ class NativeHistory:
         runner.signals[:] = [v for v in runner.signals[:-200] if v['id'] in active] + runner.signals[-200:]
         runner.signal_ids = {v['id'] for v in runner.signals}
         retained = active | runner.signal_ids
+        last_overrides = {(o.risk_entry_signal_id, o.exit_reason): o.signal_id for o in runner.broker.orders
+                          if o.pnl_override is not None and o.risk_entry_signal_id in active}
+        retained.update(last_overrides.values())
         runner.broker.orders[:] = [o for o in runner.broker.orders if o.status == 'pending' or o.signal_id in retained]
         self.written_orders = {o.id: o.status for o in runner.broker.orders}
         self.state['risk_levels'] = {key: value for key, value in self.state['risk_levels'].items() if value['entry_signal_id'] in active}
@@ -117,7 +122,8 @@ class NativeHistory:
                 'exit_signal_id': None, 'observed_until': runner.data.now,
                 **open_valuation(runner, lot),
                 'risk_levels': [v for v in self.state['risk_levels'].values() if v['entry_signal_id'] == lot.signal_id]})
-        return {**performance(self.sim, runner.broker.quote), 'start': self.config['history_start'],
+        return {**performance(self.sim, runner.broker.quote, runner.broker.exit_accounting),
+            'start': self.config['history_start'],
             'through': runner.data.now, 'initial_cash': self.config['initial_cash'], 'replaying': self.phase == 'history',
             'equity_curve': [v for _, v in sorted(self.state['daily'].items())], 'open_trades': opened,
             'pnl_unit': 'currency', 'execution_model': 'actual_contract', 'account': runner.broker.account()}

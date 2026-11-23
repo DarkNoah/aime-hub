@@ -41,6 +41,11 @@ const signalStyles = {
   exit: 'border-orange-700 bg-orange-700 text-white dark:border-orange-400 dark:bg-orange-400 dark:text-orange-950',
 };
 const signalIcons = { entry: LogIn, exit: LogOut };
+const pnlLabels = {
+  realized: 'notifications.signal.netPnl',
+  estimate: 'notifications.signal.estimatedPnl',
+  override: 'notifications.signal.overridePnl',
+} as const;
 
 export function MarketSignalToast({
   id,
@@ -130,9 +135,7 @@ export function MarketSignalToast({
                 <div className="rounded-md bg-muted/50 p-2.5">
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-xs text-muted-foreground">
-                      {t(
-                        `notifications.signal.${signal.pnl.basis === 'realized' ? 'netPnl' : 'estimatedPnl'}`,
-                      )}
+                      {t(pnlLabels[signal.pnl.basis])}
                     </span>
                     <strong
                       className={`tabular-nums ${signal.pnl.value > 0 ? 'text-rose-700 dark:text-rose-300' : signal.pnl.value < 0 ? 'text-emerald-700 dark:text-emerald-300' : ''}`}

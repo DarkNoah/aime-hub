@@ -24,7 +24,8 @@ class Protected(Strategy):
             ctx.state['entry'] = ctx.orders.target_position(bar.symbol, 1, reason='test entry')
             ctx.set_risk_levels(bar.symbol, entry_id=ctx.state['entry'], stop_loss=90, take_profit=120)
         elif n == 2:
-            ctx.set_risk_levels(bar.symbol, entry_id=ctx.state['entry'], stop_loss=95, take_profit=120)
+            ctx.set_risk_levels(bar.symbol, entry_id=ctx.state['entry'], stop_loss=95, take_profit=120,
+                                stop_loss_note='成本保护', take_profit_note='达到目标', stop_loss_pnl=0)
 '''
 
 
@@ -60,10 +61,19 @@ class StrategyReplayTest(unittest.TestCase):
             self.assertEqual(frames[1]['positions'][0]['quantity'], 1)
             self.assertEqual(frames[1]['overlay']['levels'][0]['stop_loss'], 90)
             self.assertEqual(frames[2]['overlay']['levels'][0]['stop_loss'], 95)
+            self.assertEqual(frames[2]['overlay']['levels'][0]['stop_loss_note'], '成本保护')
+            self.assertEqual(frames[2]['overlay']['levels'][0]['take_profit_note'], '达到目标')
+            self.assertEqual(frames[2]['overlay']['levels'][0]['stop_loss_pnl'], 0)
             self.assertEqual(frames[3]['positions'], [])
             self.assertEqual(frames[3]['overlay']['levels'], [])
             self.assertEqual([signal['type'] for signal in frames[3]['signals']], ['exit'])
             self.assertEqual(frames[3]['trades'][0]['exit_reason'], 'stop_loss')
+            self.assertEqual(frames[3]['signals'][0]['exit_note'], '成本保护')
+            self.assertEqual(frames[3]['signals'][0]['pnl'], {'value': 0, 'unit': 'points', 'basis': 'override'})
+            self.assertEqual(frames[3]['trades'][0]['net_pnl'], 0)
+            self.assertEqual(frames[3]['trades'][0]['exit_note'], '成本保护')
+            self.assertEqual(frames[3]['trades'][0]['exit_price'], 95)
+            self.assertEqual(frames[3]['summary']['metrics']['total_points'], 0)
             self.assertEqual(frames[3]['summary']['metrics']['trade_count'], 1)
             # Rewinding is an exact lookup; later fills cannot mutate saved frames.
             self.assertEqual(frames[1]['positions'][0]['status'], 'open')

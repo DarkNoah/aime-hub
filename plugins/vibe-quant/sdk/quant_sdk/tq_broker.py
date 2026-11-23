@@ -1,7 +1,5 @@
-"""TqSim execution adapter. TqSim alone decides fills, cash, margin and positions.
-
-The local FIFO ledger only attributes native fills to strategy signals for reports.
-No PaperBroker matching or account arithmetic is used here.
+"""TqSim decides fills and buying power. The reporting ledger attributes native fills
+to strategy signals and applies any explicitly overridden realized exit P&L.
 """
 from hashlib import sha256
 from dataclasses import asdict, dataclass, field
@@ -10,6 +8,8 @@ from math import ceil, floor, isfinite
 
 from .execution import Lot, Order
 from .protection import ProtectionBook
+from .risk import exit_terms
+from .tq_metrics import ExitAccounting
 
 
 @dataclass
@@ -29,6 +29,7 @@ class TqBroker:
         self.native_account = api.get_account()
         self.orders, self.fills, self.trades, self.lots = [], [], [], []
         self.protection = ProtectionBook()
+        self.exit_accounting = ExitAccounting()
         self.marks, self.trading_day = {}, ''
         self.fill_sequence = self.trade_sequence = 0
         self.children = {}  # active native id -> (entity, parent)
@@ -41,10 +42,14 @@ class TqBroker:
 
     def account(self):
         value = self.native_account
-        return {'cash': float(value.balance - value.float_profit), 'equity': float(value.balance),
-                'margin': float(value.margin), 'available': float(value.available),
+        adjustment = self.exit_accounting.total_adjustment
+        account = {'cash': float(value.balance - value.float_profit) + adjustment, 'equity': float(value.balance) + adjustment,
+                'margin': float(value.margin), 'available': float(value.available) + adjustment,
                 'positions': {self.symbol: self.position(self.symbol)},
                 'frozen_margin': float(value.frozen_margin), 'source': 'TqSim'}
+        if self.exit_accounting.daily_adjustments:
+            account.update(source='quant_sdk/TqSim', native_available=float(value.available))
+        return account
 
     def position(self, symbol):
         self.data.instrument(symbol)
@@ -156,6 +161,10 @@ class TqBroker:
         if not delta:
             self._status(parent, 'filled')
             return
+        if parent.pnl_override is not None:
+            # A native fill can race cancellation of the prior target. Allocate the
+            # override across the actual remaining lots after that child is reconciled.
+            parent.risk_remaining_quantity = abs(delta)
         direction = 'BUY' if delta > 0 else 'SELL'
         offset, size = 'OPEN', abs(delta)
         if position * delta < 0:
@@ -204,6 +213,8 @@ class TqBroker:
         for entry in dict.fromkeys(l.signal_id for l in self.lots):
             if any(o.risk_entry_signal_id == entry and o.status in ('pending', 'filled') for o in self.orders):
                 continue
+            if any(parent.risk_entry_signal_id == entry for _, parent in self.children.values()):
+                continue  # A fill may still race the acknowledgement of a cancelled child.
             levels = self.protection.at_open(now, {entry}).get(entry)
             if not levels:
                 continue
@@ -218,13 +229,24 @@ class TqBroker:
                 if order.status == 'pending' and not order.risk_entry_signal_id:
                     self.cancel(order.id, 'risk_exit_triggered')
             threshold = stop if reason == 'stop_loss' else profit
+            terms = exit_terms(levels, reason)
             signal_id = self.runner.context.emit('risk_exit', symbol=self.symbol, entry_signal_id=entry,
                 risk_level_id=levels['id'], reason=reason, trigger_price=threshold, trigger_time=now,
-                trigger_bar_time=floor(now / 60) * 60, trigger_time_precision='quote')
-            parent = TargetOrder(f'risk:{levels["id"]}:{len(self.orders)}', self.symbol,
+                trigger_bar_time=floor(now / 60) * 60, trigger_time_precision='quote', **terms)
+            attempt = len(self.orders)
+            previous = None
+            if 'pnl_override' in terms:
+                # Compaction can change the order count. Link retries of this
+                # snapshot to its last attempt, including any amount already paid.
+                previous = next((o for o in reversed(self.orders)
+                                 if o.risk_level_id == levels['id'] and o.exit_reason == reason), None)
+                attempt = sha256(previous.id.encode()).hexdigest() if previous else signal_id
+            parent = TargetOrder(f'risk:{levels["id"]}:{attempt}', self.symbol,
                 self.position(self.symbol) - quantity, now, signal_id, exit_reason=reason,
                 risk_entry_signal_id=entry, risk_level_id=levels['id'], trigger_price=threshold,
-                trigger_time=now, trigger_bar_time=floor(now / 60) * 60, trigger_time_precision='quote')
+                trigger_time=now, trigger_bar_time=floor(now / 60) * 60, trigger_time_precision='quote',
+                risk_remaining_quantity=abs(quantity) if 'pnl_override' in terms else 0,
+                risk_allocated_pnl=previous.risk_allocated_pnl if previous else 0.0, **terms)
             self.orders.append(parent)
             self.runner._notify('order', asdict(parent))
 
@@ -236,7 +258,7 @@ class TqBroker:
         fee = float(trade.get('commission', abs(quantity) * self.sim.get_commission(self.symbol)))
         if not all(isfinite(v) for v in (time, price, fee)) or fee < 0:
             raise ValueError('TqSim 返回无效成交或费用')
-        details = {'exit_reason': parent.exit_reason, 'exit_bar_time': floor(time / 60) * 60,
+        details = {'exit_reason': parent.exit_reason, 'exit_note': parent.exit_note, 'exit_bar_time': floor(time / 60) * 60,
                    'exit_time_precision': 'quote', 'risk_level_id': parent.risk_level_id,
                    'trigger_price': parent.trigger_price, 'trigger_time': parent.trigger_time,
                    'trigger_bar_time': parent.trigger_bar_time, 'trigger_time_precision': parent.trigger_time_precision}
@@ -249,7 +271,7 @@ class TqBroker:
             if self.symbol.startswith(('SHFE.', 'INE.')):
                 candidates = [l for l in candidates if (l.trading_day == day) == (trade.offset == 'CLOSETODAY')]
             if parent.risk_entry_signal_id:
-                candidates.sort(key=lambda l: l.signal_id != parent.risk_entry_signal_id)
+                candidates = [lot for lot in candidates if lot.signal_id == parent.risk_entry_signal_id]
             else:
                 candidates.sort(key=lambda l: l.trading_day == day)
             for lot in candidates:
@@ -258,13 +280,17 @@ class TqBroker:
                 size = min(remaining, abs(lot.quantity))
                 entry_fee, close_fee = lot.entry_fee * size / abs(lot.quantity), fee * size / abs(quantity)
                 gross = (price - lot.entry_price) * (1 if lot.quantity > 0 else -1) * size * self.quote.volume_multiple
-                closed_pnl += gross - entry_fee - close_fee
+                fees = entry_fee + close_fee
+                override = parent.allocate_pnl(size)
+                self.exit_accounting.record(day, size, gross, fees, override)
+                net = gross - fees if override is None else override
+                closed_pnl += net
                 self.trade_sequence += 1
                 self.trades.append({'id': f'trade-{self.trade_sequence}', 'symbol': self.symbol,
                     'side': 'long' if lot.quantity > 0 else 'short', 'quantity': size,
                     'entry_time': lot.entry_time, 'exit_time': time, 'entry_price': lot.entry_price,
-                    'exit_price': price, 'gross_pnl': gross, 'fees': entry_fee + close_fee,
-                    'net_pnl': gross - entry_fee - close_fee, 'entry_signal_id': lot.signal_id,
+                    'exit_price': price, 'gross_pnl': gross if override is None else override + fees, 'fees': fees,
+                    'net_pnl': net, 'pnl_override': override, 'entry_signal_id': lot.signal_id,
                     'exit_signal_id': parent.signal_id, **details})
                 lot.entry_fee -= entry_fee
                 lot.quantity += size if quantity > 0 else -size
@@ -278,6 +304,7 @@ class TqBroker:
                 'native_order_id': trade.order_id, 'native_trade_id': trade.trade_id,
                 'symbol': self.symbol, 'time': time, 'trading_day': day, 'quantity': quantity,
                 'price': price, 'fee': fee, 'offset': 'open' if trade.offset == 'OPEN' else 'close',
-                **({**details, 'net_pnl': closed_pnl} if trade.offset != 'OPEN' else {})}
+                **({**details, 'net_pnl': closed_pnl, 'pnl_override': closed_pnl if parent.pnl_override is not None else None}
+                   if trade.offset != 'OPEN' else {})}
         self.fills.append(fill)
         self.runner._notify('fill', fill)

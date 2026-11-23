@@ -200,14 +200,16 @@ function PositionRow({
             {monitor.replaying ? '计算历史中' : statuses[monitor.status]}
           </Badge>
         ) : (
-          <TradeExitBadge reason={trade.exit_reason} />
+          <TradeExitBadge reason={trade.exit_reason} note={trade.exit_note} />
         )}
         {
           <span
             title={
               open
                 ? '按最新可用价格计算，含已付入场费用，未计离场费用与滑点'
-                : '已扣除入场及离场费用'
+                : trade.pnl_override != null
+                  ? '按策略指定的净盈亏结算'
+                  : '已扣除入场及离场费用'
             }
             className={`ml-auto text-xs font-medium tabular-nums ${pnl != null && pnl > 0 ? 'text-rose-700 dark:text-rose-300' : pnl != null && pnl < 0 ? 'text-emerald-700 dark:text-emerald-300' : ''}`}
           >
@@ -236,7 +238,9 @@ export function MarketPositionsPanel({
   hiddenStrategyIds,
   onStrategyVisibleChange,
   onEditParameters,
-  changedMonitor,
+  onRemove,
+  busy,
+  positionsRevision,
 }: {
   pluginId: string;
   engine?: string;
@@ -246,9 +250,11 @@ export function MarketPositionsPanel({
   hiddenStrategyIds: ReadonlySet<string>;
   onStrategyVisibleChange: (id: string, visible: boolean) => void;
   onEditParameters: (item: MarketPositionMonitor) => void;
-  changedMonitor?: string;
+  onRemove: (item: MarketPositionMonitor) => void;
+  busy: boolean;
+  positionsRevision: number;
 }) {
-  const positions = useMarketPositions(pluginId, engine, changedMonitor);
+  const positions = useMarketPositions(pluginId, engine, positionsRevision);
   const viewportRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     viewportRef.current?.scrollTo({ top: 0 });
@@ -456,6 +462,8 @@ export function MarketPositionsPanel({
             hiddenStrategyIds={hiddenStrategyIds}
             onVisibleChange={onStrategyVisibleChange}
             onEditParameters={onEditParameters}
+            onRemove={onRemove}
+            busy={busy}
           />
         </TabsContent>
         {marketOverview && (

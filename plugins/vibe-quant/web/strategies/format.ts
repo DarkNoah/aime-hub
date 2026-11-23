@@ -1,7 +1,23 @@
+import type { RiskLevelRecord } from '../../strategy-types';
+
 export const number = (value: number | null | undefined) =>
   value == null || !Number.isFinite(value)
     ? '—'
     : value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
+
+export function riskLevelDetails(
+  record: Omit<RiskLevelRecord, 'event_id'>,
+  side: 'stop_loss' | 'take_profit',
+  points: boolean,
+) {
+  const pnl = record[`${side}_pnl`];
+  return [
+    record[`${side}_note`],
+    pnl == null ? '' : `指定净盈亏 ${number(pnl)} ${points ? '点' : '元'}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
 export const percent = (value: number | null | undefined) =>
   value == null || !Number.isFinite(value)
     ? '—'

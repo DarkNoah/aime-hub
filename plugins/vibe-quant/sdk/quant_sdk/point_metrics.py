@@ -37,7 +37,7 @@ def summarize_points(curve: list[dict], trades: list[dict]) -> dict:
                    benchmark_points=curve[-1].get('benchmark_equity') if curve else None)
     return {'metrics': metrics, 'monthly_returns': periods(monthly), 'yearly_returns': periods(yearly),
             'metric_notes': {'pnl_unit': 'points', 'position': 'fixed one unit per direction; target magnitude ignored',
-                             'returns': 'absolute price changes net of per-side point costs and slippage; no currency returns',
+                             'returns': 'realized points use the protective net override when supplied, otherwise price changes after costs and slippage',
                              'drawdown': 'peak-to-trough cumulative points, starting at zero; includes open positions',
                              'unrealized_points': 'mark-to-market remainder including costs already paid on open positions',
                              'trade_count': 'closed trades only; open positions marked to market',

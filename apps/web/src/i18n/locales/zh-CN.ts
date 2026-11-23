@@ -914,6 +914,7 @@ export const zhCN = {
   'notifications.signal.locate': '定位行情',
   'notifications.signal.netPnl': '净盈亏',
   'notifications.signal.estimatedPnl': '参考盈亏',
+  'notifications.signal.overridePnl': '策略指定净盈亏',
   'notifications.signal.estimatedPnlHint':
     '按信号参考价估算，含已付入场费用，未计离场费用与滑点',
   'notifications.signal.currency': '元',

@@ -5,7 +5,7 @@ unsafe to resume. Compatible releases retain it; runtime_hash remains an audit
 fingerprint. Never infer compatibility for an unknown unversioned runtime.
 """
 
-SDK_VERSION = '0.1.1'
+SDK_VERSION = '0.1.2'
 CHECKPOINT_VERSION = 1
 
 # Reviewed deployed SDKs before checkpoint_version was introduced. The only

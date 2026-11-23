@@ -275,6 +275,81 @@ class TqBrokerTests(unittest.TestCase):
         self.broker.advance()
         self.assertEqual((self.api.orders[-1].offset, self.api.orders[-1].volume), ('CLOSETODAY', 1))
 
+    def test_protective_exit_freezes_note_and_zero_amount_across_partial_fills_and_restore(self):
+        from quant_sdk.tq_metrics import performance
+        from quant_sdk.tq_restore import snapshot_runner, restore_broker
+        entry = self.open(3)
+        self.runner.context.set_risk_levels(self.api.symbol, entry_id=entry, stop_loss=95, take_profit=110,
+            stop_loss_note='跌破前低', take_profit_note='到达阻力位', stop_loss_pnl=-200, take_profit_pnl=0)
+        self.api.quote.last_price = 112
+        self.api.quote.max_limit_order_volume = 1
+        self.broker.check_risk()
+        self.runner.context.set_risk_levels(self.api.symbol, entry_id=entry, take_profit=120, take_profit_pnl=43)
+        self.broker.advance()
+        self.api.fill(self.api.orders[-1], 111)
+        self.broker.sync()
+        saved = json.loads(json.dumps(snapshot_runner(self.runner, 2)))
+        self.api.get_order = lambda: {o.order_id: o for o in self.api.orders}
+        self.broker = self.runner.broker = TqBroker(self.runner, self.api, self.api, self.api.quote, self.calendar)
+        restore_broker(self.runner, saved, self.api)
+        for price in (112, 113):
+            self.broker.advance()
+            self.api.fill(self.api.orders[-1], price)
+            self.broker.sync()
+        self.assertEqual([t['exit_price'] for t in self.broker.trades], [111, 112, 113])
+        for record in [*self.broker.trades, *self.broker.fills[1:]]:
+            self.assertEqual(record['exit_reason'], 'take_profit')
+            self.assertEqual(record['exit_note'], '到达阻力位')
+            self.assertEqual(record['pnl_override'], 0)
+            self.assertEqual(record['net_pnl'], 0)
+        self.assertEqual(self.broker.account()['equity'], 10000)
+        self.assertEqual(self.broker.account()['native_available'], self.api.account.available)
+        result = performance(self.api, self.api.quote, self.broker.exit_accounting)
+        self.assertEqual(result['metrics']['total_pnl'], 0)
+        self.assertEqual(result['metrics']['final_equity'], 10000)
+        self.assertEqual(result['metrics_source'], 'quant_sdk/TqSim')
+        self.assertEqual(result['native_metrics']['balance'], self.api.account.balance)
+
+    def test_retriggered_snapshot_after_partial_fill_allocates_only_its_remaining_amount(self):
+        entry = self.open(3)
+        self.runner.context.set_risk_levels(self.api.symbol, entry_id=entry, stop_loss=95, stop_loss_pnl=-99)
+        self.api.quote.last_price = 93
+        self.api.quote.max_limit_order_volume = 1
+        self.broker.check_risk()
+        self.broker.advance()
+        self.api.fill(self.api.orders[-1], 93)
+        self.broker.sync()
+        self.broker.advance()
+        self.api.fill(self.api.orders[-1], reject=True)
+        self.broker.sync()
+        self.assertEqual(self.broker.orders[-1].status, 'rejected')
+        self.broker.check_risk()
+        self.api.quote.max_limit_order_volume = 10
+        self.broker.advance()
+        self.api.fill(self.api.orders[-1], 92)
+        self.broker.sync()
+        self.assertEqual([trade['net_pnl'] for trade in self.broker.trades], [-33, -66])
+        self.assertEqual(self.broker.account()['equity'], 9901)
+
+    def test_open_fill_racing_risk_cancellation_shares_the_single_exit_amount(self):
+        self.api.quote.max_limit_order_volume = 1
+        entry = self.open(3)
+        self.broker.advance()
+        pending_open = self.api.orders[-1]
+        self.runner.context.set_risk_levels(self.api.symbol, entry_id=entry, stop_loss=95, pnl_override=-50)
+        self.api.quote.last_price = 93
+        self.broker.check_risk()
+        self.assertIn(pending_open.order_id, self.api.cancelled)
+        self.api.fill(pending_open, 100)
+        self.broker.sync()
+        self.api.quote.max_limit_order_volume = 10
+        self.broker.advance()
+        self.api.fill(self.api.orders[-1], 92)
+        self.broker.sync()
+        self.assertEqual([trade['net_pnl'] for trade in self.broker.trades], [-25, -25])
+        self.assertEqual(self.broker.fills[-1]['net_pnl'], -50)
+        self.assertEqual(self.broker.account()['equity'], 9950)
+
     def test_missing_opposite_quote_keeps_order_pending(self):
         self.target(1)
         self.api.quote.ask_price1 = float('nan')

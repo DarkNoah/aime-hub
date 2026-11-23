@@ -1,6 +1,10 @@
 import type { StrategyNotifications } from './strategy-notifications.js';
 import type { MarketSignalNotification } from '@aime/shared/notifications';
-import type { BacktestInput, TradeRecord } from './strategy-types.js';
+import type {
+  BacktestInput,
+  RiskLevelRecord,
+  TradeRecord,
+} from './strategy-types.js';
 import type { Engine } from './shared.js';
 import { DURATIONS, MONTH_DURATION } from './shared.js';
 
@@ -87,23 +91,24 @@ export interface StrategySignal {
   symbol: string;
   time: number;
   reason: string;
+  exit_note?: string;
   price: number | null;
   /** Source candle/tick time, distinct from delivery time. */
   chart_time?: number;
   pnl?: MarketSignalNotification['pnl'];
 }
 
-export interface StrategyRiskLevel {
+export interface StrategyRiskLevel extends Omit<RiskLevelRecord, 'event_id'> {
   chart_time?: number;
-  id: string;
-  symbol: string;
-  entry_signal_id: string;
-  time: number;
-  stop_loss: number | null;
-  take_profit: number | null;
   chart_stop_loss: number | null;
   chart_take_profit: number | null;
 }
+
+export const signalPnlLabels = {
+  realized: '净盈亏',
+  estimate: '参考盈亏',
+  override: '策略指定净盈亏',
+} satisfies Record<NonNullable<StrategySignal['pnl']>['basis'], string>;
 export interface SignalOverlay {
   updated_at: number | null;
   levels: StrategyRiskLevel[];

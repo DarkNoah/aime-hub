@@ -17,7 +17,7 @@ except ModuleNotFoundError as error:
     if error.name == 'tqsdk':
         raise unittest.SkipTest('Native persistence tests require the plugin TqSdk environment')
     raise
-from quant_sdk.tq_metrics import performance
+from quant_sdk.tq_metrics import ExitAccounting, performance
 from tq_monitor_history import NativeSignalOutput
 
 SYMBOL = 'CFFEX.IM2611'
@@ -79,6 +79,22 @@ class PersistenceTests(unittest.TestCase):
         with self.assertRaises(ValueError): DurableTqSim(10000, 'test', saved)
         self.assertEqual(unpack(pack(float('inf'))), float('inf'))
 
+    def test_overridden_native_report_uses_adjusted_daily_balances_and_trade_outcomes(self):
+        sim, quote = self.make_sim()
+        self.order(sim, 'open', 101)
+        self.order(sim, 'close', 99, 'SELL', 'CLOSE')
+        accounting = ExitAccounting()
+        accounting.record('2026-10-19', 1, -20, 4, 42)
+        result = performance(sim, quote, accounting)
+        self.assertEqual(result['metrics']['final_equity'], 10042)
+        self.assertEqual(result['metrics']['total_pnl'], 42)
+        self.assertEqual(result['metrics']['commission'], 4)
+        self.assertEqual(result['metrics']['win_rate'], 1)
+        self.assertEqual(result['monthly_returns'][0]['pnl'], 42)
+        self.assertEqual(result['yearly_returns'][0]['pnl'], 42)
+        self.assertEqual(result['native_metrics']['balance'], 9976)
+        self.assertEqual(result['native_metrics']['winning_rate'], 0)
+
     def test_signal_only_after_fill_and_notification_respects_cutoff(self):
         class History:
             def __init__(self): self.signals, self.notifications = [], []
@@ -96,9 +112,11 @@ class PersistenceTests(unittest.TestCase):
         self.assertEqual(history.signals[0]['id'], 'native:t1')
         self.assertEqual(len(history.notifications), 1)
         output({'type': 'fill', 'payload': dict(offset='close', quantity=-1, native_trade_id='t2',
-                symbol=SYMBOL, time=99, price=101)})
+                symbol=SYMBOL, time=99, price=101, exit_note='止盈备注', net_pnl=0)})
         self.assertEqual(history.signals[-1]['side'], 'long')
         self.assertEqual(history.signals[-1]['type'], 'exit')
+        self.assertEqual(history.signals[-1]['exit_note'], '止盈备注')
+        self.assertEqual(history.signals[-1]['pnl']['value'], 0)
         self.assertEqual(len(history.notifications), 1)
 
 class RestoreIntentTests(unittest.TestCase):

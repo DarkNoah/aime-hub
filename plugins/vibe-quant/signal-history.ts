@@ -3,14 +3,18 @@ import type { SignalMonitor, StrategySignal } from './signal-types.js';
 
 export interface SignalHistorySummary extends Pick<
   BacktestResult,
-  'metrics' | 'equity_curve' | 'monthly_returns' | 'yearly_returns' | 'pnl_unit'
+  | 'metrics'
+  | 'equity_curve'
+  | 'monthly_returns'
+  | 'yearly_returns'
+  | 'pnl_unit'
+  | 'metrics_source'
 > {
   start: number;
   through: number;
   initial_cash: number;
   replaying: boolean;
   open_trades: OpenTrade[];
-  metrics_source?: 'TqSim/TqReport';
   native_metrics?: Record<string, unknown>;
   account?: Record<string, unknown>;
   execution_model?: SignalMonitor['config']['execution_model'];

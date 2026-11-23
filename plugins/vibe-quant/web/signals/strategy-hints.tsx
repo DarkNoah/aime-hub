@@ -54,6 +54,7 @@ export function StrategyHints({
   hints,
   onJumpToEntry,
   onEditParameters,
+  onRemove,
   replay,
 }: {
   pluginId: string;
@@ -61,6 +62,7 @@ export function StrategyHints({
   hints: ReturnType<typeof useStrategyHints>;
   onJumpToEntry: (time: number) => Promise<boolean>;
   onEditParameters: (item: MarketStrategyHint) => void;
+  onRemove: (item: MarketStrategyHint) => void;
   replay?: StrategyReplayView;
 }) {
   const [adding, setAdding] = useState(false);
@@ -197,10 +199,7 @@ export function StrategyHints({
                     disabled={!!hints.busy}
                     onSelect={(event) => {
                       event.preventDefault();
-                      void hints.change(item, {
-                        deleted: true,
-                        enabled: false,
-                      });
+                      onRemove(item);
                     }}
                   >
                     <Button

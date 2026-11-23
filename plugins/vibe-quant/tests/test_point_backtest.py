@@ -25,7 +25,8 @@ class Protected(Strategy):
         if not ctx.state:
             ctx.state['started'] = True
             entry = ctx.orders.target_position(INDEX, 100)
-            ctx.set_risk_levels(INDEX, stop_loss=95, take_profit=110, entry_id=entry)
+            ctx.set_risk_levels(INDEX, stop_loss=95, take_profit=110, entry_id=entry,
+                                **ctx.params.get('exit_terms', {}))
 
 
 class PointBacktestTest(unittest.TestCase):
@@ -88,6 +89,19 @@ class PointBacktestTest(unittest.TestCase):
         self.assertEqual(result['status'], 'succeeded', result['message'])
         self.assertEqual(result['trades'][0]['net_pnl'], 20)
         self.assertEqual(result['metrics']['total_points'], 20)
+
+    def test_protective_override_is_final_realized_points_including_costs(self):
+        item = Instrument(INDEX, 'stock', 1, tradable=False)
+        events = [candle(INDEX, 0, 100), candle(INDEX, 1, 100), candle(INDEX, 2, 90)]
+        result, _ = self.run_strategy(Protected(), item, events, RunConfig(pnl_mode='points', point_cost=.5),
+                                      exit_terms={'stop_loss_note': '固定亏损', 'stop_loss_pnl': -4.5})
+        self.assertEqual(result['status'], 'succeeded', result['message'])
+        trade = result['trades'][0]
+        self.assertEqual((trade['exit_note'], trade['exit_price'], trade['fees']), ('固定亏损', 90, 1))
+        self.assertEqual(trade['net_pnl'], -4.5)
+        self.assertEqual(result['metrics']['realized_points'], -4.5)
+        self.assertEqual(result['metrics']['total_points'], -4.5)
+        self.assertEqual(result['metrics']['unrealized_points'], 0)
 
     def test_periods_open_position_and_initial_loss_drawdown(self):
         result = summarize_points([

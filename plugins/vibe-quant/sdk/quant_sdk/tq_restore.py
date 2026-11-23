@@ -1,15 +1,18 @@
 """Restore the Strategy context and reporting ledger around a restored native account."""
 from copy import deepcopy
+from dataclasses import asdict
 import json
 from pathlib import Path
 from .runtime import Runner
 from .execution import Lot
 from .tq_broker import TargetOrder
+from .tq_metrics import ExitAccounting, performance
 
 
 def snapshot_runner(runner, sequence):
     checkpoint = json.loads(runner.checkpoint().read_text())
     return {'runner': checkpoint, 'sequence': sequence,
+            'exit_accounting': asdict(runner.broker.exit_accounting),
             'children': {key: parent.id for key, (_, parent) in runner.broker.children.items()},
             'seen_trades': [list(key) for key in runner.broker.seen_trades]}
 
@@ -32,6 +35,11 @@ def restore_broker(runner, saved, api):
     broker.orders = [TargetOrder(**value) for value in data['orders']]
     for key in ('fills', 'trades', 'marks', 'fill_sequence', 'trade_sequence', 'trading_day'):
         setattr(broker, key, data[key])
+    if 'exit_accounting' in saved:
+        broker.exit_accounting = ExitAccounting(**saved['exit_accounting'])
+    elif broker.trade_sequence:
+        stats = performance(broker.sim, broker.quote)['native_metrics']
+        broker.exit_accounting = ExitAccounting.from_native(stats)
     broker.seen_trades = {tuple(value) for value in saved['seen_trades']}
     for record in runner.risk_levels:
         broker.protection.update(record)

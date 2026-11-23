@@ -138,6 +138,9 @@ export interface Trade {
   exit_signal_id: string | null;
   /** Optional for historical results created before protective execution. */
   exit_reason?: string;
+  exit_note?: string;
+  /** Amount allocated to this closed fragment after fees. */
+  pnl_override?: number | null;
   exit_bar_time?: number;
   exit_time_precision?: 'open' | 'bar' | 'quote';
   risk_level_id?: string | null;
@@ -175,7 +178,7 @@ export const tradeExitAnchor = (trade: TradeRecord) =>
 export const tradeHoldingEnd = (trade: TradeRecord) =>
   trade.status === 'open' ? trade.observed_until : trade.exit_time;
 export interface BacktestResult {
-  metrics_source?: 'TqSim/TqReport';
+  metrics_source?: 'TqSim/TqReport' | 'quant_sdk/TqSim';
   native_metrics?: Record<string, unknown>;
   backtest_engine?: 'builtin' | 'tqsdk';
   pnl_unit?: 'currency' | 'points';
@@ -210,6 +213,10 @@ export interface RiskLevelRecord {
   entry_signal_id: string;
   stop_loss: number | null;
   take_profit: number | null;
+  stop_loss_note?: string;
+  take_profit_note?: string;
+  stop_loss_pnl?: number | null;
+  take_profit_pnl?: number | null;
 }
 export interface TradeReplay {
   trade: TradeRecord;

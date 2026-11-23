@@ -16,7 +16,7 @@ export type NotificationSound = z.infer<typeof notificationSoundSchema>;
 export const marketSignalPnlSchema = z.object({
   value: z.number().finite(),
   unit: z.enum(['currency', 'points']),
-  basis: z.enum(['realized', 'estimate']),
+  basis: z.enum(['realized', 'estimate', 'override']),
 });
 export const marketSignalNotificationSchema = z.object({
   type: z.enum(['entry', 'exit']),

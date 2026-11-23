@@ -133,6 +133,8 @@ class SignalOutput:
                 'side': side, 'symbol': symbol, 'time': value['time'], 'reason': str(value.get('reason', '')),
                 'price': price, 'chart_time': value.get('trigger_bar_time', getattr(self.event.payload, 'time', value['time']) if self.event else value['time'])}
             if event_type == 'exit':
+                if value.get('exit_note'):
+                    record['exit_note'] = value['exit_note']
                 pnl = exit_valuation(self.runner, value, side, price)
                 if pnl is not None:
                     record['pnl'] = pnl
@@ -166,7 +168,7 @@ class SignalOutput:
                     if bar.time in actual and bar.time >= runner.data._roll_times.get(chart_symbol, 0):
                         offset = bar.close - actual[bar.time]
                         break
-            levels.append({key: record[key] for key in ('id', 'symbol', 'entry_signal_id', 'time', 'stop_loss', 'take_profit')} | {
+            levels.append({**record,
                 'chart_time': self.risk_times.get(record['id'], record['time']),
                 'chart_stop_loss': None if offset is None or record['stop_loss'] is None else record['stop_loss'] + offset,
                 'chart_take_profit': None if offset is None or record['take_profit'] is None else record['take_profit'] + offset,

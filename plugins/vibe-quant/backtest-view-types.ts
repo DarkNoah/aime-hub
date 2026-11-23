@@ -12,7 +12,11 @@ export interface BacktestTradePage {
 
 export interface BacktestOverview extends Pick<
   BacktestResult,
-  'metrics' | 'equity_curve' | 'monthly_returns' | 'yearly_returns'
+  | 'metrics'
+  | 'equity_curve'
+  | 'monthly_returns'
+  | 'yearly_returns'
+  | 'metrics_source'
 > {
   curve_points: number;
   closed_win_rate: number | null;

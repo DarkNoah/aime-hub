@@ -2,7 +2,8 @@ import { runVersionName } from '../../strategy-version';
 import { Badge, Button, Label, ScrollArea, Switch } from '@app/plugin-ui';
 import { useId } from 'react';
 import type { StrategyReplayView } from './use-strategy-replay';
-import { number } from '../strategies/format';
+import { monitorExecutionModel } from '../../signal-types';
+import { number, riskLevelDetails } from '../strategies/format';
 import { durationLabel } from '../../shared';
 
 export function ReplayStrategies({
@@ -53,6 +54,7 @@ export function ReplayStrategies({
             .map((item) => {
               const page = view.pages[item.id];
               const positions = page?.summary?.open_trades ?? [];
+              const points = monitorExecutionModel(item.config) === 'points';
               return (
                 <div
                   key={item.id}
@@ -95,12 +97,14 @@ export function ReplayStrategies({
                     >
                       {level.stop_loss !== null && (
                         <span className="text-emerald-700 dark:text-emerald-400">
-                          止损 {number(level.stop_loss)}
+                          止损 {number(level.stop_loss)}{' '}
+                          {riskLevelDetails(level, 'stop_loss', points)}
                         </span>
                       )}
                       {level.take_profit !== null && (
                         <span className="text-rose-700 dark:text-rose-400">
-                          止盈 {number(level.take_profit)}
+                          止盈 {number(level.take_profit)}{' '}
+                          {riskLevelDetails(level, 'take_profit', points)}
                         </span>
                       )}
                     </span>

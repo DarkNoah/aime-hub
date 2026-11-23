@@ -152,11 +152,12 @@ class MonitorHistory:
         records = sorted((record for record in self.state['risk_levels'].values()
                           if record['symbol'] == symbol and record['entry_signal_id'] == entry),
                          key=lambda record: record['time'])
-        # Repeated calculations with unchanged prices do not add a chart step.
+        # Retain changes to either price or its associated exit instructions.
         # Preserve the exact triggering ID so pending exits freeze the right level.
         return [record for index, record in enumerate(records)
                 if index in (0, len(records) - 1) or record['id'] == triggered
-                or any(record[key] != records[index - 1][key] for key in ('stop_loss', 'take_profit'))]
+                or any(record.get(key) != records[index - 1].get(key) for key in
+                       ('stop_loss', 'take_profit', 'stop_loss_note', 'take_profit_note', 'stop_loss_pnl', 'take_profit_pnl'))]
 
     def summary(self):
         runner, state = self.runner, self.state

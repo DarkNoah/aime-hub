@@ -10,7 +10,7 @@ import type { PluginContext } from '@app/plugin-sdk/server';
 import type { SyncStatus } from '../../shared.js';
 import type { QuantConfig } from '../config.js';
 import type { StrategySignal } from '../../signal-types.js';
-import { monitorExecutionModel } from '../../signal-types.js';
+import { monitorExecutionModel, signalPnlLabels } from '../../signal-types.js';
 import { strategyNotifications } from '../../strategy-notifications.js';
 import type { StrategyStore } from '../strategies/store.js';
 import { StrategyError } from '../strategies/schema.js';
@@ -26,6 +26,7 @@ const signalSchema = z.object({
   symbol: z.string(),
   time: z.number().finite(),
   reason: z.string(),
+  exit_note: z.string().optional(),
   price: z.number().finite().nullable(),
   chart_time: z.number().finite().optional(),
   pnl: marketSignalPnlSchema.optional(),
@@ -41,6 +42,10 @@ const overlaySchema = z.object({
       time: z.number().finite(),
       stop_loss: z.number().finite().nullable(),
       take_profit: z.number().finite().nullable(),
+      stop_loss_note: z.string().optional(),
+      take_profit_note: z.string().optional(),
+      stop_loss_pnl: z.number().finite().nullable().optional(),
+      take_profit_pnl: z.number().finite().nullable().optional(),
       chart_stop_loss: z.number().finite().nullable(),
       chart_take_profit: z.number().finite().nullable(),
     }),
@@ -499,13 +504,16 @@ export class SignalWorker {
             });
             const pnl = event.pnl;
             const pnlText = pnl
-              ? ` · ${pnl.basis === 'realized' ? '净盈亏' : '参考盈亏'} ${pnl.value > 0 ? '+' : ''}${pnl.value.toFixed(2)} ${pnl.unit === 'points' ? '点' : '元'}`
+              ? ` · ${signalPnlLabels[pnl.basis]} ${pnl.value > 0 ? '+' : ''}${pnl.value.toFixed(2)} ${pnl.unit === 'points' ? '点' : '元'}`
               : '';
+            const reasonText = [event.reason, event.exit_note]
+              .filter(Boolean)
+              .join(' · ');
             await this.context.notifications.publish({
               userId: row.user_id,
               eventId: event.id,
               title: `${strategy.name} · ${side}${event.type === 'entry' ? '入场' : '离场'}信号`,
-              body: `${event.symbol} · ${runVersionName(row)} · ${time}${event.price === null ? '' : ` · 参考价 ${event.price}`}${pnlText}${event.reason ? ` · ${event.reason}` : ''}`,
+              body: `${event.symbol} · ${runVersionName(row)} · ${time}${event.price === null ? '' : ` · 参考价 ${event.price}`}${pnlText}${reasonText ? ` · ${reasonText}` : ''}`,
               url: marketChartUrl({
                 symbol: event.symbol,
                 time: event.chart_time ?? event.time,
@@ -523,7 +531,7 @@ export class SignalWorker {
                 symbol: event.symbol,
                 time: event.time,
                 price: event.price,
-                reason: event.reason,
+                reason: reasonText,
                 pnl,
               },
             });

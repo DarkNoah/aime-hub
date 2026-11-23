@@ -97,9 +97,14 @@ class Context:
     def log(self, message: str, **fields) -> None:
         self._runner.logs.append({'time': self.now, 'message': message, **fields})
 
-    def set_risk_levels(self, symbol: str, *, stop_loss=None, take_profit=None, entry_id=None) -> None:
+    def set_risk_levels(self, symbol: str, *, stop_loss=None, take_profit=None, entry_id=None,
+                        stop_loss_note: str = '', take_profit_note: str = '', pnl_override: float | None = None,
+                        stop_loss_pnl: float | None = None, take_profit_pnl: float | None = None) -> None:
         """Publish a full TP/SL snapshot at the current calculation time."""
-        publish(self, RiskLevels(symbol, stop_loss, take_profit, entry_id))
+        publish(self, RiskLevels(symbol, stop_loss=stop_loss, take_profit=take_profit, entry_id=entry_id,
+                                 stop_loss_note=stop_loss_note, take_profit_note=take_profit_note,
+                                 pnl_override=pnl_override, stop_loss_pnl=stop_loss_pnl,
+                                 take_profit_pnl=take_profit_pnl))
 
 
 class Runner:

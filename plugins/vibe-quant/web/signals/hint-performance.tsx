@@ -131,7 +131,10 @@ function Trades({
                 </TableCell>
                 {!open && (
                   <TableCell className="whitespace-nowrap">
-                    <TradeExitBadge reason={row.exit_reason} />
+                    <TradeExitBadge
+                      reason={row.exit_reason}
+                      note={row.exit_note}
+                    />
                   </TableCell>
                 )}
                 <TableCell>{number(row.net_pnl)}</TableCell>
@@ -276,6 +279,7 @@ export function HintPerformance({
   const monitor = page?.monitor ?? item;
   const points = monitorExecutionModel(monitor.config) === 'points';
   const native = monitor.config.simulation_engine === 'tqsdk';
+  const nativeReport = native && summary?.metrics_source !== 'quant_sdk/TqSim';
   const computing =
     !replaying && (monitor.status === 'starting' || summary?.replaying);
   return (
@@ -295,9 +299,11 @@ export function HintPerformance({
             {durationLabel(item.config.duration)}
             {replaying
               ? '。仅显示当前回放时点已产生的信号、持仓和交易，回退时同步恢复。'
-              : native
+              : nativeReport
                 ? '。历史由 TqBacktest 回放，实时由 TqSim 模拟交易；绩效取自天勤报告。'
-                : '。加入后自动计算全部已存行情，并持续更新当前入场、离场与持仓。'}
+                : native
+                  ? '。成交与手续费取自 TqSim，绩效按策略指定的平仓净盈亏计算。'
+                  : '。加入后自动计算全部已存行情，并持续更新当前入场、离场与持仓。'}
           </SheetDescription>
         </SheetHeader>
         <div className="space-y-2 border-b px-4 py-3 sm:px-5">
@@ -423,7 +429,10 @@ export function HintPerformance({
                                 : ''}
                           </Badge>
                           {signal.type === 'exit' && (
-                            <TradeExitBadge reason={signal.reason} />
+                            <TradeExitBadge
+                              reason={signal.reason}
+                              note={signal.exit_note}
+                            />
                           )}
                           <span>{signal.symbol}</span>
                           <span className="tabular-nums">
@@ -491,7 +500,7 @@ export function HintPerformance({
                           number(summary.metrics.trade_count),
                         ],
                         [
-                          native ? '胜率（天勤按手数）' : '胜率',
+                          native ? '胜率（按手数）' : '胜率',
                           percent(summary.metrics.win_rate),
                         ],
                         ['最大回撤', percent(summary.metrics.max_drawdown)],

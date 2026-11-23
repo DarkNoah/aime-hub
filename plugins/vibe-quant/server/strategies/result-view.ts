@@ -84,6 +84,7 @@ export function prepareResultView(
   const view: BacktestView = {
     result: {
       metrics: result.metrics,
+      metrics_source: result.metrics_source,
       equity_curve: overviewCurve(result.equity_curve ?? []),
       curve_points: result.equity_curve?.length ?? 0,
       monthly_returns: result.monthly_returns,

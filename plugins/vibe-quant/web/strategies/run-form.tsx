@@ -588,8 +588,8 @@ export function RunForm({
                     )}
                   {native ? (
                     <p className="text-xs text-muted-foreground sm:col-span-2">
-                      使用天勤交易日历、结算规则与 TqSim / TqReport
-                      原生指标；年化、回撤及胜率均按天勤口径。
+                      使用天勤交易日历和结算规则。默认采用 TqReport
+                      绩效指标，触发策略指定的平仓净盈亏后按调整后的权益计算绩效。
                     </p>
                   ) : (
                     <Label className="grid gap-2 text-xs sm:col-span-2">

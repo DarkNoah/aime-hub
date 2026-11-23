@@ -102,6 +102,26 @@ class ProtectiveExecutionTest(unittest.TestCase):
             self.assertEqual(result['trades'][0]['exit_reason'], 'stop_loss')
             self.assertEqual(result['trades'][0]['exit_price'], stop)
 
+    def test_triggered_side_selects_its_note_and_final_net_pnl(self):
+        levels = {'stop_loss': 95, 'stop_loss_note': '跌破前低', 'stop_loss_pnl': 0,
+                  'take_profit': 105, 'take_profit_note': '达到目标', 'take_profit_pnl': 80}
+        for low, high, reason, price, note, override in [
+            (94, 106, 'stop_loss', 95, '跌破前低', 0),
+            (98, 106, 'take_profit', 105, '达到目标', 80),
+        ]:
+            with self.subTest(reason=reason):
+                result = self.run_case([self.bar(0), self.bar(1, low=low, high=high)], updates={'0': levels})
+                trade, fill = result['trades'][0], result['fills'][-1]
+                self.assertEqual(trade['exit_price'], price)
+                self.assertEqual(trade['fees'], 7)
+                self.assertEqual(trade['gross_pnl'], override + 7)
+                for row in (result['signals'][-1], result['orders'][-1], trade, fill):
+                    self.assertEqual((row['exit_note'], row['pnl_override']), (note, override))
+                for row in (trade, fill):
+                    self.assertEqual((row['exit_reason'], row['net_pnl']), (reason, override))
+                self.assertEqual(result['account']['cash'], self.config.initial_cash + override)
+                self.assertEqual(result['metrics']['total_pnl'], override)
+
     def test_latest_dynamic_level_only_applies_after_calculation_and_clear_disarms(self):
         events = [self.bar(0), self.bar(1, low=94), self.bar(2)]
         updates = {'0': {'stop_loss': 90}, '1': {'stop_loss': 99}}
@@ -134,6 +154,30 @@ class ProtectiveExecutionTest(unittest.TestCase):
         self.assertEqual(len([s for s in result['signals'] if s['kind'] == 'risk_exit']), 1)
         self.assertEqual(result['account']['positions'], {})
 
+    def test_split_override_survives_settlement_new_levels_and_restart(self):
+        events = [self.bar(0), self.bar(1, volume=3, low=94),
+                  self.bar(2, opening=94, close=93, low=92, high=96, volume=1),
+                  self.bar(3, opening=92, close=92, low=91, high=93, next_day=True)]
+        updates = {'0': {'stop_loss': 95, 'stop_loss_note': '初始止损', 'stop_loss_pnl': -100},
+                   '1': {'stop_loss': 90, 'stop_loss_note': '更新止损', 'stop_loss_pnl': -50}}
+        expected = self.run_case(events, targets={'0': 3}, updates=updates)
+        runner = LiveRunner(ProtectedSchedule(), [self.item], mode='paper', params=self.params,
+                            config=self.config, output_dir=self.temp.name)
+        for event in events[:3]:
+            runner.process(event)
+        restored = LiveRunner.restore(ProtectedSchedule(), runner.checkpoint(), output_dir=self.temp.name)
+        runner.finish('cancelled')
+        result = restored.run(events[2:])
+        for field in ('signals', 'trades', 'fills', 'equity_curve', 'account', 'metrics'):
+            self.assertEqual(result[field], expected[field], field)
+        trades = result['trades']
+        self.assertEqual([t['quantity'] for t in trades], [1, 2])
+        self.assertAlmostEqual(trades[0]['net_pnl'], -100 / 3)
+        self.assertEqual(sum(t['net_pnl'] for t in trades), -100)
+        self.assertEqual([t['exit_note'] for t in trades], ['初始止损', '初始止损'])
+        self.assertAlmostEqual(result['metrics']['total_pnl'], -100)
+        self.assertAlmostEqual(result['account']['equity'], self.config.initial_cash - 100)
+
     def test_partial_entry_remainder_is_cancelled_instead_of_reopening(self):
         events = [self.bar(0), self.bar(1, volume=2, low=94), self.bar(2), self.bar(3)]
         result = self.run_case(events, targets={'0': 3})
@@ -158,6 +202,12 @@ class ProtectiveExecutionTest(unittest.TestCase):
         self.assertEqual(result['trades'][0]['exit_time'], events[3].payload.time)
         self.assertEqual(result['trades'][0]['trigger_bar_time'], events[1].payload.time)
         self.assertEqual(result['trades'][0]['exit_price'], 90)
+        result = self.run_case(events, targets={'0': 100},
+                               updates={'0': {'stop_loss': 95, 'pnl_override': -17, 'stop_loss_note': 'T+1 止损'}})
+        self.assertEqual(result['trades'][0]['exit_price'], 90)
+        self.assertEqual(result['trades'][0]['net_pnl'], -17)
+        self.assertEqual(result['trades'][0]['exit_note'], 'T+1 止损')
+        self.assertEqual(result['account']['cash'], self.config.initial_cash - 17)
 
     def test_signal_exit_precedes_later_intrabar_risk_but_gap_risk_cancels_reversal(self):
         events = [self.bar(0), self.bar(1), self.bar(2, low=94)]

@@ -10,7 +10,7 @@
 - TqApi + TqBacktest 推进行情，TqSim 决定委托、成交、资金、保证金和结算。订单使用对手价加 `slippage_ticks` 的限价（受涨跌停边界限制）；目标反向持仓先平再开，上期所/能源中心区分平今和平昨。等待撤单回报后再执行替代目标，竞态中已经发生的成交仍记入结果。
 - `tq_options.commission_per_lot` 与 `margin_per_lot` 分别覆盖每手单边手续费、每手保证金（元）。留空优先继承插件 `tqSimCommissionPerLot` / `tqSimMarginPerLot`，插件未设置时使用天勤默认，任务创建时冻结配置、实际取值写入报告；不是历史费率表。`rules`、`participation_rate` 不用于天勤账户，服务端保存其规范占位值；界面只展示天勤实际规则。`instrument.margin_rate` 为初始化时的隐含比例，账户保证金始终取自 TqSim。
 - K 线只在收盘后交给策略；预热窗口最多 2000 根/周期，运行中历史窗口沿用 SDK 上限。分钟收盘事件时间保留天勤微秒精度，成交图标按所属分钟定位。TqSim 不产生部分成交；保护单按收到的报价最新价触发，再由 TqSim 撮合，不能还原 K 线内部触发路径，不能与内置 OHLC 止损口径视为相同。
-- 每笔成交保留原生委托/成交 ID；平仓按 FIFO 关联开仓信号，资金曲线来自原生账户。结果、行情快照、风险线、未平仓展示、交易图表和导出沿用现有格式。快照用于核对数据，不保证脱离天勤服务重新运行 TqSim 得到同样结果；一次性历史回测不支持检查点恢复；行情策略的持续模拟账户支持下述恢复机制。
+- 每笔成交保留原生委托/成交 ID，平仓按入场批次归属。资金曲线默认来自原生账户。策略指定保护性平仓的净盈亏时，SDK 在成交时把差额计入策略账户和报表，TqSim 仍按原生账户的可用资金和保证金决定是否接受委托。结果、行情快照、风险线、未平仓展示、交易图表和导出沿用现有格式。快照用于核对数据，不保证脱离天勤服务重新运行 TqSim 得到同样结果；一次性历史回测不支持检查点恢复；行情策略的持续模拟账户支持下述恢复机制。
 - 每次任务有独立 TqSim 账户、15 分钟上限、50 万根 K 线与产物大小限制。凭证只从父进程管道传入，不进入任务参数、命令行、环境变量或回测产物；任务取消会终止整个进程组。
 
 内置回测仍保留原有费用、成交量、主连模拟、点数回测及调优能力。
@@ -29,7 +29,7 @@
 - 原生委托、成交、交易记录、账户摘要写入 ClickHouse `quant_signal_history`（摘要使用 `kind=summary`）；账户和策略检查点写入 `quant_signal_checkpoints`。先保存含待投递记录的检查点，再发布记录，以稳定 ID 去重。存储失败会重试同一批记录。
 - 重启恢复已有账户和挂单；未发到 TqSim 的委托意图使用原 ID 重发，未确认撤单会再次撤销。停机期间行情只用于预热，不补造离线成交。历史转实时和重启不会人为执行一次日结；真实换日仍由 TqSim 处理。
 - TqSdk 没有公开的完整状态保存接口，因此 `tq_persistence.py` 隔离适配内部状态并严格限定 `tqsdk==3.10.2`，不修改依赖包。升级 SDK 或策略运行时前需验证/迁移检查点；不兼容状态会明确报错，不能自动重置账户。
-- 绩效直接读取 `TqSim.tqsdk_stat`；持续运行中通过天勤自身 `TqReport` 生成同口径指标，保留 `native_metrics` 和 `metrics_source`。年化/回撤/胜率采用天勤定义，胜率按平仓手数、毛盈亏统计，持平计为盈利。`profit_loss_ratio` 是天勤盈亏额比例，不伪装成内置 `profit_factor`；不支持的指标显示为空。
+- 绩效默认读取 `TqSim.tqsdk_stat`，持续运行中通过天勤自身 `TqReport` 生成同口径指标。原生胜率按平仓手数、毛盈亏统计，持平计为盈利。使用保护性平仓盈亏覆盖后，策略报表计入覆盖值，`native_metrics` 保留原生统计，`metrics_source` 标明报表来源。
 - 历史记录、账户曲线与交易图表沿用现有展示。交互式逐根重新计算目前仅支持内置引擎，天勤任务会明确提示不支持，避免用不同撮合器生成结果。此模式仅构造 TqSim，不连接实盘交易账户。
 
 ## 策略文件与版本控制
@@ -173,16 +173,23 @@ from quant_sdk import RiskLevels
 
 # 下单时绑定本次入场信号；价格使用真实交易合约的坐标。
 entry_id = ctx.orders.target_position(actual, target_quantity, reason=entry_reason)
-return RiskLevels(actual, stop_loss=stop_price,
-                  take_profit=target_price, entry_id=entry_id)
+return RiskLevels(actual, entry_id=entry_id,
+                  stop_loss=stop_price, stop_loss_note="初始止损", stop_loss_pnl=-200,
+                  take_profit=target_price, take_profit_note="达到目标", take_profit_pnl=500)
 
 # 持仓期间每次计算都可更新。省略 entry_id 会更新该标的全部在持入场批次。
-ctx.set_risk_levels(actual, stop_loss=trailing_stop, take_profit=target)
+ctx.set_risk_levels(actual, stop_loss=trailing_stop, stop_loss_note="保本止损", pnl_override=0)
 # None 表示清除对应价格；两个都为 None 则解除尚未触发的保护。
 ctx.set_risk_levels(actual, stop_loss=None, take_profit=None)
 ```
 
 `entry_id` 接受 `target_position` 返回的 ID（回测／paper 为订单 ID，monitor 为信号 ID），也可使用开仓成交的 `signal_id`；SDK 将其统一关联到入场信号。每次调用生成独立快照，包含 `id/event_id/time/symbol/entry_signal_id/stop_loss/take_profit`，保存在结果 `risk_levels`、检查点及实时回调中；相同时间的后一次计算覆盖前一次。前端按入场批次绘制动态分段范围，可以查看每次计算并定位行情。
+
+`stop_loss_note` 和 `take_profit_note` 默认为空字符串。触发时，SDK 将对应一侧的备注写入 `exit_note`，`exit_reason` 仍可用于区分止损和止盈。
+
+`pnl_override` 指定本次保护性平仓的最终净盈亏，默认 `None` 时按成交价、数量和费用计算。正数表示盈利，负数表示亏损，`0` 表示保本。若两侧金额不同，分别传 `stop_loss_pnl` 和 `take_profit_pnl`。每一侧优先使用该侧的金额，再取通用的 `pnl_override`。资金模式使用账户货币，点数模式使用点数。
+
+覆盖值是触发时该入场批次剩余仓位的合计净额，已经包含费用。分笔成交按平仓数量分摊，实际成交价和手续费仍保存在明细中。盈亏在成交时计入账户、净值曲线及统计。持仓期间的浮动盈亏继续随行情变化。更新风控时应传入仍需保留的价格、备注和覆盖值，已经触发的保护单沿用触发时的快照。
 
 成交规则随运行写入 manifest 的 `risk_model`：
 

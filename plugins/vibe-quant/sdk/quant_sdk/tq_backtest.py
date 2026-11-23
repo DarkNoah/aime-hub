@@ -121,7 +121,7 @@ def prepare(strategy, api, sim, raw, *, output_dir, stop_event, sdk_version, on_
     runner.manifest['mode'] = runner.mode
     runner.stop_event = stop_event
     runner.broker = TqBroker(runner, api, sim, quote, calendar)
-    runner.performance = lambda: performance(sim, quote)
+    runner.performance = lambda: performance(sim, quote, runner.broker.exit_accounting)
     if restored:
         from .tq_restore import restore_broker
         restore_broker(runner, restored, api)

@@ -992,6 +992,7 @@ export const en = {
   'notifications.signal.locate': 'Locate on chart',
   'notifications.signal.netPnl': 'Net P&L',
   'notifications.signal.estimatedPnl': 'Estimated P&L',
+  'notifications.signal.overridePnl': 'Strategy-defined net P&L',
   'notifications.signal.estimatedPnlHint':
     'At the signal price, including paid entry fees; excludes exit fees and slippage',
   'notifications.signal.currency': 'CNY',

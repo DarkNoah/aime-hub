@@ -7,7 +7,7 @@ import {
   Skeleton,
   Switch,
 } from '@app/plugin-ui';
-import { SlidersHorizontal } from 'lucide-react';
+import { SlidersHorizontal, Trash2 } from 'lucide-react';
 import type {
   MarketPositionMonitor,
   MarketPositionsPage,
@@ -30,6 +30,8 @@ export function MarketStrategyList({
   hiddenStrategyIds,
   onVisibleChange,
   onEditParameters,
+  onRemove,
+  busy,
 }: {
   data?: MarketPositionsPage;
   filtered?: boolean;
@@ -38,6 +40,8 @@ export function MarketStrategyList({
   hiddenStrategyIds: ReadonlySet<string>;
   onVisibleChange: (id: string, visible: boolean) => void;
   onEditParameters: (item: MarketPositionMonitor) => void;
+  onRemove: (item: MarketPositionMonitor) => void;
+  busy: boolean;
 }) {
   const openCounts = new Map<string, number>();
   for (const row of data?.open ?? [])
@@ -139,8 +143,8 @@ export function MarketStrategyList({
                     {monitor.message}
                   </p>
                 )}
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[11px] text-muted-foreground">
+                <div className="flex items-center gap-1">
+                  <p className="mr-auto text-[11px] text-muted-foreground">
                     {monitor.through == null
                       ? '尚未完成持仓计算'
                       : `计算至 ${dateTime(monitor.through)}（北京时间）`}
@@ -153,6 +157,17 @@ export function MarketStrategyList({
                     onClick={() => onEditParameters(monitor)}
                   >
                     <SlidersHorizontal className="size-3.5" /> 参数
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="shrink-0 text-xs text-destructive hover:text-destructive"
+                    aria-label={`移除 ${monitor.strategy_name} ${runVersionName(monitor)} ${displaySymbol} 策略提示`}
+                    title="移除策略提示并清除本次加载的历史记录"
+                    disabled={busy}
+                    onClick={() => onRemove(monitor)}
+                  >
+                    <Trash2 className="size-3.5" /> 移除
                   </Button>
                 </div>
               </li>

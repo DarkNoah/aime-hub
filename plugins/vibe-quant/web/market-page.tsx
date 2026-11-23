@@ -91,14 +91,15 @@ const timeText = (value?: string | null) =>
 export function MarketPage({ pluginId }: PluginPageProps) {
   const strategyVisibility = useStrategyVisibility();
   const [parameterMonitor, setParameterMonitor] = useState<NamedMonitor>();
-  const [recalculatedMonitor, setRecalculatedMonitor] = useState<string>();
+  const [positionsRevision, setPositionsRevision] = useState(0);
   const [chartTarget, setChartTarget] = useState(() =>
     readMarketChartTarget(window.location.search),
   );
   const [list, setList] = useState<WatchItem[]>([]);
-  const [selected, setSelected] = useState(
+  const [watchSymbol, setWatchSymbol] = useState(
     () => new URLSearchParams(window.location.search).get('symbol') ?? '',
   );
+  const selected = chartTarget?.symbol ?? watchSymbol;
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [orderBooks, setOrderBooks] = useState<OrderBook[]>([]);
   const [status, setStatus] = useState<SyncStatus>();
@@ -140,13 +141,14 @@ export function MarketPage({ pluginId }: PluginPageProps) {
     locateTarget();
   }, [chartTarget, identity]);
   function navigateChart(target: MarketChartTarget) {
-    setSelected(target.symbol);
+    if (list.some((entry) => entry.symbol === target.symbol))
+      setWatchSymbol(target.symbol);
     setPeriod(parseChartPeriod(String(target.duration)));
     setChartTarget(target);
   }
   function selectSymbol(symbol: string) {
     setChartTarget(null);
-    setSelected(symbol);
+    setWatchSymbol(symbol);
   }
   const hints = useStrategyHints(
     pluginId,
@@ -159,13 +161,26 @@ export function MarketPage({ pluginId }: PluginPageProps) {
   );
   const applyWatchlist = useEffectEvent((items: WatchItem[]) => {
     setList(items);
-    setSelected((current) =>
-      chartTarget || items.some((item) => item.symbol === current)
+    setWatchSymbol((current) =>
+      items.some((item) => item.symbol === current)
         ? current
         : (items[0]?.symbol ?? ''),
     );
     setListError('');
   });
+  async function removeMonitor(monitor: NamedMonitor) {
+    if (!(await hints.change(monitor, { deleted: true, enabled: false })))
+      return;
+    strategyVisibility.setVisible(monitor.attachment_id ?? monitor.id, true);
+    setChartTarget((target) =>
+      target?.monitor &&
+      (target.monitor === monitor.id ||
+        target.monitor === monitor.attachment_id)
+        ? null
+        : target,
+    );
+    setPositionsRevision((value) => value + 1);
+  }
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
@@ -498,6 +513,7 @@ export function MarketPage({ pluginId }: PluginPageProps) {
                     hints={hints}
                     onJumpToEntry={marketBars.navigate}
                     onEditParameters={setParameterMonitor}
+                    onRemove={removeMonitor}
                     replay={replay}
                   />
                 )}
@@ -547,7 +563,9 @@ export function MarketPage({ pluginId }: PluginPageProps) {
           hiddenStrategyIds={strategyVisibility.hiddenStrategyIds}
           onStrategyVisibleChange={strategyVisibility.setVisible}
           onEditParameters={setParameterMonitor}
-          changedMonitor={recalculatedMonitor}
+          onRemove={removeMonitor}
+          busy={!!hints.busy}
+          positionsRevision={positionsRevision}
           marketOverview={
             item ? (
               <div aria-label="行情概览与盘口">
@@ -620,7 +638,7 @@ export function MarketPage({ pluginId }: PluginPageProps) {
             );
             if (!next) return;
             if (next.id !== parameterMonitor.id)
-              setRecalculatedMonitor(next.id);
+              setPositionsRevision((value) => value + 1);
             setParameterMonitor(undefined);
           }}
         />
