@@ -160,6 +160,7 @@ export function RoomPanel({
             onA2aUpdated={state.updateA2aMember}
             onA2aRemoved={state.removeA2aMember}
             onAgentUpdated={state.updateAgent}
+            onAvatarSaved={state.updateAgentAvatar}
             onAgentRemoved={state.removeAgent}
             onMention={(agent) => {
               onClose(() => composer.current?.mention(agent));
@@ -194,7 +195,7 @@ export function RoomPanel({
           onClose={() => setEditor(null)}
         />
       )}
-      {editor && editor !== 'new' && (
+      {editor && editor !== 'new' && state.room.canManage && (
         <RoomAgentEditor
           key={editor.id}
           roomId={roomId}

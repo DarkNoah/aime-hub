@@ -1,4 +1,4 @@
-import { lstat, realpath } from 'node:fs/promises';
+import { lstat, mkdir, realpath } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { ThreadError } from '../threads/errors.js';
 
@@ -44,4 +44,19 @@ export function fileError(error: unknown): never {
   if (code === 'EACCES' || code === 'EPERM' || code === 'ELOOP')
     throw new ThreadError('FILE_FORBIDDEN', 403);
   throw error;
+}
+
+export async function ensureWorkspaceDirectory(root: string, path: string) {
+  validatePath(path);
+  let directory = await filePath(root, '', true);
+  for (const part of path.split('/')) {
+    directory = join(directory, part);
+    await mkdir(directory).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'EEXIST') throw error;
+    });
+    const info = await lstat(directory);
+    if (info.isSymbolicLink()) throw new ThreadError('FILE_SYMLINK', 403);
+    if (!info.isDirectory()) throw new ThreadError('FILE_NOT_FOUND', 404);
+  }
+  return directory;
 }

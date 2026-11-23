@@ -1121,6 +1121,19 @@ test(
       async () => {
         const room = await rooms.create('alice', { title: 'Fixed leader' });
         const bot = room.agents[0];
+        await rooms.addMember('alice', room.id, 'bob');
+        assert.equal(
+          await rooms.agentAvatarThread('alice', room.id, bot.id),
+          bot.threadId,
+        );
+        await assert.rejects(
+          rooms.agentAvatarThread('bob', room.id, bot.id),
+          code('FORBIDDEN'),
+        );
+        await assert.rejects(
+          rooms.agentAvatarThread('alice', project.id, bot.id),
+          code('NOT_FOUND'),
+        );
         for (const update of [
           { name: 'Renamed' },
           { enabled: false },

@@ -1,10 +1,11 @@
-import { useId, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import type {
   GroupChatAgent,
   GroupChatAgentInput,
 } from '@aime/shared/group-chats';
+import { localAgentFileReference } from '@aime/shared/agents';
 import { reasoningEfforts, type ReasoningEffort } from '@aime/shared/threads';
 import { AgentSelector } from '@/components/agent-selector';
 import { ModelSelector } from '@/components/model-selector';
@@ -30,6 +31,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { groupChatApi, groupChatErrorKey } from '../api';
+import { RoomAgentInstructions } from './room-agent-instructions';
 
 export function RoomAgentEditor({
   roomId,
@@ -69,6 +71,12 @@ export function RoomAgentEditor({
   const selected = catalog.data?.agents.find(
     (item) =>
       item.id === (form.settings.agentId ?? catalog.data?.defaultAgentId),
+  );
+  const localId =
+    !isBot && selected?.source === 'local' ? selected.id : undefined;
+  const localFile = useMemo(
+    () => (localId ? localAgentFileReference(localId) : undefined),
+    [localId],
   );
   const fixedModel = isBot ? undefined : selected?.model;
   async function save(event: React.FormEvent) {
@@ -163,6 +171,9 @@ export function RoomAgentEditor({
                     )}
                   </div>
                 </>
+              )}
+              {localFile && (
+                <RoomAgentInstructions key={localId} file={localFile} />
               )}
               <div className="space-y-2">
                 <Label htmlFor={`${id}-model`}>{t('chat.model')}</Label>

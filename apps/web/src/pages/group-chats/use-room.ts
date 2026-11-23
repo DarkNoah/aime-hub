@@ -287,6 +287,17 @@ export function useRoom(roomId: string, projectId?: string, pluginId?: string) {
       if (!signal?.aborted) merge(message);
     },
     updateAgent,
+    updateAgentAvatar: (agentId: string, url: string) => {
+      memberRevision.current += 1;
+      setRoom((current) =>
+        current?.id === roomId
+          ? {
+              ...current,
+              agentAvatarUrls: { ...current.agentAvatarUrls, [agentId]: url },
+            }
+          : current,
+      );
+    },
     updateA2aMember: (member: GroupChatA2AMember) => {
       if (
         lifecycle.current?.signal.aborted ||

@@ -262,6 +262,26 @@ export const zhCN = {
   'groupChat.a2a.neverUsed': '尚未连接',
   'groupChat.agentRemoved': 'Agent 已移除',
   'groupChat.editAgent': '配置 Agent',
+  'groupChat.editAvatar': '更换 {{name}} 的头像',
+  'groupChat.avatarDescription': '上传图片或根据提示词生成，预览满意后保存。',
+  'groupChat.avatarUpload': '上传图片',
+  'groupChat.avatarFormats': 'JPG、PNG、WebP 或 GIF，最大 10 MB',
+  'groupChat.avatarPrompt': '头像生成提示词',
+  'groupChat.avatarPromptExample': '例如，一只戴着圆框眼镜的橘猫，浅蓝色背景',
+  'groupChat.avatarGenerate': '生成预览',
+  'groupChat.avatarGenerating': '正在生成…',
+  'groupChat.avatarInvalid':
+    '无法读取这张头像，请选择有效的 JPG、PNG、WebP 或 GIF 图片。',
+  'groupChat.avatarToolDisabled':
+    '图片生成工具已停用，请联系管理员启用或上传图片。',
+  'groupChat.avatarGenerateFailed':
+    '头像生成失败，请检查图片生成模型配置后重试。',
+  'groupChat.avatarSaved': '头像已更新',
+  'groupChat.avatarSave': '保存头像',
+  'groupChat.agentInstructions': 'Agent 提示词',
+  'groupChat.editInstructions': '编辑 Agent 提示词',
+  'groupChat.instructionsHint':
+    '保存会更新 {{filename}}，所有使用这个本地 Agent 的会话都会使用新提示词。',
   'groupChat.addAgent': '添加 Agent',
   'groupChat.pickAgentsHint': '勾选要加入聊天室的 Agent，名称与配置自动沿用。',
   'groupChat.noAvailableAgents': '暂无可添加的 Agent。',

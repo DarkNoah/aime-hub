@@ -29,6 +29,7 @@ import {
 } from '../group-chats.js';
 
 const params = z.object({ roomId: threadId });
+const agentParams = params.extend({ agentId: threadId });
 const sequence = groupChatSequenceSchema;
 export const groupChatMessagesQuery = z
   .object({
@@ -163,6 +164,27 @@ export const groupChatsContract = {
       }),
     )
     .output(type<GroupChatAgent>()),
+  generateAgentAvatar: procedure
+    .route({
+      method: 'POST',
+      path: '/group-chats/{roomId}/agents/{agentId}/avatar/preview',
+      inputStructure: 'detailed',
+    })
+    .input(
+      z.object({
+        params: agentParams,
+        body: z.object({ prompt: z.string().trim().min(1).max(32000) }),
+      }),
+    )
+    .output(z.file()),
+  saveAgentAvatar: procedure
+    .route({
+      method: 'PUT',
+      path: '/group-chats/{roomId}/agents/{agentId}/avatar',
+      inputStructure: 'detailed',
+    })
+    .input(z.object({ params: agentParams, body: z.file() }))
+    .output(z.object({ url: z.string() })),
   removeAgent: procedure
     .route({
       method: 'DELETE',

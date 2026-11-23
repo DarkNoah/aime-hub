@@ -16,6 +16,32 @@ const fileInput = z.object({
 });
 
 export const localAgentsContract = {
+  getInstructions: procedure
+    .route({
+      method: 'GET',
+      path: '/local-agents/instructions',
+      inputStructure: 'detailed',
+    })
+    .input(z.object({ query: fileInput.omit({ version: true }) }))
+    .output(
+      z.object({
+        instructions: z.string(),
+        version: z.string(),
+        canManage: z.boolean(),
+      }),
+    ),
+  updateInstructions: procedure
+    .route({
+      method: 'PATCH',
+      path: '/local-agents/instructions',
+      inputStructure: 'detailed',
+    })
+    .input(
+      z.object({
+        body: fileInput.extend({ instructions: z.string().max(100_000) }),
+      }),
+    )
+    .output(type<void>()),
   list: procedure
     .route({ method: 'GET', path: '/local-agents', inputStructure: 'detailed' })
     .input(z.object({ query: localAgentScopeSchema }))

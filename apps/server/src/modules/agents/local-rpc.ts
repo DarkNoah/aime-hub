@@ -4,6 +4,20 @@ import type { LocalAgentService } from './local-service.js';
 export function localAgentRouter(service?: LocalAgentService) {
   const p = rpc.localAgents;
   return p.router({
+    getInstructions: p.getInstructions.handler(({ context, input }) =>
+      required(service).getInstructions(
+        context,
+        input.query.target,
+        input.query.filename,
+      ),
+    ),
+    updateInstructions: p.updateInstructions.handler(({ context, input }) =>
+      required(service).updateInstructions(
+        context,
+        input.body.target,
+        input.body,
+      ),
+    ),
     list: p.list.handler(({ context, input }) =>
       required(service).list(context, input.query),
     ),

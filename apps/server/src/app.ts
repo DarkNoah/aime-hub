@@ -20,6 +20,7 @@ import { OpenAPIHandler } from '@orpc/openapi/fetch';
 import type { OpenAPIReferencePlugin } from '@orpc/openapi/plugins';
 import type { Auth } from '@aime/auth';
 import { normalizeWebOrigins, type WebOrigins } from '@aime/shared';
+import { AVATAR_MAX_BYTES } from '@aime/shared/profile';
 import type { HttpEnv } from './http.js';
 import { authRoutes } from './modules/auth/routes.js';
 import { requireAdmin } from './modules/auth/require-admin.js';
@@ -173,7 +174,11 @@ export function createApp(
   if (chat?.groupChats)
     app.route('/api/a2a/rooms', groupChatA2aRoutes(chat.groupChats));
   const router = rpc.router({
-    groupChats: groupChatRouter(chat?.groupChats, chat?.threads),
+    groupChats: groupChatRouter(
+      chat?.groupChats,
+      chat?.threads,
+      tools?.service,
+    ),
     users: userRouter(chat?.users),
     knowledge: knowledgeRouter(knowledge),
     usage: usageRouter(usage?.service),
@@ -223,21 +228,31 @@ export function createApp(
     );
   app.use('/api/*', async (c, next) => {
     const path = c.req.path;
+    const avatarUpload =
+      path === '/api/rpc/groupChats/saveAgentAvatar' ||
+      (c.req.method === 'PUT' &&
+        /^\/api\/group-chats\/[^/]+\/agents\/[^/]+\/avatar$/.test(path));
     const threadRequest =
       /^\/api\/(?:threads(?:\/|$)|rpc\/(?:threads|files)\/)/.test(path);
     const projectRequest = /^\/api\/(?:projects(?:\/|$)|rpc\/projects\/)/.test(
       path,
     );
     return bodyLimit({
-      maxSize: /^\/api\/rpc\/knowledge\//.test(path)
-        ? 15 * 1024 * 1024
-        : threadRequest
-          ? 12 * 1024 * 1024
-          : projectRequest
-            ? 32 * 1024
-            : 128 * 1024,
+      maxSize: avatarUpload
+        ? AVATAR_MAX_BYTES + 64 * 1024
+        : /^\/api\/rpc\/knowledge\//.test(path)
+          ? 15 * 1024 * 1024
+          : threadRequest
+            ? 12 * 1024 * 1024
+            : projectRequest
+              ? 32 * 1024
+              : 128 * 1024,
       onError: (ctx) => {
-        const code = threadRequest ? 'MESSAGE_TOO_LARGE' : 'VALIDATION_ERROR';
+        const code = avatarUpload
+          ? 'AVATAR_TOO_LARGE'
+          : threadRequest
+            ? 'MESSAGE_TOO_LARGE'
+            : 'VALIDATION_ERROR';
         // Boundary errors must use the RPC envelope when the caller uses RPC.
         return ctx.json(
           ctx.req.path.startsWith('/api/rpc/')

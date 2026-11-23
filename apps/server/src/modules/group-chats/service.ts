@@ -837,6 +837,19 @@ export class GroupChatService {
     return this.agentInRoom(this.database.manager, roomId, memberId);
   }
 
+  async agentAvatarThread(userId: string, roomId: string, memberId: string) {
+    if (!(await this.access(userId, roomId)).canManage)
+      throw new ORPCError('FORBIDDEN');
+    const rows: { threadId: string }[] = await this.database.query(
+      `SELECT bot.thread_id AS "threadId" FROM group_chat_agents bot
+       JOIN group_chat_agents member ON member.room_id=bot.room_id
+       WHERE bot.room_id=$1 AND bot.role='bot' AND NOT bot.deleting AND member.id=$2 AND NOT member.deleting`,
+      [roomId, memberId],
+    );
+    if (!rows[0]) throw new ORPCError('NOT_FOUND');
+    return rows[0].threadId;
+  }
+
   private async wakeBot(
     manager: EntityManager,
     roomId: string,

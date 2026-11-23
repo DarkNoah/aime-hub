@@ -256,6 +256,15 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     const uiResponses = [];
     const historyCursors = [];
     const agentUpdates = [];
+    const localFile = {
+      target: { scope: 'project', projectId },
+      filename: 'research:v2.md',
+    };
+    let promptFile = {
+      version: 'v1',
+      instructions: 'Review the evidence.',
+      canManage: true,
+    };
     const memberAdds = [];
     const memberRemovals = [];
     const memberRoleUpdates = [];
@@ -372,6 +381,10 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     let failEarlier = false;
     const uploadSessions = new Map();
     const uploadedFiles = new Map();
+    const previewPng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWP4//8/AAX+Av5Y8msOAAAAAElFTkSuQmCC',
+      'base64',
+    );
     let failUpload = true;
     await page.route('**/api/threads/*/files/**', async (route) => {
       const request = route.request();
@@ -425,6 +438,18 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
         '/api/rpc/',
       )[1];
       calls.push(endpoint);
+      if (endpoint === 'groupChats/saveAgentAvatar') {
+        const form = await new Response(route.request().postDataBuffer(), {
+          headers: route.request().headers(),
+        }).formData();
+        const { params } = JSON.parse(form.get('data')).json;
+        const file = form.get('0');
+        const avatarPath = `.agents/agents/${params.agentId}.png`;
+        uploadedFiles.set(avatarPath, Buffer.from(await file.arrayBuffer()));
+        const url = `/api/threads/${botFor(params.roomId).threadId}/files/raw?${new URLSearchParams({ path: avatarPath, v: String(calls.length) })}`;
+        agentAvatarUrls[params.agentId] = url;
+        return route.fulfill({ json: { json: { url } } });
+      }
       const input = route.request().postDataJSON()?.json ?? {};
       const failure = (code, status) =>
         route.fulfill({
@@ -477,10 +502,17 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
             agents: [
               {
                 id: 'default',
-                name: '调研助手',
+                name: '默认助手',
                 description: '',
                 model: null,
                 source: 'code',
+              },
+              {
+                id: `local:project:${projectId}:research:v2`,
+                name: '调研助手',
+                description: '',
+                model: null,
+                source: 'local',
               },
             ],
           };
@@ -502,6 +534,36 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
           );
           Object.assign(result, input.body);
           break;
+        case 'localAgents/getInstructions':
+          assert.deepEqual(input.query, localFile);
+          result = promptFile;
+          break;
+        case 'localAgents/updateInstructions':
+          assert.deepEqual(input.body, {
+            ...localFile,
+            version: 'v1',
+            instructions: 'Cite the source.',
+          });
+          promptFile = {
+            ...promptFile,
+            version: 'v2',
+            instructions: input.body.instructions,
+          };
+          break;
+        case 'groupChats/generateAgentAvatar': {
+          assert.equal(input.body.prompt, '戴眼镜的橘猫');
+          const form = new FormData();
+          form.set('data', JSON.stringify({ json: {}, maps: [[]] }));
+          form.set(
+            '0',
+            new File([previewPng], 'avatar.png', { type: 'image/png' }),
+          );
+          const response = new Response(form);
+          return route.fulfill({
+            contentType: response.headers.get('content-type'),
+            body: Buffer.from(await response.arrayBuffer()),
+          });
+        }
         case 'groupChats/removeAgent':
           agentsByRoom.set(
             input.params.roomId,
@@ -1021,6 +1083,50 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     );
     assert.equal(await page.getByRole('dialog').count(), 0);
     assert.equal(await page.getByRole('complementary').count(), 1);
+    await t.test(
+      'managers preview, cancel and save uploaded or generated room avatars',
+      async () => {
+        const bot = botFor(roomId);
+        const open = roster.getByRole('button', {
+          name: '更换 Room assistant 的头像',
+        });
+        const editor = page.getByRole('dialog', {
+          name: '更换 Room assistant 的头像',
+        });
+        const save = editor.getByRole('button', { name: '保存头像' });
+        await open.click();
+        assert.equal(await save.isEnabled(), false);
+        await editor.getByLabel('头像生成提示词').fill('戴眼镜的橘猫');
+        await editor.getByRole('button', { name: '生成预览' }).click();
+        await editor.locator('img[src^="blob:"]').waitFor();
+        await editor.getByRole('button', { name: '取消' }).click();
+        assert.equal(agentAvatarUrls[bot.id], undefined);
+        for (const mode of ['upload', 'generate']) {
+          await open.click();
+          if (mode === 'upload') {
+            await editor.locator('input[type=file]').setInputFiles({
+              name: 'avatar.png',
+              mimeType: 'image/png',
+              buffer: previewPng,
+            });
+          } else {
+            await editor.getByLabel('头像生成提示词').fill('戴眼镜的橘猫');
+            await editor.getByRole('button', { name: '生成预览' }).click();
+          }
+          await editor.locator('img[src^="blob:"]').waitFor();
+          await save.click();
+          await editor.waitFor({ state: 'hidden' });
+          const avatar = `img[src="${agentAvatarUrls[bot.id]}"]`;
+          await roster.locator(avatar).waitFor();
+          await page
+            .locator('[data-chat-turn="message000000079"]')
+            .locator(avatar)
+            .waitFor();
+        }
+        uploadedFiles.delete(`.agents/agents/${bot.id}.png`);
+        delete agentAvatarUrls[bot.id];
+      },
+    );
     assert.equal(await page.locator('[data-chat-turn]').count(), 50);
     assert.equal(await input.inputValue(), '切换成员面板时保留草稿');
     assert.equal(
@@ -1044,6 +1150,12 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
     });
     assert.equal(
       await leaderEditor.getByRole('textbox', { name: '显示名称' }).count(),
+      0,
+    );
+    assert.equal(
+      await leaderEditor
+        .getByRole('button', { name: '编辑 Agent 提示词' })
+        .count(),
       0,
     );
     assert.equal(await leaderEditor.getByRole('switch').count(), 1);
@@ -1115,6 +1227,48 @@ await initializeI18n();createRoot(document.getElementById('root')).render(<Theme
       .click();
     await editor.waitFor({ state: 'hidden' });
     await roster.getByText('调研助手', { exact: true }).waitFor();
+    await t.test(
+      'edit the local Markdown prompt independently of room settings',
+      async () => {
+        const config = page.getByRole('dialog', {
+          name: '配置 Agent',
+          exact: true,
+        });
+        const prompt = page.getByRole('dialog', {
+          name: '编辑 Agent 提示词',
+          exact: true,
+        });
+        const open = config.getByRole('button', { name: '编辑 Agent 提示词' });
+        const field = prompt.getByRole('textbox', { name: 'Agent 提示词' });
+        await roster
+          .getByRole('button', { name: '配置 调研助手', exact: true })
+          .click();
+        await open.click();
+        await t.waitFor(async () =>
+          assert.equal(await field.inputValue(), 'Review the evidence.'),
+        );
+        await field.fill('Do not save this draft.');
+        await prompt.getByRole('button', { name: '取消' }).click();
+        assert.equal(promptFile.version, 'v1');
+        await open.click();
+        await t.waitFor(async () =>
+          assert.equal(await field.inputValue(), 'Review the evidence.'),
+        );
+        await field.fill('Cite the source.');
+        await prompt.getByRole('button', { name: '保存配置' }).click();
+        await prompt.waitFor({ state: 'hidden' });
+        await open.click();
+        await t.waitFor(async () =>
+          assert.equal(await field.inputValue(), 'Cite the source.'),
+        );
+        await prompt.getByRole('button', { name: '取消' }).click();
+        await config.getByRole('button', { name: '取消' }).click();
+        assert.equal(
+          agentUpdates.some((entry) => 'instructions' in entry.body),
+          false,
+        );
+      },
+    );
     await input.fill('@调');
     await page.getByRole('option', { name: /@调研助手/ }).waitFor();
     await input.press('Enter');

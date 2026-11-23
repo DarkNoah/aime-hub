@@ -1,7 +1,13 @@
 import { rpc, required } from '../../rpc/context.js';
 import type { GroupChatService } from './service.js';
 import type { ThreadService } from '../threads/service.js';
-import { getRoomAgentAvatarUrls } from './agent-avatars.js';
+import {
+  getRoomAgentAvatarUrls,
+  saveRoomAgentAvatar,
+} from './agent-avatars.js';
+import { AVATAR_MAX_BYTES } from '@aime/shared/profile';
+import { AvatarError, renderAvatar } from '../profile/avatars.js';
+import type { ToolService } from '../tools/service.js';
 
 export function groupChatRouter(
   service?: GroupChatService,
@@ -9,6 +15,7 @@ export function groupChatRouter(
     ThreadService,
     'invalidateProject' | 'refreshNavigation' | 'withWorkspaceFiles'
   >,
+  tools?: Pick<ToolService, 'generateImage'>,
 ) {
   const p = rpc.groupChats;
   const rooms = () => required(service);
@@ -80,6 +87,48 @@ export function groupChatRouter(
         input.params.agentId,
         input.body,
       ),
+    ),
+    generateAgentAvatar: p.generateAgentAvatar.handler(
+      async ({ context, input, signal }) => {
+        const { roomId, agentId } = input.params;
+        await rooms().agentAvatarThread(context.userId, roomId, agentId);
+        const bytes = await required(tools).generateImage(
+          input.body.prompt,
+          signal,
+        );
+        const preview = await renderAvatar(bytes, { signal, format: 'png' });
+        return new File([new Uint8Array(preview)], 'avatar.png', {
+          type: 'image/png',
+        });
+      },
+    ),
+    saveAgentAvatar: p.saveAgentAvatar.handler(
+      async ({ context, input, signal }) => {
+        const { roomId, agentId } = input.params;
+        if (input.body.size > AVATAR_MAX_BYTES)
+          throw new AvatarError('AVATAR_TOO_LARGE');
+        const botThreadId = await rooms().agentAvatarThread(
+          context.userId,
+          roomId,
+          agentId,
+        );
+        const bytes = Buffer.from(await input.body.arrayBuffer());
+        const image = await renderAvatar(bytes, { signal, animated: true });
+        return required(threads).withWorkspaceFiles(
+          context.userId,
+          botThreadId,
+          async (root) => {
+            await rooms().agentAvatarThread(context.userId, roomId, agentId);
+            return saveRoomAgentAvatar(
+              root,
+              botThreadId,
+              agentId,
+              image,
+              signal,
+            );
+          },
+        );
+      },
     ),
     removeAgent: p.removeAgent.handler(({ context, input }) =>
       rooms().removeAgent(

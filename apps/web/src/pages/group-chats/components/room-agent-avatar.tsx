@@ -5,18 +5,24 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 export function RoomAgentAvatar({
   name,
   image,
+  className,
   external = false,
   onMention,
 }: {
   name: string;
   image?: string;
+  className?: string;
   external?: boolean;
   onMention?: () => void;
 }) {
   const { t } = useTranslation();
   const Icon = external ? Cable : Bot;
   const avatar = (
-    <Avatar title={name} aria-label={onMention ? undefined : name}>
+    <Avatar
+      title={name}
+      aria-label={onMention ? undefined : name}
+      className={className}
+    >
       {image && <AvatarImage src={image} alt="" className="object-cover" />}
       <AvatarFallback className="bg-primary/10 text-primary">
         <Icon className="size-4" aria-hidden="true" />

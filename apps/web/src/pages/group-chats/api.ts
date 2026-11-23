@@ -100,6 +100,26 @@ export const groupChatApi = {
     api.groupChats.addAgent({ params: { roomId }, body }),
   updateAgent: (roomId: string, agentId: string, body: GroupChatAgentUpdate) =>
     api.groupChats.updateAgent({ params: { roomId, agentId }, body }),
+  generateAgentAvatar: (
+    roomId: string,
+    agentId: string,
+    prompt: string,
+    signal: AbortSignal,
+  ) =>
+    api.groupChats.generateAgentAvatar(
+      { params: { roomId, agentId }, body: { prompt } },
+      { signal },
+    ),
+  saveAgentAvatar: (
+    roomId: string,
+    agentId: string,
+    file: File,
+    signal: AbortSignal,
+  ) =>
+    api.groupChats.saveAgentAvatar(
+      { params: { roomId, agentId }, body: file },
+      { signal },
+    ),
   removeAgent: (roomId: string, agentId: string) =>
     api.groupChats.removeAgent({ params: { roomId, agentId } }),
   plans: (roomId: string, signal?: AbortSignal) =>

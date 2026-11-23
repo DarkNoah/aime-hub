@@ -7,8 +7,52 @@ import { AVATAR_MAX_BYTES, AVATAR_SIZE } from '@aime/shared/profile';
 import { withAbortSignal } from '../../lib/abort.js';
 
 export class AvatarError extends Error {
+  readonly status: number;
   constructor(public code: 'AVATAR_INVALID' | 'AVATAR_TOO_LARGE') {
     super(code);
+    this.status = code === 'AVATAR_TOO_LARGE' ? 413 : 400;
+  }
+}
+
+export async function renderAvatar(
+  input: Buffer,
+  {
+    signal,
+    animated = false,
+    format = 'webp',
+  }: {
+    signal?: AbortSignal;
+    animated?: boolean;
+    format?: 'webp' | 'png';
+  } = {},
+) {
+  signal?.throwIfAborted();
+  if (!input.length) throw new AvatarError('AVATAR_INVALID');
+  const maxPixels = 40_000_000;
+  const image = sharp(input, { limitInputPixels: maxPixels, animated });
+  try {
+    const metadata = await withAbortSignal(signal, () => image.metadata());
+    const supported =
+      ['jpeg', 'png', 'webp'].includes(metadata.format) ||
+      (animated && metadata.format === 'gif');
+    if (
+      !supported ||
+      (animated && (metadata.pages ?? 1) * AVATAR_SIZE ** 2 > maxPixels)
+    )
+      throw new AvatarError('AVATAR_INVALID');
+    const square = image
+      .autoOrient()
+      .resize(AVATAR_SIZE, AVATAR_SIZE, { fit: 'cover' });
+    const output =
+      format === 'png' ? square.png() : square.webp({ quality: 82 });
+    return await withAbortSignal(signal, () =>
+      output.timeout({ seconds: 15 }).toBuffer(),
+    );
+  } catch {
+    signal?.throwIfAborted();
+    throw new AvatarError('AVATAR_INVALID');
+  } finally {
+    image.destroy();
   }
 }
 
@@ -23,29 +67,7 @@ export class AvatarService {
     signal?.throwIfAborted();
     if (input.length > AVATAR_MAX_BYTES)
       throw new AvatarError('AVATAR_TOO_LARGE');
-    const image = sharp(input, { limitInputPixels: 40_000_000, pages: 1 });
-    let output: Buffer;
-    try {
-      const metadata = await withAbortSignal(signal, () => image.metadata());
-      if (!['jpeg', 'png', 'webp'].includes(metadata.format ?? ''))
-        throw new AvatarError('AVATAR_INVALID');
-      signal?.throwIfAborted();
-      // Re-encode raster pixels, strip metadata, and enforce square output even
-      // when callers bypass the browser cropper.
-      output = await withAbortSignal(signal, () =>
-        image
-          .autoOrient()
-          .resize(AVATAR_SIZE, AVATAR_SIZE, { fit: 'cover' })
-          .webp({ quality: 82 })
-          .timeout({ seconds: 15 })
-          .toBuffer(),
-      );
-    } catch {
-      signal?.throwIfAborted();
-      throw new AvatarError('AVATAR_INVALID');
-    } finally {
-      image.destroy();
-    }
+    const output = await renderAvatar(input, { signal });
     signal?.throwIfAborted();
     const filename = `${createHash('sha256').update(output).digest('hex')}.webp`;
     await mkdir(this.directory, { recursive: true });

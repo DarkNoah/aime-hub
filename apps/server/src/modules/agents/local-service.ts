@@ -16,6 +16,7 @@ import matter from 'gray-matter';
 import { z } from 'zod';
 import {
   localAgentNameSchema,
+  localAgentDocumentSchema,
   localAgentScopeSchema,
   type LocalAgentScope,
   type LocalAgentDocument,
@@ -175,7 +176,10 @@ export class LocalAgentService {
     const file = await open(
       join(directory, filename),
       constants.O_RDONLY | constants.O_NOFOLLOW,
-    );
+    ).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') throw new AgentError('AGENT_NOT_FOUND', 404);
+      throw error;
+    });
     try {
       if (!(await file.stat()).isFile())
         throw new AgentError('LOCAL_AGENT_PATH_UNAVAILABLE', 409);
@@ -280,6 +284,47 @@ export class LocalAgentService {
     });
   }
 
+  async getInstructions(
+    actor: Actor,
+    target: LocalAgentScope,
+    filename: string,
+  ) {
+    const access = await this.access(actor, target);
+    const directory = await this.directory(access.directory, false);
+    if (!directory) throw new AgentError('AGENT_NOT_FOUND', 404);
+    const file = await this.read(directory, filename);
+    return {
+      instructions: parseLocalAgentDocument(file.content).content,
+      version: file.version,
+      canManage: access.canManage,
+    };
+  }
+
+  async updateInstructions(
+    actor: Actor,
+    target: LocalAgentScope,
+    input: { filename: string; version: string; instructions: string },
+  ) {
+    const access = await this.access(actor, target, true);
+    if (!input.instructions.trim()) throw new AgentError('VALIDATION_ERROR');
+    await this.exclusive(access.directory, async () => {
+      const directory = await this.directory(access.directory, false);
+      if (!directory) throw new AgentError('AGENT_NOT_FOUND', 404);
+      const current = await this.readVersion(directory, input);
+      const { header } = parseLocalAgentDocument(current.content);
+      const newline = header.includes('\r\n') ? '\r\n' : '\n';
+      const content =
+        header +
+        (header.endsWith('\n') ? '' : newline) +
+        input.instructions.replace(/\r\n|\r|\n/g, newline);
+      if (
+        !localAgentDocumentSchema.safeParse({ format: 'md', content }).success
+      )
+        throw new AgentError('VALIDATION_ERROR');
+      await this.replace(directory, input.filename, content);
+    });
+  }
+
   async update(
     actor: Actor,
     target: LocalAgentScope,
@@ -316,13 +361,7 @@ export class LocalAgentService {
     directory: string,
     input: { filename: string; version: string },
   ) {
-    const current = await this.read(directory, input.filename).catch(
-      (error: NodeJS.ErrnoException) => {
-        if (error.code === 'ENOENT')
-          throw new AgentError('AGENT_NOT_FOUND', 404);
-        throw error;
-      },
-    );
+    const current = await this.read(directory, input.filename);
     if (current.version !== input.version)
       throw new AgentError('AGENT_CONFLICT', 409);
     return current;

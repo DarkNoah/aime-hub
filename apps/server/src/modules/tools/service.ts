@@ -29,9 +29,11 @@ import {
   type ResolvedSpeechModel,
 } from '../../mastra/tools/speech.js';
 import {
+  createImageGenTool,
   ImageGenerationError,
   type ResolvedImageModel,
 } from '../../mastra/tools/image_gen.js';
+import { isValidationError } from '@mastra/core/tools';
 import {
   getTools,
   parseToolConfig,
@@ -176,6 +178,28 @@ export class ToolService {
   private requireTool(id: string) {
     if (!registeredToolIds.includes(id))
       throw new ProviderError('NOT_FOUND', 404);
+  }
+
+  async generateImage(prompt: string, signal?: AbortSignal): Promise<Buffer> {
+    const tool = await this.get('image_gen');
+    if (tool.kind !== 'image_gen' || !tool.config.enabled)
+      throw new ProviderError('IMAGE_TOOL_DISABLED', 409);
+    const generator = createImageGenTool(tool.config, {
+      resolveModel: (reference) => this.imageModel(reference),
+    });
+    const result = await generator.execute!(
+      { prompt },
+      { abortSignal: signal },
+    );
+    signal?.throwIfAborted();
+    if (result && !isValidationError(result)) {
+      const image = result.content.find((part) => part.type === 'image');
+      if (result.ok && image) return Buffer.from(image.data, 'base64');
+      throw new ImageGenerationError(
+        result.content.find((part) => part.type === 'text')?.text,
+      );
+    }
+    throw new ImageGenerationError('Image generation failed.');
   }
 
   private async imageModel(

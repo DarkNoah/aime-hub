@@ -129,6 +129,23 @@ export const localAgentScopeSchema = z.discriminatedUnion('scope', [
   }),
 ]);
 export type LocalAgentScope = z.infer<typeof localAgentScopeSchema>;
+export function localAgentFileReference(id: string) {
+  const projectId = localAgentProjectId(id);
+  let target: LocalAgentScope;
+  let prefix: string;
+  if (projectId) {
+    target = { scope: 'project', projectId };
+    prefix = `local:project:${projectId}:`;
+  } else if (id.startsWith('local:global:')) {
+    target = { scope: 'global' };
+    prefix = 'local:global:';
+  } else if (id.startsWith('local:personal:')) {
+    target = { scope: 'personal' };
+    prefix = 'local:personal:';
+  } else return undefined;
+  const stem = localAgentFileIdSchema.safeParse(id.slice(prefix.length));
+  if (stem.success) return { target, filename: `${stem.data}.md` };
+}
 export const localAgentDocumentSchema = z.object({
   format: z.literal('md'),
   content: z

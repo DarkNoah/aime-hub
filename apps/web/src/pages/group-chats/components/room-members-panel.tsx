@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import {
   Cable,
+  Camera,
   MessageSquareText,
   PanelRightClose,
   Plus,
@@ -37,6 +38,7 @@ import { groupChatApi, groupChatErrorKey } from '../api';
 import { AgentStatus } from './agent-status';
 import { RoomA2aMember } from './room-a2a-member';
 import { RoomAgentAvatar } from './room-agent-avatar';
+import { RoomAgentAvatarEditor } from './room-agent-avatar-editor';
 import { RoomMemberRoleEditor } from './room-member-role-editor';
 
 export function RoomMembersPanel({
@@ -51,6 +53,7 @@ export function RoomMembersPanel({
   onA2aUpdated,
   onA2aRemoved,
   onAgentUpdated,
+  onAvatarSaved,
   onAgentRemoved,
   onMention,
   onClose,
@@ -68,6 +71,7 @@ export function RoomMembersPanel({
   onA2aUpdated: (member: GroupChatA2AMember) => void;
   onA2aRemoved: (memberId: string) => void;
   onAgentUpdated: (agent: GroupChatAgent) => void;
+  onAvatarSaved: (agentId: string, url: string) => void;
   onAgentRemoved: (agentId: string) => void;
   onMention: (agent: GroupChatAgent | GroupChatA2AMember) => void;
   onClose: () => void;
@@ -90,6 +94,8 @@ export function RoomMembersPanel({
   };
   const [opener, setOpener] = useState<HTMLElement | null>(null);
   const threadAgent = room.agents.find((agent) => agent.id === threadAgentId);
+  const [avatarAgentId, setAvatarAgentId] = useState<string | null>(null);
+  const avatarAgent = room.agents.find((agent) => agent.id === avatarAgentId);
   const [changingAgent, setChangingAgent] = useState<string | null>(null);
   const [memberToRemove, setMemberToRemove] = useState<{
     id: string;
@@ -292,6 +298,20 @@ export function RoomMembersPanel({
                             type="button"
                             variant="ghost"
                             size="icon-sm"
+                            aria-label={t('groupChat.editAvatar', {
+                              name: agent.name,
+                            })}
+                            title={t('groupChat.editAvatar', {
+                              name: agent.name,
+                            })}
+                            onClick={() => setAvatarAgentId(agent.id)}
+                          >
+                            <Camera className="size-3.5" aria-hidden="true" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
                             aria-label={t('groupChat.configureAgent', {
                               name: agent.name,
                             })}
@@ -434,6 +454,16 @@ export function RoomMembersPanel({
           </ul>
         </ScrollArea>
       </div>
+      {avatarAgent && room.canManage && (
+        <RoomAgentAvatarEditor
+          key={avatarAgent.id}
+          roomId={room.id}
+          agent={avatarAgent}
+          image={room.agentAvatarUrls?.[avatarAgent.id]}
+          onSaved={onAvatarSaved}
+          onClose={() => setAvatarAgentId(null)}
+        />
+      )}
       {roleEditor && (
         <RoomMemberRoleEditor
           roomId={room.id}

@@ -17,11 +17,17 @@ const metadataSchema = z.object({
 });
 
 export function parseLocalAgentDocument(document: string) {
-  const source = document.replace(/^\uFEFF/, '');
   // Accept YAML only: gray-matter also supports executable JS frontmatter.
-  if (!/^---[\t ]*\r?\n[\s\S]*?\r?\n---[\t ]*(?:\r?\n|$)/.test(source))
+  const header = document.match(
+    /^\uFEFF?---[\t ]*\r?\n[\s\S]*?\r?\n---[\t ]*(?:\r?\n|$)/,
+  )?.[0];
+  if (!header)
     throw new Error('Agent Markdown must start with YAML frontmatter');
-  return matter(source);
+  return {
+    header,
+    data: matter(header).data,
+    content: document.slice(header.length),
+  };
 }
 
 /** The Markdown filename is the delegation ID. */

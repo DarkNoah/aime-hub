@@ -8,6 +8,8 @@ import { SkillError } from '../modules/skills/errors.js';
 import { EnvironmentVariableError } from '../modules/environment-variables/errors.js';
 import { AgentError } from '../modules/agents/errors.js';
 import { McpError } from '../modules/mcp/errors.js';
+import { AvatarError } from '../modules/profile/avatars.js';
+import { ImageGenerationError } from '../mastra/tools/image_gen.js';
 import type { LocalApiAccess } from '../modules/auth/local-api.js';
 
 export type RpcContext = {
@@ -20,6 +22,7 @@ export type RpcContext = {
 
 export function mapRpcError(error: unknown): never {
   if (
+    error instanceof AvatarError ||
     error instanceof AgentError ||
     error instanceof McpError ||
     error instanceof ThreadError ||
@@ -30,6 +33,11 @@ export function mapRpcError(error: unknown): never {
     throw new ORPCError(error.code, {
       status: error.status,
       message: error.code,
+    });
+  if (error instanceof ImageGenerationError)
+    throw new ORPCError('IMAGE_GENERATION_FAILED', {
+      status: 502,
+      message: error.message,
     });
   if (error instanceof ORPCError) {
     if (error.code === 'BAD_REQUEST' && error.cause instanceof ValidationError)

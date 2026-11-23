@@ -281,6 +281,27 @@ export const en = {
   'groupChat.a2a.neverUsed': 'Not connected yet',
   'groupChat.agentRemoved': 'Agent removed',
   'groupChat.editAgent': 'Configure agent',
+  'groupChat.editAvatar': 'Change avatar for {{name}}',
+  'groupChat.avatarDescription':
+    'Upload an image or generate one from a prompt. Preview it before saving.',
+  'groupChat.avatarUpload': 'Upload image',
+  'groupChat.avatarFormats': 'JPG, PNG, WebP or GIF, up to 10 MB',
+  'groupChat.avatarPrompt': 'Avatar prompt',
+  'groupChat.avatarPromptExample':
+    'For example, an orange cat with round glasses against a pale blue background',
+  'groupChat.avatarGenerate': 'Generate preview',
+  'groupChat.avatarGenerating': 'Generating…',
+  'groupChat.avatarInvalid': 'Choose a readable JPG, PNG, WebP or GIF image.',
+  'groupChat.avatarToolDisabled':
+    'Image generation is disabled. Ask an administrator to enable it or upload an image.',
+  'groupChat.avatarGenerateFailed':
+    'Avatar generation failed. Check the image model configuration and try again.',
+  'groupChat.avatarSaved': 'Avatar updated',
+  'groupChat.avatarSave': 'Save avatar',
+  'groupChat.agentInstructions': 'Agent instructions',
+  'groupChat.editInstructions': 'Edit agent instructions',
+  'groupChat.instructionsHint':
+    'Saving updates {{filename}} for every chat that uses this local agent.',
   'groupChat.addAgent': 'Add agent',
   'groupChat.pickAgentsHint':
     'Select agents to add. Their names and configurations are used automatically.',
