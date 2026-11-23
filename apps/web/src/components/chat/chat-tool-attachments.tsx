@@ -56,7 +56,7 @@ export function ChatToolAttachments({
     : attachments;
   if (attachments.length === 0) return null;
 
-  const renderAttachment = (file: ToolAttachment, gallery = false) => {
+  const renderAttachment = (file: ToolAttachment) => {
     const name = file.filename || t('chat.readFile.attachment');
     const kind = file.mediaType.split('/', 1)[0];
     const previewLabel = t('files.openPreview', {
@@ -83,8 +83,10 @@ export function ChatToolAttachments({
         key={file.id}
         data={file}
         className={cn(
-          'h-auto max-w-full border bg-card',
-          gallery ? 'w-full min-w-0' : 'w-64',
+          'max-w-full border bg-card',
+          kind === 'image'
+            ? 'size-auto min-w-0 justify-self-start'
+            : 'h-auto w-64',
         )}
       >
         {kind === 'image' ? (
@@ -92,13 +94,7 @@ export function ChatToolAttachments({
             src={file.url}
             alt={name}
             referrerPolicy="no-referrer"
-            containerClassName="w-full rounded-none"
-            className={cn(
-              'w-full max-h-none rounded-none',
-              gallery
-                ? 'aspect-[4/3] h-auto bg-muted/40 object-contain'
-                : 'h-48 object-cover',
-            )}
+            className="rounded-none"
             onPreview={() => setPreviewId(file.id)}
             onOpen={canPreview ? openPreview : undefined}
           />
@@ -174,8 +170,8 @@ export function ChatToolAttachments({
             )}
             aria-label={t('imagePreview.gallery')}
           >
-            {(expanded ? images : images.slice(0, previewLimit)).map((file) =>
-              renderAttachment(file, true),
+            {(expanded ? images : images.slice(0, previewLimit)).map(
+              renderAttachment,
             )}
           </Attachments>
           {images.length > previewLimit && (
@@ -198,7 +194,7 @@ export function ChatToolAttachments({
           className="ml-0 w-full max-w-full"
           aria-label={t('chat.readFile.media')}
         >
-          {otherAttachments.map((file) => renderAttachment(file))}
+          {otherAttachments.map(renderAttachment)}
         </Attachments>
       )}
       {preview && (

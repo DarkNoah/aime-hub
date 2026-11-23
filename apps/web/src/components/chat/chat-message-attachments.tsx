@@ -52,7 +52,7 @@ export function ChatMessageAttachments({
               key={`${attachment.id}:${index}`}
               data={{ ...attachment, url }}
               title={name}
-              className="h-32 w-40 border bg-background"
+              className="size-auto min-w-0 max-w-full border bg-background"
             >
               <PreviewImage
                 src={url}
@@ -62,8 +62,7 @@ export function ChatMessageAttachments({
                     ? filesApi.raw(threadId, target.path, true, target.scope)
                     : url
                 }
-                containerClassName="size-full"
-                className="h-32 w-full rounded-none object-cover"
+                className="rounded-none"
                 onOpen={path && openFile ? () => openFile(path) : undefined}
               />
             </Attachment>

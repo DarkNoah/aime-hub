@@ -1,0 +1,756 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-21T14:08:34.000Z",
+  "title": "Aime Hub 设计规范",
+  "extensions": {
+    "colorMeta": {
+      "background": {
+        "role": "neutral",
+        "displayName": "浅色 · 页面底色",
+        "tonalRamp": [
+          "#0a0b0b",
+          "#232424",
+          "#414342",
+          "#5f6160",
+          "#828483",
+          "#a3a5a4",
+          "#c9cbca",
+          "#edefee"
+        ]
+      },
+      "foreground": {
+        "role": "neutral",
+        "displayName": "浅色 · 正文",
+        "tonalRamp": [
+          "#040e07",
+          "#1b2720",
+          "#38463e",
+          "#56655b",
+          "#78887e",
+          "#99a99f",
+          "#bfcfc5",
+          "#e3f3e9"
+        ]
+      },
+      "card": {
+        "role": "neutral",
+        "displayName": "浅色 · 内容面板",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242424",
+          "#424242",
+          "#606060",
+          "#838383",
+          "#a4a4a4",
+          "#cacaca",
+          "#eeeeee"
+        ]
+      },
+      "primary": {
+        "role": "primary",
+        "displayName": "浅色 · 主操作",
+        "tonalRamp": [
+          "#001302",
+          "#002e17",
+          "#164e34",
+          "#376d52",
+          "#5b9174",
+          "#7cb395",
+          "#a1daba",
+          "#c5fedd"
+        ]
+      },
+      "primary-foreground": {
+        "role": "primary",
+        "displayName": "浅色 · 主操作文字",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242424",
+          "#424242",
+          "#606060",
+          "#838383",
+          "#a4a4a4",
+          "#cacaca",
+          "#eeeeee"
+        ]
+      },
+      "secondary": {
+        "role": "secondary",
+        "displayName": "浅色 · 次要底色",
+        "tonalRamp": [
+          "#090c0a",
+          "#222523",
+          "#404341",
+          "#5e615f",
+          "#818481",
+          "#a2a6a3",
+          "#c8ccc9",
+          "#ecf0ed"
+        ]
+      },
+      "secondary-foreground": {
+        "role": "secondary",
+        "displayName": "浅色 · 次要操作文字",
+        "tonalRamp": [
+          "#060d08",
+          "#1d2720",
+          "#3b453e",
+          "#59635c",
+          "#7b867f",
+          "#9ca8a0",
+          "#c2cec6",
+          "#e6f2e9"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "浅色 · 弱强调背景",
+        "tonalRamp": [
+          "#0a0c0a",
+          "#222523",
+          "#414341",
+          "#5f615f",
+          "#818482",
+          "#a2a5a3",
+          "#c8cbc9",
+          "#ecefed"
+        ]
+      },
+      "muted-foreground": {
+        "role": "neutral",
+        "displayName": "浅色 · 辅助文字",
+        "tonalRamp": [
+          "#050e08",
+          "#1c2720",
+          "#3a463e",
+          "#57645c",
+          "#7a877f",
+          "#9ba9a0",
+          "#c0cfc6",
+          "#e4f3ea"
+        ]
+      },
+      "accent": {
+        "role": "neutral",
+        "displayName": "浅色 · 选中与悬停",
+        "tonalRamp": [
+          "#080d09",
+          "#202622",
+          "#3e4440",
+          "#5c625e",
+          "#7e8581",
+          "#9fa7a2",
+          "#c5cdc8",
+          "#e9f1ec"
+        ]
+      },
+      "accent-foreground": {
+        "role": "neutral",
+        "displayName": "浅色 · 选中文字",
+        "tonalRamp": [
+          "#001007",
+          "#122a1e",
+          "#30493c",
+          "#4e675a",
+          "#708a7c",
+          "#91ac9e",
+          "#b6d2c3",
+          "#daf7e7"
+        ]
+      },
+      "destructive": {
+        "role": "error",
+        "displayName": "浅色 · 危险操作",
+        "tonalRamp": [
+          "#3a0000",
+          "#600000",
+          "#89000e",
+          "#af1d2e",
+          "#da4a50",
+          "#ff6e71",
+          "#ff9595",
+          "#ffbab8"
+        ]
+      },
+      "destructive-foreground": {
+        "role": "error",
+        "displayName": "浅色 · 危险操作文字",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#242424",
+          "#424242",
+          "#606060",
+          "#838383",
+          "#a4a4a4",
+          "#cacaca",
+          "#eeeeee"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "浅色 · 分隔线",
+        "tonalRamp": [
+          "#080c0a",
+          "#212522",
+          "#3f4441",
+          "#5d625e",
+          "#7f8581",
+          "#a1a6a2",
+          "#c6ccc8",
+          "#eaf0ec"
+        ]
+      },
+      "input": {
+        "role": "neutral",
+        "displayName": "浅色 · 输入边界",
+        "tonalRamp": [
+          "#070d08",
+          "#1f2621",
+          "#3d453f",
+          "#5b635d",
+          "#7d867f",
+          "#9fa7a1",
+          "#c4cdc6",
+          "#e8f1ea"
+        ]
+      },
+      "ring": {
+        "role": "neutral",
+        "displayName": "浅色 · 键盘焦点",
+        "tonalRamp": [
+          "#001202",
+          "#002d17",
+          "#224c35",
+          "#406b52",
+          "#638f75",
+          "#84b195",
+          "#a9d8bb",
+          "#ccfcde"
+        ]
+      },
+      "sidebar": {
+        "role": "neutral",
+        "displayName": "浅色 · 主侧栏",
+        "tonalRamp": [
+          "#090c0b",
+          "#222523",
+          "#404342",
+          "#5e6160",
+          "#808482",
+          "#a2a6a4",
+          "#c8cbca",
+          "#ebefed"
+        ]
+      },
+      "feature-surface": {
+        "role": "primary",
+        "displayName": "浅色 · 工作区入口底色",
+        "tonalRamp": [
+          "#001204",
+          "#022c1b",
+          "#254c39",
+          "#436a56",
+          "#658e78",
+          "#86b099",
+          "#abd6bf",
+          "#cffbe2"
+        ]
+      },
+      "selection": {
+        "role": "neutral",
+        "displayName": "浅色 · 文字选区",
+        "tonalRamp": [
+          "#060e04",
+          "#1e271b",
+          "#3b4638",
+          "#596456",
+          "#7c8778",
+          "#9da999",
+          "#c2cfbe",
+          "#e6f3e2"
+        ]
+      },
+      "selection-foreground": {
+        "role": "neutral",
+        "displayName": "浅色 · 选区文字",
+        "tonalRamp": [
+          "#001005",
+          "#132a1c",
+          "#31493a",
+          "#4f6758",
+          "#718a7a",
+          "#92ac9b",
+          "#b7d3c0",
+          "#dbf7e4"
+        ]
+      },
+      "dark-background": {
+        "role": "neutral",
+        "displayName": "深色 · 页面底色",
+        "tonalRamp": [
+          "#080c0b",
+          "#202523",
+          "#3e4442",
+          "#5c625f",
+          "#7e8582",
+          "#a0a6a4",
+          "#c5ccc9",
+          "#e9f0ed"
+        ]
+      },
+      "dark-foreground": {
+        "role": "neutral",
+        "displayName": "深色 · 正文",
+        "tonalRamp": [
+          "#070d09",
+          "#1f2622",
+          "#3d4440",
+          "#5b635e",
+          "#7d8680",
+          "#9fa7a1",
+          "#c4cdc7",
+          "#e8f1eb"
+        ]
+      },
+      "dark-card": {
+        "role": "neutral",
+        "displayName": "深色 · 内容面板",
+        "tonalRamp": [
+          "#060d0a",
+          "#1e2622",
+          "#3c4540",
+          "#5a635e",
+          "#7c8681",
+          "#9da7a2",
+          "#c3cdc8",
+          "#e7f2ec"
+        ]
+      },
+      "dark-primary": {
+        "role": "primary",
+        "displayName": "深色 · 主操作",
+        "tonalRamp": [
+          "#001200",
+          "#002d14",
+          "#214d31",
+          "#406c4f",
+          "#628f71",
+          "#83b291",
+          "#a9d8b7",
+          "#ccfdda"
+        ]
+      },
+      "dark-primary-foreground": {
+        "role": "primary",
+        "displayName": "深色 · 主操作文字",
+        "tonalRamp": [
+          "#020f06",
+          "#17291d",
+          "#35473b",
+          "#536659",
+          "#75897b",
+          "#96ab9c",
+          "#bbd1c2",
+          "#dff5e6"
+        ]
+      },
+      "dark-secondary": {
+        "role": "secondary",
+        "displayName": "深色 · 次要底色",
+        "tonalRamp": [
+          "#020f07",
+          "#19281f",
+          "#36473c",
+          "#54655a",
+          "#76887d",
+          "#97aa9e",
+          "#bdd0c3",
+          "#e0f4e7"
+        ]
+      },
+      "dark-secondary-foreground": {
+        "role": "secondary",
+        "displayName": "深色 · 次要操作文字",
+        "tonalRamp": [
+          "#050d08",
+          "#1d2720",
+          "#3b453e",
+          "#58645c",
+          "#7b877f",
+          "#9ca8a0",
+          "#c2cec5",
+          "#e5f2e9"
+        ]
+      },
+      "dark-muted": {
+        "role": "neutral",
+        "displayName": "深色 · 弱强调背景",
+        "tonalRamp": [
+          "#030e07",
+          "#1a281f",
+          "#38473d",
+          "#55655b",
+          "#78887d",
+          "#99aa9e",
+          "#bed0c4",
+          "#e2f4e8"
+        ]
+      },
+      "dark-muted-foreground": {
+        "role": "neutral",
+        "displayName": "深色 · 辅助文字",
+        "tonalRamp": [
+          "#030e06",
+          "#1a281e",
+          "#37473c",
+          "#55655a",
+          "#77887c",
+          "#98aa9d",
+          "#bed0c3",
+          "#e1f4e6"
+        ]
+      },
+      "dark-accent": {
+        "role": "neutral",
+        "displayName": "深色 · 选中与悬停",
+        "tonalRamp": [
+          "#010f05",
+          "#16291c",
+          "#34483a",
+          "#516757",
+          "#738a7a",
+          "#94ab9b",
+          "#bad2c0",
+          "#ddf6e4"
+        ]
+      },
+      "dark-accent-foreground": {
+        "role": "neutral",
+        "displayName": "深色 · 选中文字",
+        "tonalRamp": [
+          "#050e08",
+          "#1c2720",
+          "#3a463e",
+          "#58645b",
+          "#7a877e",
+          "#9ba89f",
+          "#c1cfc5",
+          "#e5f3e9"
+        ]
+      },
+      "dark-destructive": {
+        "role": "error",
+        "displayName": "深色 · 危险操作",
+        "tonalRamp": [
+          "#2e0001",
+          "#510013",
+          "#771830",
+          "#9b3b4d",
+          "#c35f6f",
+          "#e98090",
+          "#ffa6b5",
+          "#ffcad8"
+        ]
+      },
+      "dark-destructive-foreground": {
+        "role": "error",
+        "displayName": "深色 · 危险操作文字",
+        "tonalRamp": [
+          "#1c0207",
+          "#39181f",
+          "#5a363d",
+          "#7b545a",
+          "#a0767d",
+          "#c3979e",
+          "#eabdc4",
+          "#ffe1e7"
+        ]
+      },
+      "dark-border": {
+        "role": "neutral",
+        "displayName": "深色 · 分隔线",
+        "tonalRamp": [
+          "#040e08",
+          "#1b2721",
+          "#39463f",
+          "#56645d",
+          "#79877f",
+          "#9aa9a0",
+          "#bfcfc6",
+          "#e3f3ea"
+        ]
+      },
+      "dark-input": {
+        "role": "neutral",
+        "displayName": "深色 · 输入边界",
+        "tonalRamp": [
+          "#000f05",
+          "#15291c",
+          "#33483a",
+          "#506757",
+          "#738a7a",
+          "#93ac9b",
+          "#b9d2c0",
+          "#dcf6e4"
+        ]
+      },
+      "dark-ring": {
+        "role": "neutral",
+        "displayName": "深色 · 键盘焦点",
+        "tonalRamp": [
+          "#001200",
+          "#002d14",
+          "#214d31",
+          "#406c4f",
+          "#628f71",
+          "#83b291",
+          "#a9d8b7",
+          "#ccfdda"
+        ]
+      },
+      "dark-sidebar": {
+        "role": "neutral",
+        "displayName": "深色 · 主侧栏",
+        "tonalRamp": [
+          "#070d09",
+          "#1f2622",
+          "#3d4540",
+          "#5a635e",
+          "#7d8680",
+          "#9ea7a2",
+          "#c4cdc8",
+          "#e8f1eb"
+        ]
+      },
+      "dark-feature-surface": {
+        "role": "primary",
+        "displayName": "深色 · 工作区入口底色",
+        "tonalRamp": [
+          "#001104",
+          "#062c1a",
+          "#274b38",
+          "#456a56",
+          "#688d78",
+          "#88af99",
+          "#aed6be",
+          "#d1fae2"
+        ]
+      },
+      "dark-selection": {
+        "role": "neutral",
+        "displayName": "深色 · 文字选区",
+        "tonalRamp": [
+          "#001101",
+          "#082c16",
+          "#294b33",
+          "#476a51",
+          "#698e73",
+          "#8ab093",
+          "#afd6b9",
+          "#d2fadc"
+        ]
+      },
+      "dark-selection-foreground": {
+        "role": "neutral",
+        "displayName": "深色 · 选区文字",
+        "tonalRamp": [
+          "#080d09",
+          "#202621",
+          "#3e4440",
+          "#5c625d",
+          "#7e8580",
+          "#9fa7a1",
+          "#c5cdc7",
+          "#e9f1eb"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "页面标题",
+        "purpose": "项目名称和设置页面标题。"
+      },
+      "title": {
+        "displayName": "对话标题",
+        "purpose": "列表行的主要识别信息。"
+      },
+      "body": {
+        "displayName": "基础正文",
+        "purpose": "页面环境的默认字号。"
+      },
+      "description": {
+        "displayName": "说明",
+        "purpose": "页头与导航说明。"
+      },
+      "label": {
+        "displayName": "字段标签",
+        "purpose": "表单控件的名称。"
+      },
+      "caption": {
+        "displayName": "辅助信息",
+        "purpose": "对话更新时间等次要信息。"
+      }
+    },
+    "shadows": [
+      {
+        "name": "shadow-xs",
+        "value": "0 1px 2px 0 rgb(0 0 0 / 0.05)",
+        "purpose": "输入框与描边按钮的轻微投影。"
+      },
+      {
+        "name": "shadow-lg",
+        "value": "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
+        "purpose": "Dialog 与页面的层次。"
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0.22, 1, 0.36, 1)",
+        "purpose": "导航交互和弹层开合。"
+      },
+      {
+        "name": "navigation",
+        "value": "180ms",
+        "purpose": "导航行悬停与焦点变化。"
+      },
+      {
+        "name": "overlay-enter",
+        "value": "200ms",
+        "purpose": "打开弹层。"
+      },
+      {
+        "name": "overlay-exit",
+        "value": "150ms",
+        "purpose": "关闭弹层。"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "主按钮",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "创建对话与提交表单。",
+      "html": "<button type=\"button\" class=\"ds-button-primary\">新建对话</button>",
+      "css": ".ds-button-primary { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; height: 36px; padding: 8px 16px; border-radius: 8px; border: 0; background: var(--primary, #2d6348); color: var(--primary-foreground, #ffffff); font: 500 14px/20px var(--font-sans, Inter, 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif); cursor: pointer; transition: color 150ms ease-out, background-color 150ms ease-out, transform 150ms ease-out; }\n.ds-button-primary:hover { background: color-mix(in oklab, var(--primary, #2d6348) 90%, transparent); }\n.ds-button-primary:focus-visible { outline: none; border-color: var(--ring, #416c53); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring, #416c53) 50%, transparent); }\n.ds-button-primary:active { transform: scale(0.97); } .ds-button-primary:disabled { opacity: 0.5; pointer-events: none; }\n@media (prefers-reduced-motion: reduce) { .ds-button-primary { transition: none; } .ds-button-primary:active { transform: none; } }"
+    },
+    {
+      "name": "次按钮",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "同一操作组中的次要动作。",
+      "html": "<button type=\"button\" class=\"ds-button-secondary\">查看详情</button>",
+      "css": ".ds-button-secondary { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; height: 36px; padding: 8px 16px; border-radius: 8px; border: 0; background: var(--secondary, #eef2ef); color: var(--secondary-foreground, #3f4942); font: 500 14px/20px var(--font-sans, Inter, 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif); cursor: pointer; transition: color 150ms ease-out, background-color 150ms ease-out, transform 150ms ease-out; }\n.ds-button-secondary:hover { background: color-mix(in oklab, var(--secondary, #eef2ef) 80%, transparent); }\n.ds-button-secondary:focus-visible { outline: none; border-color: var(--ring, #416c53); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring, #416c53) 50%, transparent); }\n.ds-button-secondary:active { transform: scale(0.97); } .ds-button-secondary:disabled { opacity: 0.5; pointer-events: none; }\n@media (prefers-reduced-motion: reduce) { .ds-button-secondary { transition: none; } .ds-button-secondary:active { transform: none; } }"
+    },
+    {
+      "name": "描边按钮",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "项目页并列的成员与设置入口。",
+      "html": "<button type=\"button\" class=\"ds-button-outline\">管理成员</button>",
+      "css": ".ds-button-outline { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; height: 36px; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border, #e0e6e2); box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); background: var(--background, #f7f9f8); color: var(--foreground, #202d25); font: 500 14px/20px var(--font-sans, Inter, 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif); cursor: pointer; transition: color 150ms ease-out, background-color 150ms ease-out, transform 150ms ease-out; }\n.ds-button-outline:hover { background: var(--accent, #e6eee9); color: var(--accent-foreground, #263e32); }\n.ds-button-outline:focus-visible { outline: none; border-color: var(--ring, #416c53); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring, #416c53) 50%, transparent); }\n.ds-button-outline:active { transform: scale(0.97); } .ds-button-outline:disabled { opacity: 0.5; pointer-events: none; }\n:host-context(.dark) .ds-button-outline { background: color-mix(in oklab, var(--input, #d4ddd6) 30%, transparent); border-color: var(--input, #d4ddd6); } :host-context(.dark) .ds-button-outline:hover { background: color-mix(in oklab, var(--input, #d4ddd6) 50%, transparent); }\n@media (prefers-reduced-motion: reduce) { .ds-button-outline { transition: none; } .ds-button-outline:active { transform: none; } }"
+    },
+    {
+      "name": "弱强调按钮",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "列表中的辅助操作。",
+      "html": "<button type=\"button\" class=\"ds-button-ghost\">更多操作</button>",
+      "css": ".ds-button-ghost { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; height: 36px; padding: 8px 16px; border-radius: 8px; border: 0; background: transparent; color: var(--foreground, #202d25); font: 500 14px/20px var(--font-sans, Inter, 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif); cursor: pointer; transition: color 150ms ease-out, background-color 150ms ease-out, transform 150ms ease-out; }\n.ds-button-ghost:hover { background: var(--accent, #e6eee9); color: var(--accent-foreground, #263e32); }\n.ds-button-ghost:focus-visible { outline: none; border-color: var(--ring, #416c53); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring, #416c53) 50%, transparent); }\n.ds-button-ghost:active { transform: scale(0.97); } .ds-button-ghost:disabled { opacity: 0.5; pointer-events: none; }\n:host-context(.dark) .ds-button-ghost:hover { background: color-mix(in oklab, var(--accent, #e6eee9) 50%, transparent); }\n@media (prefers-reduced-motion: reduce) { .ds-button-ghost { transition: none; } .ds-button-ghost:active { transform: none; } }"
+    },
+    {
+      "name": "危险操作",
+      "kind": "button",
+      "refersTo": "button-destructive",
+      "description": "确认移除成员等危险操作。",
+      "html": "<button type=\"button\" class=\"ds-button-destructive\">移除成员</button>",
+      "css": ".ds-button-destructive { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; height: 36px; padding: 8px 16px; border-radius: 8px; border: 0; background: var(--destructive, #b42332); color: var(--destructive-foreground, #ffffff); font: 500 14px/20px var(--font-sans, Inter, 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif); cursor: pointer; transition: color 150ms ease-out, background-color 150ms ease-out, transform 150ms ease-out; }\n.ds-button-destructive:hover { background: color-mix(in oklab, var(--destructive, #b42332) 90%, transparent); }\n.ds-button-destructive:focus-visible { outline: none; border-color: var(--ring, #416c53); box-shadow: 0 0 0 3px color-mix(in oklab, var(--destructive, #b42332) 20%, transparent); }\n.ds-button-destructive:active { transform: scale(0.97); } .ds-button-destructive:disabled { opacity: 0.5; pointer-events: none; }\n@media (prefers-reduced-motion: reduce) { .ds-button-destructive { transition: none; } .ds-button-destructive:active { transform: none; } }"
+    },
+    {
+      "name": "文字按钮",
+      "kind": "button",
+      "refersTo": "button-link",
+      "description": "行内导航和补充入口。",
+      "html": "<button type=\"button\" class=\"ds-button-link\">查看项目</button>",
+      "css": ".ds-button-link { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; height: 36px; padding: 8px 16px; border-radius: 8px; border: 0; background: transparent; color: var(--primary, #2d6348); font: 500 14px/20px var(--font-sans, Inter, 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif); cursor: pointer; transition: color 150ms ease-out, background-color 150ms ease-out, transform 150ms ease-out; }\n.ds-button-link:hover { text-decoration: underline; text-underline-offset: 4px; }\n.ds-button-link:focus-visible { outline: none; border-color: var(--ring, #416c53); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring, #416c53) 50%, transparent); }\n.ds-button-link:active { transform: scale(0.97); } .ds-button-link:disabled { opacity: 0.5; pointer-events: none; }\n@media (prefers-reduced-motion: reduce) { .ds-button-link { transition: none; } .ds-button-link:active { transform: none; } }"
+    },
+    {
+      "name": "项目名称输入框",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "用于编辑名称等单行文本。",
+      "html": "<input class=\"ds-input\" aria-label=\"项目名称\" placeholder=\"输入项目名称\">",
+      "css": ".ds-input { box-sizing: border-box; width: 100%; min-width: 0; height: 36px; border: 1px solid var(--input, #d4ddd6); border-radius: 8px; padding: 4px 12px; background: transparent; color: var(--foreground, #202d25); font: 400 16px/24px var(--font-sans, Inter, 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif); box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); }\n@media(min-width: 768px) { .ds-input { font-size: 14px; line-height: 20px; } }\n:host-context(.dark) .ds-input { background: color-mix(in oklab, var(--input, #d4ddd6) 30%, transparent); }\n.ds-input::placeholder { color: var(--muted-foreground, #5e6b63); }\n.ds-input:focus-visible { outline: none; border-color: var(--ring, #416c53); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring, #416c53) 50%, transparent); }\n.ds-input[aria-invalid=\"true\"] { border-color: var(--destructive, #b42332); } .ds-input:disabled { opacity: 0.5; pointer-events: none; }"
+    },
+    {
+      "name": "当前导航项",
+      "kind": "nav",
+      "refersTo": "nav-active",
+      "description": "顶层侧栏中当前页面的样式。",
+      "html": "<a class=\"ds-nav\" href=\"#workspace\" aria-current=\"page\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z\"/></svg>工作空间</a>",
+      "css": ".ds-nav { display: flex; align-items: center; height: 36px; gap: 12px; padding: 0 12px; border-radius: 10px; text-decoration: none; background: var(--accent, #e6eee9); color: var(--primary, #2d6348); font: 600 14px/20px var(--font-sans, Inter, 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif); } .ds-nav:focus-visible { outline: 2px solid var(--ring, #416c53); } .ds-nav svg { transition: transform 180ms var(--ease-out, ease-out); } .ds-nav:hover svg { transform: translateY(-1px); } @media (prefers-reduced-motion: reduce) { .ds-nav svg { transition: none; } .ds-nav:hover svg { transform: none; } }"
+    },
+    {
+      "name": "成员角色徽章",
+      "kind": "chip",
+      "refersTo": "badge-secondary",
+      "description": "成员列表中只读的角色名称。",
+      "html": "<span class=\"ds-role\">成员</span>",
+      "css": ".ds-role { display: inline-flex; align-items: center; width: fit-content; white-space: nowrap; padding: 2px 8px; border: 1px solid transparent; border-radius: 9999px; background: var(--secondary, #eef2ef); color: var(--secondary-foreground, #3f4942); font: 500 12px/16px var(--font-sans, Inter, 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif); }"
+    },
+    {
+      "name": "内容卡片",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "标题与说明共用的平面容器。",
+      "html": "<section class=\"ds-card\"><header><h3>项目设置</h3><p>管理项目名称与协作设置。</p></header></section>",
+      "css": ".ds-card { display: flex; flex-direction: column; gap: 24px; padding: 24px 0; border: 1px solid var(--border, #e0e6e2); border-radius: 14px; background: var(--card, #ffffff); color: var(--foreground, #202d25); font-family: var(--font-sans, Inter, 'PingFang SC', 'Microsoft YaHei', ui-sans-serif, system-ui, sans-serif); } .ds-card header { display: grid; gap: 8px; padding: 0 24px; } .ds-card h3 { margin: 0; font-size: 16px; line-height: 1; font-weight: 600; } .ds-card p { margin: 0; color: var(--muted-foreground, #5e6b63); font-size: 14px; line-height: 20px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "项目协作台",
+    "overview": "成员从项目里的对话标题和更新时间找到上次讨论，再打开共享文件核对内容。首屏把空间留给项目名称、对话和常用操作。成员管理放在侧面板里，关闭后仍能看见原来的项目列表。\n\n同一套界面也用于个人聊天和管理后台。并排比较多条记录时，用对齐、分隔线和简短标签组织信息。在窄屏上让导航收进抽屉，让项目名称、正文和操作保有足够空间。",
+    "keyCharacteristics": [
+      "选中的导航项同时改变底色、文字颜色和字重。",
+      "项目对话行将标题与更新时间放在一起，活动状态和管理操作单独对齐。",
+      "明暗主题按同一组语义角色配色，主操作、输入焦点和错误都能区分。"
+    ],
+    "rules": [
+      {
+        "name": "The Paired Color Rule",
+        "body": "同时使用相应的背景与前景角色。深色主题会替换两者，主按钮上的文字也随之变深。",
+        "section": "colors"
+      },
+      {
+        "name": "The Overlay Rule",
+        "body": "让阴影只承担层级提示。连续的对话行使用分隔线，编辑弹窗通过遮罩和投影与原页面分开。",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "沿用项目的共享模型选择器、PasswordInput 和 ScrollArea，让跨页面的交互一致。",
+      "保存单条记录后就地更新该行，用 Sonner 提示结果，保留页码、滚动位置和输入上下文。",
+      "在空列表给出适合当前权限的下一步，在加载、失败和无权限时分别说明状态。"
+    ],
+    "donts": [
+      "避免用虚构统计、示例项目或模拟聊天填充页面。",
+      "避免把尚未实现的功能画成可点击入口。需要展示时明确标注待开放。",
+      "避免装饰抢占管理界面的内容空间，例如给每条对话单独包一层投影卡片。"
+    ]
+  }
+}

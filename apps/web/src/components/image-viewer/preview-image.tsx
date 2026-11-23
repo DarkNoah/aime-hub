@@ -62,8 +62,8 @@ function PreviewImageContent({
       <Container
         data-image-preview
         className={cn(
-          'relative mx-auto w-fit max-w-full',
-          inline && 'inline-block align-middle',
+          'relative mx-auto grid w-fit max-w-full grid-rows-[minmax(2rem,1fr)_auto]',
+          inline && 'inline-grid align-middle',
           containerClassName,
         )}
       >
@@ -76,7 +76,7 @@ function PreviewImageContent({
           onClick={preview}
           className={cn(
             'group relative mx-auto block max-w-full cursor-zoom-in rounded outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-            'w-full disabled:cursor-default',
+            'col-start-1 row-span-2 row-start-1 w-full self-start disabled:cursor-default',
           )}
         >
           <img
@@ -103,12 +103,12 @@ function PreviewImageContent({
           />
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-16 rounded-b-[inherit] bg-linear-to-t from-black/75 via-black/55 to-transparent"
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-16 rounded-b-[inherit] bg-linear-to-t from-black/75 via-black/55 to-transparent in-data-[slot=message]:hidden"
           />
         </button>
         <span
           data-image-actions
-          className="absolute right-2 bottom-2 flex max-w-[calc(100%-1rem)] flex-wrap items-center justify-end gap-0.5"
+          className="relative col-start-1 row-start-2 mx-2 mb-2 flex flex-wrap items-center justify-end gap-0.5 justify-self-end in-data-[slot=message]:[&_svg]:drop-shadow-[0_1px_2px_#000]"
         >
           {onOpen && (
             <Button

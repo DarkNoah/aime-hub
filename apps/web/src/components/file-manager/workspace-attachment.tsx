@@ -9,6 +9,7 @@ import { AudioClip } from '@/components/audio/audio-clip';
 import { PreviewImage } from '@/components/image-viewer/preview-image';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 import { fileErrorKey, filesApi } from './api';
 import { useWorkspaceFile } from './context';
 
@@ -94,7 +95,12 @@ function WorkspaceAttachmentContent({
   return (
     <div
       ref={container}
-      className="w-full min-w-0 max-w-md group-[.is-user]:ml-auto"
+      className={cn(
+        'min-w-0 group-[.is-user]:ml-auto',
+        kind === 'image' && url && !mediaFailed
+          ? 'w-fit max-w-full'
+          : 'w-full max-w-md',
+      )}
       data-workspace-attachment={file.path}
     >
       {kind === 'audio' && url ? (
@@ -115,8 +121,7 @@ function WorkspaceAttachmentContent({
                   src={url}
                   alt={file.name}
                   downloadUrl={downloadUrl}
-                  containerClassName="w-full"
-                  className="max-h-80 rounded-none"
+                  className="rounded-none"
                   onError={() => setMediaFailed(true)}
                   onOpen={openFile ? () => openFile(file.path) : undefined}
                 />

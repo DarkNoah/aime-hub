@@ -37,7 +37,7 @@ export function MarkdownImage({
         alt={alt}
         title={title}
         referrerPolicy="no-referrer"
-        containerClassName="mx-0 my-2 block"
+        containerClassName="mx-0 my-2 grid"
         className={cn(imageClassName, className)}
       />
     );
