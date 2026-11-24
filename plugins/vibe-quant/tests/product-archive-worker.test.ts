@@ -8,12 +8,12 @@ import type { ProductSyncTarget } from '../product-sync-types.js';
 import type { QuantConfig } from '../server/config.js';
 import { ProductArchiveWorker } from '../server/product-sync/worker.js';
 
-async function fixture(t: TestContext, script: string) {
+async function fixture(t: TestContext, script: string, historyBars = 1000) {
   const cwd = await mkdtemp(join(tmpdir(), 'product-archive-'));
   const path = join(cwd, 'provider.py');
   await writeFile(path, script);
   const events = new EventEmitter();
-  const config = { engine: 'tqsdk', historyBars: 1000 } as QuantConfig;
+  const config = { engine: 'tqsdk', historyBars } as QuantConfig;
   const targets: ProductSyncTarget[] = ['A', 'B'].map((symbol) => ({
     symbol,
     latest: {},
@@ -31,7 +31,7 @@ async function fixture(t: TestContext, script: string) {
     },
     {
       due: async (_engine, limit) => {
-        assert.equal(limit, 10);
+        events.emit('limit', limit);
         return targets;
       },
       record: async (_engine, owner, results) => {
@@ -66,7 +66,9 @@ sys.exit(1)
     );
     const written = once(events, 'write');
     const recorded = once(events, 'record');
+    const batchLimit = once(events, 'limit');
     worker.start('python3');
+    assert.equal((await batchLimit)[0], 12);
     assert.equal((await written)[0][0].symbol, 'A');
     const [results] = await recorded;
     assert.deepEqual(
@@ -86,16 +88,19 @@ test(
       `
 import sys, time
 sys.stdin.readline()
-print('{"type":"bars","bars":[{"symbol":"A"}]}', flush=True)
+print('{"type":"bars","bars":[{"symbol":"A","duration":60,"time":60}]}', flush=True)
 time.sleep(120)
 `,
+      8000,
     );
     let checkpoints = 0;
     events.on('record', () => {
       checkpoints++;
     });
     const written = once(events, 'write');
+    const batchLimit = once(events, 'limit');
     worker.start('python3');
+    assert.equal((await batchLimit)[0], 8);
     await written;
     await worker.stop();
     assert.equal(checkpoints, 0);

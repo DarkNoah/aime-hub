@@ -55,7 +55,6 @@ function ContractChoice({
   const last = item.lastBarAt ? minuteTime(item.lastBarAt) : '';
   const first = item.firstBarAt ? minuteTime(item.firstBarAt) : '';
   let status = item.ready ? '已就绪' : active ? '待入库' : '';
-  if (item.outcome === 'partial') status = '部分周期已归档';
   if (item.outcome === 'empty')
     status = active ? '暂无 K 线 · 待重试' : '暂无 K 线';
   if (item.outcome === 'error')
@@ -259,11 +258,13 @@ export function ProductSyncPicker({ pluginId }: { pluginId: string }) {
               <ArrowLeft className="size-4" />
             </Button>
             <span className="font-mono text-sm font-medium">{productKey}</span>
-            <span className="text-xs text-muted-foreground">选择单张合约</span>
+            <span className="text-xs text-muted-foreground">
+              同步所选合约的 1 分钟 K 线
+            </span>
           </div>
         ) : (
           <p className="text-xs leading-5 text-muted-foreground">
-            勾选品种可同步全部挂牌合约，点开品种可单独选合约。
+            勾选品种可同步全部挂牌合约的 1 分钟 K 线，展开可单独选择合约。
           </p>
         )}
         <div className="relative">

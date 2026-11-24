@@ -153,11 +153,37 @@ test(
 
     const writer = 'fixture-writer';
     assert.equal(await state.acquireLease('tqsdk', writer), true);
+    // The previous six-period collector could finish some periods without a minute bar.
+    const progress = store.table('quant_product_sync_progress');
+    await store.request(
+      `INSERT INTO ${progress} VALUES
+         ('tqsdk', {put:String}, {'60':180,'300':300}, 60, 180, 'partial', 0, 1),
+         ('tqsdk', 'SHFE.cu2703', {'300':300}, 0, 0, 'partial', 0, 1)`,
+      { put: put.symbol },
+    );
+    const targets = await store.due('tqsdk', 1000);
+    assert.deepEqual(targets.find((t) => t.symbol === put.symbol)?.latest, {
+      '60': 180,
+    });
+    assert.deepEqual(
+      targets.find((t) => t.symbol === 'SHFE.cu2703')?.latest,
+      {},
+    );
+    assert.equal((await store.overview('tqsdk', 'bob')).ready, 1);
+    const [withMinutes] = (
+      await store.contracts('tqsdk', 'alice', 'CFFEX.MO', put.symbol)
+    ).items;
+    assert.equal(withMinutes.outcome, 'ready');
+    const [withoutMinutes] = (
+      await store.contracts('tqsdk', 'bob', 'SHFE.CU', 'SHFE.cu2703')
+    ).items;
+    assert.equal(withoutMinutes.ready, false);
+    assert.equal(withoutMinutes.outcome, undefined);
     const result = {
       symbol: put.symbol,
-      latest: { '60': 180, '300': 300 },
-      firstBarAt: 60,
-      lastBarAt: 300,
+      latest: { '60': 240 },
+      firstBarAt: 240,
+      lastBarAt: 240,
       outcome: 'ready' as const,
     };
     await assert.rejects(
@@ -179,12 +205,13 @@ test(
       firstBarAt: number;
       lastBarAt: number;
     }>(
-      `SELECT latest, firstBarAt,lastBarAt FROM ${store.table('quant_product_sync_progress')} FINAL`,
+      `SELECT latest, firstBarAt, lastBarAt FROM ${progress} FINAL WHERE symbol = {put:String}`,
+      { put: put.symbol },
     );
     assert.deepEqual(checkpoint, {
-      latest: { '60': 180, '300': 300 },
+      latest: { '60': 240, '300': 300 },
       firstBarAt: 60,
-      lastBarAt: 300,
+      lastBarAt: 240,
     });
     assert.equal(
       (await store.due('tqsdk', 1000)).some((row) => row.symbol === put.symbol),
@@ -201,7 +228,7 @@ test(
     assert.equal(expired.expired, true);
     assert.equal(expired.ready, true);
     assert.equal(expired.firstBarAt, 60);
-    assert.equal(expired.lastBarAt, 300);
+    assert.equal(expired.lastBarAt, 240);
     assert.equal(expired.outcome, 'error');
     assert.equal(
       await store.setSelected('tqsdk', 'alice', put.symbol, true),

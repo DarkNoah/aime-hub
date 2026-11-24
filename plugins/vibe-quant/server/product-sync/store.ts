@@ -166,7 +166,8 @@ export class ProductSyncStore extends ClickHouseClient {
       `SELECT c.symbol AS symbol, c.name AS name, c.expired AS expired,
          toBool(c.symbol IN (SELECT target FROM ${this.selections()} FINAL WHERE engine = {engine:String}
            AND userId = {userId:String} AND productKey = {productKey:String} AND isContract AND selected)) AS selected,
-         toBool(p.lastBarAt > 0) AS ready, p.firstBarAt AS firstBarAt, p.lastBarAt AS lastBarAt, p.outcome AS outcome
+         toBool(p.lastBarAt > 0) AS ready, p.firstBarAt AS firstBarAt, p.lastBarAt AS lastBarAt,
+         multiIf(p.outcome != 'partial', p.outcome, p.lastBarAt > 0, 'ready', '') AS outcome
        FROM (${this.catalog()}) AS c
        LEFT JOIN (SELECT symbol, firstBarAt, lastBarAt, outcome FROM ${this.progress()} FINAL
          WHERE engine = {engine:String}) AS p ON p.symbol = c.symbol
@@ -221,7 +222,7 @@ export class ProductSyncStore extends ClickHouseClient {
       WHERE engine = {engine:String} AND selected`;
     if (!(await this.rows(`${selected} LIMIT 1`, { engine })).length) return [];
     return this.rows<ProductSyncTarget>(
-      `SELECT c.symbol AS symbol, p.latest AS latest
+      `SELECT c.symbol AS symbol, mapFilter((k, v) -> k = '60', p.latest) AS latest
        FROM (SELECT symbol FROM (${this.catalog()}) WHERE NOT expired
          AND (symbol IN (${selected} AND isContract) OR productKey IN (${selected} AND NOT isContract))) AS c
        LEFT JOIN (SELECT symbol, latest, nextCheckAt FROM ${this.progress()} FINAL

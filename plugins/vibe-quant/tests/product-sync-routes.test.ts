@@ -182,7 +182,7 @@ test(
         firstBarAt: timestamp,
         lastBarAt: timestamp,
         latest: { 60: timestamp },
-        outcome: 'partial',
+        outcome: 'ready',
       },
     ]);
     await state.saveCatalog('tqsdk', [{ ...saved, expired: true }]);

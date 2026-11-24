@@ -31,12 +31,12 @@ export interface ProductSyncContractPage {
 
 export interface ProductSyncTarget {
   symbol: string;
-  /** Last committed bar start time, by native duration in seconds. */
+  /** Last committed 1-minute bar start time, keyed by duration in seconds. */
   latest: Record<string, number>;
 }
 
 export interface ProductSyncResult extends ProductSyncTarget {
   firstBarAt: number;
   lastBarAt: number;
-  outcome: 'ready' | 'partial' | 'empty' | 'error';
+  outcome: 'ready' | 'empty' | 'error';
 }

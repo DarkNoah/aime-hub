@@ -96,10 +96,10 @@ export class ProductArchiveWorker {
   }
 
   private async run(python: string, signal: AbortSignal) {
-    // Limit both the number of chart handles and memory for large history windows.
+    // Each contract opens one minute chart. Bound both handles and total rows.
     const limit = Math.min(
       12,
-      Math.max(1, Math.floor(64000 / (6 * this.config.historyBars))),
+      Math.max(1, Math.floor(64000 / this.config.historyBars)),
     );
     while (!signal.aborted) {
       let wait = 15000;
