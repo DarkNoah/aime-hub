@@ -49,9 +49,15 @@ export function PluginNavigation({
               {pages.map((page) => (
                 <Link
                   key={page.path}
-                  to={admin ? '/admin/p/$pluginId/$' : '/p/$pluginId/$'}
+                  to={
+                    !admin && plugin.id === 'vibe-quant' && page.path === ''
+                      ? '/vibe-quant'
+                      : admin
+                        ? '/admin/p/$pluginId/$'
+                        : '/p/$pluginId/$'
+                  }
                   params={{ pluginId: plugin.id, _splat: page.path }}
-                  activeOptions={{ exact: true }}
+                  activeOptions={{ exact: true, includeSearch: false }}
                   title={page.title}
                   className="sidebar-link flex h-9 min-w-0 items-center gap-3 rounded-lg px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   activeProps={{

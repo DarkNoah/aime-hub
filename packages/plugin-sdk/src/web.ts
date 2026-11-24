@@ -15,6 +15,9 @@ export class PluginRequestError extends Error {
 export interface PluginPageProps {
   pluginId: string;
   path: string;
+  /** Browser search string and same-page navigation, when hosted by the web router. */
+  locationSearch?: string;
+  navigateToSearch?: (search: string, replace?: boolean) => void;
   params: Readonly<Record<string, string>>;
 }
 export interface PluginSidebarProps {

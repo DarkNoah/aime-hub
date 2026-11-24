@@ -3,6 +3,12 @@ export { Button } from '../../../apps/web/src/components/ui/button';
 export { Badge } from '../../../apps/web/src/components/ui/badge';
 export { showMarketSignalToast } from '../../../apps/web/src/features/notifications/market-signal-toast';
 export { Input } from '../../../apps/web/src/components/ui/input';
+export { Checkbox } from '../../../apps/web/src/components/ui/checkbox';
+export {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '../../../apps/web/src/components/ui/popover';
 export { AutocompleteInput } from '../../../apps/web/src/components/autocomplete-input';
 export { Textarea } from '../../../apps/web/src/components/ui/textarea';
 export { Label } from '../../../apps/web/src/components/ui/label';

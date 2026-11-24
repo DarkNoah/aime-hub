@@ -5,7 +5,11 @@ import {
   timeSql,
   versionSql,
 } from './clickhouse-client.js';
-import { searchTerms } from './symbols.js';
+import {
+  historicalInstrument,
+  searchTerms,
+  symbolsWithBars,
+} from './symbols.js';
 
 type WatchRow = {
   userId: string;
@@ -22,6 +26,11 @@ export type CatalogRow = {
 
 /** Durable plugin state shared by every service using this ClickHouse database. */
 export class StateStore extends ClickHouseClient {
+  private readonly archived = new Map<
+    Engine,
+    { expires: number; items: Promise<Instrument[]> }
+  >();
+
   async initialize() {
     const [{ version }] = await this.rows<{ version: string }>(
       'SELECT version() AS version',
@@ -81,27 +90,117 @@ export class StateStore extends ClickHouseClient {
     return row ? (JSON.parse(row.metadata) as Instrument) : undefined;
   }
 
+  async viewInstrument(
+    engine: Engine,
+    symbol: string,
+  ): Promise<Instrument | undefined> {
+    const instrument = await this.instrument(engine, symbol);
+    if (instrument && !instrument.expired) return instrument;
+    const saved = await this.rows(
+      `SELECT 1 FROM ${this.table('bars')} WHERE engine = {engine:String} AND symbol = {symbol:String} LIMIT 1`,
+      { engine, symbol },
+    );
+    return saved.length ? historicalInstrument(symbol, instrument) : undefined;
+  }
+
+  private archivedInstruments(engine: Engine): Promise<Instrument[]> {
+    const cached = this.archived.get(engine);
+    if (cached && cached.expires > Date.now()) return cached.items;
+    // The bars table also contains history imported before there was a catalog or an
+    // archive worker. Read only the indexed identifiers and share the lookup across searches.
+    const items = this.rows<{ symbol: string; metadata: string }>(
+      `SELECT saved.symbol AS symbol, known.metadata AS metadata
+       FROM (SELECT DISTINCT symbol FROM ${this.table('bars')} WHERE engine = {engine:String}) AS saved
+       LEFT JOIN (SELECT symbol, metadata FROM ${this.catalog()} FINAL WHERE engine = {engine:String}) AS known
+         ON saved.symbol = known.symbol
+       WHERE known.metadata = '' OR JSONExtractBool(known.metadata, 'expired')
+       ORDER BY saved.symbol SETTINGS join_use_nulls = 0, optimize_distinct_in_order = 1`,
+      { engine },
+    )
+      .then((rows) =>
+        rows.map(({ symbol, metadata }) =>
+          historicalInstrument(
+            symbol,
+            metadata ? JSON.parse(metadata) : undefined,
+          ),
+        ),
+      )
+      .catch((error: unknown) => {
+        if (this.archived.get(engine)?.items === items)
+          this.archived.delete(engine);
+        throw error;
+      });
+    this.archived.set(engine, { expires: Date.now() + 60_000, items });
+    return items;
+  }
+
   async search(
     engine: Engine,
     query: string,
     kind: string,
   ): Promise<Instrument[]> {
+    return (await this.searchPage(engine, query, kind)).items;
+  }
+
+  async searchPage(
+    engine: Engine,
+    query: string,
+    kind: string,
+    cursor?: { rank: number; symbol: string },
+    includeArchived = false,
+  ): Promise<{ items: Instrument[]; nextCursor: string | null }> {
     const { term, continuous } = searchTerms(query);
-    const rows = await this.rows<{ metadata: string }>(
-      `SELECT metadata FROM ${this.catalog()} FINAL
-       WHERE engine = {engine:String}
-         AND ({kind:String} = 'all' OR JSONExtractString(metadata, 'kind') = {kind:String})
-         AND (symbol ILIKE {term:String} OR JSONExtractString(metadata, 'name') ILIKE {term:String})
-         AND NOT JSONExtractBool(metadata, 'expired')
-       ORDER BY (splitByChar('.', symbol)[2] ILIKE {prefix:String}) DESC, symbol LIMIT 60`,
-      {
-        engine,
-        kind: continuous ? 'continuous' : kind,
-        term: `%${term}%`,
-        prefix: term,
-      },
-    );
-    return rows.map((row) => JSON.parse(row.metadata));
+    const category = continuous ? 'continuous' : kind;
+    const limit = 60;
+    const items: { instrument: Instrument; rank: number }[] = [];
+    if (!cursor || cursor.rank < 2) {
+      const rows = await this.rows<{ metadata: string; rank: number }>(
+        `SELECT metadata, if(splitByChar('.', symbol)[2] ILIKE {prefix:String}, 0, 1) AS rank
+         FROM ${this.catalog()} FINAL
+         WHERE engine = {engine:String} AND NOT JSONExtractBool(metadata, 'expired')
+           AND ({kind:String} = 'all' OR JSONExtractString(metadata, 'kind') = {kind:String})
+           AND (symbol ILIKE {term:String} OR JSONExtractString(metadata, 'name') ILIKE {term:String})
+           ${cursor ? 'AND (rank, symbol) > ({rank:UInt8}, {after:String})' : ''}
+         ORDER BY rank, symbol LIMIT ${limit + 1}`,
+        {
+          engine,
+          kind: category,
+          term: `%${term}%`,
+          prefix: term,
+          ...(cursor
+            ? { rank: String(cursor.rank), after: cursor.symbol }
+            : {}),
+        },
+      );
+      for (const row of rows)
+        items.push({ instrument: JSON.parse(row.metadata), rank: row.rank });
+    }
+    if (includeArchived && items.length <= limit) {
+      const archived = await this.archivedInstruments(engine);
+      const needle = term.replace(/\\([%_\\])/g, '$1').toLowerCase();
+      // Another writer may have put a cached contract back into the live catalog.
+      const liveSymbols = new Set(
+        items.map(({ instrument }) => instrument.symbol),
+      );
+      for (const instrument of archived) {
+        if (liveSymbols.has(instrument.symbol)) continue;
+        if (cursor?.rank === 2 && instrument.symbol <= cursor.symbol) continue;
+        if (category !== 'all' && category !== instrument.kind) continue;
+        if (
+          !instrument.symbol.toLowerCase().includes(needle) &&
+          !instrument.name.toLowerCase().includes(needle)
+        )
+          continue;
+        items.push({ instrument, rank: 2 });
+        if (items.length > limit) break;
+      }
+    }
+    const last = items[limit - 1];
+    return {
+      items: items.slice(0, limit).map((row) => row.instrument),
+      nextCursor:
+        items.length > limit ? `${last.rank}:${last.instrument.symbol}` : null,
+    };
   }
 
   async watchlist(userId: string, engine: Engine): Promise<WatchItem[]> {
@@ -123,6 +222,12 @@ export class StateStore extends ClickHouseClient {
         JSON.parse(row.metadata) as Instrument,
       ]),
     );
+    const missing = rows
+      .filter((row) => !instruments.has(row.symbol))
+      .map((row) => row.symbol);
+    for (const symbol of await symbolsWithBars(this, engine, missing)) {
+      instruments.set(symbol, historicalInstrument(symbol));
+    }
     return rows.flatMap((row) => {
       const item = instruments.get(row.symbol);
       return item ? [{ ...item, enabled: row.enabled }] : [];
@@ -213,6 +318,7 @@ export class StateStore extends ClickHouseClient {
         .join('\n'),
       'catalog',
     );
+    this.archived.delete(engine);
   }
 
   async completeCatalog(engine: Engine, symbols: string[]) {
@@ -227,6 +333,7 @@ export class StateStore extends ClickHouseClient {
       symbols.map((symbol) => JSON.stringify({ symbol })).join('\n'),
       'catalog',
     );
+    this.archived.delete(engine);
   }
 
   async catalogCount(engine: Engine) {

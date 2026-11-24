@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { PluginBoundary } from '@/features/plugins/boundary';
-import { useParams } from '@tanstack/react-router';
+import { useLocation, useParams, useRouter } from '@tanstack/react-router';
 import type { PluginPageProps } from '@app/plugin-sdk/web';
 import { usePlugins } from '@/features/plugins/context';
 import { pluginLoaders, pluginManifests } from '@/features/plugins/generated';
@@ -25,8 +25,19 @@ const pages = pluginManifests
   )
   .sort((a, b) => a.path.split(':').length - b.path.split(':').length);
 
-export function PluginPage({ admin = false }: { admin?: boolean }) {
-  const { pluginId, _splat = '' } = useParams({ strict: false });
+export function PluginPage({
+  admin = false,
+  fixedPluginId,
+}: {
+  admin?: boolean;
+  fixedPluginId?: string;
+}) {
+  const router = useRouter();
+  const locationSearch = useLocation({
+    select: (location) => location.searchStr,
+  });
+  const { pluginId: routePluginId, _splat = '' } = useParams({ strict: false });
+  const pluginId = fixedPluginId ?? routePluginId;
   const { plugins, loading, error, refresh } = usePlugins();
   const { data } = useAuthSession();
   if (loading) return <LoadingState />;
@@ -57,6 +68,12 @@ export function PluginPage({ admin = false }: { admin?: boolean }) {
         <page.Component
           pluginId={pluginId!}
           path={path}
+          locationSearch={locationSearch}
+          navigateToSearch={(search, replace) => {
+            const href =
+              router.state.location.pathname + search + window.location.hash;
+            void router.navigate({ href, replace, resetScroll: false });
+          }}
           params={match!.params}
         />
       </Suspense>

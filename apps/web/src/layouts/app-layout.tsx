@@ -78,7 +78,10 @@ function LayoutContent() {
     isGroupChat ||
     location.pathname.startsWith('/threads') ||
     /^\/projects\/[^/]+\/threads(?:\/|$)/.test(location.pathname);
-  const pluginId = location.pathname.match(/^\/(?:admin\/)?p\/([^/]+)/)?.[1];
+  const pluginId =
+    location.pathname === '/vibe-quant'
+      ? 'vibe-quant'
+      : location.pathname.match(/^\/(?:admin\/)?p\/([^/]+)/)?.[1];
   const pluginTitle = pluginManifests.find(
     (plugin) => plugin.id === pluginId,
   )?.name;

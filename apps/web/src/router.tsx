@@ -4,9 +4,11 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  redirect,
   Outlet,
 } from '@tanstack/react-router';
 import { AvailableModelsProvider } from '@/features/models/available-models-provider';
+import { validateLoginSearch } from '@/features/auth/login-search';
 import { SessionProvider } from '@/features/auth/session-provider';
 import {
   PublicOnly,
@@ -180,6 +182,7 @@ const applicationRoute = createRoute({
 const publicRoute = createRoute({
   getParentRoute: () => applicationRoute,
   id: 'public',
+  validateSearch: validateLoginSearch,
   component: PublicOnly,
 });
 const sessionRoute = createRoute({
@@ -256,6 +259,25 @@ const routeTree = rootRoute.addChildren([
           path: '/knowledge',
           component: KnowledgePage,
         }),
+        createRoute({
+          getParentRoute: () => layoutRoute,
+          path: '/vibe-quant',
+          component: () => <PluginPage fixedPluginId="vibe-quant" />,
+        }),
+        ...(['/p/vibe-quant', '/plugins/vibe-quant'] as const).map((path) =>
+          createRoute({
+            getParentRoute: () => layoutRoute,
+            path,
+            beforeLoad: ({ location }) => {
+              throw redirect({
+                to: '/vibe-quant',
+                search: location.search,
+                hash: location.hash,
+                replace: true,
+              });
+            },
+          }),
+        ),
         createRoute({
           getParentRoute: () => layoutRoute,
           path: '/p/$pluginId/$',

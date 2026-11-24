@@ -9,6 +9,7 @@ import {
 } from '../shared.js';
 import type { QuantConfig } from './config.js';
 import { LiveMarket } from './live-market.js';
+import { symbolsWithBars } from './symbols.js';
 import { ClickHouseClient, timeSql } from './clickhouse-client.js';
 import { tickColumns, validateTickVolumes } from './tick-validation.js';
 import { rebuildTickBars } from './tick-bars.js';
@@ -123,6 +124,18 @@ export class MarketStore extends ClickHouseClient {
   }
   retainSymbols(engine: Engine, symbols: string[]) {
     this.live.retainSymbols(engine, symbols);
+  }
+  async storedSymbols(engine: Engine, symbols: string[]): Promise<Set<string>> {
+    return symbolsWithBars(this, engine, symbols);
+  }
+  async storedDurations(engine: Engine, symbol: string): Promise<number[]> {
+    const rows = await this.rows<{ duration: number }>(
+      `SELECT DISTINCT duration FROM ${this.table('bars')}
+       WHERE engine = {engine:String} AND symbol = {symbol:String}
+       ORDER BY duration SETTINGS optimize_distinct_in_order = 1`,
+      { engine, symbol },
+    );
+    return rows.map((row) => row.duration);
   }
   validateTickVolumes(engine: Engine, symbol: string, tradingDay: string) {
     return validateTickVolumes(this, engine, symbol, tradingDay);

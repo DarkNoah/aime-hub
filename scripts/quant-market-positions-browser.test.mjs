@@ -129,67 +129,137 @@ function monthlySummary(rows) {
   return [...groups.values()];
 }
 
+async function marketBrowser(t) {
+  const fixture = await mkdtemp(
+    path.join(webRoot, '.quant-market-positions-test-'),
+  );
+  const artifacts = path.join(root, '.tmp/quant-market-positions');
+  await mkdir(artifacts, { recursive: true });
+  let vite, browser;
+  t.after(async () => {
+    await browser?.close();
+    await vite?.close();
+    await rm(fixture, { recursive: true, force: true });
+  });
+  await writeFile(
+    path.join(fixture, 'index.html'),
+    `<html lang="zh-CN"><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="/${path.basename(fixture)}/entry.tsx"></script></body></html>`,
+  );
+  await writeFile(
+    path.join(fixture, 'entry.tsx'),
+    `
+import React from 'react';import {createRoot} from 'react-dom/client';import '/src/index.css';
+import {initializeI18n} from '/src/i18n';await initializeI18n();
+import {App} from '/src/app';
+import {ThemeProvider} from '/src/components/theme/theme-provider';
+createRoot(document.getElementById('root')!).render(<ThemeProvider><App/></ThemeProvider>);`,
+  );
+  // Exercise the host route tree, session guard and plugin loader. The rest of
+  // the application sidebar has its own network requests and browser tests.
+  await writeFile(
+    path.join(fixture, 'layout.tsx'),
+    `
+import React from 'react';import { Outlet } from '@tanstack/react-router';
+export function AppLayout() { return <main className="p-4 sm:ml-56"><Outlet /></main> }`,
+  );
+  vite = await createServer({
+    configFile: false,
+    envFile: false,
+    root: webRoot,
+    cacheDir: path.join(artifacts, 'vite'),
+    resolve: {
+      alias: [
+        {
+          find: '@/layouts/app-layout',
+          replacement: path.join(fixture, 'layout.tsx'),
+        },
+        { find: '@', replacement: path.join(webRoot, 'src') },
+      ],
+      dedupe: ['react', 'react-dom', '@tanstack/react-router'],
+    },
+    optimizeDeps: { entries: [path.join(fixture, 'index.html')] },
+    plugins: [
+      react(),
+      tailwindcss(),
+      {
+        name: 'market-test-entry',
+        configureServer(server) {
+          server.middlewares.use((req, _res, next) => {
+            if (
+              [
+                '/p/vibe-quant',
+                '/plugins/vibe-quant',
+                '/vibe-quant',
+                '/login',
+              ].includes(
+                new URL(req.url, 'http://localhost').pathname.replace(
+                  /\/$/,
+                  '',
+                ),
+              )
+            )
+              req.url = `/${path.basename(fixture)}/index.html`;
+            next();
+          });
+        },
+      },
+    ],
+    server: {
+      watch: null,
+      host: '127.0.0.1',
+      port: 0,
+      fs: { allow: [root] },
+    },
+  });
+  await vite.listen();
+  browser = await playwright.chromium.launch({
+    headless: true,
+    executablePath:
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  });
+  const page = await browser.newPage({
+    viewport: { width: 1600, height: 1000 },
+    locale: 'zh-CN',
+  });
+  await page.route('**/api/auth/get-session**', (route) =>
+    route.fulfill({
+      json: {
+        user: {
+          id: 'market-reader',
+          name: '行情用户',
+          email: 'viewer@example.test',
+          role: 'user',
+        },
+        session: {
+          id: 'market-session',
+          userId: 'market-reader',
+          expiresAt: '2099-01-01T00:00:00Z',
+        },
+      },
+    }),
+  );
+  await page.route('**/api/plugins', (route) =>
+    route.fulfill({ json: [{ id: 'vibe-quant', enabled: true }] }),
+  );
+  page.setDefaultTimeout(10000);
+  const errors = [];
+  page.on('pageerror', (error) => {
+    errors.push(error.message);
+    console.error(error.stack);
+  });
+  return {
+    page,
+    errors,
+    artifacts,
+    marketUrl: `http://127.0.0.1:${vite.httpServer.address().port}/p/vibe-quant/`,
+  };
+}
+
 test(
   'market positions: strategy filters, monthly totals, pagination, polling and responsive layout',
   { timeout: 120000 },
   async (t) => {
-    const fixture = await mkdtemp(
-      path.join(webRoot, '.quant-market-positions-test-'),
-    );
-    const artifacts = path.join(root, '.tmp/quant-market-positions');
-    await mkdir(artifacts, { recursive: true });
-    let vite, browser;
-    t.after(async () => {
-      await browser?.close();
-      await vite?.close();
-      await rm(fixture, { recursive: true, force: true });
-    });
-    await writeFile(
-      path.join(fixture, 'index.html'),
-      '<html lang="zh-CN"><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="./entry.tsx"></script></body></html>',
-    );
-    await writeFile(
-      path.join(fixture, 'entry.tsx'),
-      `
-import React from 'react';import {createRoot} from 'react-dom/client';import '/src/index.css';
-import {initializeI18n} from '/src/i18n';await initializeI18n();
-import {MarketPage} from '/@fs/${root}/plugins/vibe-quant/web/market-page.tsx';
-createRoot(document.getElementById('root')!).render(<main className="p-4 sm:ml-56"><MarketPage pluginId="vibe-quant"/></main>);`,
-    );
-    vite = await createServer({
-      configFile: false,
-      envFile: false,
-      root: webRoot,
-      cacheDir: path.join(artifacts, 'vite'),
-      resolve: {
-        alias: [{ find: '@', replacement: path.join(webRoot, 'src') }],
-        dedupe: ['react', 'react-dom'],
-      },
-      optimizeDeps: { entries: [path.join(fixture, 'index.html')] },
-      plugins: [react(), tailwindcss()],
-      server: {
-        watch: null,
-        host: '127.0.0.1',
-        port: 0,
-        fs: { allow: [root] },
-      },
-    });
-    await vite.listen();
-    browser = await playwright.chromium.launch({
-      headless: true,
-      executablePath:
-        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    });
-    const page = await browser.newPage({
-      viewport: { width: 1600, height: 1000 },
-      locale: 'zh-CN',
-    });
-    page.setDefaultTimeout(10000);
-    const errors = [];
-    page.on('pageerror', (error) => {
-      errors.push(error.message);
-      console.error(error.stack);
-    });
+    const { page, errors, artifacts, marketUrl } = await marketBrowser(t);
     let failed = false,
       empty = false,
       count = 6,
@@ -273,8 +343,13 @@ createRoot(document.getElementById('root')!).render(<main className="p-4 sm:ml-5
       return route.fulfill({ json: [] });
     });
     await page.goto(
-      `http://127.0.0.1:${vite.httpServer.address().port}/${path.basename(fixture)}/index.html?symbol=SHFE.rb2701&monitor=m2&time=${start}&duration=300`,
+      `${marketUrl}?symbol=SHFE.rb2701&monitor=m2&time=${start}&duration=300`,
       { timeout: 60000, waitUntil: 'domcontentloaded' },
+    );
+    await page.waitForURL(
+      (url) =>
+        url.pathname === '/vibe-quant' &&
+        url.searchParams.get('monitor') === 'm2',
     );
     const sidebar = page.getByRole('complementary', { name: '策略持仓与行情' });
     const list = sidebar.getByRole('list', { name: '持仓记录列表' });
@@ -852,6 +927,350 @@ createRoot(document.getElementById('root')!).render(<main className="p-4 sm:ml-5
     assert.equal(await strategies.getByRole('listitem').count(), 3);
     const menu = page.getByRole('button', { name: '策略菜单' });
     assert.match(await menu.innerText(), /0/);
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  'market search opens live and cached symbols independently of the watchlist',
+  { timeout: 100000 },
+  async (t) => {
+    const { page, marketUrl, errors } = await marketBrowser(t);
+    const historical = 'CFFEX.IM2610';
+    const live = 'CFFEX.IM2612';
+    const limited = 'CFFEX.IM2702';
+    const catalog = [historical, live, limited].map((symbol) => ({
+      symbol,
+      name: symbol.split('.')[1],
+      exchange: 'CFFEX',
+      kind: 'future',
+      product: 'IM',
+      underlying: '',
+      priceTick: 0.2,
+      localHistory: true,
+      expired: symbol === historical,
+    }));
+    const favorites = new Map([
+      [historical, { ...catalog[0], enabled: false }],
+    ]);
+    const favoriteWrites = [];
+    const requests = [];
+    const released = new Set();
+    const marketView = new Map();
+    let quotePrice = 7321.2;
+    await page.route('**/api/plugins/vibe-quant/**', async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      const endpoint = url.pathname.replace('/api/plugins/vibe-quant/', '');
+      const symbol = url.searchParams.get('symbol');
+      if (endpoint === 'watchlist' && request.method() === 'POST') {
+        const added = request.postDataJSON().symbol;
+        favoriteWrites.push(['add', added]);
+        const entry = {
+          ...catalog.find((item) => item.symbol === added),
+          enabled: true,
+        };
+        favorites.set(added, entry);
+        return route.fulfill({ json: entry, status: 201 });
+      }
+      if (endpoint === 'watchlist')
+        return route.fulfill({ json: [...favorites.values()] });
+      if (endpoint.startsWith('watchlist/') && request.method() === 'DELETE') {
+        const deleted = endpoint.slice('watchlist/'.length);
+        favoriteWrites.push(['remove', deleted]);
+        favorites.delete(deleted);
+        return route.fulfill({ json: { deleted: true } });
+      }
+      if (endpoint === 'instruments') {
+        return route.fulfill({
+          json: {
+            items: catalog.filter((item) =>
+              item.symbol.includes(url.searchParams.get('q') ?? ''),
+            ),
+            nextCursor: null,
+          },
+        });
+      }
+      if (endpoint.startsWith('market-view/')) {
+        const id = endpoint.split('/')[1];
+        if (request.method() === 'DELETE') {
+          if (marketView.get(id) !== symbol)
+            return route.fulfill({
+              status: 400,
+              json: { code: 'INVALID_SYMBOL' },
+            });
+          released.add(id);
+          return route.fulfill({ json: { released: true } });
+        }
+        const viewed = request.postDataJSON().symbol;
+        const instrument = catalog.find((entry) => entry.symbol === viewed);
+        if (!instrument)
+          return route.fulfill({ status: 404, json: { code: 'NOT_FOUND' } });
+        marketView.set(id, viewed);
+        return route.fulfill({
+          json: {
+            instrument,
+            mode:
+              viewed === historical
+                ? 'history'
+                : viewed === limited
+                  ? 'limit'
+                  : 'live',
+            availableDurations: viewed === historical ? [86400] : [60, 86400],
+          },
+        });
+      }
+      if (endpoint === 'snapshot') {
+        const subscribed = [
+          ...new Set([...favorites.keys(), ...(symbol ? [symbol] : [])]),
+        ];
+        return route.fulfill({
+          json: {
+            status: { engine: 'tqsdk', state: 'syncing' },
+            quotes: subscribed.map((symbol) => ({
+              symbol,
+              time: start,
+              open: quotePrice,
+              last: quotePrice,
+            })),
+            orderBooks: subscribed.map((symbol) => ({
+              symbol,
+              sourceTime: start,
+              receivedAt: start,
+              bidPrices: [quotePrice],
+              askPrices: [quotePrice + 0.2],
+              bidVolumes: [13],
+              askVolumes: [16],
+            })),
+          },
+        });
+      }
+      if (endpoint === 'bars') {
+        const duration = Number(url.searchParams.get('duration'));
+        requests.push({
+          symbol,
+          duration,
+          around: url.searchParams.get('around'),
+          monitor: url.searchParams.get('monitor'),
+        });
+        if (
+          symbol === historical &&
+          !url.searchParams.has('monitor') &&
+          duration !== 86400
+        )
+          return route.fulfill({ json: [] });
+        const bars = Array.from({ length: 4 }, (_, i) => ({
+          symbol,
+          duration,
+          time: start + i * duration,
+          open: 7250,
+          high: 7255 + i,
+          low: 7245,
+          close: 7251 + i,
+          volume: 100 + i,
+        }));
+        return route.fulfill({
+          json: url.searchParams.has('around')
+            ? { bars, targetTime: Number(url.searchParams.get('around')) }
+            : bars,
+        });
+      }
+      if (endpoint === 'product-sync')
+        return route.fulfill({
+          json: {
+            options: [],
+            matched: 0,
+            ready: 0,
+            selectedContracts: 0,
+            writable: true,
+          },
+        });
+      if (endpoint.endsWith('/monitors/positions'))
+        return route.fulfill({
+          json: {
+            strategies: [],
+            monitors: [],
+            open: [],
+            history: [],
+            monthly: [],
+            next: null,
+          },
+        });
+      return route.fulfill({ json: [] });
+    });
+
+    async function result(symbol) {
+      await page.getByRole('button', { name: '搜索代码或名称' }).click();
+      const dialog = page.getByRole('dialog', { name: '搜索行情' });
+      await dialog.getByRole('textbox').fill(symbol);
+      const link = dialog.getByRole('link', { name: `查看 ${symbol} 行情` });
+      const href = new URL(await link.getAttribute('href'), marketUrl);
+      assert.equal(href.pathname, '/vibe-quant');
+      assert.equal(href.searchParams.get('symbol'), symbol);
+      return { dialog, link };
+    }
+    async function verifySelection(symbol, label) {
+      await page.waitForURL(
+        (url) =>
+          url.pathname === '/vibe-quant' &&
+          url.searchParams.get('symbol') === symbol,
+      );
+      await page.getByText(label, { exact: true }).waitFor();
+      await page
+        .getByRole('button', { name: 'K 线回放', exact: true, disabled: false })
+        .waitFor();
+      assert.ok(
+        requests.some((query) => query.symbol === symbol && !query.monitor),
+      );
+    }
+
+    await page.goto(marketUrl);
+    await page.getByRole('button', { name: '移除 IM2610 自选' }).click();
+    await page
+      .getByRole('button', { name: '移除 IM2610 自选' })
+      .waitFor({ state: 'detached' });
+
+    const activeResult = await result(live);
+    await activeResult.link.focus();
+    await activeResult.link.press('Enter');
+    await verifySelection(live, '实时行情');
+    assert.equal(
+      new URL(page.url()).pathname + new URL(page.url()).search,
+      '/vibe-quant?symbol=CFFEX.IM2612',
+    );
+    const liveSession = [...marketView].find(
+      ([, symbol]) => symbol === live,
+    )?.[0];
+    assert.ok(liveSession, 'opening a live symbol starts a chart session');
+    await page.getByRole('tab', { name: '行情盘口' }).click();
+    const book = page.getByRole('region', { name: '买卖盘口' });
+    await book.getByText('7,321.20', { exact: true }).waitFor();
+    quotePrice = 7329.4;
+    await book.getByText('7,329.40', { exact: true }).waitFor();
+    await page
+      .getByLabel('行情概览', { exact: true })
+      .getByText('7,329.40', { exact: true })
+      .waitFor();
+
+    await (await result(historical)).link.click();
+    await verifySelection(historical, '历史行情');
+    assert.ok(
+      requests.some(
+        (query) => query.symbol === historical && query.duration === 86400,
+      ),
+      'a retired contract with only cached daily candles opens its available period',
+    );
+    assert.ok(
+      released.has(liveSession),
+      'switching releases the chart-only live subscription',
+    );
+    assert.deepEqual(favoriteWrites, [['remove', historical]]);
+    await page.reload();
+    await verifySelection(historical, '历史行情');
+    await page.goBack();
+    await verifySelection(live, '实时行情');
+    await page.goForward();
+    await verifySelection(historical, '历史行情');
+    await (await result(limited)).link.click();
+    await verifySelection(limited, '实时名额已满');
+    assert.deepEqual([...favorites], []);
+
+    const addResult = await result(live);
+    await addResult.dialog.getByRole('button', { name: '加入自选' }).click();
+    await addResult.dialog.waitFor({ state: 'hidden' });
+    assert.deepEqual(favoriteWrites, [
+      ['remove', historical],
+      ['add', live],
+    ]);
+    assert.deepEqual([...favorites.keys()], [live]);
+    const notification = new URL('/plugins/vibe-quant/', marketUrl);
+    notification.search = new URLSearchParams({
+      symbol: historical,
+      monitor: 'past-trade',
+      time: String(start),
+      duration: '300',
+    });
+    const monitorRead = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname.endsWith('/bars') &&
+        url.searchParams.get('monitor') === 'past-trade' &&
+        url.searchParams.get('around') === String(start)
+      );
+    });
+    await page.goto(notification.href);
+    await monitorRead;
+    const canonical = new URL(page.url());
+    assert.equal(canonical.pathname, '/vibe-quant');
+    assert.deepEqual(
+      Object.fromEntries(canonical.searchParams),
+      Object.fromEntries(notification.searchParams),
+    );
+
+    await t.test(
+      'signed-out market deep link survives refreshing login and submitting the sign-in form',
+      async () => {
+        favorites.clear();
+        const beforeLogin = favoriteWrites.length;
+        let signedIn = false;
+        await page.route('**/api/auth/get-session**', (route) =>
+          signedIn
+            ? route.fallback()
+            : route.fulfill({ body: 'null', contentType: 'application/json' }),
+        );
+        await page.route('**/api/auth/registration-status', (route) =>
+          route.fulfill({
+            json: {
+              appName: 'Test',
+              registrationEnabled: false,
+              requestLoggingEnabled: false,
+              messageCompressionTokens: 1024,
+              e2bDesktopEnabled: false,
+              e2bDesktopApiUrl: '',
+              e2bDesktopTemplate: '',
+              e2bDesktopTimeoutSeconds: 60,
+              e2bDesktopHasApiKey: false,
+              e2bDesktopManaged: false,
+            },
+          }),
+        );
+        await page.route('**/api/auth/sign-in/username', (route) => {
+          const credentials = route.request().postDataJSON();
+          signedIn =
+            credentials.username === 'fixture_viewer' &&
+            credentials.password === 'test-market-only';
+          return signedIn
+            ? route.fulfill({
+                json: {
+                  token: 'test-session',
+                  user: { id: 'market-reader', username: 'fixture_viewer' },
+                },
+              })
+            : route.fulfill({
+                status: 401,
+                json: { code: 'INVALID_CREDENTIALS' },
+              });
+        });
+
+        const requested = new URL('/vibe-quant?symbol=CFFEX.IM2612', marketUrl);
+        await page.goto(requested.href);
+        await page.waitForURL((url) => url.pathname === '/login');
+        assert.equal(
+          new URL(page.url()).searchParams.get('returnTo'),
+          requested.pathname + requested.search,
+        );
+        await page.getByRole('button', { name: '登录', exact: true }).waitFor();
+        await page.reload();
+        await page.getByLabel('用户名', { exact: true }).fill('fixture_viewer');
+        await page.locator('input[name=password]').fill('test-market-only');
+        await page.getByRole('button', { name: '登录', exact: true }).click();
+        await verifySelection(live, '实时行情');
+        assert.equal(page.url(), requested.href);
+        assert.equal(signedIn, true);
+        assert.equal(favoriteWrites.length, beforeLogin);
+        assert.deepEqual([...favorites], []);
+      },
+    );
     assert.deepEqual(errors, []);
   },
 );

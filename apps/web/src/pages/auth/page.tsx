@@ -1,7 +1,7 @@
 import type { ErrorKey } from '@/i18n/config';
 import { useTranslation } from 'react-i18next';
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import {
   ArrowRight,
   FolderOpen,
@@ -34,6 +34,10 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
   const { t } = useTranslation();
   const registering = mode === 'register';
   const navigate = useNavigate();
+  const returnTo = useSearch({
+    from: '/application/public',
+    select: (search) => search.returnTo,
+  });
   const { refetch } = useAuthSession();
   const {
     registrationEnabled,
@@ -112,7 +116,7 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
         }
       }
       await refetch();
-      void navigate({ to: '/', replace: true });
+      void navigate({ href: returnTo ?? '/', replace: true });
     } catch (cause) {
       if (created) setAccountCreated(true);
       setError(authErrorKey(cause, 'errors.request'));
@@ -325,7 +329,7 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
                   )}
                   {accountCreated ? (
                     <Button asChild className="h-11 w-full">
-                      <Link to="/login">
+                      <Link to="/login" search={{ returnTo }}>
                         {t('auth.goToLogin')}
                         <ArrowRight />
                       </Link>
@@ -360,6 +364,7 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
                   {registering ? t('auth.hasAccount') : t('auth.noAccount')}{' '}
                   <Link
                     to={registering ? '/login' : '/register'}
+                    search={{ returnTo }}
                     className="rounded-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
                   >
                     {registering ? t('auth.goToLogin') : t('auth.register')}

@@ -145,3 +145,7 @@ plugins/vibe-quant/**/__pycache__/
 !apps/server/src/modules/threads/session-stream-error.test.ts
 !scripts/interrupted-thread-messages.test.ts
 !apps/server/src/modules/knowledge/embedding-lifecycle.test.ts
+!plugins/vibe-quant/tests/product-sync-store.test.ts
+!plugins/vibe-quant/tests/product-sync-routes.test.ts
+!plugins/vibe-quant/tests/product-archive-worker.test.ts
+!plugins/vibe-quant/tests/market-view.test.ts

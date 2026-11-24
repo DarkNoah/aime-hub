@@ -9,6 +9,10 @@ export interface Instrument {
   priceTick: number;
   underlying: string;
   expired: boolean;
+  /** Present in paged market-search results when stored bars can be opened. */
+  localHistory?: boolean;
+  /** Only historical data is available, including when catalog metadata is absent. */
+  historyOnly?: boolean;
 }
 export interface WatchItem extends Instrument {
   enabled: boolean;

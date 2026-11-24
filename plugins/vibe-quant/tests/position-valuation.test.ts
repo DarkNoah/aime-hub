@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { marketChartUrl, readMarketChartTarget } from '../market-navigation.js';
+import {
+  marketChartUrl,
+  marketPageUrl,
+  readMarketChartTarget,
+} from '../market-navigation.js';
 import type { MarketPositionMonitor } from '../market-positions.js';
 import type { OpenTrade } from '../strategy-types.js';
 import type { Quote } from '../shared.js';
@@ -68,7 +72,23 @@ test('notification chart links roundtrip symbol, source candle, monitor and peri
     target,
   );
   assert.equal(readMarketChartTarget('?symbol=IM&time=NaN'), null);
-  assert.equal(readMarketChartTarget('?symbol=IM'), null);
+  const directUrl = new URL(
+    marketPageUrl({ symbol: 'CFFEX.IM2610' }),
+    'https://local.test',
+  );
+  assert.equal(directUrl.pathname, '/vibe-quant');
+  assert.deepEqual(readMarketChartTarget(directUrl.search), {
+    symbol: 'CFFEX.IM2610',
+    monitor: undefined,
+  });
+  assert.deepEqual(
+    readMarketChartTarget('?symbol=CFFEX.IM2610&duration=86400'),
+    { symbol: 'CFFEX.IM2610', duration: 86400, monitor: undefined },
+  );
+  assert.equal(
+    readMarketChartTarget('?symbol=CFFEX.IM2610&monitor=another-user'),
+    null,
+  );
   const parsed = marketSignalNotificationSchema.parse({
     type: 'exit',
     side: 'long',

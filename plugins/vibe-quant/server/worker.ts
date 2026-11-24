@@ -17,6 +17,8 @@ import { MarketStore } from './clickhouse.js';
 import { StateStore } from './state-store.js';
 import { ensurePython } from './python.js';
 import type { MarketBatch } from './sdk/feed.js';
+import type { ProductSyncStore } from './product-sync/store.js';
+import { ProductArchiveWorker } from './product-sync/worker.js';
 
 type Event =
   | { type: 'catalog'; instruments: Instrument[] }
@@ -46,6 +48,7 @@ export class SyncWorker {
   private restartAfter = 0;
   private lastOutputAt = 0;
   private pythonPath?: string;
+  private readonly archive?: ProductArchiveWorker;
   private status: SyncStatus;
   private tickChecks = new Map<
     string,
@@ -59,7 +62,17 @@ export class SyncWorker {
     private readonly preparePython = (signal: AbortSignal) =>
       ensurePython(context.runtime, signal),
     private readonly onMarketData?: (batch: MarketBatch) => void,
+    products?: ProductSyncStore,
   ) {
+    if (products && config.engine === 'tqsdk' && !config.clickhouseReadOnly) {
+      this.archive = new ProductArchiveWorker(
+        config,
+        resolve(context.runtime.paths.pluginRoot, 'worker/product_archive.py'),
+        store,
+        products,
+        this.instanceId,
+      );
+    }
     this.status = {
       engine: config.engine,
       state: 'starting',
@@ -87,7 +100,7 @@ export class SyncWorker {
   }
   async stop() {
     this.controller?.abort();
-    await this.stopChild();
+    await Promise.all([this.stopChild(), this.archive?.stop()]);
     await this.task;
     this.task = undefined;
   }
@@ -372,14 +385,17 @@ export class SyncWorker {
               this.config.engine,
             );
             await this.saveStatus();
+            if (!signal.aborted && this.pythonPath)
+              this.archive?.start(this.pythonPath);
           } else {
-            await this.stopChild();
+            await Promise.all([this.stopChild(), this.archive?.stop()]);
             this.status.state = 'standby';
             this.status.message = '共享 ClickHouse 的另一服务正在写入行情';
             this.status.active = 0;
             await this.saveStatus();
           }
         } catch {
+          await this.archive?.stop();
           this.status.state = 'error';
           this.status.message = this.pythonPath
             ? '行情处理失败，保留待处理批次并重试'
@@ -406,7 +422,7 @@ export class SyncWorker {
         }).catch(() => {});
       }
     } finally {
-      await this.stopChild();
+      await Promise.all([this.stopChild(), this.archive?.stop()]);
       try {
         await this.flush();
       } catch {

@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { pluginRequest, type PluginPageProps } from '@app/plugin-sdk/web';
 import {
   Badge,
@@ -31,8 +31,16 @@ import {
   type WatchItem,
 } from '../shared';
 import { MarketChartPanel } from './components/market-chart-panel';
+import { ProductSyncPicker } from './components/product-sync-picker';
+import { useMarketSearch } from './use-market-search';
+import { useMarketView } from './use-market-view';
+import { derivedPeriod } from '../server/bar-periods';
 import { useMarketBars } from './use-market-bars';
-import { parseChartPeriod, readChartPeriod } from './chart-period';
+import {
+  parseChartPeriod,
+  readChartPeriod,
+  type ChartPeriod,
+} from './chart-period';
 import { OrderBookPanel } from './order-book';
 import { useStrategyHints } from './signals/use-strategy-hints';
 import { useStrategyVisibility } from './signals/use-strategy-visibility';
@@ -43,8 +51,10 @@ import {
   type NamedMonitor,
 } from './signals/monitor-parameters';
 import {
+  marketSearch,
+  marketPageUrl,
   readMarketChartTarget,
-  type MarketChartTarget,
+  type MarketViewTarget,
 } from '../market-navigation';
 
 const ENGINE_NAMES = { tqsdk: 'TqSdk', tushare: 'Tushare', tdx: '通达信' };
@@ -88,18 +98,34 @@ const timeText = (value?: string | null) =>
       })
     : '暂无';
 
-export function MarketPage({ pluginId }: PluginPageProps) {
+export function MarketPage({
+  pluginId,
+  locationSearch,
+  navigateToSearch,
+}: PluginPageProps) {
   const strategyVisibility = useStrategyVisibility();
   const [parameterMonitor, setParameterMonitor] = useState<NamedMonitor>();
   const [positionsRevision, setPositionsRevision] = useState(0);
-  const [chartTarget, setChartTarget] = useState(() =>
-    readMarketChartTarget(window.location.search),
+  const [browserSearch, setBrowserSearch] = useState(
+    () => window.location.search,
   );
+  const searchString = locationSearch ?? browserSearch;
+  const chartTarget = useMemo(
+    () => readMarketChartTarget(searchString),
+    [searchString],
+  );
+  const invalidTarget =
+    !chartTarget && new URLSearchParams(searchString).has('symbol');
   const [list, setList] = useState<WatchItem[]>([]);
-  const [watchSymbol, setWatchSymbol] = useState(
-    () => new URLSearchParams(window.location.search).get('symbol') ?? '',
-  );
-  const selected = chartTarget?.symbol ?? watchSymbol;
+  const selected =
+    chartTarget?.symbol ?? (invalidTarget ? '' : (list[0]?.symbol ?? ''));
+  const watched = list.find((entry) => entry.symbol === selected);
+  useEffect(() => {
+    if (navigateToSearch) return;
+    const restore = () => setBrowserSearch(window.location.search);
+    window.addEventListener('popstate', restore);
+    return () => window.removeEventListener('popstate', restore);
+  }, [navigateToSearch]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [orderBooks, setOrderBooks] = useState<OrderBook[]>([]);
   const [status, setStatus] = useState<SyncStatus>();
@@ -110,22 +136,43 @@ export function MarketPage({ pluginId }: PluginPageProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState<InstrumentKind | 'all'>('all');
-  const [results, setResults] = useState<Instrument[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState('');
+  const search = useMarketSearch<Instrument>(
+    pluginId,
+    searchOpen
+      ? `/instruments?paged=1&q=${encodeURIComponent(query)}&kind=${kind}`
+      : null,
+  );
   const [busy, setBusy] = useState('');
   const busyRef = useRef(false);
-  const [period, setPeriod] = useState(() =>
-    chartTarget
+  const viewSymbol =
+    chartTarget &&
+    !chartTarget.monitor &&
+    (!watched?.enabled || watched.expired || watched.historyOnly) &&
+    (status || reconnecting)
+      ? selected
+      : '';
+  const lookup = useMarketView(pluginId, viewSymbol, retry, status?.engine);
+  const view = lookup?.view;
+  const [preferredPeriod, setPreferredPeriod] = useState(readChartPeriod);
+  const preferredDuration =
+    preferredPeriod === 'intraday' ? 60 : preferredPeriod;
+  const sourceDuration =
+    derivedPeriod(preferredDuration)?.source ?? preferredDuration;
+  const available = view?.availableDurations;
+  const period =
+    chartTarget?.duration !== undefined
       ? parseChartPeriod(String(chartTarget.duration))
-      : readChartPeriod(),
-  );
+      : available?.length && !available.includes(sourceDuration)
+        ? parseChartPeriod(String(available[0]))
+        : preferredPeriod;
+  const readableSymbol =
+    chartTarget?.monitor || view || watched ? selected : '';
   const isIntraday = period === 'intraday';
   const duration = isIntraday ? 60 : period;
   const identity = `${chartTarget?.monitor ?? status?.engine ?? ''}:${selected}:${period}`;
   const marketBars = useMarketBars({
     pluginId,
-    symbol: selected,
+    symbol: readableSymbol,
     duration,
     intraday: isIntraday,
     identity,
@@ -135,50 +182,53 @@ export function MarketPage({ pluginId }: PluginPageProps) {
       : undefined,
   });
   const locateTarget = useEffectEvent(() => {
-    if (chartTarget) void marketBars.navigate(chartTarget.time);
+    if (readableSymbol && chartTarget?.time !== undefined)
+      void marketBars.navigate(chartTarget.time);
   });
   useEffect(() => {
     locateTarget();
-  }, [chartTarget, identity]);
-  function navigateChart(target: MarketChartTarget) {
-    if (list.some((entry) => entry.symbol === target.symbol))
-      setWatchSymbol(target.symbol);
-    setPeriod(parseChartPeriod(String(target.duration)));
-    setChartTarget(target);
+  }, [chartTarget, identity, readableSymbol]);
+  function navigateChart(target: MarketViewTarget, replace = false) {
+    const query = marketSearch(target);
+    if (query === searchString && window.location.pathname === '/vibe-quant')
+      return;
+    if (navigateToSearch) navigateToSearch(query, replace);
+    else {
+      window.history[replace ? 'replaceState' : 'pushState'](
+        null,
+        '',
+        marketPageUrl(target),
+      );
+      setBrowserSearch(query);
+    }
   }
   function selectSymbol(symbol: string) {
-    setChartTarget(null);
-    setWatchSymbol(symbol);
+    navigateChart({ symbol });
+  }
+  function selectPeriod(next: ChartPeriod) {
+    setPreferredPeriod(next);
+    if (chartTarget) navigateChart({ ...chartTarget, duration: next }, true);
   }
   const hints = useStrategyHints(
     pluginId,
-    selected,
+    readableSymbol,
     status?.engine,
     marketBars.bars[0]?.time,
     marketBars.bars.length
       ? marketBars.bars.at(-1)!.time + duration
       : undefined,
   );
-  const applyWatchlist = useEffectEvent((items: WatchItem[]) => {
-    setList(items);
-    setWatchSymbol((current) =>
-      items.some((item) => item.symbol === current)
-        ? current
-        : (items[0]?.symbol ?? ''),
-    );
-    setListError('');
-  });
   async function removeMonitor(monitor: NamedMonitor) {
     if (!(await hints.change(monitor, { deleted: true, enabled: false })))
       return;
     strategyVisibility.setVisible(monitor.attachment_id ?? monitor.id, true);
-    setChartTarget((target) =>
-      target?.monitor &&
-      (target.monitor === monitor.id ||
-        target.monitor === monitor.attachment_id)
-        ? null
-        : target,
-    );
+    if (
+      chartTarget?.monitor &&
+      (chartTarget.monitor === monitor.id ||
+        chartTarget.monitor === monitor.attachment_id)
+    ) {
+      navigateChart({ symbol: selected }, true);
+    }
     setPositionsRevision((value) => value + 1);
   }
   useEffect(() => {
@@ -188,7 +238,9 @@ export function MarketPage({ pluginId }: PluginPageProps) {
       signal: controller.signal,
     })
       .then((items) => {
-        applyWatchlist(items);
+        if (controller.signal.aborted) return;
+        setList(items);
+        setListError('');
       })
       .catch(() => {
         if (!controller.signal.aborted) setListError('无法读取自选列表');
@@ -198,6 +250,7 @@ export function MarketPage({ pluginId }: PluginPageProps) {
       });
     return () => controller.abort();
   }, [pluginId, retry]);
+  const snapshotSymbol = view && !watched ? selected : '';
   useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
@@ -207,7 +260,13 @@ export function MarketPage({ pluginId }: PluginPageProps) {
           status: SyncStatus;
           quotes: Quote[];
           orderBooks: OrderBook[];
-        }>(pluginId, '/snapshot', { signal: controller.signal });
+        }>(
+          pluginId,
+          snapshotSymbol
+            ? `/snapshot?symbol=${encodeURIComponent(snapshotSymbol)}`
+            : '/snapshot',
+          { signal: controller.signal },
+        );
         if (!controller.signal.aborted) {
           setQuotes(data.quotes);
           setOrderBooks(data.orderBooks ?? []);
@@ -225,33 +284,7 @@ export function MarketPage({ pluginId }: PluginPageProps) {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [pluginId, retry]);
-  useEffect(() => {
-    if (!searchOpen) return;
-    const controller = new AbortController();
-    setSearching(true);
-    const timer = setTimeout(() => {
-      void pluginRequest<Instrument[]>(
-        pluginId,
-        `/instruments?q=${encodeURIComponent(query)}&kind=${kind}`,
-        { signal: controller.signal },
-      )
-        .then((items) => {
-          setResults(items);
-          setSearchError('');
-        })
-        .catch(() => {
-          if (!controller.signal.aborted) setSearchError('搜索失败，请重试');
-        })
-        .finally(() => {
-          if (!controller.signal.aborted) setSearching(false);
-        });
-    }, 250);
-    return () => {
-      controller.abort();
-      clearTimeout(timer);
-    };
-  }, [pluginId, query, kind, searchOpen, retry]);
+  }, [pluginId, retry, snapshotSymbol]);
   async function mutate(
     symbol: string,
     action: 'add' | 'delete' | 'toggle',
@@ -273,16 +306,22 @@ export function MarketPage({ pluginId }: PluginPageProps) {
         );
         selectSymbol(symbol);
         setSearchOpen(false);
-        toast.success('已加入自选，自动同步已开启');
+        toast.success(
+          item.enabled
+            ? '已加入自选，自动同步已开启'
+            : '已加入自选，可查看本地 K 线',
+        );
       } else if (action === 'delete') {
+        if (selected === symbol && !chartTarget)
+          navigateChart({ symbol }, true);
         await pluginRequest(
           pluginId,
           `/watchlist/${encodeURIComponent(symbol)}`,
           { method: 'DELETE' },
         );
-        const next = list.filter((entry) => entry.symbol !== symbol);
-        setList(next);
-        if (selected === symbol) selectSymbol(next[0]?.symbol ?? '');
+        setList((current) =>
+          current.filter((entry) => entry.symbol !== symbol),
+        );
         toast.success('已移除自选');
       } else {
         await pluginRequest(
@@ -305,8 +344,9 @@ export function MarketPage({ pluginId }: PluginPageProps) {
     }
   }
   const item: Instrument | undefined =
-    list.find((entry) => entry.symbol === selected) ??
-    (chartTarget
+    view?.instrument ??
+    watched ??
+    (chartTarget?.monitor
       ? {
           symbol: selected,
           name: selected,
@@ -319,6 +359,13 @@ export function MarketPage({ pluginId }: PluginPageProps) {
         }
       : undefined);
   const currentQuote = quotes.find((entry) => entry.symbol === selected);
+  let viewLabel = '实时行情';
+  if (chartTarget?.time !== undefined) viewLabel = '交易定位';
+  else if (lookup?.error || (viewSymbol && !view) || reconnecting)
+    viewLabel = '连接中';
+  else if (view?.mode === 'limit') viewLabel = '实时名额已满';
+  else if (view?.mode === 'history' || item?.expired || item?.historyOnly)
+    viewLabel = '历史行情';
   return (
     <div
       className="flex flex-col gap-4 xl:h-[calc(100dvh-8.5rem)] xl:min-h-[32rem]"
@@ -337,11 +384,14 @@ export function MarketPage({ pluginId }: PluginPageProps) {
               </span>
             </h1>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              自选驱动同步 · 中国标准时间 UTC+8
+              中国标准时间 UTC+8
             </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {status?.engine === 'tqsdk' && (
+            <ProductSyncPicker key={pluginId} pluginId={pluginId} />
+          )}
           <Badge variant="outline">
             {status ? ENGINE_NAMES[status.engine] : '连接引擎'}
           </Badge>
@@ -430,7 +480,9 @@ export function MarketPage({ pluginId }: PluginPageProps) {
                           </span>
                           <span className="mt-1 block text-[11px] text-muted-foreground">
                             {KIND_LABELS[entry.kind]}
-                            {!entry.enabled && ' · 已暂停'}
+                            {entry.expired
+                              ? ' · 已到期'
+                              : !entry.enabled && ' · 实时已暂停'}
                           </span>
                         </span>
                         <span
@@ -458,7 +510,9 @@ export function MarketPage({ pluginId }: PluginPageProps) {
                         <label className="flex items-center gap-2 text-xs">
                           <Switch
                             checked={entry.enabled}
-                            disabled={!!busy}
+                            disabled={
+                              !!busy || entry.expired || entry.historyOnly
+                            }
                             onCheckedChange={(enabled) =>
                               void mutate(entry.symbol, 'toggle', enabled)
                             }
@@ -482,9 +536,9 @@ export function MarketPage({ pluginId }: PluginPageProps) {
               })
             ) : (
               <div className="space-y-3 px-5 py-10 text-center">
-                <p className="text-sm font-medium">添加第一个自选</p>
+                <p className="text-sm font-medium">暂无自选标的</p>
                 <p className="text-xs leading-5 text-muted-foreground">
-                  搜索 000852、IM2610、MO 或 IM主连。加入后自动开始同步。
+                  搜索 000852、IM2610、MO 或 IM主连，选择要查看的标的。
                 </p>
                 <Button size="sm" onClick={() => setSearchOpen(true)}>
                   <Plus className="mr-1 size-4" />
@@ -498,9 +552,30 @@ export function MarketPage({ pluginId }: PluginPageProps) {
           {item ? (
             <>
               {chartTarget && (
-                <div className="flex items-center gap-2 border-b px-4 py-2 text-xs">
-                  <Badge variant="outline">交易定位</Badge>
+                <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-xs">
+                  {item.name !== selected && (
+                    <span className="font-medium">{item.name}</span>
+                  )}
                   <span className="min-w-0 truncate font-mono">{selected}</span>
+                  <Badge variant="outline">{viewLabel}</Badge>
+                  {currentQuote?.last != null && (
+                    <span className="tabular-nums">
+                      {price(currentQuote.last)}
+                    </span>
+                  )}
+                  {currentQuote?.time != null && (
+                    <time
+                      className="text-muted-foreground"
+                      dateTime={new Date(
+                        currentQuote.time * 1000,
+                      ).toISOString()}
+                    >
+                      {new Date(currentQuote.time * 1000).toLocaleString(
+                        'zh-CN',
+                        { timeZone: 'Asia/Shanghai', hour12: false },
+                      )}
+                    </time>
+                  )}
                 </div>
               )}
               <MarketChartPanel
@@ -523,7 +598,14 @@ export function MarketPage({ pluginId }: PluginPageProps) {
                 identity={identity}
                 drawingSharedScope={`${chartTarget?.monitor ?? status?.engine ?? ''}:${selected}`}
                 period={period}
-                onPeriodChange={setPeriod}
+                onPeriodChange={selectPeriod}
+                emptyHint={
+                  view?.mode === 'history'
+                    ? '本地没有此周期的 K 线，可切换其他周期查看。'
+                    : view?.mode === 'limit'
+                      ? '实时订阅名额已满，当前周期暂无已缓存 K 线。'
+                      : undefined
+                }
                 priceTick={item.priceTick}
                 volumeProfileSource={
                   chartTarget?.monitor
@@ -539,13 +621,30 @@ export function MarketPage({ pluginId }: PluginPageProps) {
             <div className="flex min-h-[500px] flex-1 items-center justify-center p-8 text-center xl:min-h-0">
               <div className="max-w-md">
                 <ChartCandlestick className="mx-auto mb-5 size-10 text-primary/70" />
-                <h2 className="text-lg font-medium">从关注的标的开始</h2>
+                <h2 className="text-lg font-medium">
+                  {invalidTarget
+                    ? '行情链接参数有误'
+                    : chartTarget
+                      ? lookup?.error
+                        ? '无法打开该标的'
+                        : '正在打开行情…'
+                      : '选择行情标的'}
+                </h2>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  {status?.clickhouseReadOnly
-                    ? '添加自选后，查询历史数据并展示实时行情。实时数据不写入 ClickHouse。'
-                    : '添加自选后，行情和 K 线会自动同步并持续保存。'}
-                  切换不同周期，查看价格与成交量。
+                  {chartTarget
+                    ? selected
+                    : '搜索代码或名称，可直接查看行情和本地历史。'}
+                  {lookup?.error && ' · 请检查合约代码、数据源和本地缓存。'}
                 </p>
+                {lookup?.error && (
+                  <Button
+                    variant="outline"
+                    className="mt-5 mr-2"
+                    onClick={() => setRetry((value) => value + 1)}
+                  >
+                    重试
+                  </Button>
+                )}
                 <Button className="mt-5" onClick={() => setSearchOpen(true)}>
                   <Search className="mr-2 size-4" />
                   搜索行情
@@ -648,7 +747,7 @@ export function MarketPage({ pluginId }: PluginPageProps) {
           <DialogHeader>
             <DialogTitle>搜索行情</DialogTitle>
             <DialogDescription>
-              选择准确的交易所与合约类型，加入自选后自动同步。
+              点击标的查看行情，点击「加入自选」可持续关注。
               {status?.engine &&
                 status.engine !== 'tqsdk' &&
                 '当前引擎支持沪深股票与指数。'}
@@ -681,38 +780,56 @@ export function MarketPage({ pluginId }: PluginPageProps) {
             )}
           </div>
           <ScrollArea className="h-[340px]">
-            {searching ? (
+            {search.loading ? (
               <p
                 role="status"
                 className="p-6 text-center text-sm text-muted-foreground"
               >
                 正在搜索…
               </p>
-            ) : searchError ? (
+            ) : search.error && !search.items.length ? (
               <div role="alert" className="p-6 text-center">
-                <p className="text-sm text-destructive">{searchError}</p>
-                <Button
-                  variant="ghost"
-                  onClick={() => setRetry((value) => value + 1)}
-                >
+                <p className="text-sm text-destructive">搜索失败，请重试</p>
+                <Button variant="ghost" onClick={search.retry}>
                   重试搜索
                 </Button>
               </div>
-            ) : results.length ? (
-              results.map((entry) => (
+            ) : search.items.length ? (
+              search.items.map((entry) => (
                 <div
                   key={entry.symbol}
                   className="flex items-center justify-between gap-3 border-b px-1 py-3"
                 >
-                  <div className="min-w-0">
+                  <a
+                    className="min-w-0 flex-1 rounded-sm py-1 hover:text-primary focus-visible:outline-2 focus-visible:outline-ring"
+                    href={marketPageUrl({ symbol: entry.symbol })}
+                    aria-label={`查看 ${entry.symbol} 行情`}
+                    onClick={(event) => {
+                      if (
+                        event.button !== 0 ||
+                        event.metaKey ||
+                        event.ctrlKey ||
+                        event.shiftKey ||
+                        event.altKey
+                      )
+                        return;
+                      event.preventDefault();
+                      setSearchOpen(false);
+                      selectSymbol(entry.symbol);
+                    }}
+                  >
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-medium">{entry.name}</span>
                       <Badge variant="outline">{KIND_LABELS[entry.kind]}</Badge>
+                      {entry.expired && <Badge variant="outline">已到期</Badge>}
+                      {entry.localHistory && (
+                        <Badge variant="secondary">本地 K 线可用</Badge>
+                      )}
                     </div>
                     <p className="mt-1 font-mono text-xs text-muted-foreground">
                       {entry.symbol}
                     </p>
-                  </div>
+                  </a>
                   <Button
                     size="sm"
                     variant="outline"
@@ -735,10 +852,25 @@ export function MarketPage({ pluginId }: PluginPageProps) {
                 <p className="text-sm">没有匹配的标的</p>
                 <p className="text-xs leading-5 text-muted-foreground">
                   {status?.catalogCount
-                    ? '试试完整代码或切换分类。只有当前引擎支持的有效合约会显示。'
+                    ? '试试完整代码或切换分类。已到期合约可通过本地历史查找。'
                     : '合约目录尚未就绪，请检查引擎配置、账号权限与连接状态。'}
                 </p>
               </div>
+            )}
+            {search.nextCursor && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="w-full"
+                onClick={() => void search.loadMore()}
+                disabled={search.loadingMore}
+              >
+                {search.error
+                  ? '加载失败，重试'
+                  : search.loadingMore
+                    ? '加载中…'
+                    : '加载更多标的'}
+              </Button>
             )}
           </ScrollArea>
         </DialogContent>
