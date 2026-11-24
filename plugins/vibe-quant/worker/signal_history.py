@@ -7,6 +7,7 @@ from quant_sdk.hub import DataError, convert_bar, event_for, three_minute
 from quant_sdk.metrics import summarize
 from quant_sdk.point_metrics import summarize_points
 from position_valuation import open_valuation
+from monitor_options import instruments as option_instruments, option_bars
 
 
 def history_events(client, runner, symbol, duration, start, end, calendar, rules):
@@ -15,7 +16,8 @@ def history_events(client, runner, symbol, duration, start, end, calendar, rules
     runner.data._instruments[symbol] = item
     requests = {(symbol, duration): (start, end)}
     rolls = []
-    if item.tradable:
+    router = getattr(runner, 'option_router', None)
+    if item.tradable or (router and item.kind != 'continuous'):
         requests[(symbol, 60)] = (start, end)
     if item.kind == 'continuous':
         mappings = list(client.contracts(symbol, start, end))
@@ -31,6 +33,19 @@ def history_events(client, runner, symbol, duration, start, end, calendar, rules
             prior = requests.get((contract, 60), (lower, end))
             requests[(contract, 60)] = (min(prior[0], lower), end)
             rolls.append(event_for(Roll(symbol, contract, lower, calendar.trading_day(lower, futures=True))))
+    options = {}
+    if router:
+        sources = {event.payload.contract for event in rolls} or {symbol}
+        for source in sorted(sources):
+            fees = runner.data.instrument(source).fees
+            for option in option_instruments(client, source, start, end, fees, calendar):
+                options[option.symbol] = option
+                runner.data._instruments[option.symbol] = option
+                router.known.add(source)
+                router.register(option)
+        bound = router.state.get('contract')
+        if bound:
+            options[bound] = runner.data.instrument(bound)
     def bars(name, period, bounds):
         instrument = runner.data._instruments[name]
         group, bucket, count = {}, None, 0
@@ -54,8 +69,12 @@ def history_events(client, runner, symbol, duration, start, end, calendar, rules
             raise DataError(f'Missing execution history for {name}')
     def order(event):
         return (event.available_at, 0 if isinstance(event.payload, Roll) else
-                2 if runner.data._instruments[event.payload.symbol].kind == 'continuous' else 1)
+                1 if event.payload.symbol in options else
+                4 if runner.data.instrument(event.payload.symbol).kind == 'continuous' else
+                2 if event.payload.duration == 60 else 3)
     streams = [iter(rolls), *(bars(name, period, bounds) for (name, period), bounds in sorted(requests.items()))]
+    if options:
+        streams.append((event_for(bar) for bar in option_bars(client, options, start, end, calendar)))
     observed, execution = dict(runner.data._contracts), {}
     for event in merge(*streams, key=order):
         value = event.payload
@@ -147,6 +166,18 @@ class MonitorHistory:
                 if key[0] not in keep and runner.data._instruments[key[0]].kind == 'future':
                     del runner.data._bars[key]
 
+
+    def compact_option_minutes(self):
+        # The router only needs the latest matched minute. Preserve full history
+        # for option series explicitly subscribed to by the strategy.
+        data = self.runner.data
+        if not self.runner.option_router:
+            return
+        for (symbol, duration), series in data._bars.items():
+            if (data.instrument(symbol).kind == 'option' and (symbol, duration) not in data._subscriptions
+                    and (symbol, None) not in data._subscriptions):
+                while len(series) > 2:
+                    series.popitem(last=False)
 
     def levels(self, symbol, entry, triggered=None):
         records = sorted((record for record in self.state['risk_levels'].values()

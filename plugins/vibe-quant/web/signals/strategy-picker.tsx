@@ -26,6 +26,11 @@ import type { SignalMonitor } from '../../signal-types';
 import { monitorExecutionModel, monitorParameters } from '../../signal-types';
 import type { StrategySummary, StrategyVersion } from '../../strategy-types';
 import { errorText, parseObject } from '../strategies/format';
+import {
+  defaultOptionExecution,
+  OptionExecutionFields,
+  useOptionAvailability,
+} from '../strategies/option-execution-settings';
 import { MonitorParameterFields } from './monitor-parameters';
 
 export function StrategyPicker({
@@ -55,6 +60,14 @@ export function StrategyPicker({
     margin_per_lot?: number;
   }>({});
   const native = simulationEngine === 'tqsdk';
+  const available = useOptionAvailability(
+    pluginId,
+    native ? '' : sourceSymbol.trim(),
+  );
+  const [options, setOptions] = useState<
+    SignalMonitor['config']['option_execution']
+  >(defaultOptionExecution);
+  const optionExecution = !native && available ? options : undefined;
   const [selected, setSelected] = useState('');
   const [primaryVersion, setPrimaryVersion] = useState<StrategyVersion>();
   const [parameters, setParameters] = useState('');
@@ -134,6 +147,7 @@ export function StrategyPicker({
             symbol: sourceSymbol.trim(),
             display_symbol: symbol,
             simulation_engine: simulationEngine,
+            option_execution: optionExecution,
             ...(native
               ? {
                   initial_cash: Number(cash),
@@ -176,9 +190,11 @@ export function StrategyPicker({
               ? '由天勤回放合约历史，随后持续模拟交易，成交与账户记录入库。'
               : '计算全部已存行情，完成后持续实时更新。'}
             {!native &&
+              !optionExecution &&
               monitorExecutionModel({ symbol: sourceSymbol }) === 'points' &&
               '指数按固定 1 单位模拟多空，收益以点数统计。'}
             {!native &&
+              !optionExecution &&
               sourceSymbol.startsWith('KQ.m@') &&
               '主连按主连价格模拟，不计实际合约价差与换月成本。'}
           </DialogDescription>
@@ -216,6 +232,9 @@ export function StrategyPicker({
                 </SelectContent>
               </Select>
             </Label>
+            {!native && available && (
+              <OptionExecutionFields value={options} onChange={setOptions} />
+            )}
             {native && (
               <div className="grid grid-cols-2 gap-3">
                 <Label className="grid gap-2">
@@ -345,7 +364,13 @@ export function StrategyPicker({
             取消
           </Button>
           <Button
-            disabled={!version || !sourceSymbol.trim() || !canRun || busy}
+            disabled={
+              !version ||
+              !sourceSymbol.trim() ||
+              available === undefined ||
+              !canRun ||
+              busy
+            }
             onClick={() => void add()}
           >
             {busy ? '正在添加…' : '添加'}

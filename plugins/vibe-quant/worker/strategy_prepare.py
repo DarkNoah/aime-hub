@@ -1,5 +1,6 @@
 """Trusted snapshot preparation. Runs in the plugin venv before loading user code."""
 import json
+from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 import sys
@@ -7,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 if __name__ == '__main__':
     sys.path.insert(0, sys.argv[1])
+from quant_sdk.options import index_chain
 from quant_sdk import Fees, HubClient, Instrument, TradingCalendar
 
 
@@ -48,6 +50,10 @@ def prepare(raw):
                 day += timedelta(days=1)
     calendar = TradingCalendar(supplied)
 
+    by_series = defaultdict(list)
+    for bar in bars:
+        by_series[bar['symbol'], bar['duration']].append(bar)
+
     class FrozenClient(HubClient):
         def __init__(self):
             pass
@@ -64,7 +70,12 @@ def prepare(raw):
             return super().rules(symbol, resolver)
 
         def history(self, symbol, duration, start, end):
-            return (bar for bar in bars if bar['symbol'] == symbol and bar['duration'] == duration and start <= bar['time'] < end)
+            return by_series[symbol, duration]
+
+        def option_chain(self, source, start, end):
+            prefix = index_chain(source)
+            return (item for item in raw['instruments'].values() if item['kind'] == 'option'
+                    and (item.get('underlying') == source or (prefix and item['symbol'].startswith(prefix))))
 
         def contracts(self, symbol, start, end):
             return raw['mappings'][symbol]
@@ -83,7 +94,8 @@ def prepare(raw):
 
     symbols = list(dict.fromkeys(filter(None, [config['symbol'], config['benchmark_symbol']])))
     data = FrozenClient().snapshot(symbols, start=config['start'], end=config['end'],
-                                  duration=config['duration'], calendar=calendar, rules=rules)
+                                  duration=config['duration'], calendar=calendar, rules=rules,
+                                  option_execution=bool(config.get('option_execution')))
     data.metadata.update(engine=raw['engine'], execution_model=execution_model,
                          calendar_source='explicit override' if config.get('calendar') is not None else 'chinese-calendar; weekends excluded')
     if raw.get('derived_bars'):

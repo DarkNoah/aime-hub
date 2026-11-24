@@ -42,6 +42,8 @@ class Order:
     risk_remaining_quantity: int = 0
     risk_allocated_pnl: float = 0.0
 
+    immediate_entry: bool = False
+
     def allocate_pnl(self, size: int) -> float | None:
         """Allocate the entry's net override once across its protective closing fills."""
         if self.pnl_override is None:
@@ -80,7 +82,7 @@ class PaperBroker:
             price = self.marks.get(lot.symbol, lot.basis)
             if self.points:
                 unrealized += (price - lot.basis) * lot.quantity
-            elif item.kind == 'stock':
+            elif item.kind in ('stock', 'option'):
                 stock_value += price * lot.quantity * item.multiplier
             else:
                 unrealized += (price - lot.basis) * lot.quantity * item.multiplier
@@ -108,10 +110,10 @@ class PaperBroker:
             raise ValueError('Target position must be an integer')
         if not self.points and (not item.tradable or item.kind == 'continuous'):
             raise ValueError('Orders require a tradable, actual instrument')
-        if not self.points and item.kind == 'stock' and target < 0:
-            raise ValueError('Uncovered stock short selling is unsupported')
+        if not self.points and item.kind in ('stock', 'option') and target < 0:
+            raise ValueError('Uncovered short selling is unsupported')
 
-    def target_position(self, symbol: str, target: int, *, now: float, signal_id: str, reason: str = '') -> str:
+    def target_position(self, symbol: str, target: int, *, now: float, signal_id: str, reason: str = '', immediate_entry: bool = False) -> str:
         self.validate_target(symbol, target)
         if self.points:
             target = (target > 0) - (target < 0)
@@ -121,7 +123,7 @@ class PaperBroker:
         for pending in self.orders:
             if pending.symbol == symbol and pending.status == 'pending' and not pending.risk_entry_signal_id:
                 self._status(pending, 'cancelled', 'replaced')
-        order = Order(order_id, symbol, target, now, signal_id, exit_reason=reason or 'strategy_signal')
+        order = Order(order_id, symbol, target, now, signal_id, exit_reason=reason or 'strategy_signal', immediate_entry=immediate_entry)
         self.orders.append(order)
         if any(o.symbol == symbol and o.status == 'pending' and o.risk_entry_signal_id
                and any(lot.signal_id == o.risk_entry_signal_id for lot in self.lots) for o in self.orders):
@@ -184,6 +186,9 @@ class PaperBroker:
             if (order.symbol != bar.symbol or order.status != 'pending' or bar.time < order.submitted_at
                     or order.risk_entry_signal_id):
                 continue
+            if order.immediate_entry and (bar.time != ceil(order.submitted_at / 60) * 60 or budget < 1):
+                self._status(order, 'rejected', 'OPTION_ENTRY_NO_LIQUIDITY')
+                continue
             if budget <= 0:
                 continue
             delta = order.target - self.position(bar.symbol)
@@ -195,6 +200,8 @@ class PaperBroker:
             price = (ceil(price / item.price_tick - 1e-8) if direction > 0
                      else floor(price / item.price_tick + 1e-8)) * item.price_tick
             if price <= 0 or not bar.low <= price <= bar.high:
+                if order.immediate_entry:
+                    self._status(order, 'rejected', 'OPTION_ENTRY_NO_FILL')
                 continue
             remaining = min(abs(delta), budget)
             # Close FIFO first. A target reversal becomes a close and then an open.
@@ -226,10 +233,14 @@ class PaperBroker:
                 if not self.points and self.account()['available'] + 1e-8 < required + fee:
                     self._status(order, 'rejected', 'INSUFFICIENT_FUNDS')
                     continue
-                self.cash -= fee + (price * signed * item.multiplier if item.kind == 'stock' and not self.points else 0)
+                self.cash -= fee + (price * signed * item.multiplier if item.kind in ('stock', 'option') and not self.points else 0)
                 self.lots.append(Lot(bar.symbol, signed, price, price, bar.time, bar.trading_day, fee, order.signal_id))
                 budget -= size
                 self._fill(order, signed, price, fee, bar, 'open')
+                if order.immediate_entry:
+                    # The premium percentages were configured before the order.
+                    # Only these levels can protect the opening fill in this bar.
+                    levels.update(self.protection.at_open(bar.time, {order.signal_id}))
             if self.position(bar.symbol) == order.target:
                 self._status(order, 'filled')
         self._risk_exits(bar, levels, budget, open_only=False)
@@ -303,7 +314,7 @@ class PaperBroker:
         fees = entry_fee + fee
         net = gross - entry_fee - fee
         override = order.allocate_pnl(size)
-        if item.kind == 'stock' and not self.points:
+        if item.kind in ('stock', 'option') and not self.points:
             self.cash -= signed * price * item.multiplier + fee
         else:
             self.cash += (price - lot.basis) * side * size * multiplier - fee

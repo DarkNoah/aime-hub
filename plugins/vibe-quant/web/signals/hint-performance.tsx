@@ -331,6 +331,12 @@ export function HintPerformance({
                 {dateTime(summary.through)}
               </p>
             )}
+            {monitor.config.option_execution && (
+              <Badge variant="secondary">
+                自动选约 · 目标{' '}
+                {monitor.config.option_execution.target_leverage} 倍
+              </Badge>
+            )}
             {monitorExecutionModel(item.config) === 'continuous_price' && (
               <p>
                 <Badge variant="secondary">主连价格模拟</Badge>{' '}

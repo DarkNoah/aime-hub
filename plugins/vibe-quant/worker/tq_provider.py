@@ -1,6 +1,6 @@
 import time
 from datetime import datetime, timedelta
-from common import TZ, DURATIONS, bar, emit, in_session, instrument, quote, timestamp
+from common import number, TZ, DURATIONS, bar, emit, in_session, instrument, quote, timestamp
 from order_book import tq_book
 from ticks import TickCollector, tick_targets
 
@@ -19,8 +19,16 @@ def load_catalog(api):
             if row['ins_class'] == 'INDEX' and not symbol.startswith(('SSE.', 'SZSE.')):
                 # Commodity weighted indices are not exchange stock indices.
                 kind = 'continuous'
-            records.append(instrument(symbol, row['instrument_name'], kind, row.get('product_id', ''),
-                                      row.get('price_tick'), row.get('underlying_symbol', ''), row.get('expired', False)))
+            record = instrument(symbol, row['instrument_name'], kind, row.get('product_id', ''),
+                                row.get('price_tick'), row.get('underlying_symbol', ''), row.get('expired', False))
+            if kind == 'option':
+                right = {'CALL': 'C', 'PUT': 'P'}.get(row.get('option_class'))
+                expiry = number(row.get('expire_datetime'))
+                fields = dict(optionRight=right, strike=number(row.get('strike_price')),
+                              volumeMultiple=number(row.get('volume_multiple')),
+                              expiryDay=datetime.fromtimestamp(expiry, TZ).date().isoformat() if expiry and expiry > 0 else None)
+                record.update({key: value for key, value in fields.items() if value is not None})
+            records.append(record)
         emit('catalog', instruments=records)
     emit('catalog_complete')
 

@@ -12,6 +12,7 @@ export {
 export { AutocompleteInput } from '../../../apps/web/src/components/autocomplete-input';
 export { Textarea } from '../../../apps/web/src/components/ui/textarea';
 export { Label } from '../../../apps/web/src/components/ui/label';
+export { Slider } from '../../../apps/web/src/components/ui/slider';
 export { Switch } from '../../../apps/web/src/components/ui/switch';
 export {
   ScrollArea,

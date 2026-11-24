@@ -165,7 +165,9 @@ export function ResultView({
               ? '点数回测（固定 1 单位，按多空价格点差记账）'
               : run.config.execution_model === 'continuous_price'
                 ? '主连价格模拟（不计实际合约价差和换月成交成本）'
-                : '实际合约价格'}
+                : run.config.option_execution
+                  ? `自动选约 · 目标有效杠杆 ${run.config.option_execution.target_leverage} 倍`
+                  : '实际合约价格'}
           </div>
           <div>
             区间：{dateTime(run.config.start)} — {dateTime(run.config.end)}
@@ -190,7 +192,8 @@ export function ResultView({
           )}
           {!points && !native && (
             <div>
-              乘数：{run.config.rules.multiplier} · 保证金：
+              {run.config.option_execution ? '原标的乘数' : '乘数'}：
+              {run.config.rules.multiplier} · 保证金：
               {percent(run.config.rules.margin_rate)}
             </div>
           )}
@@ -223,6 +226,7 @@ export function ResultView({
                   run.config.execution_model ?? 'actual_contract',
                 backtest_engine: run.config.backtest_engine ?? 'builtin',
                 parameters: run.config.parameters,
+                option_execution: run.config.option_execution,
                 ...(run.config.optimization
                   ? { optimization: run.config.optimization }
                   : {}),

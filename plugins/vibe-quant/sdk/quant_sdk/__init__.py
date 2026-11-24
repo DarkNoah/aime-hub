@@ -1,6 +1,6 @@
 from . import backtest, live
 from .data import DataView, Dataset
-from .models import Bar, Event, Fees, Instrument, InstrumentUpdate, Quote, Roll, RunConfig
+from .models import Bar, Event, Fees, Instrument, InstrumentUpdate, Quote, Roll, OptionExecution, RunConfig
 from .calendar import TradingCalendar
 from .hub import HubClient, DataError
 from .runtime import Context, Strategy
@@ -11,6 +11,6 @@ from .kronos import KronosFactor, KronosForecast, kronos_forecast
 from .checkpoint import SDK_VERSION as __version__
 
 __all__ = ['backtest', 'live', 'DataView', 'Dataset', 'Bar', 'Event', 'Fees', 'Instrument',
-           'Quote', 'Roll', 'RunConfig', 'Context', 'Strategy', 'LiveRunner',
+           'Quote', 'Roll', 'OptionExecution', 'RunConfig', 'Context', 'Strategy', 'LiveRunner',
            'InstrumentUpdate', 'TradingCalendar', 'HubClient', 'DataError', 'RiskLevels',
            'Factor', 'load_factor', 'KronosFactor', 'KronosForecast', 'kronos_forecast']

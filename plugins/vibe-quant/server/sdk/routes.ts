@@ -2,11 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { PluginHttpEnv } from '@app/plugin-sdk/server';
-import { DURATIONS, type SyncStatus } from '../../shared.js';
+import { DURATIONS, type Bar, type SyncStatus } from '../../shared.js';
 import type { QuantConfig } from '../config.js';
 import type { MarketStore } from '../clickhouse.js';
 import type { StateStore } from '../state-store.js';
-import { supports } from '../symbols.js';
+import { hasOptionProduct, optionChain } from '../strategies/option-chain.js';
+import { historicalInstrument, supports } from '../symbols.js';
 import type { StrategyFeed } from './feed.js';
 import type { StrategySubscriptions } from './subscriptions.js';
 
@@ -38,6 +39,78 @@ export function strategyDataRoutes(get: () => Dependencies) {
     const item = await state.instrument(config.engine, parsed.data);
     return item ? c.json(item) : c.json({ code: 'INSTRUMENT_NOT_FOUND' }, 404);
   });
+  api.get('/option-availability', async (c) => {
+    const symbol = symbolSchema.safeParse(c.req.query('symbol'));
+    if (!symbol.success) return c.json({ code: 'VALIDATION_ERROR' }, 400);
+    const { store, config } = get();
+    return c.json({
+      available: await hasOptionProduct(store, config.engine, symbol.data),
+    });
+  });
+  api.get('/option-chain', async (c) => {
+    const query = z
+      .object({
+        symbol: symbolSchema,
+        start: z.coerce.number().int().positive(),
+        end: z.coerce.number().int().positive(),
+      })
+      .safeParse(c.req.query());
+    if (!query.success || query.data.end <= query.data.start)
+      return c.json({ code: 'VALIDATION_ERROR' }, 400);
+    const { config, store } = get();
+    return c.json(
+      await optionChain(
+        store,
+        config.engine,
+        [query.data.symbol],
+        query.data.start,
+        query.data.end,
+      ),
+    );
+  });
+  // Page by both time and symbol so a minute can span multiple pages.
+  api.get('/option-minutes', async (c) => {
+    const parsed = z
+      .object({
+        symbols: z
+          .string()
+          .transform((value) => value.split(','))
+          .pipe(z.array(symbolSchema).min(1).max(48)),
+        start: z.coerce.number().int().nonnegative(),
+        end: z.coerce.number().int().positive(),
+        after_time: z.coerce.number().int().nonnegative().optional(),
+        after_symbol: symbolSchema.optional(),
+      })
+      .safeParse(c.req.query());
+    if (!parsed.success || parsed.data.start >= parsed.data.end)
+      return c.json({ code: 'VALIDATION_ERROR' }, 400);
+    const { symbols, start, end, after_time, after_symbol } = parsed.data;
+    const { store, config } = get();
+    const bars = await store.rows<Bar>(
+      `SELECT symbol, duration, toFloat64(time) AS time, open, high, low, close, volume
+       FROM ${store.table('bars')} FINAL WHERE engine={engine:String} AND duration=60
+       AND symbol IN (SELECT arrayJoin(JSONExtract({symbols:String}, 'Array(String)')))
+       AND time >= {start:UInt64} AND time < {end:UInt64}
+       AND (time, symbol) > ({afterTime:Int64}, {afterSymbol:String})
+       ORDER BY time, symbol LIMIT 512`,
+      {
+        engine: config.engine,
+        symbols: JSON.stringify(symbols),
+        start: String(start),
+        end: String(end),
+        afterTime: String(after_time ?? start - 1),
+        afterSymbol: after_symbol ?? '',
+      },
+    );
+    const last = bars.at(-1);
+    return c.json({
+      bars,
+      next:
+        bars.length === 512 && last
+          ? { after_time: last.time, after_symbol: last.symbol }
+          : null,
+    });
+  });
   api.get('/history', async (c) => {
     const parsed = z
       .object({
@@ -57,9 +130,12 @@ export function strategyDataRoutes(get: () => Dependencies) {
       return c.json({ code: 'VALIDATION_ERROR' }, 400);
     const { config, state, store } = get();
     const { symbol, duration, after, before, limit } = parsed.data;
-    const item = await state.instrument(config.engine, symbol);
-    if (!item || item.kind === 'option')
-      return c.json({ code: 'UNSUPPORTED_INSTRUMENT' }, 400);
+    const item =
+      (await state.instrument(config.engine, symbol)) ??
+      (historicalInstrument(symbol).kind === 'option'
+        ? await state.viewInstrument(config.engine, symbol)
+        : undefined);
+    if (!item) return c.json({ code: 'UNSUPPORTED_INSTRUMENT' }, 400);
     if (
       parsed.data.execution_model === 'continuous_price' &&
       (item.kind !== 'continuous' || !symbol.startsWith('KQ.m@'))
@@ -70,7 +146,8 @@ export function strategyDataRoutes(get: () => Dependencies) {
         after: Math.floor(after),
         before: Math.ceil(before),
         limit,
-        ...(['continuous_price', 'points'].includes(
+        ...(item.kind === 'option' ||
+        ['continuous_price', 'points'].includes(
           parsed.data.execution_model ?? '',
         )
           ? { rebuildTicks: false }

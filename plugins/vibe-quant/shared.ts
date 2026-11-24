@@ -8,6 +8,10 @@ export interface Instrument {
   product: string;
   priceTick: number;
   underlying: string;
+  optionRight?: 'C' | 'P';
+  strike?: number;
+  volumeMultiple?: number;
+  expiryDay?: string;
   expired: boolean;
   /** Present in paged market-search results when stored bars can be opened. */
   localHistory?: boolean;

@@ -238,7 +238,7 @@ export class StrategyReplaySessions {
           start: Math.max(1, input.from - monitor.config.warmup_days * 86400),
           end: times.at(-1)!,
           slippage_ticks: 0,
-          participation_rate: 1,
+          participation_rate: monitor.config.option_execution ? 0.1 : 1,
           annualization: 252,
           risk_free_rate: 0,
           benchmark_symbol: monitor.config.symbol,

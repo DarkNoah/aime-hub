@@ -39,6 +39,32 @@ export interface StrategyVersion extends ScriptDraft {
   note: string;
   created_at: string;
 }
+/** Surface premium exits from older runs in the ordinary strategy parameter editor. */
+export function normalizeOptionParameters<
+  T extends Pick<BacktestInput, 'option_execution' | 'parameters'>,
+>(config: T): T {
+  const options = config.option_execution;
+  if (
+    !options ||
+    (options.stop_loss_pct === undefined &&
+      options.take_profit_pct === undefined)
+  )
+    return config;
+  return {
+    ...config,
+    option_execution: { target_leverage: options.target_leverage },
+    parameters: {
+      ...(options.stop_loss_pct === undefined
+        ? {}
+        : { option_stop_loss_pct: options.stop_loss_pct }),
+      ...(options.take_profit_pct === undefined
+        ? {}
+        : { option_take_profit_pct: options.take_profit_pct }),
+      ...config.parameters,
+    },
+  };
+}
+
 export interface BacktestInput {
   /** Omitted on existing runs: the original snapshot/PaperBroker engine. */
   backtest_engine?: 'builtin' | 'tqsdk';
@@ -49,6 +75,11 @@ export interface BacktestInput {
   symbol: string;
   duration: number;
   /** Actual historical contracts by default; continuous prices are an explicit backtest approximation. */
+  option_execution?: {
+    target_leverage: number;
+    stop_loss_pct?: number;
+    take_profit_pct?: number;
+  };
   execution_model?: 'actual_contract' | 'continuous_price' | 'points';
   /** Per-side cost in price points, only for fixed-one-unit point backtests. */
   point_cost?: number;

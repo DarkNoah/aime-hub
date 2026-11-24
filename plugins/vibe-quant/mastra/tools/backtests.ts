@@ -106,7 +106,9 @@ export const agentBacktestSchema = z.object({
   parameters: z
     .record(z.string(), z.unknown())
     .default({})
-    .describe('覆盖固定版本的同名参数；省略时使用版本参数'),
+    .describe(
+      '覆盖固定版本的同名参数。自动选约可选填 option_stop_loss_pct、option_take_profit_pct，10 表示权利金变动 10%。',
+    ),
   rules: z
     .object({
       multiplier: z.number(),
@@ -132,6 +134,14 @@ export const agentBacktestSchema = z.object({
     .describe(
       '内置资金回测须提供用户给定或核实的交易规则，费率用小数；点数或天勤回测可省略',
     ),
+  option_execution: z
+    .object({
+      target_leverage: z
+        .number()
+        .describe('入场时选择有效杠杆最接近目标的流动合约，一手'),
+    })
+    .optional()
+    .describe('内置资金回测按信号自动选择期权，无关联品种沿用原成交方式'),
   execution_model: z
     .enum(['actual_contract', 'continuous_price', 'points'])
     .optional()

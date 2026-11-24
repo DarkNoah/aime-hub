@@ -49,6 +49,8 @@ def replay(directory):
                         mode='backtest' if config['execution_model'] in ('points', 'continuous_price') else 'paper',
                         config=RunConfig(start=config['start'], initial_cash=config['initial_cash'],
                                          pnl_mode='points' if config.get('execution_model') == 'points' else 'currency',
+                                         option_execution=config.get('option_execution'),
+                                         participation_rate=config.get('participation_rate', 1),
                                          point_cost=config.get('point_cost', 0), benchmark_symbol=config['symbol']),
                         params={**config['parameters'], 'symbol': config['symbol'], 'duration': config['duration'],
                                 'execution_model': config['execution_model']},
@@ -57,6 +59,11 @@ def replay(directory):
         # Batches persist atomically once; per-event paper checkpoints are unnecessary.
         runner._maybe_checkpoint = lambda: None
         runner.data._instruments.update({item.symbol: item for item in dataset.instruments})
+        if runner.option_router:
+            runner.option_router.known.add(config['symbol'])
+            runner.option_router.known.update(dataset.metadata.get('option_underlyings', ()))
+            for item in dataset.instruments:
+                runner.option_router.register(item)
         signals.runner = runner
         history = MonitorHistory(output, runner, config['start'], saved.get('history') if saved else None)
         signals.history = history
@@ -82,6 +89,7 @@ def replay(directory):
             history.pending.clear()
             # The next event can mutate lots and protection records; freeze each frame now.
             frames.append(json.loads(json.dumps(frame, allow_nan=False)))
+        history.compact_option_minutes()
         checkpoint = json.loads(runner.checkpoint().read_text())
         state = {'runner': checkpoint, 'through': request['times'][-1], 'history': history.state,
                  'targets': signals.targets, 'risk_times': signals.risk_times, 'overlay': output.overlay}

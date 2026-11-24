@@ -17,6 +17,7 @@ class HubStream:
         self.symbols = tuple(dict.fromkeys(symbols))
         self.duration, self.poll_seconds = duration, poll_seconds
         self.stop_event = stop_event if stop_event is not None else StopEvent()
+        self.reference_minutes = False
         self._instruments = {s: client.rules(s, rules) for s in self.symbols}
         self._contracts = {}
         self._activation = {}
@@ -86,13 +87,13 @@ class HubStream:
                     self._quote_versions[symbol] = value
             # The collector may return newest-first pages; normalize ordering first.
             rows = sorted(batch['bars'], key=lambda b: (b['time'] + min(b['duration'], 86400),
-                          b['symbol'].startswith('KQ.m@'), b['symbol']))
+                          b['symbol'].startswith('KQ.m@'), self.reference_minutes and b['duration'] != 60, b['symbol']))
             for row in rows:
                 symbol = row['symbol']
                 if symbol not in self._instruments:
                     continue
                 requested = self.duration if symbol in self.symbols else 60
-                execution = row['duration'] == 60 and self._instruments[symbol].tradable
+                execution = row['duration'] == 60 and (self._instruments[symbol].tradable or self.reference_minutes)
                 if not execution and row['duration'] != (60 if requested == 180 else requested):
                     continue
                 cutoff = int(self.cutoff // 180 * 180) if requested == 180 else self.cutoff

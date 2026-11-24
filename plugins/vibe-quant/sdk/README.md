@@ -21,6 +21,31 @@
 
 插件页面已提供脚本、版本、回测记录、交易行情回放与内置引擎的 Optuna 调优。天勤回测只构造 TqSim 模拟账户。
 
+## 根据信号自动选择一手期权
+
+在策略管理的新建回测中选择内置回测、实际合约价格，使用「自动选择期权」滑块设置目标有效杠杆。默认目标为 20 倍。权利金止损和止盈是可选的普通策略参数 `option_stop_loss_pct` 和 `option_take_profit_pct`，百分数 10 表示 10%。可按需设置其中一侧，省略时沿用策略版本参数，版本也未设置时由策略自行决定退出。显式传入 `null` 可关闭该侧。重跑已有任务沿用原配置。HTTP 和 SDK 调用通过显式提供 `option_execution` 启用。
+
+```python
+from quant_sdk import OptionExecution, RunConfig, backtest
+
+symbol = 'KQ.m@CFFEX.IM'
+data = client.snapshot([symbol], start=start, end=end, calendar=calendar,
+                       rules=rules, duration=300, option_execution=True)
+result = backtest.run(strategy, data, params={'symbol': symbol, 'duration': 300,
+                                              'option_take_profit_pct': 10},
+                      config=RunConfig(initial_cash=1_000_000, participation_rate=0.1,
+                                       option_execution=OptionExecution(target_leverage=25)))
+```
+
+策略继续对信号标的或当时解析出的实际合约调用 `ctx.orders.target_position`。正目标买一手 Call，负目标买一手 Put，零目标平掉持有的那张期权。重复的同向目标保持一手，反手等待旧仓平掉，再用当时可见的行情选约。`ctx.position(信号标的)` 表示策略方向，成交回调里的 `symbol`、`quantity` 和 `price` 是实际模拟交易的期权、手数和权利金。
+
+- 股指期货按当时的实际合约月份自动匹配 IM→MO、IF→IO、IH→HO。主连换月后，原持仓保留原合约。其他标的按行情目录的 `underlying` 关联，选约需要行权价、Call/Put 方向和合约乘数。没有关联品种时沿用原策略的交易标的和数量。已知有关联，但该时点没有可成交的候选时跳过这一笔。
+- 使用标的与候选期权同一分钟已收盘的价格，以零利率 Black 模型从权利金反推总波动率及 Delta。股指期货使用同月实际期货价。有效杠杆为 `参考价 ÷ 权利金 × |Delta|`。越接近滑块目标越优先，差值相同优先选当分钟成交量大的合约，再按代码排序。`target_position` 信号记录 `source_contract`、`target_leverage`、`effective_leverage`、`delta`、`reference_price` 和 `premium`。模型弹性定义见 [QuantLib BlackCalculator](https://github.com/lballabio/QuantLib/blob/master/ql/pricingengines/blackcalculator.cpp)。
+- 候选和紧接信号后的执行分钟均要求「期权分钟成交量 × 参与率」至少一手。参与率为 10% 时各需至少 10 手成交量。使用下一分钟开盘价和配置的滑点模拟成交。缺行情、成交量不够或该分钟无法按规则成交时，结束本次入场。跳过和拒单原因分别保存在信号和委托中。
+- 买入支付全额权利金和手续费，持仓按该期权收盘价估值，平仓按期权成交价、乘数、费用计算净盈亏。手续费取回测交易规则，请按期权费率设置。成交前预设的百分比保护从开仓成交价计算，入场 K 线即可触发。跳空和同根双触发沿用内置执行器规则。策略在信号标的上显式给出的价格保护触发后，在期权下一可成交分钟平仓。
+- 历史行情取回测区间内归档的分钟线。目录可包含已到期或尚未开始交易的合约，每次只比较信号时点确有分钟线的合约。仍持仓进入已知到期日之后的交易日时，回测会提示缺少交割结算数据。旧股指期权目录按合约月份的第三个周五和提供的交易日历确定已验证的持仓期限。
+- 行情页在「策略 → 添加策略 → 内置模拟」中使用同一滑块。历史计算、图表回放及后续监听共用该配置。监听从行情库读取已收盘的期权分钟线，以当分钟成交量的 10% 判断能否买入一手。图表在模拟成交后记录入场和离场，平仓展示净盈亏。
+
 ## 行情策略的 TqSim 模拟引擎
 
 行情「添加策略」可选 `simulation_engine="tqsdk"`。`symbol` 自动填入当前图表，可改为其他标的；`display_symbol` / `display_engine` 记录显示位置。例如在 `KQ.m@CFFEX.IM` 分别绑定 `CFFEX.IM2611`、`CFFEX.IM2612`，或在 `SZSE.000852` 绑定内置引擎的 `KQ.m@CFFEX.IM`。跨标的信号按时间显示并标明来源，不把其他标的的风险价格画在当前价格轴。天勤引擎仍仅支持单个期货实际合约。

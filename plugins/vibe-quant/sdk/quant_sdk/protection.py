@@ -13,7 +13,7 @@ class ProtectionBook:
         # A quote/fill callback inside a completed bar cannot change that bar's
         # earlier high/low. Such updates first apply to a subsequent full bar.
         return {entry: record for entry in entries
-                if (record := next((r for r in reversed(self.history.get(entry, [])) if r['time'] <= time), None)) is not None}
+                if (record := next((r for r in reversed(self.history.get(entry, [])) if r.get('active_from', r['time']) <= time), None)) is not None}
 
 
 def trigger(record: dict, side: int, bar: Bar, *, open_only: bool = False):

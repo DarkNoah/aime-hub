@@ -33,7 +33,7 @@ class Fees:
 @dataclass(frozen=True)
 class Instrument:
     symbol: str
-    kind: Literal['stock', 'future', 'continuous']
+    kind: Literal['stock', 'future', 'continuous', 'option']
     price_tick: float
     multiplier: float | None = None
     lot_size: int | None = None
@@ -42,8 +42,19 @@ class Instrument:
     tradable: bool = True
     fees: Fees = field(default_factory=Fees)
 
+    option_underlying: str = ''
+    option_right: Literal['C', 'P'] | None = None
+    strike: float | None = None
+    expiry_day: str | None = None
+
     def __post_init__(self):
-        if not self.symbol or self.kind not in ('stock', 'future', 'continuous'):
+        if self.kind == 'option':
+            if not self.option_underlying or self.option_right not in ('C', 'P') or self.multiplier is None:
+                raise ValueError('Option requires underlying, right and premium multiplier')
+            finite(self.strike or 0, 'strike', positive=True)
+            if self.expiry_day:
+                date.fromisoformat(self.expiry_day)
+        if not self.symbol or self.kind not in ('stock', 'future', 'continuous', 'option'):
             raise ValueError('Unsupported instrument')
         if self.kind == 'future' and (self.multiplier is None or self.margin_rate is None):
             raise ValueError('Futures require explicit multiplier and margin_rate')
@@ -171,6 +182,23 @@ class Event:
 
 
 @dataclass(frozen=True)
+class OptionExecution:
+    target_leverage: float
+    stop_loss_pct: float | None = None
+    take_profit_pct: float | None = None
+
+    def __post_init__(self):
+        for name in ('target_leverage', 'stop_loss_pct', 'take_profit_pct'):
+            value = getattr(self, name)
+            if value is not None:
+                if type(value) not in (int, float):
+                    raise ValueError(f'Invalid {name}')
+                finite(value, name, positive=True)
+        if self.target_leverage is None or (self.stop_loss_pct is not None and self.stop_loss_pct >= 100):
+            raise ValueError('Invalid option execution settings')
+
+
+@dataclass(frozen=True)
 class RunConfig:
     initial_cash: float = 100_000.0
     start: float | None = None
@@ -186,8 +214,14 @@ class RunConfig:
     dedup_limit: int = 50_000
     pnl_mode: Literal['currency', 'points'] = 'currency'
     point_cost: float = 0.0
+    option_execution: OptionExecution | None = None
 
     def __post_init__(self):
+        if isinstance(self.option_execution, dict):
+            object.__setattr__(self, 'option_execution', OptionExecution(**self.option_execution))
+        if self.option_execution is not None and (not isinstance(self.option_execution, OptionExecution)
+                or self.pnl_mode != 'currency' or self.execution_duration != 60):
+            raise ValueError('Automatic option execution requires currency accounting and one-minute fills')
         if self.pnl_mode not in ('currency', 'points'):
             raise ValueError('Invalid P&L mode')
         finite(self.point_cost, 'point_cost')

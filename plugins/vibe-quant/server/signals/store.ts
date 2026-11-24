@@ -1,4 +1,5 @@
 import { SignalHistoryStore } from './history.js';
+import { normalizeOptionParameters } from '../../strategy-types.js';
 import { monitorExecutionModel } from '../../signal-types.js';
 import { randomUUID } from 'node:crypto';
 import type {
@@ -31,6 +32,11 @@ export type MonitorRuntime = {
   message: string;
   checkpoint: string;
 };
+function readMonitor(payload: string): StoredMonitor {
+  const row: StoredMonitor = JSON.parse(payload);
+  row.config = normalizeOptionParameters(row.config);
+  return row;
+}
 export class MonitorStore extends ClickHouseClient {
   constructor(
     config: QuantConfig,
@@ -89,14 +95,14 @@ export class MonitorStore extends ClickHouseClient {
       { id, ...(owner ? { owner } : {}) },
     );
     if (!row) throw new StrategyError('MONITOR_NOT_FOUND', 404);
-    return JSON.parse(row.payload) as StoredMonitor;
+    return readMonitor(row.payload);
   }
   async list(owner?: string, strategy?: string): Promise<StoredMonitor[]> {
     const rows = await this.rows<{ payload: string }>(
       `SELECT payload FROM ${this.table('quant_signal_monitors')} FINAL WHERE NOT JSONExtractBool(payload,'deleted') ${owner ? 'AND userId={owner:String}' : ''} ${strategy ? "AND JSONExtractString(payload,'strategy_id')={strategy:String}" : ''}`,
       { ...(owner ? { owner } : {}), ...(strategy ? { strategy } : {}) },
     );
-    return rows.map((row) => JSON.parse(row.payload));
+    return rows.map((row) => readMonitor(row.payload));
   }
   async runtime(id: string, includeCheckpoint = false) {
     const [row] = await this.rows<MonitorRuntime>(

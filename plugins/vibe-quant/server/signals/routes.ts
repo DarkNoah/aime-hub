@@ -19,8 +19,12 @@ import {
   monitorExecutionModel,
   strategyHintDuration,
 } from '../../signal-types.js';
-import { POINT_BACKTEST_RULES } from '../../strategy-types.js';
+import {
+  normalizeOptionParameters,
+  POINT_BACKTEST_RULES,
+} from '../../strategy-types.js';
 
+import { hasOptionProduct } from '../strategies/option-chain.js';
 import { actualFuture, resolveTqOptions } from '../tq-options.js';
 import { readMarketPositionMonths, readMarketPositions } from './positions.js';
 import type { MarketPositionsPage } from '../../market-positions.js';
@@ -43,6 +47,7 @@ export const monitorSchema = z.object({
   calendar: shape.calendar,
   execution_model: shape.execution_model,
   point_cost: shape.point_cost,
+  option_execution: shape.option_execution,
   notifications: strategyNotificationsSchema.optional(),
   notifications_enabled: z.boolean().optional(),
   warmup_days: z.number().int().min(1).max(90).default(7),
@@ -258,6 +263,16 @@ export function signalRoutes(
     if (version.strategy_id !== strategyId)
       throw new StrategyError('VERSION_NOT_FOUND', 404);
     const native = parsed.data.simulation_engine === 'tqsdk';
+    if (parsed.data.option_execution) {
+      if (
+        native ||
+        (parsed.data.execution_model &&
+          parsed.data.execution_model !== 'actual_contract')
+      )
+        throw new StrategyError('INVALID_MONITOR_CONFIG');
+      if (!(await hasOptionProduct(state, config.engine, parsed.data.symbol)))
+        delete parsed.data.option_execution;
+    }
     if (native && !actualFuture.test(parsed.data.symbol))
       throw new StrategyError('TQ_ACTUAL_FUTURES_ONLY');
     if (native && (!config.tqUser || !config.tqPassword))
@@ -287,7 +302,9 @@ export function signalRoutes(
       (!item ||
         item.expired ||
         item.kind === 'option' ||
-        (isIndexSymbol(item.symbol) && executionModel !== 'points') ||
+        (isIndexSymbol(item.symbol) &&
+          executionModel !== 'points' &&
+          !parsed.data.option_execution) ||
         (executionModel === 'continuous_price' &&
           (item.kind !== 'continuous' || !item.symbol.startsWith('KQ.m@'))) ||
         !supports(config.engine, item) ||
@@ -347,7 +364,9 @@ export function signalRoutes(
             }
           : {}),
         ...calculation,
-        ...(points ? { execution_model: 'points' } : {}),
+        ...(points || parsed.data.option_execution
+          ? { execution_model: executionModel }
+          : {}),
         initial_cash: points ? 1 : (parsed.data.initial_cash ?? 1_000_000),
         rules:
           points || native
@@ -361,7 +380,7 @@ export function signalRoutes(
       strategyId,
       version.number,
       native ? 'tqsdk' : config.engine,
-      monitorConfig,
+      normalizeOptionParameters(monitorConfig),
       {
         notifications: strategyNotifications(
           notifications ?? {

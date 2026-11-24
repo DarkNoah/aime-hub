@@ -8,6 +8,8 @@ from .runtime import Runner, _write
 def run(strategy, data: Dataset, *, params=None, config=None, output_dir='.quant-runs', on_event=None, stop_event=None):
     """Every invocation writes its source, input snapshot, config and result."""
     config = config or RunConfig()
+    if config.option_execution and data.metadata.get('execution_model') not in (None, 'actual_contract'):
+        raise ValueError('Automatic option execution requires an actual-contract snapshot')
     if data.metadata.get('execution_model') == 'points' and config.pnl_mode != 'points':
         raise ValueError('Point snapshots require point accounting')
     if config.start is None and data.events:
@@ -17,6 +19,8 @@ def run(strategy, data: Dataset, *, params=None, config=None, output_dir='.quant
     if stop_event is not None:
         runner.stop_event = stop_event
     try:
+        if runner.option_router:
+            runner.option_router.known.update(data.metadata.get('option_underlyings', ()))
         data.save(runner.directory / 'dataset.json')
         runner.manifest['data_snapshot_hash'] = data.fingerprint
         for key in ('execution_model', 'simulated_execution_symbol', 'execution_policy', 'mapping_policy', 'data_policy'):

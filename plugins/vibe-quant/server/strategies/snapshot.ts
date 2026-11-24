@@ -5,6 +5,7 @@ import type { StateStore } from '../state-store.js';
 import { ClickHouseError } from '../clickhouse-client.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import { MAX_BACKTEST_BARS } from './limits.js';
+import { optionChain } from './option-chain.js';
 import { completeFiveMinuteBars } from './signal-bars.js';
 
 export interface RawSnapshot {
@@ -124,6 +125,48 @@ export async function collectSnapshot(
           throw new Error('主连必须映射到期货合约');
         request(contract, 60);
       }
+    }
+  }
+  if (config.option_execution) {
+    const sources = result.mappings[config.symbol]?.map(
+      (row) => row.underlying,
+    ) ?? [config.symbol];
+    const options = await read(() =>
+      optionChain(
+        store,
+        engine,
+        [...new Set(sources)],
+        config.start,
+        config.end,
+      ),
+    );
+    for (const item of options) {
+      result.instruments[item.symbol] = item;
+    }
+    // Load the archived minute series in bounded batches. Reading only rows in
+    // the requested window also handles contracts with no local observations.
+    const symbols = options.map((item) => item.symbol);
+    for (let offset = 0; offset < symbols.length; offset += 40) {
+      const room = MAX_BACKTEST_BARS - result.bars.length;
+      const bars = await read(() =>
+        store.rows<Bar>(
+          `SELECT symbol, duration, toFloat64(time) AS time, open, high, low, close, volume
+         FROM ${store.table('bars')} FINAL WHERE engine={engine:String} AND duration=60
+           AND symbol IN (SELECT arrayJoin(JSONExtract({symbols:String}, 'Array(String)')))
+           AND time >= {start:UInt64} AND time < {end:UInt64}
+         ORDER BY symbol, time LIMIT {limit:UInt32}`,
+          {
+            engine,
+            symbols: JSON.stringify(symbols.slice(offset, offset + 40)),
+            start: String(config.start),
+            end: String(config.end),
+            limit: String(room + 1),
+          },
+        ),
+      );
+      if (bars.length > room)
+        throw new Error('期权链超过单次回测数据上限，请缩短区间');
+      for (const bar of bars) result.bars.push(bar);
     }
   }
   const loaded = new Set<string>();

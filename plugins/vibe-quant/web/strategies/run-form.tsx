@@ -26,8 +26,13 @@ import type {
   BacktestRun,
   StrategyVersion,
 } from '../../strategy-types';
+import { normalizeOptionParameters } from '../../strategy-types';
 import { InstrumentInput } from '../components/instrument-input';
 import { errorText, parseObject } from './format';
+import {
+  defaultOptionExecution,
+  OptionExecutionSettings,
+} from './option-execution-settings';
 import { FeeSettings } from './fee-settings';
 import { nextOptimizationVersionName } from '../../strategy-version';
 import { VersionSelect } from './version-select';
@@ -67,7 +72,7 @@ export function RunForm({
   const [config, setConfig] = useState<BacktestInput>(() =>
     initial
       ? {
-          ...initial,
+          ...normalizeOptionParameters(initial),
           ...(optimize
             ? { version_id: '', parameters: {}, optimization: undefined }
             : {}),
@@ -75,6 +80,7 @@ export function RunForm({
       : {
           version_id: optimize ? '' : defaultVersion.id,
           symbol: 'KQ.m@CFFEX.IM',
+          option_execution: defaultOptionExecution,
           duration: 60,
           start: Math.floor(Date.now() / 1000) - 7 * 86400,
           end: Math.floor(Date.now() / 1000),
@@ -173,6 +179,11 @@ export function RunForm({
       const input = {
         ...config,
         backtest_engine: native ? 'tqsdk' : 'builtin',
+        option_execution:
+          !native &&
+          (config.execution_model ?? 'actual_contract') === 'actual_contract'
+            ? config.option_execution
+            : undefined,
         tq_options: native ? config.tq_options : undefined,
         optimization: optimize
           ? {
@@ -395,6 +406,16 @@ export function RunForm({
                     }));
                   }}
                 />
+                {!native &&
+                  (config.execution_model ?? 'actual_contract') ===
+                    'actual_contract' && (
+                    <OptionExecutionSettings
+                      symbol={config.symbol}
+                      pluginId={pluginId}
+                      value={config.option_execution}
+                      onChange={(value) => field('option_execution', value)}
+                    />
+                  )}
                 <p className="text-xs leading-5 text-muted-foreground">
                   {native
                     ? '信号与成交均使用所选实际合约；历史合约可手动输入，回测日期须位于合约存续期内。'
@@ -402,7 +423,9 @@ export function RunForm({
                       ? '信号与成交使用所选标的价格，结果单位为点。主连不做实际合约映射。'
                       : config.execution_model === 'continuous_price'
                         ? '主连同时用于信号和模拟成交。'
-                        : '主连产生信号，交易历史映射的实际合约。'}
+                        : config.option_execution
+                          ? '主连按信号时点的主力合约匹配期权月份。'
+                          : '主连产生信号，交易历史映射的实际合约。'}
                   {!points &&
                     !native &&
                     '股票数量单位为股，期货为手；商品期货请核对合约乘数。'}

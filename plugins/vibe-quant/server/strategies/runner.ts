@@ -294,6 +294,7 @@ export class BacktestWorker {
             initial_cash,
             pnl_mode:
               job.config.execution_model === 'points' ? 'points' : 'currency',
+            option_execution: job.config.option_execution,
             point_cost: job.config.point_cost ?? 0,
             start,
             end,

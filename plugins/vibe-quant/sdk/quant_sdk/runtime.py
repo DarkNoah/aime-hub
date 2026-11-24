@@ -13,7 +13,8 @@ from uuid import uuid4
 from .data import DataView
 from .execution import Lot, Order, PaperBroker
 from .metrics import summarize
-from .models import Bar, Event, Fees, Instrument, Quote, Roll, RunConfig
+from .options import OptionRouter
+from .models import InstrumentUpdate, Bar, Event, Fees, Instrument, Quote, Roll, RunConfig
 from .risk import RiskLevels, accept, publish
 from .state_codec import encode_state, decode_state
 from .factors import snapshot_factors
@@ -45,6 +46,9 @@ class Execution:
         ctx = self._ctx
         if ctx.warming_up or not ctx.event_id:
             raise ValueError('Orders are only allowed inside active event callbacks')
+        router = ctx._runner.option_router
+        if router and router.handles(symbol):
+            return router.target(symbol, quantity, reason)
         ctx._runner.broker.validate_target(symbol, quantity)
         if ctx._runner.broker.points:
             quantity = (quantity > 0) - (quantity < 0)
@@ -76,6 +80,9 @@ class Context:
     def account(self): return self._runner.broker.account()
 
     def position(self, symbol: str) -> int:
+        router = self._runner.option_router
+        if router and router.handles(symbol):
+            return router.position(symbol)
         return self._runner.broker.position(symbol)
 
     def emit(self, kind: str, **payload) -> str:
@@ -135,6 +142,9 @@ class Runner:
         self.broker = PaperBroker(self.data, self.config, self._notify,
                                   lambda **payload: self.context.emit('risk_exit', **payload))
         self.context = Context(self, params or {})
+        if self.config.option_execution and mode == 'monitor':
+            raise ValueError('Automatic option execution requires a simulated account')
+        self.option_router = OptionRouter(self.context, self.config.option_execution) if self.config.option_execution else None
         self.source = self._source()
         self.source_hash = sha256(self.source.encode()).hexdigest()
         self.runtime_hash = sha256(b''.join(path.read_bytes() for path in sorted(Path(__file__).parent.glob('*.py')))).hexdigest()
@@ -205,6 +215,8 @@ class Runner:
         if kind == 'order':
             accept(self.context, self.strategy.on_order(self.context, payload))
         else:
+            if self.option_router:
+                self.option_router.after_fill(payload)
             accept(self.context, self.strategy.on_fill(self.context, payload))
 
     def process(self, event: Event, *, warmup: bool = False) -> bool:
@@ -235,6 +247,8 @@ class Runner:
         ctx = self.context
         ctx.event_id, ctx.trading_day = event.id, event.payload.trading_day
         ctx.warming_up = warmup or (self.config.start is not None and event.available_at < self.config.start)
+        if self.option_router and isinstance(event.payload, InstrumentUpdate):
+            self.option_router.register(event.payload.instrument)
         if correction:
             ctx.log('Historical correction applied without retriggering strategy', event_id=event.id)
             self._maybe_checkpoint()
@@ -251,6 +265,8 @@ class Runner:
         if isinstance(value, Bar) and value.is_final:
             if self.mode != 'monitor':
                 self.broker.on_bar(value)
+                if self.option_router:
+                    self.option_router.on_bar(value)
             if value.symbol == self.config.benchmark_symbol:
                 self.benchmark_price = value.close
                 if self.benchmark_start is None and value.open > 0:
@@ -264,6 +280,8 @@ class Runner:
                 accept(ctx, self.strategy.on_roll(ctx, value, previous))
         if isinstance(value, Bar) and value.is_final:
             account = self.broker.account()
+            if self.option_router and self.option_router.by_underlying and self.curve and self.curve[-1]['time'] == ctx.now:
+                self.curve.pop()
             self.curve.append({'time': ctx.now, 'trading_day': ctx.trading_day, **account,
                                'benchmark_equity': (self.benchmark_price - self.benchmark_start if self.broker.points else
                                                     self.config.initial_cash * self.benchmark_price / self.benchmark_start)
@@ -282,6 +300,8 @@ class Runner:
         self._checkpoint_at = self.data.now
         self.manifest['instruments'] = [asdict(i) for i in self.data._instruments.values()]
         _write(path, {'schema_version': 1, 'manifest': self.manifest,
+                      'option_underlyings': sorted(self.option_router.known) if self.option_router else [],
+                      'option_binding': self.option_router.state if self.option_router else None,
                       'now': self.data.now, 'state_encoding': 1, 'state': encode_state(self.context.state),
                       'trading_day': self.context.trading_day, 'event_id': self.context.event_id,
                       'ready': self.ready, 'seen': self.seen, 'signals': self.signals,
@@ -372,6 +392,9 @@ class Runner:
         for raw in value['bars']:
             bar = Bar(**raw)
             runner.data._apply(Event(f'restore:{bar.symbol}:{bar.duration}:{bar.time}', bar.end_time, bar))
+        if runner.option_router:
+            runner.option_router.known.update(value.get('option_underlyings', ()))
+            runner.option_router.state = value.get('option_binding') or {}
         runner.data._quotes = {q['symbol']: Quote(**q) for q in value['quotes']}
         runner.data._contracts = value['contracts']
         runner.data._roll_times = value.get('roll_times', {})

@@ -162,6 +162,7 @@ function settings(entry: Entry): Record<string, unknown> {
     start: c.start,
     end: c.end,
     execution_model: c.execution_model ?? 'actual_contract',
+    option_execution: c.option_execution ?? null,
     slippage_ticks: c.slippage_ticks,
     benchmark_symbol: c.benchmark_symbol,
     ...(!points

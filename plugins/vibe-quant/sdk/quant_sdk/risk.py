@@ -1,5 +1,5 @@
 """Causal protective levels shared by execution, exported results and charts."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 import json
 
@@ -50,10 +50,16 @@ def exit_terms(record: dict, reason: str) -> dict:
     return terms
 
 
-def publish(context, levels: RiskLevels) -> None:
+def publish(context, levels: RiskLevels, *, active_from=None) -> None:
     runner = context._runner
     if context.warming_up or not context.event_id:
         raise ValueError('Risk levels require an active event callback')
+    router = runner.option_router
+    if router and router.handles(levels.symbol):
+        router.source_levels(levels)
+        return
+    if router and levels.symbol == router.state.get('contract'):
+        levels = replace(levels, stop_loss_pnl=None, take_profit_pnl=None, pnl_override=None)
     item = context.data.instrument(levels.symbol)
     if not runner.broker.points and (not item.tradable or item.kind == 'continuous'):
         raise ValueError('Risk levels require the actual tradable instrument')
@@ -82,6 +88,8 @@ def publish(context, levels: RiskLevels) -> None:
     for entry in entries:
         payload = {'event_id': context.event_id, 'time': context.now, 'symbol': levels.symbol,
                    'entry_signal_id': entry, 'stop_loss': levels.stop_loss, 'take_profit': levels.take_profit, **terms}
+        if active_from is not None:
+            payload['active_from'] = active_from
         identity = sha256(json.dumps([runner.source_hash, runner.manifest['params'], payload, len(runner.risk_levels)],
                                     sort_keys=True, allow_nan=False).encode()).hexdigest()
         record = {'id': identity, **payload}

@@ -166,6 +166,24 @@ test('monitor creation uses shared strategies and enforces administrator, versio
   assert.deepEqual(loaded.parameters, { fast: 5, slow: 30, duration: 300 });
   assert.equal(loaded.duration, 300);
   assert.deepEqual(versionParameters, { fast: 10, slow: 30, duration: 60 });
+  const option_execution = {
+    target_leverage: 31,
+    stop_loss_pct: 8,
+    take_profit_pct: 14,
+  };
+  const optionMonitor = { ...value, symbol: 'KQ.m@CFFEX.IM', option_execution };
+  assert.equal((await request(optionMonitor)).status, 201);
+  const optionConfig = (calls.at(-2) as unknown[])[4] as ReturnType<
+    typeof config
+  >;
+  assert.deepEqual(optionConfig.option_execution, { target_leverage: 31 });
+  assert.equal(optionConfig.parameters.option_stop_loss_pct, 8);
+  assert.equal(optionConfig.parameters.option_take_profit_pct, 14);
+  assert.equal(monitorExecutionModel(optionConfig), 'actual_contract');
+  assert.equal(
+    (await request({ ...optionMonitor, simulation_engine: 'tqsdk' })).status,
+    400,
+  );
   for (const parameter_overrides of [[], { duration: 17 }, { symbol: actual }])
     assert.equal(
       (await request({ ...value, parameter_overrides })).status,

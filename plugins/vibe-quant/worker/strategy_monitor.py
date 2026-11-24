@@ -16,6 +16,7 @@ from quant_sdk.runtime import Runner
 from strategy_entrypoint import resolve_strategy
 from signal_history import BufferedEvents, MonitorHistory, history_events
 from position_valuation import exit_valuation
+from monitor_options import LiveOptionEvents
 
 
 class BridgeClient(HubClient):
@@ -106,11 +107,22 @@ class SignalOutput:
         if event['type'] == 'risk_levels':
             value = event['payload']
             self.risk_times[value['id']] = getattr(self.event.payload, 'time', value['time']) if self.event and self.event.available_at == value['time'] else value['time']
+        value = event['payload']
+        symbol = value.get('symbol')
+        if (symbol and self.runner and getattr(self.runner, 'option_router', None)
+                and symbol in self.runner.data._instruments and self.runner.data.instrument(symbol).kind == 'option'
+                and event['type'] in ('signal', 'fill')):
+            if event['type'] == 'fill':
+                self.option_fill(value)
+            return
         if event['type'] != 'signal':
             return
         value = event['payload']
         symbol, kind = value.get('symbol'), value['kind']
         if not symbol:
+            return
+        router = getattr(self.runner, 'option_router', None)
+        if router and kind in ('entry', 'exit') and router.handles(symbol):
             return
         previous = self.targets.get(symbol, 0)
         signals = []
@@ -143,6 +155,25 @@ class SignalOutput:
             # Historical records are persisted, but never replay old notifications.
             if value['time'] > self.cutoff:
                 self.client.call('signal', signal=record)
+
+    def option_fill(self, fill):
+        item = self.runner.data.instrument(fill['symbol'])
+        opening = fill['offset'] == 'open'
+        self.dirty = True
+        self.targets[item.symbol] = self.runner.broker.position(item.symbol)
+        signal = next((s for s in reversed(self.runner.signals) if s['id'] == fill['signal_id']), {})
+        record = {'id': fill['id'] + ':' + fill['signal_id'], 'type': 'entry' if opening else 'exit',
+                  'side': 'long' if item.option_right == 'C' else 'short', 'symbol': item.symbol,
+                  'time': fill['time'], 'chart_time': fill.get('exit_bar_time', fill['time']),
+                  'price': fill['price'], 'reason': fill.get('exit_reason') or signal.get('reason', '')}
+        if not opening:
+            record['pnl'] = {'value': fill['net_pnl'], 'unit': 'currency', 'basis': 'realized'}
+            if fill.get('exit_note'):
+                record['exit_note'] = fill['exit_note']
+        if self.history:
+            self.history.signal(record)
+        if self.event and self.event.available_at > self.cutoff:
+            self.client.call('signal', signal=record)
 
     def flush_overlay(self, chart_symbol):
         if not self.dirty and (self.overlay_key == '[]' or not self.event or not isinstance(self.event.payload, Bar)):
@@ -213,6 +244,8 @@ def main():
                               multiplier=1, margin_rate=1, lot_size=1, t_plus_one=False)
         values = dict(config['rules'])
         values['fees'] = Fees(**values['fees'])
+        if config.get('option_execution') and (metadata.get('assetClass') == 'index' or symbol.startswith(('SSE.000', 'SZSE.399'))):
+            values['tradable'] = False
         if metadata['kind'] == 'stock':
             values['multiplier'] = values['margin_rate'] = 1
         # This monitor alone treats the main-price series as a synthetic future.
@@ -221,7 +254,18 @@ def main():
 
     with client.stream([config['symbol']], calendar=calendar, rules=rules,
                        duration=config['duration'], stop_event=stop) as stream:
-        with BufferedEvents(stream, directory / 'live-events.jsonl') as live:
+        source = stream
+        if config.get('option_execution'):
+            stream.reference_minutes = True
+            retained = None
+            if saved:
+                bound = (saved['runner'].get('option_binding') or {}).get('contract')
+                for meta in saved['runner']['manifest']['instruments']:
+                    if meta['symbol'] == bound:
+                        retained = Instrument(**{**meta, 'fees': Fees(**meta['fees'])})
+                        break
+            source = LiveOptionEvents(stream, client, config['symbol'], Fees(**config['rules']['fees']), calendar, retained)
+        with BufferedEvents(source, directory / 'live-events.jsonl') as live:
             bounds = client.request('/history/range', params={'symbol': config['symbol'], 'duration': config['duration']})
             first = bounds['start'] if bounds.get('start') is not None else stream.cutoff
             output = SignalOutput(client, stream.cutoff, saved.get('targets') if saved else None, saved.get('risk_times') if saved else None)
@@ -233,9 +277,15 @@ def main():
                 runner = Runner(strategy, stream.instruments, mode='backtest' if simulated else 'paper',
                     config=RunConfig(initial_cash=config['initial_cash'], start=first, checkpoint_interval=60,
                                      benchmark_symbol=config['symbol'], pnl_mode='points' if points else 'currency',
+                                     option_execution=config.get('option_execution'),
+                                     participation_rate=0.1 if config.get('option_execution') else 1,
                                      point_cost=config.get('point_cost', 0)),
                     params={**config['parameters'], 'symbol':config['symbol'], 'duration':config['duration'], 'execution_model':execution_model},
                     output_dir=directory / 'runs', on_event=output)
+            if runner.option_router:
+                # The creation API verified the product. A missing chain for this
+                # particular minute or month must never turn into a futures order.
+                runner.option_router.known.add(config['symbol'])
             output.runner = runner
             checkpoint = runner.checkpoint
             history = MonitorHistory(client, runner, first, saved.get('history') if saved else None)
@@ -255,6 +305,7 @@ def main():
                     path = runner.directory / name
                     if path.exists() and path.stat().st_size > 16 * 1024 * 1024:
                         path.write_text('')
+                history.compact_option_minutes()
                 result = checkpoint()
                 client.call('checkpoint', checkpoint={'runner': json.loads(result.read_text()),
                     'targets': output.targets, 'risk_times': output.risk_times,

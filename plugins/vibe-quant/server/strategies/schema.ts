@@ -3,7 +3,10 @@ import { MAX_BACKTEST_SECONDS } from './limits.js';
 import { optimizationSchema } from './optimization.js';
 import { strategyNotificationsSchema } from '../../strategy-notifications.js';
 import { POINT_OPTIMIZATION_METRICS } from '../../optimization-types.js';
-import { POINT_BACKTEST_RULES } from '../../strategy-types.js';
+import {
+  normalizeOptionParameters,
+  POINT_BACKTEST_RULES,
+} from '../../strategy-types.js';
 
 export const symbol = z.string().regex(/^[A-Za-z0-9_.@-]{1,100}$/);
 export const strategyStatusSchema = z.enum(['active', 'archived', 'deleted']);
@@ -32,6 +35,13 @@ export const backtestSchema = z
     optimization: optimizationSchema.optional(),
     version_id: z.uuid(),
     symbol,
+    option_execution: z
+      .object({
+        target_leverage: z.number().finite().positive(),
+        stop_loss_pct: z.number().finite().positive().lt(100).optional(),
+        take_profit_pct: z.number().finite().positive().optional(),
+      })
+      .optional(),
     execution_model: z
       .enum(['actual_contract', 'continuous_price', 'points'])
       .optional(),
@@ -73,6 +83,16 @@ export const backtestSchema = z
       .record(z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.boolean())
       .optional(),
   })
+  .refine(
+    (v) =>
+      !v.option_execution ||
+      (v.backtest_engine !== 'tqsdk' &&
+        (v.execution_model ?? 'actual_contract') === 'actual_contract'),
+    {
+      message: '期权自动选约需要内置资金回测和实际合约行情',
+      path: ['option_execution'],
+    },
+  )
   .refine((v) => v.end > v.start && v.end - v.start <= MAX_BACKTEST_SECONDS, {
     message: '结束时间须晚于开始时间，跨度最多十年',
     path: ['end'],
@@ -161,7 +181,7 @@ export function parseBacktestConfig(input: unknown) {
     };
   }
   const parsed = backtestSchema.safeParse(input);
-  if (parsed.success) return parsed.data;
+  if (parsed.success) return normalizeOptionParameters(parsed.data);
   const field = parsed.error.issues[0]?.path[0];
   throw new StrategyError(
     field === 'start' || field === 'end'

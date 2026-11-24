@@ -39,6 +39,7 @@ export interface SignalMonitorInput extends Pick<
   | 'initial_cash'
   | 'calendar'
   | 'execution_model'
+  | 'option_execution'
   | 'point_cost'
 > {
   simulation_engine?: 'builtin' | 'tqsdk';
@@ -52,8 +53,12 @@ export interface SignalMonitorInput extends Pick<
   events: { entry: boolean; exit: boolean };
 }
 export function monitorExecutionModel(
-  config: Pick<SignalMonitorInput, 'symbol' | 'execution_model'>,
+  config: Pick<
+    SignalMonitorInput,
+    'symbol' | 'execution_model' | 'option_execution'
+  >,
 ) {
+  if (config.option_execution) return 'actual_contract';
   return (
     config.execution_model ??
     (isIndexSymbol(config.symbol)

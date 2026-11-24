@@ -9,6 +9,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .calendar import TradingCalendar
 from .data import Dataset
+from .options import catalog_option
 from .models import Bar, Event, Instrument, Roll
 
 RuleResolver = Callable[[str, dict], Instrument]
@@ -133,12 +134,13 @@ class HubClient:
             params['after'] = after
 
     def snapshot(self, symbols, *, start: float, end: float, calendar: TradingCalendar,
-                 rules: RuleResolver, duration=60) -> Dataset:
+                 rules: RuleResolver, duration=60, option_execution=False) -> Dataset:
         """Freeze latest-corrected bars and historically observed mappings, never current mappings."""
         if duration not in PERIODS:
             raise ValueError('Unsupported duration')
         instruments, events, requests = {}, [], set()
-        for symbol in dict.fromkeys(symbols):
+        symbols = list(dict.fromkeys(symbols))
+        for symbol in symbols:
             item = instruments.setdefault(symbol, self.rules(symbol, rules))
             requests.add((symbol, duration))
             if item.tradable:
@@ -157,6 +159,22 @@ class HubClient:
                     when = max(start, mapping['time'])
                     day = calendar.trading_day(when, futures=True)
                     events.append(event_for(Roll(symbol, contract, when, day)))
+        linked = set()
+        if option_execution:
+            signal = symbols[0]
+            sources = {event.payload.contract for event in events if event.payload.symbol == signal}
+            for source in sorted(sources or {signal}):
+                for meta in self.option_chain(source, start, end):
+                    linked.add(source)
+                    symbol = meta['symbol']
+                    if symbol in instruments:
+                        continue
+                    item = catalog_option(meta, source, instruments[source].fees, calendar)
+                    if item is None:
+                        continue
+                    instruments[symbol] = item
+                    requests.add((symbol, 60))
+            requests.update((source, 60) for source in linked)
         for symbol, period in sorted(requests):
             count = 0
             groups = {}
@@ -173,11 +191,22 @@ class HubClient:
                 if bar is not None:
                     events.append(event_for(bar))
                     count += 1
-            if not count:
+            if not count and instruments[symbol].kind != 'option':
                 raise DataError(f'No closed bars for {symbol} at {period}s; collect/import data first')
-        # At equal timestamps: mappings, actual execution bars, signal-only continuous bars.
-        events.sort(key=lambda e: (e.available_at, 0 if isinstance(e.payload, Roll) else
-                                   2 if instruments[e.payload.symbol].kind == 'continuous' else 1))
+        has_options = any(item.kind == 'option' for item in instruments.values())
+        def priority(event):
+            value = event.payload
+            if isinstance(value, Roll):
+                return 0
+            kind = instruments[value.symbol].kind
+            if kind == 'continuous':
+                return 4
+            if has_options:
+                if kind == 'option':
+                    return 1
+                return 2 if value.duration == 60 else 3
+            return 1
+        events.sort(key=lambda event: (event.available_at, priority(event)))
         execution_closes = {(e.payload.symbol, e.payload.end_time) for e in events
                             if isinstance(e.payload, Bar) and e.payload.duration == 60}
         observed = {}
@@ -190,10 +219,14 @@ class HubClient:
                 if (actual, value.end_time) not in execution_closes:
                     raise DataError(f'Missing actual-contract execution bar for {value.symbol} at {value.end_time}')
         return Dataset(instruments.values(), events, metadata={
+            **({'option_underlyings': sorted(linked)} if option_execution else {}),
             'source': 'vibe-quant', 'data_policy': 'latest-corrected frozen snapshot',
             'mapping_policy': 'observed quotes, no current-contract substitution',
             'calendar': calendar.to_dict(), 'start': start, 'end': end, 'duration': duration,
         })
+
+    def option_chain(self, source, start, end):
+        return self.request('/option-chain', params={'symbol': source, 'start': int(start), 'end': int(end)})
 
     def stream(self, symbols, *, calendar: TradingCalendar, rules: RuleResolver, duration=60,
                poll_seconds=1, stop_event=None):
