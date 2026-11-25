@@ -1,0 +1,23 @@
+{
+  "profiles": {
+    "moderate": {
+      "delta_min": 0.6,
+      "delta_max": 0.8,
+      "target_leverage": 12,
+      "iv_preference": "strict"
+    },
+    "balanced": {
+      "delta_min": 0.4,
+      "delta_max": 0.6,
+      "target_leverage": 20,
+      "iv_preference": "standard"
+    },
+    "aggressive": {
+      "delta_min": 0.2,
+      "delta_max": 0.4,
+      "target_leverage": 35,
+      "iv_preference": "flexible"
+    }
+  },
+  "iv_limits": { "strict": 1.0, "standard": 1.15, "flexible": 1.35 }
+}

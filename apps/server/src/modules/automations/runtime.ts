@@ -20,6 +20,7 @@ import type { ToolService } from '../tools/service.js';
 import type { ThreadService } from '../threads/service.js';
 import type { EnvironmentVariableService } from '../environment-variables/service.js';
 import { ThreadError } from '../threads/errors.js';
+import type { ThreadBrowsers } from '../threads/browser/registry.js';
 import {
   createPersonalWorkspace,
   removePersonalWorkspace,
@@ -47,6 +48,7 @@ export function createAutomationRuntime({
   workspaceRoot,
   scheduleHooks,
   threads,
+  browsers,
   notifications,
   botEvents,
   environmentVariables,
@@ -64,6 +66,7 @@ export function createAutomationRuntime({
     ThreadService,
     'refreshAutomationThread' | 'refreshNavigation'
   >;
+  browsers: Pick<ThreadBrowsers, 'execForThread' | 'releaseInactive'>;
   notifications?: Pick<NotificationService, 'publish'>;
   botEvents?: Pick<AutomationBotEvents, 'validateSource' | 'publish'>;
   environmentVariables?: Pick<EnvironmentVariableService, 'getEnv'>;
@@ -212,6 +215,12 @@ export function createAutomationRuntime({
     const projectId =
       task.scope.scope === 'project' ? task.scope.projectId : undefined;
     const userId = task.scope.scope === 'system' ? 'system' : task.createdBy;
+    const execBrowser = browsers.execForThread(
+      task.threadId,
+      userId,
+      projectId,
+      task.scope.scope === 'system' ? { profileId: task.threadId } : undefined,
+    );
     const directory = String(thread.metadata!.workspace);
     const filesystem = projectId
       ? createProjectFilesystem(
@@ -293,7 +302,9 @@ export function createAutomationRuntime({
           await publish();
         } finally {
           try {
-            await workspace.destroy();
+            await workspace
+              .destroy()
+              .finally(() => browsers.releaseInactive(task.threadId));
           } finally {
             if (runId) executions.delete(key);
             settled();
@@ -362,6 +373,7 @@ export function createAutomationRuntime({
       model,
       workspace,
       memory: executionMemory,
+      execBrowser,
       options,
       finish,
       started,
@@ -421,6 +433,7 @@ export function createAutomationRuntime({
           : undefined,
       );
       requestContext.set('chatSettings', run.task.settings);
+      requestContext.set('execBrowser', run.execBrowser);
       return run.options;
     },
   });

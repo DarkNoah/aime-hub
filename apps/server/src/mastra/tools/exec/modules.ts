@@ -147,7 +147,7 @@ export function createExecModules(
         }
         default:
           throw new Error(
-            `Unsupported exec import: ${name}. Available: browser (in chat threads), node:fs, node:fs/promises, node:path (including posix/win32).`,
+            `Unsupported exec import: ${name}. Available: browser (in browser-enabled threads), node:fs, node:fs/promises, node:path (including posix/win32).`,
           );
       }
     },

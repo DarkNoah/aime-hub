@@ -11,3 +11,6 @@ dependencies = []
 
 [tool.setuptools.packages.find]
 include = ["quant_sdk*"]
+
+[tool.setuptools.package-data]
+quant_sdk = ["option_profiles.json"]

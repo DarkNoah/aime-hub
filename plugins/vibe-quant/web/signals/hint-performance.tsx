@@ -1,3 +1,4 @@
+import { optionSelectionLabel } from '../../option-selection';
 import { runVersionName } from '../../strategy-version';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { pluginRequest } from '@app/plugin-sdk/web';
@@ -333,8 +334,7 @@ export function HintPerformance({
             )}
             {monitor.config.option_execution && (
               <Badge variant="secondary">
-                自动选约 · 目标{' '}
-                {monitor.config.option_execution.target_leverage} 倍
+                {optionSelectionLabel(monitor.config.option_execution)}
               </Badge>
             )}
             {monitorExecutionModel(item.config) === 'continuous_price' && (

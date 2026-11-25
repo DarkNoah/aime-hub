@@ -1,10 +1,12 @@
 """Select a single long option from contemporaneous, completed minute bars."""
-from dataclasses import asdict, replace
+from collections import defaultdict
+from dataclasses import asdict, dataclass, replace
 from datetime import date, timedelta
 from math import ceil, erfc, floor, log, sqrt
+from statistics import median
 import re
 
-from .models import Instrument
+from .models import Bar, Instrument, OPTION_PROFILE_CATALOG
 from .protection import trigger
 from .risk import RiskLevels, publish
 
@@ -38,7 +40,7 @@ def catalog_option(meta, source, fees, calendar):
                       strike=strike, expiry_day=expiry)
 
 
-def effective_leverage(reference, premium, strike, right):
+def _black_metrics(reference, premium, strike, right):
     """Invert the zero-rate Black price for sigma*sqrt(T), then compute forward delta."""
     sign = 1 if right == 'C' else -1
     if reference <= 0 or not max(0, sign * (reference - strike)) < premium < (reference if sign == 1 else strike):
@@ -58,7 +60,42 @@ def effective_leverage(reference, premium, strike, right):
             high = deviation
     deviation = (low + high) / 2
     delta = sign * cdf(sign * (log_fk / deviation + deviation / 2))
-    return abs(delta) * reference / premium, delta
+    return abs(delta) * reference / premium, delta, deviation
+
+
+def effective_leverage(reference, premium, strike, right):
+    metrics = _black_metrics(reference, premium, strike, right)
+    return metrics[:2] if metrics else None
+
+
+@dataclass(frozen=True)
+class _Candidate:
+    item: Instrument
+    bar: Bar
+    leverage: float
+    delta: float
+    deviation: float  # implied volatility times sqrt(years to expiry)
+
+
+def _screen_profile(quotes, settings):
+    preset = OPTION_PROFILE_CATALOG['profiles'][settings.profile]
+    iv_cap = OPTION_PROFILE_CATALOG['iv_limits'][settings.iv_preference]
+    # Each liquid strike gets one vote, including strikes outside the desired Delta band.
+    by_expiry = defaultdict(lambda: defaultdict(list))
+    for quote in quotes:
+        if quote.item.expiry_day:
+            by_expiry[quote.item.expiry_day][quote.item.strike].append(quote.deviation)
+    references = {expiry: (median(median(values) for values in strikes.values()), len(strikes))
+                  for expiry, strikes in by_expiry.items() if len(strikes) >= 3}
+    in_band = [q for q in quotes if preset['delta_min'] <= abs(q.delta) <= preset['delta_max']]
+    if not in_band:
+        return [], {}, '没有符合该风格 Delta 范围的合约'
+    comparable = [q for q in in_band if q.item.expiry_day in references]
+    if not comparable:
+        return [], {}, '缺少到期日或同到期同方向至少三个有效行权价，无法比较 IV'
+    # At one time and expiry sqrt(T) cancels, so this is the annualized IV ratio too.
+    passing = [q for q in comparable if q.deviation / references[q.item.expiry_day][0] <= iv_cap + 1e-10]
+    return passing, references, '符合 Delta 的合约均超过所选 IV 上限' if not passing else ''
 
 
 class OptionRouter:
@@ -115,35 +152,51 @@ class OptionRouter:
         return None
 
     def select(self, source, direction):
+        choice, _ = self._select(source, direction)
+        return choice
+
+    def _select(self, source, direction):
         reference = self._minute(source)
         if not reference:
-            return None
+            return None, '缺少信号标的当分钟参考价'
         chain = index_chain(source)
-        candidates = self.by_month.get(chain, ()) if chain else self.by_underlying.get(source, ())
+        symbols = self.by_month.get(chain, ()) if chain else self.by_underlying.get(source, ())
         right = 'C' if direction > 0 else 'P'
-        best = None
-        for symbol in candidates:
+        quotes = []
+        for symbol in symbols:
             item = self.ctx.data.instrument(symbol)
             if not item.tradable or item.option_right != right or (item.expiry_day and item.expiry_day < reference.trading_day):
                 continue
             bar = self._minute(symbol, reference.end_time)
             if not bar or floor(bar.volume * self.broker.config.participation_rate) < 1:
                 continue
-            value = effective_leverage(reference.close, bar.close, item.strike, right)
-            if value is None:
-                continue
-            leverage, delta = value
-            rank = (abs(leverage - self.settings.target_leverage), -bar.volume, symbol)
-            if best is None or rank < best[0]:
-                best = rank, dict(symbol=symbol, effective_leverage=leverage, delta=delta,
-                                  reference_price=reference.close, premium=bar.close, volume=bar.volume)
-        return best[1] if best else None
+            metrics = _black_metrics(reference.close, bar.close, item.strike, right)
+            if metrics:
+                quotes.append(_Candidate(item, bar, *metrics))
+        if not quotes:
+            return None, '无当分钟有效价格、Delta 或足够成交量的期权'
+        if self.settings.profile:
+            quotes, references, reason = _screen_profile(quotes, self.settings)
+            if not quotes:
+                return None, reason
+
+        best = min(quotes, key=lambda q: (abs(q.leverage - self.settings.target_leverage), -q.bar.volume, q.item.symbol))
+        choice = dict(symbol=best.item.symbol, effective_leverage=best.leverage, delta=best.delta,
+                      reference_price=reference.close, premium=best.bar.close, volume=best.bar.volume)
+        if self.settings.profile:
+            reference_deviation, count = references[best.item.expiry_day]
+            choice.update(profile=self.settings.profile, iv_preference=self.settings.iv_preference,
+                          iv_ratio=best.deviation / reference_deviation, iv_reference_strikes=count,
+                          expiry_day=best.item.expiry_day)
+        return choice, ''
 
     def _open(self, source, direction, reason):
-        choice = self.select(source, direction)
+        choice, skip_reason = self._select(source, direction)
         if not choice:
             return self.ctx.emit('option_entry_skipped', signal_symbol=self.signal, source_contract=source,
-                                 direction=direction, reason='无当分钟有效价格、Delta 或足够成交量的期权')
+                                 direction=direction, reason=skip_reason,
+                                 **({'profile': self.settings.profile, 'iv_preference': self.settings.iv_preference}
+                                    if self.settings.profile else {}))
         contract = choice['symbol']
         self.state = dict(contract=contract, source=source, direction=direction)
         signal = self.ctx.emit('target_position', **choice, target=1, signal_symbol=self.signal,

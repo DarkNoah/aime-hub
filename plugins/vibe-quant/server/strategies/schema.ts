@@ -1,4 +1,10 @@
 import { z } from 'zod';
+import {
+  defaultIv,
+  ivPreferenceIds,
+  optionProfiles,
+  profileIds,
+} from '../../option-selection.js';
 import { MAX_BACKTEST_SECONDS } from './limits.js';
 import { optimizationSchema } from './optimization.js';
 import { strategyNotificationsSchema } from '../../strategy-notifications.js';
@@ -37,9 +43,32 @@ export const backtestSchema = z
     symbol,
     option_execution: z
       .object({
-        target_leverage: z.number().finite().positive(),
+        profile: z.enum(profileIds).optional(),
+        target_leverage: z.number().finite().positive().optional(),
+        iv_preference: z.enum(ivPreferenceIds).optional(),
         stop_loss_pct: z.number().finite().positive().lt(100).optional(),
         take_profit_pct: z.number().finite().positive().optional(),
+      })
+      .transform((value, ctx) => {
+        if (value.profile)
+          return {
+            ...value,
+            target_leverage:
+              value.target_leverage ??
+              optionProfiles[value.profile].target_leverage,
+            iv_preference: value.iv_preference ?? defaultIv(value.profile),
+          };
+        if (
+          value.target_leverage === undefined ||
+          value.iv_preference !== undefined
+        ) {
+          ctx.addIssue({
+            code: 'custom',
+            message: '请选择选约风格，或仅指定目标有效杠杆',
+          });
+          return z.NEVER;
+        }
+        return { ...value, target_leverage: value.target_leverage };
       })
       .optional(),
     execution_model: z

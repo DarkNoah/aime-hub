@@ -12,7 +12,7 @@ from quant_sdk.runtime import Runner
 from monitor_options import LiveOptionEvents
 from signal_history import history_events, MonitorHistory
 from strategy_monitor import SignalOutput
-from test_option_execution import fixture, Targets, START
+from test_option_execution import fixture, profiled_fixture, Targets, START
 from test_signal_history import Sink
 
 
@@ -42,8 +42,10 @@ class Market:
 
 
 class MarketOptionExecutionTest(unittest.TestCase):
-    def simulate(self, *, live=False, dry=False):
+    def simulate(self, *, live=False, dry=False, profile=None):
         raw, ticker = fixture('IF', main=not live, right='P')
+        if profile:
+            raw = profiled_fixture(right='P')
         config = raw['config']
         source = config['symbol']
         if dry:
@@ -59,7 +61,7 @@ class MarketOptionExecutionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = SignalOutput(sink, START)
             runner = Runner(Targets(), [item], config=RunConfig(initial_cash=25000, participation_rate=.1,
-                            option_execution={'target_leverage':25}), mode='paper',
+                            option_execution={'profile': profile} if profile else {'target_leverage':25}), mode='paper',
                             params={'symbol':source, 'targets':{'0':-2}, 'option_take_profit_pct':10}, output_dir=directory, on_event=output)
             history = MonitorHistory(sink, runner, START)
             output.runner, output.history = runner, history
@@ -94,6 +96,11 @@ class MarketOptionExecutionTest(unittest.TestCase):
         self.assertEqual(signals[0]['symbol'], ticker)
         self.assertEqual(signals[0]['time'], START + 120)
         self.assertEqual(signals[0]['price'], 112)
+
+    def test_live_and_history_resolve_aggressive_put_from_identical_minutes(self):
+        for live in [False, True]:
+            _, signals = self.simulate(live=live, profile='aggressive')
+            self.assertEqual((signals[0]['side'], signals[0]['symbol']), ('short', 'CFFEX.MO2611-P-4875'))
 
     def test_no_option_volume_no_market_entry_marker(self):
         self.assertEqual(self.simulate(live=True, dry=True)[1], [])

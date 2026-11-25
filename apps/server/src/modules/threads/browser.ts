@@ -7,18 +7,19 @@ import type { CDPSession } from 'playwright-core';
 import { UserBrowser } from './browser/user-browser.js';
 import { browserOperation } from './browser/operation.js';
 
-/** Mastra routes threads; the context belongs to this user in the current scope. */
+/** Mastra routes an actor's thread pages inside the scope's context. */
 class ThreadBrowserManager extends AgentBrowserThreadManager {
   constructor(
     config: ConstructorParameters<typeof AgentBrowserThreadManager>[0],
     private owner: UserBrowser,
     private threadId: string,
+    private userId: string,
   ) {
     super(config);
   }
 
   async open() {
-    const manager = await this.owner.acquire(this.threadId);
+    const manager = await this.owner.acquire(this.threadId, this.userId);
     this.threadManagers.set(this.threadId, manager);
     this.sessions.set(this.threadId, {
       threadId: this.threadId,
@@ -28,7 +29,7 @@ class ThreadBrowserManager extends AgentBrowserThreadManager {
   }
   override async getManagerForThread(threadId = this.threadId) {
     if (threadId !== this.threadId) throw new Error('Browser thread mismatch');
-    const manager = this.owner.get(threadId);
+    const manager = this.owner.get(threadId, this.userId);
     if (!manager?.isLaunched())
       throw new Error('Browser not running for this thread');
     return manager;
@@ -48,18 +49,19 @@ export class ThreadBrowser extends AgentBrowser {
   constructor(
     private owner: UserBrowser,
     private threadId: string,
+    private userId = owner.userId,
   ) {
     let manager!: ThreadBrowserManager;
     super({
       headless: owner.launchOptions.headless,
-      // Tools and streams route by thread; UserBrowser shares its process within one user/scope.
+      // Routing remains per user and thread while the profile can be shared.
       scope: 'thread',
       createThreadManager: (config) =>
-        (manager = new ThreadBrowserManager(config, owner, threadId)),
+        (manager = new ThreadBrowserManager(config, owner, threadId, userId)),
     });
     this.threadManager = manager;
     this.setCurrentThread(threadId);
-    this.unsubscribe = owner.onClosed(() => this.reset());
+    this.unsubscribe = owner.onClosed(() => this.reset(), userId);
   }
   override setCurrentThread(threadId?: string) {
     if (threadId && this.threadId && threadId !== this.threadId)
@@ -69,9 +71,9 @@ export class ThreadBrowser extends AgentBrowser {
   override isBrowserRunning(threadId = this.threadId) {
     return (
       !this.released &&
-      !this.owner.isClosing &&
+      !this.owner.isClosingForUser(this.userId) &&
       threadId === this.threadId &&
-      !!this.owner.get(threadId)?.isLaunched()
+      !!this.owner.get(threadId, this.userId)?.isLaunched()
     );
   }
   override hasThreadSession(threadId: string) {
@@ -103,10 +105,10 @@ export class ThreadBrowser extends AgentBrowser {
   override closeThreadSession(threadId: string) {
     if (threadId !== this.threadId)
       return Promise.reject(new Error('Browser thread mismatch'));
-    return this.owner.close();
+    return this.close();
   }
   override close() {
-    return this.owner.close();
+    return this.owner.closeForUser(this.userId);
   }
 
   private async reset() {
@@ -125,7 +127,7 @@ export class ThreadBrowser extends AgentBrowser {
     this.released = true;
     this.unsubscribe();
     await this.reset();
-    await this.owner.release(this.threadId);
+    await this.owner.release(this.threadId, this.userId);
   }
 
   // Page-manager events handle all transitions, including popup and window.close().

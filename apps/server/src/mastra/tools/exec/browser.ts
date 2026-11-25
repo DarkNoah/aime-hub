@@ -52,7 +52,7 @@ export function createExecBrowserModule(
   function requireBinding(): BrowserExecBinding {
     if (typeof binding !== 'function')
       throw new Error(
-        'Browser module unavailable outside a browser-enabled chat thread',
+        'Browser module unavailable outside a browser-enabled thread',
       );
     return binding as BrowserExecBinding;
   }

@@ -228,10 +228,10 @@ export class NetworkCaptureStore {
     return { captureId };
   }
 
-  stopScopeOwner(userId: string, projectId?: string) {
+  stopScopeOwner(userId: string | undefined, projectId?: string) {
     for (const [key, capture] of this.active) {
       if (
-        capture.scope.userId === userId &&
+        (userId === undefined || capture.scope.userId === userId) &&
         capture.scope.projectId === projectId
       )
         this.active.delete(key);

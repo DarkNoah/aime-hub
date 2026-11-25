@@ -1,3 +1,4 @@
+from math import erfc, log, sqrt
 from pathlib import Path
 import sys
 import tempfile
@@ -51,6 +52,23 @@ def fixture(product='IM', *, main=False, right='C', volumes=(20, 20, 20, 20, 20)
                             rules=dict(multiplier=200, margin_rate=.1, fees=dict(per_unit=2)))), ticker
 
 
+def profiled_fixture(right='C', deviations=None):
+    raw, ticker = fixture(right=right)
+    raw['bars'] = [b for b in raw['bars'] if b['symbol'] == raw['config']['symbol']]
+    raw['instruments'] = {s: m for s, m in raw['instruments'].items() if m['kind'] == 'future'}
+    source_bars = raw['bars'][:]
+    sign = 1 if right == 'C' else -1
+    for strike, deviation in (deviations or {4875: .05, 5000: .05, 5125: .05}).items():
+        d1 = log(5000 / strike) / deviation + deviation / 2
+        premium = sign * (5000 * erfc(-sign * d1 / sqrt(2)) -
+                          strike * erfc(-sign * (d1 - deviation) / sqrt(2))) / 2
+        symbol = ticker.replace('-5000', f'-{strike}')
+        raw['instruments'][symbol] = dict(symbol=symbol, kind='option', priceTick=.2)
+        raw['bars'].extend(dict(b, symbol=symbol, open=premium, high=premium+1, low=premium-1,
+                                close=premium, volume=40) for b in source_bars)
+    return raw
+
+
 class OptionExecutionTest(unittest.TestCase):
     def execute(self, raw, targets=None, **params):
         config = raw['config']
@@ -63,6 +81,54 @@ class OptionExecutionTest(unittest.TestCase):
                                   output_dir=directory)
         self.assertEqual(result['status'], 'succeeded', result['message'])
         return result
+
+    def test_profiles_select_matching_calls_and_puts(self):
+        for right, direction in [('C', 1), ('P', -1)]:
+            expected = [4875, 5000, 5125] if right == 'C' else [5125, 5000, 4875]
+            for profile, strike, leverage in zip(['moderate', 'balanced', 'aggressive'], expected, [12, 20, 35]):
+                with self.subTest(profile=profile, right=right):
+                    raw = profiled_fixture(right)
+                    raw['config']['option_execution'] = dict(profile=profile)
+                    result = self.execute(raw, {'0':direction})
+                    decision = result['signals'][0]
+                    self.assertEqual((decision['symbol'], decision['profile'], decision['target_leverage']),
+                                     (f'CFFEX.MO2611-{right}-{strike}', profile, leverage))
+                    self.assertAlmostEqual(decision['iv_ratio'], 1)
+                    self.assertEqual(decision['iv_reference_strikes'], 3)
+                    self.assertEqual(result['fills'][0]['quantity'], 1)
+
+    def test_iv_override_changes_eligibility_and_preserves_leverage(self):
+        raw = profiled_fixture(deviations={4875:.05, 5000:.06, 5125:.05})
+        for preference, fills in [('strict', False), ('standard', False), ('flexible', True)]:
+            raw['config']['option_execution'] = dict(profile='balanced', iv_preference=preference, target_leverage=27)
+            result = self.execute(raw)
+            self.assertEqual(bool(result['fills']), fills)
+            if fills:
+                self.assertAlmostEqual(result['signals'][0]['iv_ratio'], 1.2)
+                self.assertEqual(result['signals'][0]['target_leverage'], 27)
+            else:
+                self.assertIn('IV 上限', result['signals'][0]['reason'])
+
+    def test_iv_sample_requires_three_liquid_strikes_of_same_expiry_at_signal(self):
+        for case in ['expiry', 'volume', 'late']:
+            raw = profiled_fixture()
+            raw['config']['option_execution'] = dict(profile='balanced')
+            symbol = 'CFFEX.MO2611-C-4875'
+            if case == 'expiry':
+                raw['instruments'][symbol]['expiryDay'] = '2026-12-18'
+            elif case == 'volume':
+                next(b for b in raw['bars'] if b['symbol'] == symbol)['volume'] = 9
+            else:
+                raw['bars'] = [b for b in raw['bars'] if b['symbol'] != symbol or b['time'] > START]
+            result = self.execute(raw)
+            self.assertFalse(result['fills'])
+            self.assertIn('三个有效行权价', result['signals'][0]['reason'])
+
+    def test_sdk_rejects_ambiguous_profile_settings(self):
+        for settings in [{}, {'profile':'unknown'}, {'target_leverage':20, 'iv_preference':'strict'},
+                         {'profile':'balanced', 'iv_preference':'unknown'}]:
+            with self.subTest(settings=settings), self.assertRaises(ValueError):
+                OptionExecution(**settings)
 
     def test_forward_delta_inversion(self):
         # ATM with F=K and premium=10% of F has N(d1)=0.55 exactly.

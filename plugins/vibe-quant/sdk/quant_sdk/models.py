@@ -2,6 +2,8 @@
 from dataclasses import asdict, dataclass, field
 from datetime import date
 from math import isfinite
+from pathlib import Path
+import json
 from typing import Any, Literal
 
 
@@ -181,13 +183,29 @@ class Event:
         return cls(value['id'], value['available_at'], types[value['type']](**payload))
 
 
+OPTION_PROFILE_CATALOG = json.loads(Path(__file__).with_name('option_profiles.json').read_text(encoding='utf-8'))
+
+
 @dataclass(frozen=True)
 class OptionExecution:
-    target_leverage: float
+    target_leverage: float | None = None
     stop_loss_pct: float | None = None
     take_profit_pct: float | None = None
 
+    profile: Literal['moderate', 'balanced', 'aggressive'] | None = None
+    iv_preference: Literal['strict', 'standard', 'flexible'] | None = None
+
     def __post_init__(self):
+        if self.profile is not None:
+            preset = OPTION_PROFILE_CATALOG['profiles'].get(self.profile)
+            if preset is None:
+                raise ValueError('Unknown option selection profile')
+            if self.target_leverage is None:
+                object.__setattr__(self, 'target_leverage', preset['target_leverage'])
+            if self.iv_preference is None:
+                object.__setattr__(self, 'iv_preference', preset['iv_preference'])
+        if self.iv_preference is not None and (not self.profile or self.iv_preference not in OPTION_PROFILE_CATALOG['iv_limits']):
+            raise ValueError('Invalid IV preference for option selection profile')
         for name in ('target_leverage', 'stop_loss_pct', 'take_profit_pct'):
             value = getattr(self, name)
             if value is not None:

@@ -23,7 +23,12 @@ const listFilters = z.object({
 });
 const readRequest = z.object({ id: z.string().min(1) });
 
-/** Threads own pages; each user has separate personal and project browser profiles. */
+const ownerKey = (userId: string, projectId?: string) =>
+  projectId
+    ? JSON.stringify(['project', projectId])
+    : JSON.stringify(['user', userId]);
+
+/** Sessions own pages; each personal user and each project has one profile. */
 export class ThreadBrowsers {
   private sessions = new Map<
     string,
@@ -36,6 +41,7 @@ export class ThreadBrowsers {
     private create: (
       threadId: string,
       owner: UserBrowser,
+      userId: string,
     ) => BrowserDriver = createBrowserDriver,
     private getEnvironment?: (
       userId: string,
@@ -59,11 +65,12 @@ export class ThreadBrowsers {
     id: string,
     userId: string,
     projectId?: string,
+    { profileId = userId }: { profileId?: string } = {},
   ): BrowserExecBinding {
-    const scope = { threadId: id, userId, projectId };
+    const scope = { threadId: id, userId: profileId, projectId };
     return async (operation, input, signal) => {
       signal?.throwIfAborted();
-      const entry = this.sessions.get(this.key(id, userId));
+      const entry = this.sessions.get(this.key(id, profileId));
       if (entry && entry.projectId !== projectId)
         throw new Error('Browser thread scope mismatch');
       // Recording can be armed before the first navigation. Reading it never
@@ -85,41 +92,46 @@ export class ThreadBrowsers {
       if (!entry && operation !== 'goto' && operation !== 'newTab') {
         if (operation === 'tabs') return [];
         if (operation === 'close') {
-          this.captures.stopScopeOwner(userId, projectId);
-          return this.owners
-            .get(JSON.stringify([userId, projectId ?? null]))
-            ?.close();
+          const owner = this.owners.get(ownerKey(profileId, projectId));
+          if (owner) return owner.closeForUser(profileId);
+          this.captures.stopScopeOwner(profileId, projectId);
+          return;
         }
         throw new ThreadError('BROWSER_NOT_RUNNING', 409);
       }
-      return (entry?.session ?? this.acquire(id, userId, projectId)).exec(
-        operation,
-        input,
-        signal,
-      );
+      return (
+        entry?.session ?? this.acquire(id, profileId, projectId, userId)
+      ).exec(operation, input, signal);
     };
   }
-  acquire(id: string, userId: string, projectId?: string) {
+  acquire(
+    id: string,
+    userId: string,
+    projectId?: string,
+    environmentUserId = userId,
+  ) {
     const key = this.key(id, userId);
     const entry = this.sessions.get(key);
     if (entry && entry.projectId !== projectId)
       throw new Error('Browser thread scope mismatch');
     let session = entry?.session;
     if (!session) {
-      const ownerKey = JSON.stringify([userId, projectId ?? null]);
-      let owner = this.owners.get(ownerKey);
+      const ownerId = ownerKey(userId, projectId);
+      let owner = this.owners.get(ownerId);
+      const getEnvironment = this.getEnvironment;
       if (!owner)
         this.owners.set(
-          ownerKey,
+          ownerId,
           (owner = new UserBrowser(
             this.profilesRoot,
             userId,
-            this.getEnvironment,
+            getEnvironment &&
+              (() => getEnvironment(environmentUserId, projectId)),
             projectId,
             this.captures,
           )),
         );
-      session = new ThreadBrowserSession(id, this.create(id, owner));
+      session = new ThreadBrowserSession(id, this.create(id, owner, userId));
       this.sessions.set(key, { userId, projectId, session });
       for (const update of this.watchers.get(key) ?? []) update();
     }

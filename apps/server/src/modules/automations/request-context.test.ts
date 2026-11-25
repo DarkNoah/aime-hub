@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createMockModel } from '@mastra/core/test-utils/llm-mock';
+import { createExecTool } from '../../mastra/tools/exec.js';
 import { createKnowledgeTools } from '../../mastra/tools/knowledge.js';
 import type { KnowledgeService } from '../knowledge/service.js';
 import {
@@ -107,5 +108,114 @@ test('scheduled tools retain their workspace with toolCall=false and receive the
         Array.from({ length: run }, () => expected),
       );
     }
+  }
+});
+
+test('cron and Run Now use the personal or project browser profile of the automation', async (t) => {
+  const exec = createExecTool({ getTools: async () => [] });
+  const execute = t.mock.fn(exec.execute!);
+  exec.execute = execute;
+  const { service, mastra, store, model, browsers } = await fixture(t, {
+    tools: { exec },
+  });
+  const bind = t.mock.method(browsers, 'execForThread');
+  const called = new Set<string>();
+  t.mock.method(
+    model,
+    'doStream',
+    async ({ headers }: { headers?: Record<string, string | undefined> }) => {
+      const threadId = headers?.['x-thread-id'];
+      assert.ok(threadId);
+      const first = !called.has(threadId);
+      called.add(threadId);
+      return {
+        stream: new ReadableStream({
+          start(controller) {
+            if (first) {
+              controller.enqueue({
+                type: 'tool-call',
+                toolCallId: `browser-${threadId}`,
+                toolName: 'exec',
+                input: JSON.stringify({
+                  code: "import { browser } from 'browser'; text(await browser.tabs());",
+                }),
+              });
+            } else {
+              controller.enqueue({ type: 'text-start', id: 'done' });
+              controller.enqueue({
+                type: 'text-delta',
+                id: 'done',
+                delta: 'Done',
+              });
+              controller.enqueue({ type: 'text-end', id: 'done' });
+            }
+            controller.enqueue({
+              type: 'finish',
+              finishReason: first ? 'tool-calls' : 'stop',
+              usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+            });
+            controller.close();
+          },
+        }),
+      };
+    },
+  );
+
+  const personalTask = await service.create('alice', personal, input);
+  const projectTask = await service.create('owner', project, {
+    ...input,
+    enabled: true,
+  });
+  const systemTask = await service.create('admin', system, {
+    ...input,
+    enabled: true,
+  });
+  const schedules = (await store.getStore('schedules'))!;
+  for (const task of [projectTask, systemTask]) {
+    await schedules.updateSchedule(task.id, { nextFireAt: Date.now() - 1000 });
+  }
+  await mastra.scheduler!.tick();
+  await service.run('alice', personalTask.id, personal);
+
+  const tasks = [personalTask, projectTask, systemTask];
+  await Promise.all(
+    tasks.map(async (task) => {
+      const [run] = await until(
+        () => service.history(task.createdBy, task.id),
+        (rows) =>
+          rows.some(
+            (row) => row.status === 'succeeded' || row.status === 'failed',
+          ),
+      );
+      assert.equal(run.status, 'succeeded', JSON.stringify(run));
+    }),
+  );
+
+  const bindings = new Map(
+    bind.mock.calls.map(({ arguments: [threadId, ...args] }) => [
+      threadId,
+      args,
+    ]),
+  );
+  assert.deepEqual(
+    bindings,
+    new Map([
+      [
+        personalTask.threadId,
+        ['alice', undefined, undefined],
+      ],
+      [
+        projectTask.threadId,
+        ['owner', project.projectId, undefined],
+      ],
+      [
+        systemTask.threadId,
+        ['system', undefined, { profileId: systemTask.threadId }],
+      ],
+    ]),
+  );
+  assert.equal(execute.mock.callCount(), tasks.length);
+  for (const { result } of execute.mock.calls) {
+    assert.deepEqual(await result, { content: [{ type: 'text', text: '[]' }] });
   }
 });

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import type { TestContext } from 'node:test';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Pool } from 'pg';
 import { Mastra } from '@mastra/core/mastra';
@@ -11,6 +12,7 @@ import { createMockModel } from '@mastra/core/test-utils/llm-mock';
 import type { ScheduleHooks } from '@mastra/core/schedules';
 import { assistantAgent } from '../../mastra/agents/code.js';
 import { ThreadService } from '../threads/service.js';
+import { ThreadBrowsers } from '../threads/browser/registry.js';
 import { ThreadError } from '../threads/errors.js';
 import type { ResolvedChatModel } from '../models/language-model.js';
 import { createAutomationRuntime } from './runtime.js';
@@ -125,9 +127,11 @@ export async function fixture(
     storage: store,
     options: { semanticRecall: false },
   });
+  const browsers = new ThreadBrowsers(resolve(root, '.browser-profiles'));
   const threads = new ThreadService(
     memory,
     {
+      browsers,
       validate: async () => {},
       createWorkspace: async () => root,
       open: async () => {
@@ -144,6 +148,7 @@ export async function fixture(
     mastra,
     scheduleHooks,
     threads,
+    browsers,
     notifications: options.notifications,
     botEvents: options.botEvents,
     getMemoryConfig: options.getMemoryConfig,
@@ -194,6 +199,7 @@ export async function fixture(
     mastra,
     store,
     threads,
+    browsers,
     users,
     members,
     calls,

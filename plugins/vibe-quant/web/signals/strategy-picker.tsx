@@ -233,7 +233,11 @@ export function StrategyPicker({
               </Select>
             </Label>
             {!native && available && (
-              <OptionExecutionFields value={options} onChange={setOptions} />
+              <OptionExecutionFields
+                symbol={sourceSymbol.trim()}
+                value={options}
+                onChange={setOptions}
+              />
             )}
             {native && (
               <div className="grid grid-cols-2 gap-3">

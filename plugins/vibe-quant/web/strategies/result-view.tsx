@@ -1,3 +1,4 @@
+import { optionSelectionLabel } from '../../option-selection';
 import { runVersionName } from '../../strategy-version';
 import { lazy, Suspense, useRef, useState } from 'react';
 import {
@@ -166,7 +167,7 @@ export function ResultView({
               : run.config.execution_model === 'continuous_price'
                 ? '主连价格模拟（不计实际合约价差和换月成交成本）'
                 : run.config.option_execution
-                  ? `自动选约 · 目标有效杠杆 ${run.config.option_execution.target_leverage} 倍`
+                  ? optionSelectionLabel(run.config.option_execution)
                   : '实际合约价格'}
           </div>
           <div>

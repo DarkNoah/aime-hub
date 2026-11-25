@@ -23,7 +23,21 @@
 
 ## 根据信号自动选择一手期权
 
-在策略管理的新建回测中选择内置回测、实际合约价格，使用「自动选择期权」滑块设置目标有效杠杆。默认目标为 20 倍。权利金止损和止盈是可选的普通策略参数 `option_stop_loss_pct` 和 `option_take_profit_pct`，百分数 10 表示 10%。可按需设置其中一侧，省略时沿用策略版本参数，版本也未设置时由策略自行决定退出。显式传入 `null` 可关闭该侧。重跑已有任务沿用原配置。HTTP 和 SDK 调用通过显式提供 `option_execution` 启用。
+行情页添加策略和内置资金回测共用「智能合约选择器」。选择风格即可运行，新表单默认「均衡」。滑块可覆盖目标有效杠杆，展开「选约细节」可独立调整 IV 容忍度。
+
+| 风格 | 目标倍率 | 允许的绝对 Delta | IV 上限（相对同组中位数） |
+| --- | ---: | ---: | ---: |
+| 温和 `moderate` | 12 倍 | 0.60–0.80 | 100% |
+| 均衡 `balanced` | 20 倍 | 0.40–0.60 | 115% |
+| 激进 `aggressive` | 35 倍 | 0.20–0.40 | 135% |
+
+SDK 和 HTTP 都支持仅传 `option_execution: {"profile":"balanced"}`。可覆盖 `target_leverage` 或 `iv_preference`。IV 三档 `strict`、`standard`、`flexible` 对应表中的三个上限。仅指定 `target_leverage` 时按原倍率规则选约。
+
+选约使用当分钟同一标的、同到期日、同看涨或看跌方向的合约。先从具有同步有效价格且成交量足够的各行权价计算中位 IV，再过滤 Delta 区间和 IV 上限，最后从合格合约中选择最接近目标倍率的一手。每个行权价在中位数里占一票，计算至少需要三个行权价。到期日未知、样本不足或没有合格候选时跳过当次入场。这里的 IV 比较是同一时点的横截面比较。同到期日的剩余时间相同，Black 模型反推的总波动率之比与年化 IV 之比相等。选约信号记录 `profile`、`iv_preference`、`iv_ratio` 及 `iv_reference_strikes`。
+
+Delta 衡量权利金对标的价格变动的敏感度，波动率偏斜描述不同行权价的隐含波动率差异。[OIC 对 Delta 和波动率偏斜的说明](https://www.optionseducation.org/referencelibrary/faq/technical-information)
+
+权利金止损和止盈仍是可选的普通策略参数 `option_stop_loss_pct` 和 `option_take_profit_pct`，百分数 10 表示 10%。均未配置时由策略决定退出，显式传入 `null` 可关闭该侧。
 
 ```python
 from quant_sdk import OptionExecution, RunConfig, backtest
@@ -34,7 +48,7 @@ data = client.snapshot([symbol], start=start, end=end, calendar=calendar,
 result = backtest.run(strategy, data, params={'symbol': symbol, 'duration': 300,
                                               'option_take_profit_pct': 10},
                       config=RunConfig(initial_cash=1_000_000, participation_rate=0.1,
-                                       option_execution=OptionExecution(target_leverage=25)))
+                                       option_execution=OptionExecution(profile="balanced")))
 ```
 
 策略继续对信号标的或当时解析出的实际合约调用 `ctx.orders.target_position`。正目标买一手 Call，负目标买一手 Put，零目标平掉持有的那张期权。重复的同向目标保持一手，反手等待旧仓平掉，再用当时可见的行情选约。`ctx.position(信号标的)` 表示策略方向，成交回调里的 `symbol`、`quantity` 和 `price` 是实际模拟交易的期权、手数和权利金。

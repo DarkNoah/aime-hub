@@ -2048,7 +2048,7 @@ export const zhCN = {
   'browser.closeBrowser': '结束浏览器：关闭你的所有线程页面，保留登录状态',
   'browser.stopBrowser': '结束浏览器：关闭你的所有线程页面，保留登录状态',
   'browser.sharedProfileHint':
-    '登录状态在你的聊天间共享，标签页仅属于当前聊天。',
+    '个人登录状态按账号共享，项目登录状态按项目共享。当前标签页仅属于你在此聊天中的会话。',
   'browser.movePreview': '拖动预览窗（也可用方向键移动）',
   'browser.tabCount': '{{count}} 个标签页',
   'browser.closedSuccess': '所有浏览器页面已关闭，登录状态已保留',

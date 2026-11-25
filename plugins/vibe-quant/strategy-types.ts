@@ -1,3 +1,4 @@
+import type { IvPreference, OptionProfile } from './option-selection.js';
 import type { Bar, Engine } from './shared.js';
 import type { OptimizationConfig } from './optimization-types.js';
 import type { StrategyNotifications } from './strategy-notifications.js';
@@ -50,16 +51,17 @@ export function normalizeOptionParameters<
       options.take_profit_pct === undefined)
   )
     return config;
+  const { stop_loss_pct, take_profit_pct, ...selection } = options;
   return {
     ...config,
-    option_execution: { target_leverage: options.target_leverage },
+    option_execution: selection,
     parameters: {
-      ...(options.stop_loss_pct === undefined
+      ...(stop_loss_pct === undefined
         ? {}
-        : { option_stop_loss_pct: options.stop_loss_pct }),
-      ...(options.take_profit_pct === undefined
+        : { option_stop_loss_pct: stop_loss_pct }),
+      ...(take_profit_pct === undefined
         ? {}
-        : { option_take_profit_pct: options.take_profit_pct }),
+        : { option_take_profit_pct: take_profit_pct }),
       ...config.parameters,
     },
   };
@@ -77,6 +79,8 @@ export interface BacktestInput {
   /** Actual historical contracts by default; continuous prices are an explicit backtest approximation. */
   option_execution?: {
     target_leverage: number;
+    profile?: OptionProfile;
+    iv_preference?: IvPreference;
     stop_loss_pct?: number;
     take_profit_pct?: number;
   };

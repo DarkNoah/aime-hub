@@ -55,15 +55,16 @@ export function chatBrowserLaunchOptions(env: NodeJS.ProcessEnv = process.env) {
   };
 }
 
-/** One persistent Chromium context per user and scope, outside chat workspaces. */
+/** One persistent Chromium context per personal user or project. */
 export class UserBrowser {
   private context?: BrowserContext;
   private network?: NetworkCaptureEvents;
-  private managers = new Map<string, ThreadPageManager>();
+  private managers = new Map<string, Map<string, ThreadPageManager>>();
   private pending: Promise<unknown> = Promise.resolve();
-  private closedListeners = new Set<() => Promise<void>>();
+  private closedListeners = new Map<() => Promise<void>, string>();
   private epoch = 0;
   private closing?: Promise<void>;
+  private closingUsers = new Map<string, Promise<void>>();
   private idleTimer?: ReturnType<typeof setTimeout>;
   private activeOperations = new Set<symbol>();
   readonly directory: string;
@@ -80,16 +81,13 @@ export class UserBrowser {
     private readonly captures?: NetworkCaptureStore,
   ) {
     if (!userId) throw new Error('Browser owner is required');
-    this.directory = join(
-      projectId
-        ? join(
-            root,
-            'projects',
-            createHash('sha256').update(projectId).digest('hex'),
-          )
-        : root,
-      createHash('sha256').update(userId).digest('hex'),
-    );
+    this.directory = projectId
+      ? join(
+          root,
+          'projects',
+          createHash('sha256').update(projectId).digest('hex'),
+        )
+      : join(root, createHash('sha256').update(userId).digest('hex'));
   }
 
   get generation() {
@@ -98,14 +96,25 @@ export class UserBrowser {
   get isClosing() {
     return !!this.closing;
   }
-  get(threadId: string) {
-    return this.managers.get(threadId);
+  isClosingForUser(userId: string) {
+    return this.isClosing || this.closingUsers.has(userId);
   }
-  onClosed(listener: () => Promise<void>) {
-    this.closedListeners.add(listener);
-    return () => {
-      this.closedListeners.delete(listener);
-    };
+  get(threadId: string, userId = this.userId) {
+    return this.managers.get(userId)?.get(threadId);
+  }
+  onClosed(listener: () => Promise<void>, userId = this.userId) {
+    this.closedListeners.set(listener, userId);
+    return () => this.closedListeners.delete(listener);
+  }
+  private notifyClosed(userId?: string) {
+    // CDP shutdown must not wait for screencast listeners.
+    for (const [listener, listenerUserId] of this.closedListeners)
+      if (userId === undefined || userId === listenerUserId)
+        void browserOperation(
+          'notify browser closed',
+          Promise.resolve().then(listener),
+          2_000,
+        ).catch(() => {});
   }
   private serial<T>(work: () => Promise<T>) {
     const next = this.pending.catch(() => {}).then(work);
@@ -134,8 +143,11 @@ export class UserBrowser {
   }
 
   /** Only requested browser operations count as use; state/preview polling does not. */
-  async withActivity<T>(work: () => Promise<T>): Promise<T> {
-    if (this.closing) throw new Error('Browser closed');
+  async withActivity<T>(
+    work: () => Promise<T>,
+    userId = this.userId,
+  ): Promise<T> {
+    if (this.isClosingForUser(userId)) throw new Error('Browser closed');
     const operation = Symbol();
     this.activeOperations.add(operation);
     this.clearIdleTimer();
@@ -216,9 +228,11 @@ export class UserBrowser {
         // Explicit close already notified listeners before asking Chromium to
         // exit. Only an unexpected disconnect needs another notification.
         if (this.closing) return;
-        this.captures?.stopScopeOwner(this.userId, this.projectId);
-        for (const listener of this.closedListeners)
-          void listener().catch(() => {});
+        this.captures?.stopScopeOwner(
+          this.projectId ? undefined : this.userId,
+          this.projectId,
+        );
+        this.notifyClosed();
       });
       return context;
     } catch (error) {
@@ -227,20 +241,23 @@ export class UserBrowser {
     }
   }
 
-  acquire(threadId: string) {
+  acquire(threadId: string, userId = this.userId) {
     const generation = this.epoch;
     return this.serial(async () => {
-      if (generation !== this.epoch || this.closing)
+      if (generation !== this.epoch || this.isClosingForUser(userId))
         throw new Error('Browser closed');
       const context = this.context ?? (await this.launch());
-      if (generation !== this.epoch) throw new Error('Browser closed');
-      let manager = this.managers.get(threadId);
+      if (generation !== this.epoch || this.isClosingForUser(userId))
+        throw new Error('Browser closed');
+      let managers = this.managers.get(userId);
+      if (!managers) this.managers.set(userId, (managers = new Map()));
+      let manager = managers.get(threadId);
       if (!manager) {
         // agent-browser declares Playwright's recursive context types. Patchright
         // extends their evaluate signatures and implements the same page/CDP API.
         const network = this.network;
         const scope = {
-          userId: this.userId,
+          userId,
           projectId: this.projectId,
           threadId,
         };
@@ -248,7 +265,7 @@ export class UserBrowser {
           context as AgentBrowserContext,
           (page) => network?.track(page, scope),
         );
-        this.managers.set(threadId, manager);
+        managers.set(threadId, manager);
       }
       if (!manager.isLaunched()) await manager.newTab();
       this.scheduleIdleClose();
@@ -256,35 +273,63 @@ export class UserBrowser {
     });
   }
 
-  release(threadId: string) {
+  release(threadId: string, userId = this.userId) {
     return this.serial(async () => {
-      const manager = this.managers.get(threadId);
-      this.managers.delete(threadId);
+      const managers = this.managers.get(userId);
+      const manager = managers?.get(threadId);
+      managers?.delete(threadId);
+      if (!managers?.size) this.managers.delete(userId);
       await manager?.close();
     }).then(async () => {
-      if (!this.managers.size) await this.close();
+      if (
+        !this.managers.size &&
+        (!this.projectId || !this.activeOperations.size)
+      )
+        await this.close();
     });
+  }
+
+  closeForUser(userId: string) {
+    if (!this.projectId || this.closing) return this.close();
+    const pending = this.closingUsers.get(userId);
+    if (pending) return pending;
+    this.captures?.stopScopeOwner(userId, this.projectId);
+    const closing = this.serial(async () => {
+      const managers = this.managers.get(userId);
+      this.managers.delete(userId);
+      if (!managers) return;
+      this.notifyClosed(userId);
+      await Promise.all(
+        [...managers.values()].map((manager) =>
+          browserOperation(
+            'close project browser pages',
+            manager.close(),
+            5_000,
+          ),
+        ),
+      );
+    })
+      .then(async () => {
+        if (!this.managers.size && !this.activeOperations.size)
+          await this.close();
+      })
+      .finally(() => this.closingUsers.delete(userId));
+    this.closingUsers.set(userId, closing);
+    return closing;
   }
 
   close() {
     if (this.closing) return this.closing;
-    this.captures?.stopScopeOwner(this.userId, this.projectId);
+    this.captures?.stopScopeOwner(
+      this.projectId ? undefined : this.userId,
+      this.projectId,
+    );
     this.clearIdleTimer();
     this.activeOperations.clear();
     this.epoch++;
     this.closing = this.serial(async () => {
       const context = this.context;
-      // Stream listeners can themselves be waiting on Chromium. They must not
-      // prevent context.close(), which interrupts those pending CDP commands.
-      void Promise.allSettled(
-        [...this.closedListeners].map((listener) =>
-          browserOperation(
-            'notify browser closed',
-            Promise.resolve().then(listener),
-            2_000,
-          ),
-        ),
-      );
+      this.notifyClosed();
       if (!context) return;
       // Save only session cookies here; persistent cookies and origin storage stay in Chromium.
       try {

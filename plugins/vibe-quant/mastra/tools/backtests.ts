@@ -1,3 +1,4 @@
+import { ivPreferenceIds, profileIds } from '../../option-selection.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
@@ -136,9 +137,22 @@ export const agentBacktestSchema = z.object({
     ),
   option_execution: z
     .object({
+      profile: z
+        .enum(profileIds)
+        .optional()
+        .describe(
+          '温和跟随 moderate、均衡参与 balanced、激进 aggressive。风格带出默认倍率、Delta 范围和 IV 容忍度',
+        ),
+      iv_preference: z
+        .enum(ivPreferenceIds)
+        .optional()
+        .describe(
+          '可覆盖风格的 IV 上限。strict、standard、flexible 分别为同链中位 IV 的 100%、115%、135%',
+        ),
       target_leverage: z
         .number()
-        .describe('入场时选择有效杠杆最接近目标的流动合约，一手'),
+        .optional()
+        .describe('可覆盖风格默认倍率。仅填倍率时按最接近目标的有效杠杆选一手'),
     })
     .optional()
     .describe('内置资金回测按信号自动选择期权，无关联品种沿用原成交方式'),

@@ -130,7 +130,7 @@ export function createChatRunner(
   skillPublisherNames?: (
     userIds: string[],
   ) => Promise<ReadonlyMap<string, string>>,
-): ChatRunner {
+): ChatRunner & { browsers: ThreadBrowsers } {
   const getConfig = async (
     id?: string | null,
     userId?: string,
@@ -185,7 +185,7 @@ export function createChatRunner(
     environmentVariables
       ? (userId, projectId) =>
           environmentVariables.getEnv(
-            userId === 'system' ? undefined : userId,
+            projectId || userId === 'system' ? undefined : userId,
             projectId,
           )
       : undefined,

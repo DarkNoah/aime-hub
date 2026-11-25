@@ -184,6 +184,29 @@ test('monitor creation uses shared strategies and enforces administrator, versio
     (await request({ ...optionMonitor, simulation_engine: 'tqsdk' })).status,
     400,
   );
+  const profiled = {
+    ...optionMonitor,
+    option_execution: { profile: 'aggressive', stop_loss_pct: 9 },
+  };
+  assert.equal((await request(profiled)).status, 201);
+  const profileConfig = (calls.at(-2) as unknown[])[4] as ReturnType<
+    typeof config
+  >;
+  assert.deepEqual(profileConfig.option_execution, {
+    profile: 'aggressive',
+    target_leverage: 35,
+    iv_preference: 'flexible',
+  });
+  assert.equal(profileConfig.parameters.option_stop_loss_pct, 9);
+  assert.equal(
+    (
+      await request({
+        ...profiled,
+        option_execution: { iv_preference: 'strict', target_leverage: 20 },
+      })
+    ).status,
+    400,
+  );
   for (const parameter_overrides of [[], { duration: 17 }, { symbol: actual }])
     assert.equal(
       (await request({ ...value, parameter_overrides })).status,

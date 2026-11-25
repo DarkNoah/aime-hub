@@ -14,13 +14,18 @@ import { withAbortSignal } from '../../../lib/abort.js';
 import { browserExecActions, type BrowserExecBinding } from './exec-actions.js';
 
 /** Keep provider-specific navigation and text insertion outside the stream lifecycle. */
-export function createBrowserDriver(threadId: string, owner: UserBrowser) {
-  const browser = new ThreadBrowser(owner, threadId);
+export function createBrowserDriver(
+  threadId: string,
+  owner: UserBrowser,
+  userId = owner.userId,
+) {
+  const browser = new ThreadBrowser(owner, threadId, userId);
   return {
     browser,
     exec: browserExecActions(browser),
     dispose: () => browser.release(),
-    withActivity: <T>(work: () => Promise<T>) => owner.withActivity(work),
+    withActivity: <T>(work: () => Promise<T>) =>
+      owner.withActivity(work, userId),
     async action(action: BrowserAction) {
       if (action.kind === 'close') {
         await browser.closeThreadSession(threadId);
@@ -311,7 +316,7 @@ export class ThreadBrowserSession {
       if (this.closing) return this.closing;
       if (this.disposed) throw new ThreadError('BROWSER_NOT_RUNNING', 409);
       this.invalidate();
-      // Closing the context is what interrupts stuck screenshots/CDP calls.
+      // Closing the pages interrupts stuck screenshots and CDP calls.
       // Never queue it behind refresh or wait for screencast teardown first.
       void this.stopStream().catch(() => {});
       this.closing = browserOperation(

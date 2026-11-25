@@ -422,7 +422,7 @@ test(
     assert.equal(project.page.context(), projectTab.page.context());
     assert.notEqual(project.page.context(), personal.page.context());
     assert.notEqual(project.page.context(), otherProject.page.context());
-    assert.notEqual(project.page.context(), otherUser.page.context());
+    assert.equal(project.page.context(), otherUser.page.context());
     await project.page.evaluate(() => {
       document.cookie = 'project_login=alice; path=/';
     });
@@ -430,13 +430,17 @@ test(
       await projectTab.page.evaluate(() => document.cookie),
       /project_login=alice/,
     );
-    for (const entry of [personal, otherProject, otherUser])
+    assert.match(
+      await otherUser.page.evaluate(() => document.cookie),
+      /project_login=alice/,
+    );
+    assert.notEqual(project.page, otherUser.page);
+    for (const entry of [personal, otherProject])
       assert.equal(await entry.page.evaluate(() => document.cookie), '');
     assert.deepEqual(reads, [
       ['alice', undefined],
-      ['alice', 'project-a'],
-      ['alice', 'project-b'],
-      ['bob', 'project-a'],
+      [undefined, 'project-a'],
+      [undefined, 'project-b'],
     ]);
     assert.throws(
       () => browsers.acquire('project', 'alice', 'project-b'),
@@ -447,5 +451,12 @@ test(
     assert.equal(projectTab.browser.isBrowserRunning(), false);
     for (const entry of [personal, otherProject, otherUser])
       assert.equal(entry.browser.isBrowserRunning(), true);
+    await otherUser.execBrowser('close', {});
+    assert.equal(otherUser.browser.isBrowserRunning(), false);
+    const reopenedProject = await open('reopened-project', 'bob', 'project-a');
+    assert.match(
+      await reopenedProject.page.evaluate(() => document.cookie),
+      /project_login=alice/,
+    );
   },
 );

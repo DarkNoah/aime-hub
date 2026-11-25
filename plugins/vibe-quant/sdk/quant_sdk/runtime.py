@@ -147,7 +147,9 @@ class Runner:
         self.option_router = OptionRouter(self.context, self.config.option_execution) if self.config.option_execution else None
         self.source = self._source()
         self.source_hash = sha256(self.source.encode()).hexdigest()
-        self.runtime_hash = sha256(b''.join(path.read_bytes() for path in sorted(Path(__file__).parent.glob('*.py')))).hexdigest()
+        sdk_root = Path(__file__).parent
+        runtime_files = [*sorted(sdk_root.glob('*.py')), sdk_root / 'option_profiles.json']
+        self.runtime_hash = sha256(b''.join(path.read_bytes() for path in runtime_files)).hexdigest()
         (self.directory / 'strategy.py').write_text(self.source, encoding='utf-8')
         self.manifest = {'schema_version': 1, 'run_id': self.run_id, 'mode': mode,
                          'strategy_class': type(strategy).__qualname__, 'source_hash': self.source_hash,

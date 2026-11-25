@@ -2252,7 +2252,7 @@ export const en = {
   'browser.stopBrowser':
     'End browser: close your tabs in all chats and keep login data',
   'browser.sharedProfileHint':
-    'Login data is shared across your chats. Tabs belong to this chat.',
+    'Personal login data is shared by account. Project login data is shared by project. Tabs belong to your session in this chat.',
   'browser.movePreview': 'Move preview (or use arrow keys)',
   'browser.tabCount': '{{count}} tabs',
   'browser.closedSuccess': 'All browser tabs closed. Login data retained.',
