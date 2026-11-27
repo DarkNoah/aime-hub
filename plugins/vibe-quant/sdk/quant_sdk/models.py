@@ -140,8 +140,9 @@ class Roll:
 
     def __post_init__(self):
         finite(self.time, 'roll time')
-        if not self.symbol or not self.contract:
-            raise ValueError('Both continuous symbol and actual contract are required')
+        # An empty observed mapping invalidates the previous main contract.
+        if not self.symbol or not isinstance(self.contract, str):
+            raise ValueError('Invalid continuous symbol or actual contract')
 
 
 @dataclass(frozen=True)

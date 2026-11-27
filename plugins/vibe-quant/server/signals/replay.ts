@@ -246,7 +246,14 @@ export class StrategyReplaySessions {
         // Re-read the bounded input window to preserve cross-period aggregation
         // and old contracts across rolls. Python only processes events after its checkpoint.
         const [raw, python] = await Promise.all([
-          collectSnapshot(store, state, monitor.engine, runConfig, abort),
+          collectSnapshot(
+            store,
+            state,
+            monitor.engine,
+            runConfig,
+            abort,
+            !!runConfig.option_execution,
+          ),
           this.python(this.context.runtime, abort),
         ]);
         abort.throwIfAborted();

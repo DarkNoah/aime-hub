@@ -14,6 +14,7 @@ from strategy_entrypoint import resolve_strategy
 from strategy_prepare import prepare
 from strategy_monitor import SignalOutput
 from signal_history import MonitorHistory
+from monitor_options import MarketOptionCoverage
 
 
 class Output:
@@ -36,11 +37,12 @@ def replay(directory):
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     strategy = resolve_strategy(module, Strategy)()
-    dataset = prepare(raw)
+    dataset = prepare(raw, skip_option_gaps=True)
     output = Output(saved.get('overlay') if saved else None)
     signals = SignalOutput(output, float('-inf'), saved.get('targets') if saved else None,
                            saved.get('risk_times') if saved else None)
     if saved:
+        signals.overlay_key = json.dumps(output.overlay['levels'], sort_keys=True)
         path = directory / 'restore.json'
         path.write_text(json.dumps(saved['runner']))
         runner = Runner.restore(strategy, path, output_dir=directory / 'runs', on_event=signals)
@@ -64,19 +66,24 @@ def replay(directory):
             runner.option_router.known.update(dataset.metadata.get('option_underlyings', ()))
             for item in dataset.instruments:
                 runner.option_router.register(item)
+            runner.start()
         signals.runner = runner
         history = MonitorHistory(output, runner, config['start'], saved.get('history') if saved else None)
         signals.history = history
         through = saved['through'] if saved else float('-inf')
-        events = iter(event for event in dataset.events if event.available_at > through)
-        event = next(events, None)
+        coverage = MarketOptionCoverage(runner)
+        events = (event for event in dataset.events if event.available_at > through)
+        raw_event = next(events, None)
         frames = []
         for cutoff in request['times']:
-            while event is not None and event.available_at <= cutoff:
-                signals.event = event
-                runner.process(event)
-                history.observe()
-                event = next(events, None)
+            while raw_event is not None and raw_event.available_at <= cutoff:
+                for event in coverage.accept(raw_event):
+                    signals.event = event
+                    runner.process(event)
+                    history.observe()
+                raw_event = next(events, None)
+            if runner.option_router:
+                history.state['through'] = cutoff
             signals.flush_overlay(config['symbol'])
             summary = history.summary()
             frame = {'time': cutoff, 'signals': [], 'trades': [], 'summary': summary,

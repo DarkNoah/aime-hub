@@ -23,6 +23,20 @@ class DataError(RuntimeError):
     pass
 
 
+def mapped_future(client, symbol, rules, allow_gaps):
+    if not symbol and allow_gaps:
+        return None
+    try:
+        item = client.rules(symbol, rules)
+    except RuntimeError as error:
+        if allow_gaps and str(error) in ('INSTRUMENT_NOT_FOUND', 'INSTRUMENT_NOT_FOUND (HTTP 404)'):
+            return None
+        raise
+    if item.kind != 'future':
+        raise DataError('Main contracts must resolve to actual futures')
+    return item
+
+
 class _NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -85,6 +99,8 @@ def three_minute(parts) -> Bar | None:
 
 
 class HubClient:
+    allow_missing_mappings = False
+
     def __init__(self, base_url: str, *, headers: dict[str, str] | None = None, timeout=10):
         parsed = urlsplit(base_url)
         if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
@@ -154,7 +170,7 @@ class HubClient:
         while True:
             page = self.request('/contracts', params=params)
             for row in page['mappings']:
-                if not row['underlying']:
+                if not row['underlying'] and not self.allow_missing_mappings:
                     raise DataError(f'Missing observed contract mapping for {symbol}')
                 if row['underlying'] != previous:
                     yield row
@@ -167,35 +183,37 @@ class HubClient:
             params['after'] = after
 
     def snapshot(self, symbols, *, start: float, end: float, calendar: TradingCalendar,
-                 rules: RuleResolver, duration=60, option_execution=False) -> Dataset:
+                 rules: RuleResolver, duration=60, option_execution=False, skip_option_gaps=False) -> Dataset:
         """Freeze latest-corrected bars and historically observed mappings, never current mappings."""
         if duration not in PERIODS:
             raise ValueError('Unsupported duration')
         instruments, events, requests = {}, [], set()
+        sparse = option_execution and skip_option_gaps
         symbols = list(dict.fromkeys(symbols))
         for symbol in symbols:
             item = instruments.setdefault(symbol, self.rules(symbol, rules))
             requests.add((symbol, duration))
-            if item.tradable:
+            if item.tradable or (sparse and symbol == symbols[0]):
                 requests.add((symbol, 60))
             if item.kind == 'continuous':
                 mappings = list(self.contracts(symbol, start, end))
-                if not mappings or mappings[0]['time'] > start:
+                if (not mappings or mappings[0]['time'] > start) and not sparse:
                     raise DataError(f'No observed contract mapping at start for {symbol}')
                 for mapping in mappings:
                     contract = mapping['underlying']
-                    if contract not in instruments:
-                        instruments[contract] = self.rules(contract, rules)
-                    if instruments[contract].kind != 'future':
-                        raise DataError('Main contracts must resolve to actual futures')
-                    requests.add((contract, 60))
+                    mapped = instruments.get(contract) or mapped_future(self, contract, rules, sparse)
+                    if mapped:
+                        instruments[contract] = mapped
+                        requests.add((contract, 60))
+                    else:
+                        contract = ''
                     when = max(start, mapping['time'])
-                    day = calendar.trading_day(when, futures=True)
+                    day = calendar.trading_day(mapping['time'] if sparse else when, futures=True)
                     events.append(event_for(Roll(symbol, contract, when, day)))
         linked, chain_items = set(), {}
         if option_execution:
             signal = symbols[0]
-            sources = {event.payload.contract for event in events if event.payload.symbol == signal}
+            sources = {event.payload.contract for event in events if event.payload.symbol == signal and event.payload.contract}
             for source in sorted(sources or {signal}):
                 for meta in self.option_chain(source, start, end):
                     linked.add(source)
@@ -229,7 +247,7 @@ class HubClient:
                 if bar is not None:
                     events.append(event_for(bar))
                     count += 1
-            if not count and instruments[symbol].kind != 'option':
+            if not count and instruments[symbol].kind != 'option' and not sparse:
                 raise DataError(f'No closed bars for {symbol} at {period}s; collect/import data first')
         has_options = any(item.kind == 'option' for item in instruments.values())
         reference_symbols = {item.option_underlying for item in chain_items.values() if item.kind == 'option'}
@@ -246,17 +264,18 @@ class HubClient:
                 return 2 if value.duration == 60 else 3
             return 1
         events.sort(key=lambda event: (event.available_at, priority(event)))
-        execution_closes = {(e.payload.symbol, e.payload.end_time) for e in events
-                            if isinstance(e.payload, Bar) and e.payload.duration == 60}
-        observed = {}
-        for event in events:
-            value = event.payload
-            if isinstance(value, Roll):
-                observed[value.symbol] = value.contract
-            elif instruments[value.symbol].kind == 'continuous':
-                actual = observed.get(value.symbol)
-                if (actual, value.end_time) not in execution_closes:
-                    raise DataError(f'Missing actual-contract execution bar for {value.symbol} at {value.end_time}')
+        if not sparse:
+            execution_closes = {(e.payload.symbol, e.payload.end_time) for e in events
+                                if isinstance(e.payload, Bar) and e.payload.duration == 60}
+            observed = {}
+            for event in events:
+                value = event.payload
+                if isinstance(value, Roll):
+                    observed[value.symbol] = value.contract
+                elif instruments[value.symbol].kind == 'continuous':
+                    actual = observed.get(value.symbol)
+                    if (actual, value.end_time) not in execution_closes:
+                        raise DataError(f'Missing actual-contract execution bar for {value.symbol} at {value.end_time}')
         return Dataset(instruments.values(), events, metadata={
             **({'option_underlyings': sorted(linked)} if option_execution else {}),
             'source': 'vibe-quant', 'data_policy': 'latest-corrected frozen snapshot',

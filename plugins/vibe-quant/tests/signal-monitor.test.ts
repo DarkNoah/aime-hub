@@ -12,6 +12,7 @@ import { strategyDataRoutes } from '../server/sdk/routes.js';
 import { monitorExecutionModel } from '../signal-types.js';
 import { runSignalProcess } from '../server/signals/process.js';
 import { input, start, actual } from './strategy-fixture.js';
+import { collectSnapshot } from '../server/strategies/snapshot.js';
 import { StrategyStore } from '../server/strategies/store.js';
 import type { StateStore } from '../server/state-store.js';
 import type { QuantConfig } from '../server/config.js';
@@ -1301,4 +1302,53 @@ test('point history reads stored index prices without contract Tick reconstructi
   );
   assert.equal(response.status, 200, await response.text());
   assert.equal(bounds.rebuildTicks, false);
+});
+
+test('market option replay skips missing historical mappings and resumes at a catalogued future', async () => {
+  const config = {
+    ...input(randomUUID()),
+    option_execution: { mode: 'time_value_third' as const },
+  };
+  const available = 'CFFEX.IM2612';
+  const missing = 'CFFEX.IM2611';
+  const store = {
+    table: (name: string) => name,
+    rows: async (sql: string) =>
+      sql.includes('lagInFrame')
+        ? [
+            { time: config.start + 60, underlying: missing },
+            { time: config.start + 120, underlying: available },
+          ]
+        : [],
+    bars: async () => [],
+  } as unknown as Parameters<typeof collectSnapshot>[0];
+  const state = {
+    instrument: async (_engine: string, symbol: string) =>
+      symbol === missing
+        ? undefined
+        : {
+            symbol,
+            kind: symbol === config.symbol ? 'continuous' : 'future',
+            priceTick: 0.2,
+          },
+  } as unknown as Parameters<typeof collectSnapshot>[1];
+  const signal = new AbortController().signal;
+  const raw = await collectSnapshot(
+    store,
+    state,
+    'tqsdk',
+    config,
+    signal,
+    true,
+  );
+  assert.deepEqual(raw.mappings[config.symbol], [
+    { time: config.start + 60, underlying: '' },
+    { time: config.start + 120, underlying: available },
+  ]);
+  assert.equal(raw.instruments[missing], undefined);
+  assert.equal(raw.instruments[available].kind, 'future');
+  await assert.rejects(
+    collectSnapshot(store, state, 'tqsdk', config, signal),
+    /历史主力映射/,
+  );
 });

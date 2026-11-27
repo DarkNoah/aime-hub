@@ -16,7 +16,7 @@ from quant_sdk.runtime import Runner
 from strategy_entrypoint import resolve_strategy
 from signal_history import BufferedEvents, MonitorHistory, history_events
 from position_valuation import exit_valuation
-from monitor_options import LiveOptionEvents
+from monitor_options import LiveOptionEvents, MarketOptionCoverage
 
 
 class BridgeClient(HubClient):
@@ -252,6 +252,7 @@ def main():
         kind = 'future' if simulated and symbol == config['symbol'] else metadata['kind']
         return Instrument(symbol, kind, price_tick=metadata['priceTick'], **values)
 
+    client.allow_missing_mappings = bool(config.get('option_execution'))
     with client.stream([config['symbol']], calendar=calendar, rules=rules,
                        duration=config['duration'], stop_event=stop) as stream:
         source = stream
@@ -320,18 +321,26 @@ def main():
                     persist()
             runner._maybe_checkpoint = maybe_checkpoint
             runner.stop_event = stop
-            start = max(first, saved['runner']['now'] - 86400) if saved else first
+            resume_at = max(saved['runner']['now'], history.state.get('through', 0)) if saved else 0
+            start = max(first, resume_at - 86400) if saved else first
+            coverage = MarketOptionCoverage(runner)
             if start < stream.cutoff:
-                for event in history_events(client, runner, config['symbol'], config['duration'],
-                                            start, stream.cutoff, calendar, rules):
+                events = history_events(client, runner, config['symbol'], config['duration'],
+                                        start, stream.cutoff, calendar, rules)
+                for raw in events:
                     live.check()
                     if stop.is_set():
                         return
-                    if saved and event.available_at < saved['runner']['now']:
+                    if saved and raw.available_at < resume_at:
                         continue
-                    output.event = event
-                    runner.process(event)
-                    history.flush()
+                    for event in coverage.accept(raw):
+                        output.event = event
+                        runner.process(event)
+                        history.flush()
+            if runner.option_router:
+                # The input scan can advance even when no option minute qualified.
+                history.state['through'] = stream.cutoff
+                runner.start()
             history.replaying = False
             preparing = False
             runner._deliver()
@@ -339,13 +348,18 @@ def main():
             runner.checkpoint()
             client.call('ready')
             runner.start()
-            for event in live:
+            for raw in live:
                 if stop.is_set():
                     break
-                output.event = event
-                runner.process(event)
-                output.flush_overlay(config['symbol'])
-                history.flush(force=bool(history.pending))
+                for event in coverage.accept(raw):
+                    output.event = event
+                    runner.process(event)
+                    output.flush_overlay(config['symbol'])
+                    history.flush(force=bool(history.pending))
+                if runner.option_router and isinstance(raw.payload, Bar) and raw.payload.symbol == config['symbol']:
+                    history.state['through'] = raw.available_at
+                    if monotonic() - checkpoint_at >= 60:
+                        runner.checkpoint()
             runner.checkpoint()
             runner.journal.close()
 

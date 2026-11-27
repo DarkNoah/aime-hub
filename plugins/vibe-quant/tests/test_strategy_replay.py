@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'sdk'))
 sys.path.insert(0, str(ROOT / 'worker'))
 from strategy_replay import replay
+from test_option_execution import fixture
 
 START = 1792373400
 SOURCE = '''from quant_sdk import Strategy
@@ -42,8 +43,8 @@ def raw(duration=60):
                  for i in range(6)]}
 
 
-def run(directory, snapshot, indices):
-    (directory / 'strategy.py').write_text(SOURCE)
+def run(directory, snapshot, indices, strategy=SOURCE):
+    (directory / 'strategy.py').write_text(strategy)
     (directory / 'market.json').write_text(json.dumps(snapshot))
     (directory / 'request.json').write_text(json.dumps({'monitor_id': 'monitor', 'times': [START + i * 60 for i in indices]}))
     replay(directory)
@@ -86,6 +87,62 @@ class StrategyReplayTest(unittest.TestCase):
             first = run(Path(b), raw(), [1, 2, 3])
             second = run(Path(b), raw(), [4, 5, 6])
             self.assertEqual(first + second, expected)
+
+    def test_empty_option_frames_and_resume_with_cash_index_and_chain(self):
+        snap, ticker = fixture(main=True)
+        config = snap['config']
+        config.update(execution_model='actual_contract', initial_cash=100000, parameters={})
+        main = config['symbol']
+        snap['mappings'][main][0]['time'] = START+60
+        # The last reference for the first minute is missing. Quotes appear in
+        # a later frame and the original pending signal is never replayed.
+        snap['bars'] = [b for b in snap['bars'] if b['symbol'] != 'SSE.000852' or b['time'] >= START+120]
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as baseline:
+            first = run(Path(directory), snap, [1,2])
+            self.assertTrue(all(not frame['signals'] and not frame['summary']['equity_curve'] for frame in first))
+            rest = run(Path(directory), snap, [3,4,5])
+            expected = run(Path(baseline), snap, [1,2,3,4,5])
+            self.assertEqual(first+rest, expected)
+            self.assertEqual(rest[1]['signals'][0]['symbol'], ticker.replace('5000','4995'))
+        snap['bars'].clear()
+        snap['mappings'][main].clear()
+        with tempfile.TemporaryDirectory() as directory:
+            frames = run(Path(directory), snap, [1,2])
+            self.assertTrue(all(not f['positions'] and not f['summary']['equity_curve'] for f in frames))
+
+    def test_missing_held_contract_preserves_cost_and_resumes_on_new_chain_after_expiry(self):
+        snap, ticker = fixture(main=True)
+        cfg = snap['config']
+        cfg.update(execution_model='actual_contract', initial_cash=100000, parameters={}, end=START+86400+180)
+        cfg['calendar']['2026-10-20'] = True
+        main, future, later = cfg['symbol'], 'CFFEX.IM2611', 'CFFEX.IM2612'
+        for meta in snap['instruments'].values():
+            if meta['kind'] == 'option':
+                meta['expiryDay'] = '2026-10-19'
+        new_option = ticker.replace('2611','2612')
+        for old, new in [(future,later), (ticker,new_option)]:
+            snap['instruments'][new] = {**snap['instruments'][old], 'symbol':new}
+        snap['instruments'][new_option]['expiryDay'] = '2026-12-18'
+        snap['mappings'][main].append(dict(time=START+86400, underlying=later))
+        snap['bars'] += [{**b, 'symbol':{ticker:new_option, future:later}.get(b['symbol'], b['symbol']),
+                         'time':b['time']+86400} for b in snap['bars']
+                         if b['symbol'] in (ticker, future, main, 'SSE.000852') and b['time'] < START+180]
+        snap['bars'] = [b for b in snap['bars'] if b['symbol'] != ticker or b['time'] < START+120]
+        strategy = """from quant_sdk import Strategy
+class Hold(Strategy):
+    def on_start(self, ctx): ctx.data.subscribe(ctx.params['symbol'],60)
+    def on_bar(self, ctx, bar):
+        if not ctx.position(bar.symbol): ctx.orders.target_position(bar.symbol,1)
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            frames = run(Path(directory), snap, [1,2,3,4,1441,1442], strategy)
+        self.assertEqual(frames[1]['signals'][0]['symbol'], ticker)
+        self.assertEqual(frames[1]['summary']['equity_curve'], frames[3]['summary']['equity_curve'])
+        self.assertEqual(frames[-1]['signals'][0]['symbol'], new_option)
+        self.assertEqual(frames[-1]['summary']['metrics']['trade_count'], 0)
+        old = next(p for p in frames[-1]['positions'] if p['symbol'] == ticker)
+        self.assertEqual(old['observed_until'], START+120)
+        self.assertIsNone(old['exit_price'])
 
     def test_five_minute_strategy_waits_for_closed_bar(self):
         snapshot = raw(300)

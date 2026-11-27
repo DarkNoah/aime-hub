@@ -9,10 +9,10 @@ from zoneinfo import ZoneInfo
 if __name__ == '__main__':
     sys.path.insert(0, sys.argv[1])
 from quant_sdk.options import index_chain
-from quant_sdk import Fees, HubClient, Instrument, TradingCalendar
+from quant_sdk import DataError, Fees, HubClient, Instrument, TradingCalendar
 
 
-def prepare(raw):
+def prepare(raw, *, skip_option_gaps=False):
     config = raw['config']
     execution_model = config.get('execution_model', 'actual_contract')
     if execution_model not in ('actual_contract', 'continuous_price', 'points'):
@@ -22,7 +22,7 @@ def prepare(raw):
     if execution_model == 'continuous_price' and (not proxy_symbol.startswith('KQ.m@') or raw['instruments'][proxy_symbol]['kind'] != 'continuous'):
         raise ValueError('Continuous-price simulation requires a main continuous series')
     bars = [bar for bar in raw['bars'] if config['start'] <= bar['time'] < config['end']]
-    if not bars:
+    if not bars and not (config.get('option_execution') and skip_option_gaps):
         raise ValueError('所选回测区间内没有可用行情，请调整日期或先采集/导入数据')
     supplied = config.get('calendar')
     if supplied is None:
@@ -32,7 +32,7 @@ def prepare(raw):
         observations.update((row['stamp'], True) for row in raw.get('option_volume_prefix', ()))
         for symbol, mappings in raw['mappings'].items():
             if symbol != proxy_symbol:
-                observations.update((max(config['start'], row['time']), True) for row in mappings
+                observations.update((row['time'] if skip_option_gaps and config.get('option_execution') else max(config['start'], row['time']), True) for row in mappings
                                     if row['time'] < config['end'])
         supplied = {}
         # Only observed bars/mappings need calendar dates. Empty portions of a
@@ -64,7 +64,9 @@ def prepare(raw):
             pass
 
         def instrument(self, symbol):
-            metadata = raw['instruments'][symbol]
+            metadata = raw['instruments'].get(symbol)
+            if metadata is None:
+                raise DataError('INSTRUMENT_NOT_FOUND')
             # Synthetic execution exists only in this frozen historical snapshot.
             # The live catalog and ordinary index order checks remain unchanged.
             return {**metadata, 'kind': 'future'} if symbol == proxy_symbol else metadata
@@ -108,7 +110,7 @@ def prepare(raw):
     symbols = list(dict.fromkeys(filter(None, [config['symbol'], config['benchmark_symbol']])))
     data = FrozenClient().snapshot(symbols, start=config['start'], end=config['end'],
                                   duration=config['duration'], calendar=calendar, rules=rules,
-                                  option_execution=bool(config.get('option_execution')))
+                                  option_execution=bool(config.get('option_execution')), skip_option_gaps=skip_option_gaps)
     data.metadata.update(engine=raw['engine'], execution_model=execution_model,
                          calendar_source='explicit override' if config.get('calendar') is not None else 'chinese-calendar; weekends excluded')
     if raw.get('derived_bars'):

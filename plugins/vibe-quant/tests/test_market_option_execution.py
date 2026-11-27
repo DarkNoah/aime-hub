@@ -10,7 +10,7 @@ sys.path[:0] = [str(ROOT / 'sdk'), str(ROOT / 'worker')]
 from quant_sdk import Fees, Instrument, RunConfig, TradingCalendar
 from quant_sdk.hub import HubClient, convert_bar, event_for, option_bars
 from quant_sdk.runtime import Runner
-from monitor_options import LiveOptionEvents
+from monitor_options import LiveOptionEvents, MarketOptionCoverage
 from signal_history import history_events, MonitorHistory
 from strategy_monitor import SignalOutput
 from test_option_execution import fixture, Targets, START
@@ -47,10 +47,14 @@ class Market(HubClient):
 
 
 class MarketOptionExecutionTest(unittest.TestCase):
-    def simulate(self, *, live=False, dry=False):
+    def simulate(self, *, live=False, dry=False, omit=None, targets=None, mappings=None, observations=None):
         raw, ticker = fixture('IF', main=not live, right='P')
         config = raw['config']
         source = config['symbol']
+        if omit:
+            raw['bars'] = [r for r in raw['bars'] if not omit(r)]
+        if mappings is not None:
+            raw['mappings'][source] = mappings
         if dry:
             for row in raw['bars']:
                 if row['symbol'] != source:
@@ -65,7 +69,7 @@ class MarketOptionExecutionTest(unittest.TestCase):
             output = SignalOutput(sink, START)
             runner = Runner(Targets(), [item], config=RunConfig(initial_cash=25000, participation_rate=.1,
                             option_execution={'mode': 'time_value_third'}), mode='paper',
-                            params={'symbol':source, 'targets':{'0':-2}, 'option_take_profit_pct':10}, output_dir=directory, on_event=output)
+                            params={'symbol':source, 'targets':targets or {'0':-2}, 'option_take_profit_pct':10}, output_dir=directory, on_event=output)
             history = MonitorHistory(sink, runner, START)
             output.runner, output.history = runner, history
             runner._maybe_checkpoint = lambda: None
@@ -79,10 +83,17 @@ class MarketOptionExecutionTest(unittest.TestCase):
             else:
                 events = history_events(market, runner, source, 60, START, START + 300, calendar, rules)
             try:
-                for event in events:
-                    output.event = event
-                    runner.process(event)
-                    history.flush()
+                coverage = MarketOptionCoverage(runner)
+                for raw_event in events:
+                    for event in coverage.accept(raw_event):
+                        output.event = event
+                        runner.process(event)
+                        history.flush()
+                if observations is not None:
+                    observations.extend(b.time for b in runner.data.history(source, 60))
+                    if not observations:
+                        self.assertEqual(history.summary()['equity_curve'], [])
+                        self.assertFalse(runner.broker.orders)
                 history.flush(force=True)
             finally:
                 runner.journal.close()
@@ -119,6 +130,33 @@ class MarketOptionExecutionTest(unittest.TestCase):
         item = Instrument(symbol, 'option', .5, multiplier=10, option_underlying='DCE.m2701', option_right='C', strike=3000)
         bars = list(option_bars(market, {symbol:item}, at('2026-11-30T09:01'), at('2026-12-01T09:01'), calendar))
         self.assertEqual([(b.trading_day, b.day_volume) for b in bars], [('2026-11-30', 995), ('2026-12-01', 20)])
+
+    def test_all_or_partial_missing_option_minutes_do_not_run_the_strategy(self):
+        for live in [False, True]:
+            for missing in ['CFFEX.IO', 'SSE.000300']:
+                observed = []
+                _, signals = self.simulate(live=live, omit=lambda r: r['symbol'].startswith(missing),
+                                           observations=observed)
+                self.assertEqual((signals, observed), ([], []))
+                ticker, signals = self.simulate(live=live,
+                    omit=lambda r: r['symbol'].startswith(missing) and r['time'] == START,
+                    targets={'0':-1, '1':-1}, observations=observed)
+                self.assertNotIn(START, observed)
+                self.assertEqual(signals[0]['symbol'], ticker)
+                self.assertGreaterEqual(signals[0]['time'], START + 120)
+
+    def test_partial_mapping_and_actual_contract_gaps_resume_at_next_valid_minute(self):
+        observed = []
+        contract = 'CFFEX.IF2611'
+        mappings = [dict(time=START+60, underlying=contract), dict(time=START+120, underlying=''),
+                    dict(time=START+240.5, underlying=contract)]
+        _, signals = self.simulate(mappings=mappings, observations=observed,
+            omit=lambda r: r['symbol']==contract and r['time']==START+60)
+        self.assertEqual(observed, [START+240])
+        self.assertEqual(signals, [])
+        observed.clear()
+        self.simulate(mappings=[], observations=observed)
+        self.assertEqual(observed, [])
 
     def test_no_option_volume_no_market_entry_marker(self):
         self.assertEqual(self.simulate(live=True, dry=True)[1], [])

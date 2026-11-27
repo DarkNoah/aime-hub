@@ -3,7 +3,7 @@ from heapq import merge
 from time import monotonic
 from quant_sdk import Bar
 from quant_sdk.models import Roll
-from quant_sdk.hub import DataError, convert_bar, event_for, three_minute
+from quant_sdk.hub import DataError, convert_bar, event_for, three_minute, mapped_future
 from quant_sdk.metrics import summarize
 from quant_sdk.point_metrics import summarize_points
 from position_valuation import open_valuation
@@ -17,25 +17,28 @@ def history_events(client, runner, symbol, duration, start, end, calendar, rules
     requests = {(symbol, duration): (start, end)}
     rolls = []
     router = getattr(runner, 'option_router', None)
-    if item.tradable or (router and item.kind != 'continuous'):
+    if item.tradable or router:
         requests[(symbol, 60)] = (start, end)
     if item.kind == 'continuous':
         mappings = list(client.contracts(symbol, start, end))
-        if not mappings or mappings[0]['time'] > start:
+        if (not mappings or mappings[0]['time'] > start) and not router:
             raise DataError(f'No observed contract mapping at start for {symbol}')
         for mapping in mappings:
             contract = mapping['underlying']
-            runner.data._instruments[contract] = client.rules(contract, rules)
-            if runner.data._instruments[contract].kind != 'future':
-                raise DataError('Main contracts must resolve to actual futures')
+            mapped = mapped_future(client, contract, rules, bool(router))
             lower = max(start, mapping['time'])
-            # Retain exit bars across a rollover, including positions in the old contract.
-            prior = requests.get((contract, 60), (lower, end))
-            requests[(contract, 60)] = (min(prior[0], lower), end)
-            rolls.append(event_for(Roll(symbol, contract, lower, calendar.trading_day(lower, futures=True))))
+            if mapped:
+                runner.data._instruments[contract] = mapped
+                # Retain exit bars across a rollover.
+                prior = requests.get((contract, 60), (lower, end))
+                requests[(contract, 60)] = (min(prior[0], lower), end)
+            else:
+                contract = ''
+            observed_at = mapping['time'] if router else lower
+            rolls.append(event_for(Roll(symbol, contract, lower, calendar.trading_day(observed_at, futures=True))))
     options = {}
     if router:
-        sources = {event.payload.contract for event in rolls} or {symbol}
+        sources = {event.payload.contract for event in rolls if event.payload.contract} if item.kind == 'continuous' else {symbol}
         for source in sorted(sources):
             fees = runner.data.instrument(source).fees
             for option in option_instruments(client, source, start, end, fees, calendar):
@@ -67,7 +70,7 @@ def history_events(client, runner, symbol, duration, start, end, calendar, rules
                 yield event_for(bar)
         if period == 180 and (value := three_minute(group.values())):
             yield event_for(value)
-        if not count and period == 60 and instrument.tradable and bounds[1] - bounds[0] >= 60:
+        if not count and not router and period == 60 and instrument.tradable and bounds[1] - bounds[0] >= 60:
             raise DataError(f'Missing execution history for {name}')
     def order(event):
         return (event.available_at, 0 if isinstance(event.payload, Roll) else
@@ -77,8 +80,12 @@ def history_events(client, runner, symbol, duration, start, end, calendar, rules
     streams = [iter(rolls), *(bars(name, period, bounds) for (name, period), bounds in sorted(requests.items()))]
     if options:
         streams.append((event_for(bar) for bar in option_bars(client, options, start, end, calendar)))
+    merged = merge(*streams, key=order)
+    if router:
+        yield from merged
+        return
     observed, execution = dict(runner.data._contracts), {}
-    for event in merge(*streams, key=order):
+    for event in merged:
         value = event.payload
         if isinstance(value, Roll):
             observed[value.symbol] = value.contract
@@ -212,16 +219,20 @@ class MonitorHistory:
             result['metrics']['calmar'] = annual / state['drawdown'] if annual is not None and state['drawdown'] else None
         opened = []
         for index, lot in enumerate(runner.broker.lots):
+            observed_until = runner.data.now
+            if runner.option_router and runner.data.instrument(lot.symbol).kind == 'option':
+                bars = runner.data.history(lot.symbol, 60, 1)
+                observed_until = bars[-1].end_time if bars else lot.entry_time
             opened.append({'id': f'open:{lot.signal_id}:{lot.entry_time}:{index}', 'status': 'open',
                 'symbol': lot.symbol, 'side': 'long' if lot.quantity > 0 else 'short',
                 'quantity': abs(lot.quantity), 'entry_time': lot.entry_time, 'entry_price': lot.entry_price,
                 'entry_signal_id': lot.signal_id, 'fees': lot.entry_fee, 'exit_time': None,
                 'exit_price': None, 'gross_pnl': None, 'net_pnl': None, 'exit_signal_id': None,
-                'observed_until': runner.data.now,
+                'observed_until': observed_until,
                 **open_valuation(runner, lot),
                 'risk_levels': self.levels(lot.symbol, lot.signal_id)})
         return {key: result[key] for key in ('metrics', 'monthly_returns', 'yearly_returns')} | {
-            'start': state['start'], 'through': runner.data.now, 'initial_cash': runner.config.initial_cash,
+            'start': state['start'], 'through': max(runner.data.now, state.get('through', 0)), 'initial_cash': runner.config.initial_cash,
             'replaying': self.replaying, 'equity_curve': daily, 'open_trades': opened,
             'pnl_unit': 'points' if points else 'currency',
             'execution_model': runner.context.params.get('execution_model', 'actual_contract')}

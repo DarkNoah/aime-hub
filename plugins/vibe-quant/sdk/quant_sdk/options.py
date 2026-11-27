@@ -47,6 +47,7 @@ def catalog_option(meta, source, fees, calendar):
 
 class OptionRouter:
     def __init__(self, context, settings):
+        self.allow_unsettled_expiry = False
         self.ctx = context
         self.settings = replace(settings,
             stop_loss_pct=context.params.get('option_stop_loss_pct', settings.stop_loss_pct),
@@ -214,6 +215,14 @@ class OptionRouter:
         if held:
             expiry = self.ctx.data.instrument(contract).expiry_day
             if expiry and bar.trading_day > expiry:
+                if self.allow_unsettled_expiry:
+                    # Preserve the paid lot at its last observed mark until settlement
+                    # data exists. New signals may bind to a current contract.
+                    for order in self.broker.orders:
+                        if order.symbol == contract and order.status == 'pending':
+                            self.broker.cancel(order.id)
+                    self.state = {}
+                    return
                 raise ValueError(f'{contract} 持仓跨越到期日，缺少交割结算数据')
         if held and (levels := binding.get('source_levels')) and bar.symbol == levels['symbol']:
             if levels['time'] <= bar.time and (hit := trigger(levels, binding['direction'], bar)):

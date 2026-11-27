@@ -92,16 +92,19 @@ class DataView:
                 return True, None
             self._quotes[value.symbol] = value
             return False, None
-        if self.instrument(value.symbol).kind != 'continuous' or self.instrument(value.contract).kind != 'future':
+        if self.instrument(value.symbol).kind != 'continuous' or (value.contract and self.instrument(value.contract).kind != 'future'):
             raise ValueError('A futures continuous symbol must resolve to a futures contract')
-        if value.symbol.startswith('KQ.m@'):
+        if value.contract and value.symbol.startswith('KQ.m@'):
             family = value.symbol.removeprefix('KQ.m@')
             if not value.contract.startswith(family) or not value.contract[len(family):].isdigit():
                 raise ValueError('Actual contract does not belong to the continuous product')
         previous = self._contracts.get(value.symbol)
         if value.time < self._roll_times.get(value.symbol, float('-inf')):
             return True, previous
-        self._contracts[value.symbol] = value.contract
+        if value.contract:
+            self._contracts[value.symbol] = value.contract
+        else:
+            self._contracts.pop(value.symbol, None)
         self._roll_times[value.symbol] = value.time
         return previous == value.contract, previous
 

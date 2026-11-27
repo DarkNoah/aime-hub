@@ -5,7 +5,7 @@ from hashlib import sha256
 import json
 from threading import Event as StopEvent
 
-from .hub import DataError, PERIODS, convert_bar, event_for, three_minute
+from .hub import DataError, PERIODS, convert_bar, event_for, three_minute, mapped_future
 from .models import Bar, InstrumentUpdate, Quote, Roll
 
 
@@ -36,10 +36,13 @@ class HubStream:
 
     def _register(self, symbol, when, day, output):
         if symbol not in self._instruments:
-            item = self.client.rules(symbol, self.rules)
+            item = mapped_future(self.client, symbol, self.rules, self.reference_minutes)
+            if item is None:
+                return False
             self._instruments[symbol] = item
             self._activation[symbol] = when
             output.append(event_for(InstrumentUpdate(symbol, when, day, item), when))
+        return True
 
     def _bar(self, bar, received, output):
         if bar.end_time <= self.cutoff or bar.end_time > received:
@@ -72,9 +75,12 @@ class HubStream:
                 received = max(received, row['time'])
                 if item.kind == 'continuous':
                     contract = row.get('underlying')
-                    if not contract:
+                    if not contract and not self.reference_minutes:
                         raise DataError('Missing live main-contract mapping')
-                    self._register(contract, received, day, output)
+                    if not contract or not self._register(contract, received, day, output):
+                        if self._contracts.pop(symbol, None):
+                            output.append(event_for(Roll(symbol, '', row['time'], day), received))
+                        continue
                     if self._contracts.get(symbol) != contract:
                         output.append(event_for(Roll(symbol, contract, row['time'], day), received))
                         self._contracts[symbol] = contract

@@ -32,6 +32,7 @@ export async function collectSnapshot(
   engine: Engine,
   config: BacktestInput,
   signal: AbortSignal,
+  skipOptionGaps = false,
 ): Promise<RawSnapshot> {
   const result: RawSnapshot = {
     engine,
@@ -93,13 +94,16 @@ export async function collectSnapshot(
         WHERE engine={engine:String} AND symbol={symbol:String} AND time <= {start:Float64} ORDER BY time DESC LIMIT 1`,
         { engine, symbol, start: String(config.start) },
       );
-      if (!initial[0]?.underlying)
+      const sparse =
+        skipOptionGaps && config.option_execution && symbol === config.symbol;
+      if (sparse) request(symbol, 60);
+      if (!initial[0]?.underlying && !sparse)
         throw new Error(
           `${symbol} 缺少起始时点的历史主力映射，请补齐数据或调整起始时间`,
         );
       const changes = await store.rows<{ time: number; underlying: string }>(
         `SELECT time, underlying FROM (
-        SELECT time, underlying, lagInFrame(underlying, 1, '') OVER (ORDER BY time ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS previous
+        SELECT time, underlying, lagInFrame(underlying, 1, {initial:String}) OVER (ORDER BY time ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS previous
         FROM ${store.table('quotes')} FINAL WHERE engine={engine:String} AND symbol={symbol:String} AND time > {start:Float64} AND time < {end:Float64}
         ) WHERE underlying != previous ORDER BY time LIMIT 101`,
         {
@@ -107,6 +111,7 @@ export async function collectSnapshot(
           symbol,
           start: String(config.start),
           end: String(config.end),
+          initial: initial[0]?.underlying ?? '',
         },
       );
       if (changes.length > 100)
@@ -118,12 +123,22 @@ export async function collectSnapshot(
       if (contracts.size > 24)
         throw new Error('单次回测最多包含 24 个实际合约，请缩短时间范围');
       for (const contract of contracts) {
+        if (sparse && !contract) continue;
         if (
           !contract ||
           !contract.startsWith(symbol.slice(5)) ||
           !/^\d+$/.test(contract.slice(symbol.length - 5))
         )
           throw new Error('历史主力映射包含不匹配的实际合约');
+        if (sparse) {
+          const item = await read(() => state.instrument(engine, contract));
+          if (!item) {
+            for (const row of result.mappings[symbol])
+              if (row.underlying === contract) row.underlying = '';
+            continue;
+          }
+          result.instruments[contract] = item;
+        }
         if ((await instrument(contract)).kind !== 'future')
           throw new Error('主连必须映射到期货合约');
         request(contract, 60);
@@ -131,9 +146,9 @@ export async function collectSnapshot(
     }
   }
   if (config.option_execution) {
-    const sources = result.mappings[config.symbol]?.map(
-      (row) => row.underlying,
-    ) ?? [config.symbol];
+    const sources = result.mappings[config.symbol]
+      ?.map((row) => row.underlying)
+      .filter(Boolean) ?? [config.symbol];
     const options = await read(() =>
       optionChain(
         store,

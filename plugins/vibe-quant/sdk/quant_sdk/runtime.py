@@ -278,7 +278,7 @@ class Runner:
                 accept(ctx, self.strategy.on_bar(ctx, value))
             elif isinstance(value, Quote):
                 accept(ctx, self.strategy.on_quote(ctx, value))
-            else:
+            elif value.contract:
                 accept(ctx, self.strategy.on_roll(ctx, value, previous))
         if isinstance(value, Bar) and value.is_final:
             account = self.broker.account()
