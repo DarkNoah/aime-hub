@@ -23,19 +23,13 @@
 
 ## 根据信号自动选择一手期权
 
-行情页添加策略和内置资金回测共用「智能合约选择器」。选择风格即可运行，新表单默认「均衡」。滑块可覆盖目标有效杠杆，展开「选约细节」可独立调整 IV 容忍度。
+行情页添加策略和内置资金回测共用「智能合约选择器」。开启后使用 **三分之一时间价值**（`time_value_third`），无需填写选约参数。HTTP 配置为 `option_execution: {"mode":"time_value_third"}`。
 
-| 风格 | 目标倍率 | 允许的绝对 Delta | IV 上限（相对同组中位数） |
-| --- | ---: | ---: | ---: |
-| 温和 `moderate` | 12 倍 | 0.60–0.80 | 100% |
-| 均衡 `balanced` | 20 倍 | 0.40–0.60 | 115% |
-| 激进 `aggressive` | 35 倍 | 0.20–0.40 | 135% |
+1. 用同一分钟已收盘的标的价和权利金计算内在价值。看涨取 `max(标的价 − 行权价, 0)`，看跌取 `max(行权价 − 标的价, 0)`。时间价值占比为 `(权利金 − 内在价值) / 权利金`，选与 1/3 距离最小的合约，不设入围区间。股指期权使用对应现货指数。缺少同步行情、权利金非正或低于内在价值时排除该合约。
+2. 占比距离相同时，选择**当个交易日截至信号分钟累计成交量**最接近 1000 手的合约。按历史分钟成交量累计，包含信号分钟及本次运行开始前的同交易日成交量；跨交易日重新累计。单分钟成交量用于判断一手能否成交。
+3. 前两项并列且有合约处于到期日所在的交易周时，在这些合约中选择权利金最接近 200 点的。其余并列按合约代码排序。200 点为报价单位，每手金额另乘合约乘数。
 
-SDK 和 HTTP 都支持仅传 `option_execution: {"profile":"balanced"}`。可覆盖 `target_leverage` 或 `iv_preference`。IV 三档 `strict`、`standard`、`flexible` 对应表中的三个上限。仅指定 `target_leverage` 时按原倍率规则选约。
-
-选约使用当分钟同一标的、同到期日、同看涨或看跌方向的合约。先从具有同步有效价格且成交量足够的各行权价计算中位 IV，再过滤 Delta 区间和 IV 上限，最后从合格合约中选择最接近目标倍率的一手。每个行权价在中位数里占一票，计算至少需要三个行权价。到期日未知、样本不足或没有合格候选时跳过当次入场。这里的 IV 比较是同一时点的横截面比较。同到期日的剩余时间相同，Black 模型反推的总波动率之比与年化 IV 之比相等。选约信号记录 `profile`、`iv_preference`、`iv_ratio` 及 `iv_reference_strikes`。
-
-Delta 衡量权利金对标的价格变动的敏感度，波动率偏斜描述不同行权价的隐含波动率差异。[OIC 对 Delta 和波动率偏斜的说明](https://www.optionseducation.org/referencelibrary/faq/technical-information)
+选约信号记录 `mode`、`reference_symbol`、`reference_price`、`intrinsic_value`、`time_value_ratio`、`volume`（分钟量）、`day_volume`（当日累计量）、`premium` 与 `expiry_week`。自行构建 SDK 数据集时，应给候选期权分钟线提供截至该分钟的 `Bar.day_volume` 及同分钟标的行情。
 
 权利金止损和止盈仍是可选的普通策略参数 `option_stop_loss_pct` 和 `option_take_profit_pct`，百分数 10 表示 10%。均未配置时由策略决定退出，显式传入 `null` 可关闭该侧。
 
@@ -48,17 +42,16 @@ data = client.snapshot([symbol], start=start, end=end, calendar=calendar,
 result = backtest.run(strategy, data, params={'symbol': symbol, 'duration': 300,
                                               'option_take_profit_pct': 10},
                       config=RunConfig(initial_cash=1_000_000, participation_rate=0.1,
-                                       option_execution=OptionExecution(profile="balanced")))
+                                       option_execution=OptionExecution(mode="time_value_third")))
 ```
 
 策略继续对信号标的或当时解析出的实际合约调用 `ctx.orders.target_position`。正目标买一手 Call，负目标买一手 Put，零目标平掉持有的那张期权。重复的同向目标保持一手，反手等待旧仓平掉，再用当时可见的行情选约。`ctx.position(信号标的)` 表示策略方向，成交回调里的 `symbol`、`quantity` 和 `price` 是实际模拟交易的期权、手数和权利金。
 
 - 股指期货按当时的实际合约月份自动匹配 IM→MO、IF→IO、IH→HO。主连换月后，原持仓保留原合约。其他标的按行情目录的 `underlying` 关联，选约需要行权价、Call/Put 方向和合约乘数。没有关联品种时沿用原策略的交易标的和数量。已知有关联，但该时点没有可成交的候选时跳过这一笔。
-- 使用标的与候选期权同一分钟已收盘的价格，以零利率 Black 模型从权利金反推总波动率及 Delta。股指期货使用同月实际期货价。有效杠杆为 `参考价 ÷ 权利金 × |Delta|`。越接近滑块目标越优先，差值相同优先选当分钟成交量大的合约，再按代码排序。`target_position` 信号记录 `source_contract`、`target_leverage`、`effective_leverage`、`delta`、`reference_price` 和 `premium`。模型弹性定义见 [QuantLib BlackCalculator](https://github.com/lballabio/QuantLib/blob/master/ql/pricingengines/blackcalculator.cpp)。
 - 候选和紧接信号后的执行分钟均要求「期权分钟成交量 × 参与率」至少一手。参与率为 10% 时各需至少 10 手成交量。使用下一分钟开盘价和配置的滑点模拟成交。缺行情、成交量不够或该分钟无法按规则成交时，结束本次入场。跳过和拒单原因分别保存在信号和委托中。
 - 买入支付全额权利金和手续费，持仓按该期权收盘价估值，平仓按期权成交价、乘数、费用计算净盈亏。手续费取回测交易规则，请按期权费率设置。成交前预设的百分比保护从开仓成交价计算，入场 K 线即可触发。跳空和同根双触发沿用内置执行器规则。策略在信号标的上显式给出的价格保护触发后，在期权下一可成交分钟平仓。
 - 历史行情取回测区间内归档的分钟线。目录可包含已到期或尚未开始交易的合约，每次只比较信号时点确有分钟线的合约。仍持仓进入已知到期日之后的交易日时，回测会提示缺少交割结算数据。旧股指期权目录按合约月份的第三个周五和提供的交易日历确定已验证的持仓期限。
-- 行情页在「策略 → 添加策略 → 内置模拟」中使用同一滑块。历史计算、图表回放及后续监听共用该配置。监听从行情库读取已收盘的期权分钟线，以当分钟成交量的 10% 判断能否买入一手。图表在模拟成交后记录入场和离场，平仓展示净盈亏。
+- 行情页在「策略 → 添加策略 → 内置模拟」中使用同一选约模式。历史计算、图表回放及后续监听共用该配置。监听从行情库读取已收盘的期权分钟线，以当分钟成交量的 10% 判断能否买入一手。图表在模拟成交后记录入场和离场，平仓展示净盈亏。
 
 ## 行情策略的 TqSim 模拟引擎
 

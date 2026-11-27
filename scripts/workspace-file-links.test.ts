@@ -245,3 +245,33 @@ test('literal code, escaped syntax, images and other URLs stay plain in user mes
   ].join('\n\n');
   assert.deepEqual(getUserMessageLinks(source), []);
 });
+
+test('user messages with a workspace recognize file and image syntax without changing surrounding text', () => {
+  const links = getUserMessageLinks(
+    '看 [**季度报告**](../shared/报告%20v2.pdf) 和 ![视频](./clip.webm "演示")。\n' +
+      '`[代码示例](ignore.txt)` [网站](https://example.com) [预览](localhost:3000) ![外链](https://example.com/photo.png)',
+    true,
+  );
+  assert.deepEqual(
+    links.map(({ label, href, image, title }) => ({
+      label,
+      target: getWorkspaceFileTarget(href),
+      image,
+      title,
+    })),
+    [
+      {
+        label: '季度报告',
+        target: { path: '../shared/报告 v2.pdf' },
+        image: undefined,
+        title: undefined,
+      },
+      {
+        label: '视频',
+        target: { path: 'clip.webm' },
+        image: true,
+        title: '演示',
+      },
+    ],
+  );
+});

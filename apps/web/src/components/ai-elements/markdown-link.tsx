@@ -1,18 +1,35 @@
-import { memo, type ComponentProps } from 'react';
+import { memo, useContext, type ComponentProps } from 'react';
 import { ExternalLink, FileText, Folder } from 'lucide-react';
 import type { ExtraProps } from 'streamdown';
 import { Badge } from '@/components/ui/badge';
 import { BrowserLink } from '@/components/browser/browser-link';
-import { useWorkspaceFile } from '@/components/file-manager/context';
+import {
+  WorkspaceFileThreadContext,
+  useWorkspaceFile,
+} from '@/components/file-manager/context';
+import { WorkspaceAttachment } from '@/components/file-manager/workspace-attachment';
 import { cn } from '@/lib/utils';
 import {
   getWorkspaceFileTarget,
+  isEncodedWorkspaceFileLink,
   isWorkspaceDirectoryLink,
 } from './markdown-file-link';
 
 type MarkdownLinkProps = ComponentProps<'a'> & ExtraProps;
 const badgeClassName = 'mx-1 max-w-full align-baseline whitespace-nowrap';
 const badgeTextClassName = 'min-w-0 max-w-[24ch] truncate';
+
+function linkLabel(node: NonNullable<ExtraProps['node']>): string {
+  return node.children
+    .map((child) => {
+      if (child.type === 'text') return child.value;
+      if (child.type !== 'element') return '';
+      return typeof child.properties.alt === 'string'
+        ? child.properties.alt
+        : linkLabel(child);
+    })
+    .join('');
+}
 
 function getWebUrl(href?: string): string | undefined {
   if (!href) return undefined;
@@ -37,20 +54,42 @@ export const MarkdownLink = memo(
     children,
     className,
     href,
-    // Discard the Markdown AST node instead of passing it to the DOM anchor.
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    node: _node,
+    node,
     onAuxClick,
     onClick,
     ...props
   }: MarkdownLinkProps) => {
     const openFile = useWorkspaceFile();
-    const file = getWorkspaceFileTarget(href);
-    const webUrl = getWebUrl(href);
+    const threadId = useContext(WorkspaceFileThreadContext);
 
-    if (href?.toLowerCase().startsWith('streamdown:workspace-file/')) {
-      if (!file || !openFile) return <span>{children}</span>;
+    if (isEncodedWorkspaceFileLink(href)) {
+      const file = getWorkspaceFileTarget(href);
+      if (!file) return <span>{children}</span>;
       const directory = isWorkspaceDirectoryLink(href);
+      if (
+        threadId &&
+        !file.path.startsWith('/') &&
+        !directory &&
+        file.line === undefined
+      ) {
+        return (
+          <WorkspaceAttachment
+            threadId={threadId}
+            file={{
+              path: file.path,
+              name: file.path.split('/').at(-1) || file.path,
+              label: node
+                ? linkLabel(node).trim()
+                : typeof children === 'string'
+                  ? children.trim()
+                  : undefined,
+            }}
+            title={props.title}
+            className={cn('my-2', className)}
+          />
+        );
+      }
+      if (!openFile) return <span>{children}</span>;
 
       return (
         <Badge
@@ -92,6 +131,7 @@ export const MarkdownLink = memo(
       );
     }
 
+    const webUrl = getWebUrl(href);
     if (href && /^https?:/i.test(href) && !webUrl) {
       return <span>{children}</span>;
     }

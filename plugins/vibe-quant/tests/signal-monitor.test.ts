@@ -176,7 +176,7 @@ test('monitor creation uses shared strategies and enforces administrator, versio
   const optionConfig = (calls.at(-2) as unknown[])[4] as ReturnType<
     typeof config
   >;
-  assert.deepEqual(optionConfig.option_execution, { target_leverage: 31 });
+  assert.deepEqual(optionConfig.option_execution, { mode: 'time_value_third' });
   assert.equal(optionConfig.parameters.option_stop_loss_pct, 8);
   assert.equal(optionConfig.parameters.option_take_profit_pct, 14);
   assert.equal(monitorExecutionModel(optionConfig), 'actual_contract');
@@ -184,27 +184,14 @@ test('monitor creation uses shared strategies and enforces administrator, versio
     (await request({ ...optionMonitor, simulation_engine: 'tqsdk' })).status,
     400,
   );
-  const profiled = {
+  const current = {
     ...optionMonitor,
-    option_execution: { profile: 'aggressive', stop_loss_pct: 9 },
+    option_execution: { mode: 'time_value_third' },
   };
-  assert.equal((await request(profiled)).status, 201);
-  const profileConfig = (calls.at(-2) as unknown[])[4] as ReturnType<
-    typeof config
-  >;
-  assert.deepEqual(profileConfig.option_execution, {
-    profile: 'aggressive',
-    target_leverage: 35,
-    iv_preference: 'flexible',
-  });
-  assert.equal(profileConfig.parameters.option_stop_loss_pct, 9);
+  assert.equal((await request(current)).status, 201);
   assert.equal(
-    (
-      await request({
-        ...profiled,
-        option_execution: { iv_preference: 'strict', target_leverage: 20 },
-      })
-    ).status,
+    (await request({ ...current, option_execution: { mode: 'unknown' } }))
+      .status,
     400,
   );
   for (const parameter_overrides of [[], { duration: 17 }, { symbol: actual }])

@@ -158,7 +158,7 @@ export function RoomMessage({
               </MessageResponse>
             ) : (
               <span className="whitespace-pre-wrap">
-                <UserMessageText text={message.text} />
+                <UserMessageText text={message.text} threadId={fileThreadId} />
               </span>
             )}
           </MessageContent>

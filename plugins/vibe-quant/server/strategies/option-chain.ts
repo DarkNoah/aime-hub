@@ -76,3 +76,31 @@ export async function optionChain(
   }
   return [...instruments.values()];
 }
+
+/** Only completed minutes before the first requested bar. Split at Shanghai 06:00
+ * and 18:00 so the SDK calendar can assign night sessions to the exchange date. */
+export function optionVolumePrefix(
+  store: Pick<MarketStore, 'rows' | 'table'>,
+  engine: Engine,
+  symbols: string[],
+  start: number,
+) {
+  const dayStart = Math.floor((start + 8 * 3600) / 86400) * 86400 - 8 * 3600;
+  const since = symbols.every((s) => s.startsWith('CFFEX.'))
+    ? dayStart
+    : dayStart - 32 * 86400;
+  return store.rows<{ symbol: string; stamp: number; lots: number }>(
+    `SELECT symbol, toFloat64(min(time)) AS stamp, sum(volume) AS lots
+     FROM ${store.table('bars')} FINAL WHERE engine={engine:String} AND duration=60
+       AND symbol IN (SELECT arrayJoin(JSONExtract({symbols:String}, 'Array(String)')))
+       AND time >= {since:Int64} AND time < {start:UInt64}
+     GROUP BY symbol, intDiv(time + 8*3600, 6*3600)
+     ORDER BY symbol, stamp DESC LIMIT 5 BY symbol`,
+    {
+      engine,
+      symbols: JSON.stringify(symbols),
+      since: String(since),
+      start: String(start),
+    },
+  );
+}

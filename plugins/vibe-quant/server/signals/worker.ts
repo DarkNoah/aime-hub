@@ -349,7 +349,7 @@ export class SignalWorker {
         if (message.kind === 'market') {
           if (
             typeof message.path !== 'string' ||
-            !/^\/(?:instruments\/[^/]+|history(?:\/range)?|contracts|option-chain|option-minutes|sessions(?:\/[a-f0-9-]+(?:\/events)?)?)$/.test(
+            !/^\/(?:instruments\/[^/]+|history(?:\/range)?|contracts|option-chain|option-minutes|option-volume-prefix|sessions(?:\/[a-f0-9-]+(?:\/events)?)?)$/.test(
               message.path,
             )
           )

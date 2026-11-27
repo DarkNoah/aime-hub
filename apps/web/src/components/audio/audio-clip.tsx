@@ -17,12 +17,14 @@ import { cn } from '@/lib/utils';
 type AudioClipProps = {
   src?: string;
   filename: string;
+  label?: string;
   mediaType?: string;
   sampleRate?: number;
   downloadUrl?: string;
   onOpen?: () => void;
   className?: string;
   compact?: boolean;
+  inline?: boolean;
 };
 
 export function AudioClip(props: AudioClipProps) {
@@ -33,12 +35,14 @@ export function AudioClip(props: AudioClipProps) {
 function AudioClipContent({
   src,
   filename,
+  label = filename,
   mediaType,
   sampleRate,
   downloadUrl = src,
   onOpen,
   className,
   compact = false,
+  inline = false,
 }: AudioClipProps) {
   const { t, i18n } = useTranslation();
   const audio = useRef<HTMLAudioElement>(null);
@@ -52,42 +56,49 @@ function AudioClipContent({
   ]
     .filter(Boolean)
     .join(' · ');
+  const Container = inline ? 'span' : 'section';
 
   return (
-    <section
-      aria-label={filename}
+    <Container
+      role={inline ? 'region' : undefined}
+      aria-label={label}
       className={cn(
-        'min-w-0 text-left',
+        'block min-w-0 text-left',
         !compact && 'rounded-xl border bg-card p-3.5',
         className,
       )}
     >
       {!compact && (
-        <div className="flex min-w-0 items-center gap-2.5">
+        <span className="flex min-w-0 items-center gap-2.5">
           <AudioLines
             className="size-5 shrink-0 text-primary"
             aria-hidden="true"
           />
-          <div className="min-w-0 flex-1">
+          <span className="min-w-0 flex-1">
             {onOpen ? (
               <button
                 type="button"
                 onClick={onOpen}
-                aria-label={t('files.openPreview', { path: filename })}
+                aria-label={t('files.openPreview', { path: label })}
                 title={filename}
                 className="block max-w-full truncate rounded text-sm font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                {filename}
+                {label}
               </button>
             ) : (
-              <p className="truncate text-sm font-medium" title={filename}>
-                {filename}
-              </p>
+              <span
+                className="block truncate text-sm font-medium"
+                title={filename}
+              >
+                {label}
+              </span>
             )}
             {metadata && (
-              <p className="mt-0.5 text-xs text-muted-foreground">{metadata}</p>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                {metadata}
+              </span>
             )}
-          </div>
+          </span>
           {downloadUrl && (
             <Button
               asChild
@@ -107,7 +118,7 @@ function AudioClipContent({
               </a>
             </Button>
           )}
-        </div>
+        </span>
       )}
       {src && (
         <AudioPlayer
@@ -137,7 +148,7 @@ function AudioClipContent({
           <AudioPlayerElement
             ref={audio}
             src={src}
-            aria-label={filename}
+            aria-label={label}
             preload={compact ? 'none' : 'metadata'}
             onError={() => setFailed(true)}
             onPlay={(event) => {
@@ -150,47 +161,50 @@ function AudioClipContent({
             }}
           />
           {compact ? (
-            <div className="flex w-full min-w-0 items-center gap-2">
+            <span className="flex w-full min-w-0 items-center gap-2">
               <AudioPlayerPlayButton className="size-8! shrink-0 rounded-full! border-0! bg-primary/10! text-primary shadow-none! [--media-icon-color:var(--color-primary)] [--media-control-hover-background:var(--color-accent)]" />
               <AudioPlayerTimeRange className="flex! h-8 min-w-0 flex-1 border-0! px-0! shadow-none!" />
               <AudioPlayerTimeDisplay
                 noToggle
                 className="shrink-0 border-0! px-0! text-xs tabular-nums text-muted-foreground shadow-none!"
               />
-            </div>
+            </span>
           ) : (
             <>
               <AudioPlayerTimeRange className="flex! h-6 w-full min-w-0 border-0! px-0! shadow-none!" />
-              <div className="mt-1 flex flex-wrap items-center gap-2">
+              <span className="mt-1 flex flex-wrap items-center gap-2">
                 <AudioPlayerPlayButton className="size-9! shrink-0 rounded-full! border-0! bg-primary! text-primary-foreground shadow-none! [--media-icon-color:var(--color-primary-foreground)] [--media-control-hover-background:var(--color-primary)]" />
                 <AudioPlayerTimeDisplay
                   showDuration
                   noToggle
                   className="border-0! px-1! text-xs text-muted-foreground shadow-none!"
                 />
-                <div className="ml-auto flex shrink-0 items-center gap-1">
+                <span className="ml-auto flex shrink-0 items-center gap-1">
                   <MediaPlaybackRateButton
                     rates={[0.75, 1, 1.25, 1.5, 2]}
                     className="inline-flex h-8 min-w-8 items-center justify-center rounded-md px-1 text-xs text-muted-foreground"
                   />
                   <AudioPlayerMuteButton className="size-8 justify-center rounded-md border-0! px-0! text-muted-foreground shadow-none!" />
-                </div>
-              </div>
+                </span>
+              </span>
             </>
           )}
         </AudioPlayer>
       )}
       {(!src || failed) && (
-        <div
+        <span
           className={cn(
             compact
               ? 'flex items-center gap-2'
-              : 'mt-3 space-y-2 border-t pt-3',
+              : 'mt-3 block space-y-2 border-t pt-3',
           )}
         >
-          <p role="status" className="text-sm leading-6 text-muted-foreground">
+          <span
+            role="status"
+            className="block text-sm leading-6 text-muted-foreground"
+          >
             {t(src ? 'audio.unavailable' : 'chat.readFile.mediaUnavailable')}
-          </p>
+          </span>
           {src && (
             <Button
               variant="outline"
@@ -204,8 +218,8 @@ function AudioClipContent({
               {t('files.retry')}
             </Button>
           )}
-        </div>
+        </span>
       )}
-    </section>
+    </Container>
   );
 }

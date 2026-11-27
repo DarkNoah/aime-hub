@@ -427,6 +427,10 @@ export function createAutomationRuntime({
       // when system tasks use a shared workspace and model resource.
       requestContext.set('userId', run.task.createdBy);
       requestContext.set(
+        'systemEnvironment',
+        run.task.scope.scope === 'system',
+      );
+      requestContext.set(
         'projectId',
         run.task.scope.scope === 'project'
           ? run.task.scope.projectId

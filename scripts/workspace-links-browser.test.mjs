@@ -111,7 +111,7 @@ const fromUser=new URLSearchParams(location.search).has('user');
 const readOnly=new URLSearchParams(location.search).has('readonly');
 function Message(){
   if (!group && fromUser) return <ChatMessages threadId="bot-thread" messages={[{id:'user-message',role:'user',parts:[{type:'text',text:userText}]}]} running={false} activeMessageId={null}/>;
-  return group?<RoomMessage message={{id:'message',roomId:'room',sequence:'1',revision:'1',senderId:fromUser?'alice':'bot',senderKind:fromUser?'user':'agent',text:fromUser?userText:markdown,files:[],reactions:[],createdAt:'2026-11-01T00:00:00Z'}} userId="alice" label={fromUser?'Alice':'Bot'} onReply={()=>{}} onJumpToReply={()=>{}} loadingReply={false} onReact={async()=>{}} onRespondUi={async()=>{}} onRespondChoices={async()=>{}}/>:<MessageResponse mode="static">{markdown}</MessageResponse>;
+  return group?<RoomMessage fileThreadId="bot-thread" message={{id:'message',roomId:'room',sequence:'1',revision:'1',senderId:fromUser?'alice':'bot',senderKind:fromUser?'user':'agent',text:fromUser?userText:markdown,files:[],reactions:[],createdAt:'2026-11-01T00:00:00Z'}} userId="alice" label={fromUser?'Alice':'Bot'} onReply={()=>{}} onJumpToReply={()=>{}} loadingReply={false} onReact={async()=>{}} onRespondUi={async()=>{}} onRespondChoices={async()=>{}}/>:<MessageResponse mode="static" workspaceThreadId="bot-thread">{markdown}</MessageResponse>;
 }
 function App(){
   const [file,setFile]=React.useState(null);
@@ -176,6 +176,11 @@ createRoot(document.getElementById('root')).render(<ThemeProvider><SessionContex
     const url = 'http://127.0.0.1:' + vite.httpServer.address().port;
     const link = (name) =>
       page.getByTestId('message').getByRole('link', { name, exact: true });
+    const card = (path) =>
+      page
+        .getByTestId('message')
+        .locator(`[data-workspace-attachment="${path}"]`);
+    const sharedGuide = card('../shared/docs/guide/index.md');
     async function assertLine(line) {
       await page.waitForFunction((line) => {
         const code = [...document.querySelectorAll('code')].find(
@@ -300,10 +305,18 @@ createRoot(document.getElementById('root')).render(<ThemeProvider><SessionContex
     }
     for (const query of ['?user', '?user&room']) {
       await page.goto(url + '/' + query);
-      await link('Open notes').click();
+      const notes = card('notes/manual.txt');
+      await notes.getByRole('button', { name: /^Open notes/ }).click();
       await page
         .getByRole('tab', { name: 'manual.txt', exact: true })
         .waitFor();
+      const download = notes.getByRole('link', {
+        name: '下载文件: manual.txt',
+      });
+      assert.equal(
+        await download.getAttribute('href'),
+        '/api/threads/bot-thread/files/raw?path=notes%2Fmanual.txt&download=1',
+      );
       assert.equal(await link('Sample').count(), 0);
       const messageText = await page.getByTestId('message').innerText();
       assert.ok(messageText.includes('**Plain text**'));
@@ -354,14 +367,14 @@ createRoot(document.getElementById('root')).render(<ThemeProvider><SessionContex
       await page
         .context()
         .route(target.split('#')[0], (route) => route.abort());
-      await link('Shared guide').click();
+      await sharedGuide.getByRole('button', { name: /^Shared guide/ }).click();
       await expectPanelNavigation(
         documentLink('Preview ' + new URL(target).hostname),
         target,
       );
     }
     await expectPanelNavigation(link('Chat app'), localUrls[0]);
-    await link('Shared guide').click();
+    await sharedGuide.getByRole('button', { name: /^Shared guide/ }).click();
     const callsBeforeRemote = navigationCalls.length;
     const remoteUrl = 'https://example.com/guide';
     await page.context().route(remoteUrl, (route) =>
@@ -386,7 +399,7 @@ createRoot(document.getElementById('root')).render(<ThemeProvider><SessionContex
     await assertLine(80);
     await page.screenshot({ path: '/tmp/workspace-file-links-readonly.png' });
     const preview = page.getByTestId('readonly');
-    await link('Shared guide').click();
+    await sharedGuide.getByRole('button', { name: /^Shared guide/ }).click();
     await preview.getByRole('heading', { name: 'Shared guide' }).waitFor();
     for (const protocol of ['http', 'https']) {
       const external = preview.getByRole('link', {
@@ -403,7 +416,7 @@ createRoot(document.getElementById('root')).render(<ThemeProvider><SessionContex
     await preview.getByRole('heading', { name: 'Chapter' }).waitFor();
     await preview.getByRole('link', { name: 'Browse assets' }).click();
     await preview.getByRole('button', { name: 'image.png' }).waitFor();
-    await link('Shared guide').click();
+    await sharedGuide.getByRole('button', { name: /^Shared guide/ }).click();
     await preview.getByRole('link', { name: 'Sandbox report' }).click();
     await preview.getByRole('heading', { name: 'Quarterly report' }).waitFor();
     await page.setViewportSize({ width: 375, height: 812 });

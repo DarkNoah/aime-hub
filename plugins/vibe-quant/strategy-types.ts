@@ -1,4 +1,4 @@
-import type { IvPreference, OptionProfile } from './option-selection.js';
+import { optionMode, type OptionMode } from './option-selection.js';
 import type { Bar, Engine } from './shared.js';
 import type { OptimizationConfig } from './optimization-types.js';
 import type { StrategyNotifications } from './strategy-notifications.js';
@@ -45,16 +45,11 @@ export function normalizeOptionParameters<
   T extends Pick<BacktestInput, 'option_execution' | 'parameters'>,
 >(config: T): T {
   const options = config.option_execution;
-  if (
-    !options ||
-    (options.stop_loss_pct === undefined &&
-      options.take_profit_pct === undefined)
-  )
-    return config;
-  const { stop_loss_pct, take_profit_pct, ...selection } = options;
+  if (!options) return config;
+  const { stop_loss_pct, take_profit_pct } = options;
   return {
     ...config,
-    option_execution: selection,
+    option_execution: { mode: options.mode ?? optionMode },
     parameters: {
       ...(stop_loss_pct === undefined
         ? {}
@@ -78,9 +73,7 @@ export interface BacktestInput {
   duration: number;
   /** Actual historical contracts by default; continuous prices are an explicit backtest approximation. */
   option_execution?: {
-    target_leverage: number;
-    profile?: OptionProfile;
-    iv_preference?: IvPreference;
+    mode: OptionMode;
     stop_loss_pct?: number;
     take_profit_pct?: number;
   };

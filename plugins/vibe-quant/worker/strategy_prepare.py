@@ -29,6 +29,7 @@ def prepare(raw):
         from chinese_calendar import is_holiday
         zone = ZoneInfo('Asia/Shanghai')
         observations = {(bar['time'], raw['instruments'][bar['symbol']]['kind'] != 'stock') for bar in bars}
+        observations.update((row['stamp'], True) for row in raw.get('option_volume_prefix', ()))
         for symbol, mappings in raw['mappings'].items():
             if symbol != proxy_symbol:
                 observations.update((max(config['start'], row['time']), True) for row in mappings
@@ -54,6 +55,10 @@ def prepare(raw):
     for bar in bars:
         by_series[bar['symbol'], bar['duration']].append(bar)
 
+    prefix = defaultdict(list)
+    for row in raw.get('option_volume_prefix', ()):
+        prefix[row['symbol']].append(row)
+
     class FrozenClient(HubClient):
         def __init__(self):
             pass
@@ -71,6 +76,14 @@ def prepare(raw):
 
         def history(self, symbol, duration, start, end):
             return by_series[symbol, duration]
+
+        def option_minute_rows(self, symbols, start, end):
+            from heapq import merge
+            return merge(*(sorted(by_series[s, 60], key=lambda b: b['time']) for s in symbols),
+                         key=lambda b: (b['time'], b['symbol']))
+
+        def option_volume_prefix(self, symbols, start):
+            return (row for s in symbols for row in prefix[s])
 
         def option_chain(self, source, start, end):
             prefix = index_chain(source)

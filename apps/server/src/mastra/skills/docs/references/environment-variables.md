@@ -46,8 +46,10 @@ node "$APP_API_SCRIPT" call personalEnvironmentVariables.update \
 
 浏览器工具启动 Chromium 时使用相同的环境变量规则，将 `http_proxy`／`HTTP_PROXY` 转为 `--proxy-server`，并读取 `no_proxy`／`NO_PROXY` 绕过规则。浏览器配置按用户及个人／项目作用域隔离；同一用户在同一作用域的聊天共享登录数据，不同项目和个人聊天使用独立浏览器。修改代理后关闭对应浏览器并重新打开即可生效。
 
+`web_fetch` 每次调用 HTTPS 的 Jina Reader 时按当前作用域读取代理，依次使用 `https_proxy`、`all_proxy`、`http_proxy`，也支持大写变量名。可配置 HTTP、HTTPS 或 SOCKS5 代理。`no_proxy`／`NO_PROXY` 匹配的是 Reader 主机（如 `r.jina.ai`）。未配置代理、命中绕过规则或 Reader 使用明文 HTTP 时直连。私网代理受服务端 `ALLOW_ALL_NETWORKS` 策略约束。
+
 技能仓库下载支持 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY` 及其小写形式，按 Git 的代理规则使用；GitHub 的 HTTPS 下载可配置 `HTTPS_PROXY`／`https_proxy`，或通用代理 `ALL_PROXY`／`all_proxy`。后台技能管理的导入和更新读取全局配置，个人技能管理读取“全局 → 当前用户”，并覆盖服务进程中的同名代理变量；每次扫描或更新重新读取，空字符串也会覆盖。聊天内置 `skill-installer` 使用当前命令已有的个人／项目作用域变量，修改后需新启动命令。下载先尝试 GitHub 原地址，失败后仍依次尝试 `githubproxy.cc` 和 `ghfast.top`，每次尝试均使用相同的代理配置。
 
 应用自动注入的 `SKILL_HOME`、`SKILLS_ROOT`、`BUILTIN_SKILLS_ROOT`、`APP_API_SCRIPT`、`APP_API_URL`、`APP_API_TOKEN`、`APP_THREAD_ID` 和 `APP_PROJECT_ID` 优先于保存的配置，不应作为自定义变量设置。
 
-保存配置无需重启服务，但不会改变已启动进程的环境；`write_stdin` 继续使用原终端启动时的值，需新建命令或终端会话才会更新。这些配置供会话命令、其中运行的技能脚本、浏览器代理和技能管理下载使用，不用于更改后端服务自身的配置。
+保存配置无需重启服务，但不会改变已启动进程的环境；`write_stdin` 继续使用原终端启动时的值，需新建命令或终端会话才会更新。这些配置供会话命令、其中运行的技能脚本、浏览器代理、Jina 网页读取和技能管理下载使用，不用于更改后端服务自身的配置。

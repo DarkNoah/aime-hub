@@ -96,6 +96,7 @@ plugins/vibe-quant/**/__pycache__/
 !apps/server/src/modules/tools/read-file-output.test.ts
 
 !apps/server/src/modules/tools/ocr-provider-resolution.test.ts
+!apps/server/src/modules/tools/reader-proxy.test.ts
 
 !apps/server/src/modules/issues/*.test.ts
 !scripts/issues-browser.test.mjs

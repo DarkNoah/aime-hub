@@ -1,4 +1,3 @@
-from math import erfc, log, sqrt
 from pathlib import Path
 import sys
 import tempfile
@@ -7,7 +6,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'sdk'), str(ROOT / 'worker')]
 from quant_sdk import OptionExecution, RiskLevels, RunConfig, Strategy, backtest
-from quant_sdk.options import effective_leverage
+from quant_sdk.options import CASH_INDEX
 from strategy_prepare import prepare
 
 START = 1792373400
@@ -39,34 +38,18 @@ def fixture(product='IM', *, main=False, right='C', volumes=(20, 20, 20, 20, 20)
         for n, (price, volume) in enumerate(zip(prices, size)):
             bars.append(dict(symbol=symbol, time=START + 60*n, duration=60, open=price, high=price+1,
                              low=price-1, close=price, volume=volume))
-    series(actual, 'future', [5000]*5, [60]*5)
+    series(actual, 'future', [5066 if not family else 5000]*5, [60]*5)
     if main:
         series(source, 'continuous', [5100]*5, [60]*5)
     if family:
+        series(CASH_INDEX[family], 'stock', [5066 if right == 'C' else 4934]*5, [300]*5)
         series(ticker, 'option', [100, 100, 112, 112, 113], volumes)
-        series(ticker.replace('5000','5100'), 'option', [150]*5, [10]*5)
+        series(ticker.replace('5000','4995' if right == 'C' else '5005'), 'option', [100]*5, [10]*5)
     return dict(engine='tqsdk', instruments=instruments, bars=bars,
                 mappings={source: [dict(time=START, underlying=actual)]} if main else {},
                 config=dict(symbol=source, benchmark_symbol=None, duration=60, start=START, end=START+5*60,
-                            option_execution={'target_leverage':25}, calendar={'2026-10-19':True},
+                            option_execution={'mode':'time_value_third'}, calendar={'2026-10-19':True},
                             rules=dict(multiplier=200, margin_rate=.1, fees=dict(per_unit=2)))), ticker
-
-
-def profiled_fixture(right='C', deviations=None):
-    raw, ticker = fixture(right=right)
-    raw['bars'] = [b for b in raw['bars'] if b['symbol'] == raw['config']['symbol']]
-    raw['instruments'] = {s: m for s, m in raw['instruments'].items() if m['kind'] == 'future'}
-    source_bars = raw['bars'][:]
-    sign = 1 if right == 'C' else -1
-    for strike, deviation in (deviations or {4875: .05, 5000: .05, 5125: .05}).items():
-        d1 = log(5000 / strike) / deviation + deviation / 2
-        premium = sign * (5000 * erfc(-sign * d1 / sqrt(2)) -
-                          strike * erfc(-sign * (d1 - deviation) / sqrt(2))) / 2
-        symbol = ticker.replace('-5000', f'-{strike}')
-        raw['instruments'][symbol] = dict(symbol=symbol, kind='option', priceTick=.2)
-        raw['bars'].extend(dict(b, symbol=symbol, open=premium, high=premium+1, low=premium-1,
-                                close=premium, volume=40) for b in source_bars)
-    return raw
 
 
 class OptionExecutionTest(unittest.TestCase):
@@ -82,61 +65,59 @@ class OptionExecutionTest(unittest.TestCase):
         self.assertEqual(result['status'], 'succeeded', result['message'])
         return result
 
-    def test_profiles_select_matching_calls_and_puts(self):
-        for right, direction in [('C', 1), ('P', -1)]:
-            expected = [4875, 5000, 5125] if right == 'C' else [5125, 5000, 4875]
-            for profile, strike, leverage in zip(['moderate', 'balanced', 'aggressive'], expected, [12, 20, 35]):
-                with self.subTest(profile=profile, right=right):
-                    raw = profiled_fixture(right)
-                    raw['config']['option_execution'] = dict(profile=profile)
-                    result = self.execute(raw, {'0':direction})
-                    decision = result['signals'][0]
-                    self.assertEqual((decision['symbol'], decision['profile'], decision['target_leverage']),
-                                     (f'CFFEX.MO2611-{right}-{strike}', profile, leverage))
-                    self.assertAlmostEqual(decision['iv_ratio'], 1)
-                    self.assertEqual(decision['iv_reference_strikes'], 3)
-                    self.assertEqual(result['fills'][0]['quantity'], 1)
+    def test_cumulative_volume_only_breaks_a_share_tie(self):
+        raw, first = fixture(volumes=(1000,) * 5)
+        second = first.replace('5000', '4934')
+        raw['instruments'][second] = dict(symbol=second, kind='option', priceTick=.2)
+        raw['bars'] += [dict(b, symbol=second, open=200, close=200, high=201, low=199, volume=15)
+                        for b in raw['bars'] if b['symbol'] == first]
+        raw['option_volume_prefix'] = [
+            dict(symbol=first, stamp=START-60, lots=500),
+            dict(symbol=second, stamp=START-60, lots=980),
+            dict(symbol=second, stamp=START-86400, lots=10000),
+        ]
+        decision = self.execute(raw)['signals'][0]
+        self.assertEqual((decision['symbol'], decision['volume'], decision['day_volume']), (second, 15, 995))
+        raw['option_volume_prefix'][1]['lots'] = 2200
+        self.assertEqual(self.execute(raw)['signals'][0]['symbol'], first)
+        for bar in raw['bars']:
+            if bar['symbol'] == second:
+                bar.update(open=198, close=198, high=199, low=197)
+        self.assertEqual(self.execute(raw)['signals'][0]['symbol'], second)
 
-    def test_iv_override_changes_eligibility_and_preserves_leverage(self):
-        raw = profiled_fixture(deviations={4875:.05, 5000:.06, 5125:.05})
-        for preference, fills in [('strict', False), ('standard', False), ('flexible', True)]:
-            raw['config']['option_execution'] = dict(profile='balanced', iv_preference=preference, target_leverage=27)
-            result = self.execute(raw)
-            self.assertEqual(bool(result['fills']), fills)
-            if fills:
-                self.assertAlmostEqual(result['signals'][0]['iv_ratio'], 1.2)
-                self.assertEqual(result['signals'][0]['target_leverage'], 27)
-            else:
-                self.assertIn('IV 上限', result['signals'][0]['reason'])
+    def test_expiry_week_uses_premium_only_after_both_ranks_tie(self):
+        raw, first = fixture()
+        second = first.replace('5000', '4934')
+        # The lower strike sorts first. Outside expiry week it wins even when
+        # its premium is farther from 200.
+        for row in raw['bars']:
+            if row['symbol'] == CASH_INDEX['MO']:
+                row.update(open=5132, close=5132, high=5133, low=5131)
+            if row['symbol'] == first:
+                row.update(open=200, close=200, high=201, low=199)
+        raw['instruments'][second] = dict(symbol=second, kind='option', priceTick=.2)
+        raw['bars'] += [dict(b, symbol=second, open=300, close=300, high=301, low=299)
+                        for b in raw['bars'] if b['symbol'] == first]
+        for expiry, selected in [('2026-10-30', second), ('2026-10-23', first), ('2026-10-19', first)]:
+            for s in (first, second):
+                raw['instruments'][s]['expiryDay'] = expiry
+            self.assertEqual(self.execute(raw)['signals'][0]['symbol'], selected)
 
-    def test_iv_sample_requires_three_liquid_strikes_of_same_expiry_at_signal(self):
-        for case in ['expiry', 'volume', 'late']:
-            raw = profiled_fixture()
-            raw['config']['option_execution'] = dict(profile='balanced')
-            symbol = 'CFFEX.MO2611-C-4875'
-            if case == 'expiry':
-                raw['instruments'][symbol]['expiryDay'] = '2026-12-18'
-            elif case == 'volume':
-                next(b for b in raw['bars'] if b['symbol'] == symbol)['volume'] = 9
-            else:
-                raw['bars'] = [b for b in raw['bars'] if b['symbol'] != symbol or b['time'] > START]
-            result = self.execute(raw)
-            self.assertFalse(result['fills'])
-            self.assertIn('三个有效行权价', result['signals'][0]['reason'])
+    def test_missing_spot_skips_and_no_percentage_band_is_applied(self):
+        raw, _ = fixture()
+        spot = CASH_INDEX['MO']
+        for row in raw['bars']:
+            if row['symbol'] == spot:
+                row.update(open=4800, close=4800, high=4801, low=4799)
+        self.assertEqual(self.execute(raw)['signals'][0]['time_value_ratio'], 1)
+        raw['bars'] = [b for b in raw['bars'] if b['symbol'] != spot or b['time'] > START]
+        self.assertEqual(self.execute(raw)['signals'][0]['kind'], 'option_entry_skipped')
 
-    def test_sdk_rejects_ambiguous_profile_settings(self):
-        for settings in [{}, {'profile':'unknown'}, {'target_leverage':20, 'iv_preference':'strict'},
-                         {'profile':'balanced', 'iv_preference':'unknown'}]:
-            with self.subTest(settings=settings), self.assertRaises(ValueError):
-                OptionExecution(**settings)
-
-    def test_forward_delta_inversion(self):
-        # ATM with F=K and premium=10% of F has N(d1)=0.55 exactly.
-        for right, delta in [('C', .55), ('P', -.45)]:
-            lev, actual = effective_leverage(100, 10, 100, right)
-            self.assertAlmostEqual(actual, delta)
-            self.assertAlmostEqual(lev, abs(delta)*10)
-        self.assertIsNone(effective_leverage(100, 9, 90, 'C'))
+    def test_old_serialized_settings_migrate_and_unknown_mode_fails(self):
+        self.assertEqual(RunConfig(option_execution={'profile':'balanced', 'target_leverage':20}).option_execution,
+                         OptionExecution())
+        with self.assertRaises(ValueError):
+            RunConfig(option_execution={'mode':'unknown'})
 
     def test_automatic_mapping_premium_trigger_and_cash(self):
         for product, right, target, main in [('IM','C',3,True), ('IF','P',-2,False)]:
@@ -151,17 +132,13 @@ class OptionExecutionTest(unittest.TestCase):
             self.assertEqual(result['equity_curve'][-1]['equity'], 26196)
             self.assertTrue(any(x.get('position') == (1 if target > 0 else -1) for x in result['logs']))
             decision = next(x for x in result['signals'] if x['kind'] == 'target_position')
-            self.assertAlmostEqual(decision['effective_leverage'],25.5 if right=='C' else 24.5)
-
-    def test_different_slider_targets_select_different_strikes(self):
-        raw, ticker = fixture()
-        raw['config']['option_execution']['target_leverage'] = 10
-        self.assertEqual(self.execute(raw)['fills'][0]['symbol'],ticker.replace('5000','5100'))
+            self.assertAlmostEqual(decision['time_value_ratio'], .34)
+            self.assertEqual(decision['reference_symbol'], CASH_INDEX['MO' if product == 'IM' else 'IO'])
 
     def test_insufficient_volume_at_selection_or_execution_skips_this_signal(self):
         for volumes in [(9,30,30,30,30), (20,9,30,30,30)]:
             raw, ticker = fixture(volumes=volumes)
-            raw['bars'] = [bar for bar in raw['bars'] if bar['symbol'] != ticker.replace('5000','5100')]
+            raw['bars'] = [bar for bar in raw['bars'] if bar['symbol'] != ticker.replace('5000','4995')]
             result = self.execute(raw)
             self.assertEqual(result['fills'], [])
             if volumes[0] == 9:
@@ -209,7 +186,7 @@ class OptionExecutionTest(unittest.TestCase):
 
     def test_reversal_waits_for_close_before_buying_put(self):
         raw, call = fixture()
-        put = call.replace('-C-', '-P-')
+        put = call.replace('-C-5000', '-P-5140')
         raw['instruments'][put] = {**raw['instruments'][call], 'symbol':put}
         raw['bars'] += [{**b, 'symbol':put} for b in raw['bars'] if b['symbol'] == call]
         result = self.execute(raw, {'0':1,'1':-1})
@@ -238,7 +215,7 @@ class OptionExecutionTest(unittest.TestCase):
 
     def test_selects_liquid_alternative_to_dry_nearest_strike(self):
         raw, ticker = fixture(volumes=(0, 20, 20, 20, 20))
-        self.assertEqual(self.execute(raw)['fills'][0]['symbol'],ticker.replace('5000','5100'))
+        self.assertEqual(self.execute(raw)['fills'][0]['symbol'],ticker.replace('5000','4995'))
 
     def test_unrelated_future_keeps_original_size_and_pnl(self):
         raw, _ = fixture('XX')

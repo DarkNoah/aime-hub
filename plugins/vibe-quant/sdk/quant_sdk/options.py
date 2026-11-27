@@ -1,16 +1,21 @@
 """Select a single long option from contemporaneous, completed minute bars."""
-from collections import defaultdict
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, replace
 from datetime import date, timedelta
-from math import ceil, erfc, floor, log, sqrt
-from statistics import median
+from math import ceil, floor
 import re
 
-from .models import Bar, Instrument, OPTION_PROFILE_CATALOG
+from .models import Instrument
 from .protection import trigger
 from .risk import RiskLevels, publish
 
 INDEX_OPTIONS = {'IM': 'MO', 'IF': 'IO', 'IH': 'HO'}
+CASH_INDEX = {'MO': 'SSE.000852', 'IO': 'SSE.000300', 'HO': 'SSE.000016'}
+
+
+def index_reference(item):
+    if item.option_underlying in CASH_INDEX.values():
+        return Instrument(item.option_underlying, 'stock', .01, tradable=False)
+    return None
 
 
 def index_chain(actual):
@@ -36,66 +41,8 @@ def catalog_option(meta, source, fees, calendar):
             day += timedelta(days=1)
         expiry = day.isoformat()
     return Instrument(symbol, 'option', meta['priceTick'], multiplier=multiple, fees=fees,
-                      option_underlying=meta.get('underlying') or source, option_right=right,
+                      option_underlying=CASH_INDEX[symbol[6:8]] if match else meta.get('underlying') or source, option_right=right,
                       strike=strike, expiry_day=expiry)
-
-
-def _black_metrics(reference, premium, strike, right):
-    """Invert the zero-rate Black price for sigma*sqrt(T), then compute forward delta."""
-    sign = 1 if right == 'C' else -1
-    if reference <= 0 or not max(0, sign * (reference - strike)) < premium < (reference if sign == 1 else strike):
-        return None
-    log_fk = log(reference / strike)
-    def cdf(x):
-        return erfc(-x / sqrt(2)) / 2
-
-    low, high = 0., 32.
-    for _ in range(48):
-        deviation = (low + high) / 2
-        d1 = log_fk / deviation + deviation / 2
-        price = sign * (reference * cdf(sign * d1) - strike * cdf(sign * (d1 - deviation)))
-        if price < premium:
-            low = deviation
-        else:
-            high = deviation
-    deviation = (low + high) / 2
-    delta = sign * cdf(sign * (log_fk / deviation + deviation / 2))
-    return abs(delta) * reference / premium, delta, deviation
-
-
-def effective_leverage(reference, premium, strike, right):
-    metrics = _black_metrics(reference, premium, strike, right)
-    return metrics[:2] if metrics else None
-
-
-@dataclass(frozen=True)
-class _Candidate:
-    item: Instrument
-    bar: Bar
-    leverage: float
-    delta: float
-    deviation: float  # implied volatility times sqrt(years to expiry)
-
-
-def _screen_profile(quotes, settings):
-    preset = OPTION_PROFILE_CATALOG['profiles'][settings.profile]
-    iv_cap = OPTION_PROFILE_CATALOG['iv_limits'][settings.iv_preference]
-    # Each liquid strike gets one vote, including strikes outside the desired Delta band.
-    by_expiry = defaultdict(lambda: defaultdict(list))
-    for quote in quotes:
-        if quote.item.expiry_day:
-            by_expiry[quote.item.expiry_day][quote.item.strike].append(quote.deviation)
-    references = {expiry: (median(median(values) for values in strikes.values()), len(strikes))
-                  for expiry, strikes in by_expiry.items() if len(strikes) >= 3}
-    in_band = [q for q in quotes if preset['delta_min'] <= abs(q.delta) <= preset['delta_max']]
-    if not in_band:
-        return [], {}, '没有符合该风格 Delta 范围的合约'
-    comparable = [q for q in in_band if q.item.expiry_day in references]
-    if not comparable:
-        return [], {}, '缺少到期日或同到期同方向至少三个有效行权价，无法比较 IV'
-    # At one time and expiry sqrt(T) cancels, so this is the annualized IV ratio too.
-    passing = [q for q in comparable if q.deviation / references[q.item.expiry_day][0] <= iv_cap + 1e-10]
-    return passing, references, '符合 Delta 的合约均超过所选 IV 上限' if not passing else ''
 
 
 class OptionRouter:
@@ -162,46 +109,54 @@ class OptionRouter:
         chain = index_chain(source)
         symbols = self.by_month.get(chain, ()) if chain else self.by_underlying.get(source, ())
         right = 'C' if direction > 0 else 'P'
-        quotes = []
+        candidates = []
+        spots = {source: reference}
         for symbol in symbols:
             item = self.ctx.data.instrument(symbol)
             if not item.tradable or item.option_right != right or (item.expiry_day and item.expiry_day < reference.trading_day):
                 continue
             bar = self._minute(symbol, reference.end_time)
-            if not bar or floor(bar.volume * self.broker.config.participation_rate) < 1:
+            if not bar or bar.close <= 0 or bar.day_volume is None or floor(bar.volume * self.broker.config.participation_rate) < 1:
                 continue
-            metrics = _black_metrics(reference.close, bar.close, item.strike, right)
-            if metrics:
-                quotes.append(_Candidate(item, bar, *metrics))
-        if not quotes:
-            return None, '无当分钟有效价格、Delta 或足够成交量的期权'
-        if self.settings.profile:
-            quotes, references, reason = _screen_profile(quotes, self.settings)
-            if not quotes:
-                return None, reason
-
-        best = min(quotes, key=lambda q: (abs(q.leverage - self.settings.target_leverage), -q.bar.volume, q.item.symbol))
-        choice = dict(symbol=best.item.symbol, effective_leverage=best.leverage, delta=best.delta,
-                      reference_price=reference.close, premium=best.bar.close, volume=best.bar.volume)
-        if self.settings.profile:
-            reference_deviation, count = references[best.item.expiry_day]
-            choice.update(profile=self.settings.profile, iv_preference=self.settings.iv_preference,
-                          iv_ratio=best.deviation / reference_deviation, iv_reference_strikes=count,
-                          expiry_day=best.item.expiry_day)
-        return choice, ''
+            underlying = item.option_underlying
+            if underlying not in spots:
+                spots[underlying] = (self._minute(underlying, reference.end_time)
+                                     if underlying in self.ctx.data._instruments else None)
+            spot = spots[underlying]
+            if not spot or spot.close <= 0:
+                continue
+            intrinsic = max(0., (spot.close - item.strike) * (1 if right == 'C' else -1))
+            if intrinsic > bar.close:
+                continue
+            share = (bar.close - intrinsic) / bar.close
+            expiry_week = bool(item.expiry_day and
+                               date.fromisoformat(item.expiry_day).isocalendar()[:2] ==
+                               date.fromisoformat(bar.trading_day).isocalendar()[:2])
+            # Round only floating-point noise when comparing economically identical shares.
+            rank = (round(abs(share - 1 / 3), 12), abs(bar.day_volume - 1000))
+            decision = dict(symbol=symbol, mode=self.settings.mode, reference_symbol=underlying,
+                            reference_price=spot.close, intrinsic_value=intrinsic, time_value_ratio=share,
+                            premium=bar.close, volume=bar.volume, day_volume=bar.day_volume,
+                            expiry_day=item.expiry_day, expiry_week=expiry_week)
+            candidates.append((rank, decision))
+        if not candidates:
+            return None, '无同分钟有效标的价、权利金、当日累计量且可成交一手的期权'
+        best_rank = min(rank for rank, _ in candidates)
+        tied = [quote for rank, quote in candidates if rank == best_rank]
+        in_week = [quote for quote in tied if quote['expiry_week']]
+        if in_week:
+            return min(in_week, key=lambda q: (abs(q['premium'] - 200), q['symbol'])), ''
+        return min(tied, key=lambda q: q['symbol']), ''
 
     def _open(self, source, direction, reason):
         choice, skip_reason = self._select(source, direction)
         if not choice:
             return self.ctx.emit('option_entry_skipped', signal_symbol=self.signal, source_contract=source,
-                                 direction=direction, reason=skip_reason,
-                                 **({'profile': self.settings.profile, 'iv_preference': self.settings.iv_preference}
-                                    if self.settings.profile else {}))
+                                 direction=direction, reason=skip_reason, mode=self.settings.mode)
         contract = choice['symbol']
         self.state = dict(contract=contract, source=source, direction=direction)
         signal = self.ctx.emit('target_position', **choice, target=1, signal_symbol=self.signal,
-                               source_contract=source, direction=direction, reason=reason,
-                               target_leverage=self.settings.target_leverage)
+                               source_contract=source, direction=direction, reason=reason)
         self.state['entry'] = signal
         order = self.broker.target_position(contract, 1, now=self.ctx.now, signal_id=signal,
                                             reason=reason, immediate_entry=True)

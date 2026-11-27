@@ -5,7 +5,9 @@ import type { StateStore } from '../state-store.js';
 import { ClickHouseError } from '../clickhouse-client.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import { MAX_BACKTEST_BARS } from './limits.js';
-import { optionChain } from './option-chain.js';
+import { indexOptionSeries } from '../../option-families.js';
+import { historicalInstrument } from '../symbols.js';
+import { optionChain, optionVolumePrefix } from './option-chain.js';
 import { completeFiveMinuteBars } from './signal-bars.js';
 
 export interface RawSnapshot {
@@ -14,6 +16,7 @@ export interface RawSnapshot {
   instruments: Record<string, Instrument>;
   mappings: Record<string, { time: number; underlying: string }[]>;
   bars: Bar[];
+  option_volume_prefix?: { symbol: string; stamp: number; lots: number }[];
   derived_bars?: {
     symbol: string;
     duration: number;
@@ -146,6 +149,18 @@ export async function collectSnapshot(
     // Load the archived minute series in bounded batches. Reading only rows in
     // the requested window also handles contracts with no local observations.
     const symbols = options.map((item) => item.symbol);
+    if (symbols.length)
+      result.option_volume_prefix = await read(() =>
+        optionVolumePrefix(store, engine, symbols, config.start),
+      );
+    for (const ref of new Set(
+      sources.map((source) => indexOptionSeries(source)?.underlying),
+    )) {
+      if (ref && !result.instruments[ref]) {
+        result.instruments[ref] = historicalInstrument(ref);
+        symbols.push(ref);
+      } else if (ref) request(ref, 60);
+    }
     for (let offset = 0; offset < symbols.length; offset += 40) {
       const room = MAX_BACKTEST_BARS - result.bars.length;
       const bars = await read(() =>

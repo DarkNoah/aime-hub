@@ -1,5 +1,13 @@
 import { lookup } from 'node:dns/promises';
-import { Agent, fetch as fetchRequest } from 'undici';
+import type { LookupAddress } from 'node:dns';
+import type { LookupFunction } from 'node:net';
+import {
+  Agent,
+  buildConnector,
+  fetch as fetchRequest,
+  ProxyAgent,
+  Socks5ProxyAgent,
+} from 'undici';
 import { isPublicAddress } from '../../modules/providers/network.js';
 import { allowAllNetworks } from '../../modules/network/policy.js';
 
@@ -71,6 +79,49 @@ export type WebRequestOptions = {
   body?: string | Buffer;
 };
 
+function pinnedLookup(address: LookupAddress): LookupFunction {
+  return (_hostname, options, callback) => {
+    if (options.all) callback(null, [address]);
+    else callback(null, address.address, address.family);
+  };
+}
+
+async function webDispatcher(
+  url: string,
+  options: WebRequestOptions,
+  readerProxy?: URL,
+) {
+  const timeout = options.timeoutMs;
+  const agentOptions = { headersTimeout: timeout, bodyTimeout: timeout };
+  if (readerProxy) {
+    // The proxy resolves the administrator-configured reader. TLS still authenticates
+    // the reader before sending its key. Page URLs never enter this branch.
+    if (webUrl(url).protocol !== 'https:')
+      throw new WebRequestError('INVALID_URL');
+    if (!allowAllNetworks()) await publicWebAddress(url, options.signal);
+    const address = await publicWebAddress(
+      'http://' + readerProxy.host,
+      options.signal,
+    );
+    const connect = { timeout, lookup: pinnedLookup(address) };
+    if (readerProxy.protocol === 'socks5:') {
+      return new Socks5ProxyAgent(readerProxy, {
+        connect: buildConnector(connect),
+      });
+    }
+    return new ProxyAgent({
+      ...agentOptions,
+      uri: readerProxy.href,
+      proxyTls: connect,
+    });
+  }
+  const address = await publicWebAddress(url, options.signal);
+  return new Agent({
+    ...agentOptions,
+    connect: { timeout, lookup: pinnedLookup(address) },
+  });
+}
+
 /** Stream through the same destination validation and pinned connection as buffered requests. */
 export async function streamWebResource(
   url: string,
@@ -80,18 +131,7 @@ export async function streamWebResource(
     chunk: (chunk: Uint8Array) => Promise<void>;
   },
 ) {
-  const address = await publicWebAddress(url, options.signal);
-  const dispatcher = new Agent({
-    headersTimeout: options.timeoutMs,
-    bodyTimeout: options.timeoutMs,
-    connect: {
-      timeout: options.timeoutMs,
-      lookup: (_hostname, lookupOptions, callback) => {
-        if (lookupOptions.all) callback(null, [address]);
-        else callback(null, address.address, address.family);
-      },
-    },
-  });
+  const dispatcher = await webDispatcher(url, options);
   try {
     const response = await fetchRequest(url, {
       method: options.method ?? 'GET',
@@ -129,19 +169,9 @@ export async function streamWebResource(
 export async function requestWebResource(
   url: string,
   options: WebRequestOptions,
+  readerProxy?: URL,
 ): Promise<WebResource> {
-  const address = await publicWebAddress(url, options.signal);
-  const dispatcher = new Agent({
-    headersTimeout: options.timeoutMs,
-    bodyTimeout: options.timeoutMs,
-    connect: {
-      timeout: options.timeoutMs,
-      lookup: (_hostname, lookupOptions, callback) => {
-        if (lookupOptions.all) callback(null, [address]);
-        else callback(null, address.address, address.family);
-      },
-    },
-  });
+  const dispatcher = await webDispatcher(url, options, readerProxy);
   try {
     const response = await fetchRequest(url, {
       method: options.method ?? 'GET',

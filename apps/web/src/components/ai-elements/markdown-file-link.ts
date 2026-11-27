@@ -1,5 +1,6 @@
 const WORKSPACE_FILE_LINK_PREFIX = 'streamdown:workspace-file/';
 const SANDBOX_FILE_PREFIX = /^sandbox:\/(?![/\\])/i;
+const BARE_LOOPBACK_URL = /^(?:localhost|127\.0\.0\.1)(?::\d+)?(?:[/?#]|$)/i;
 const hasControlCharacters = (value: string) =>
   [...value].some(
     (character) =>
@@ -114,6 +115,10 @@ export function toWorkspaceFileLink(
   return `${WORKSPACE_FILE_LINK_PREFIX}${encodeURIComponent(`${path}${directory ? '/' : line !== undefined ? `:${line}` : ''}`)}`;
 }
 
+export function isEncodedWorkspaceFileLink(href?: string): boolean {
+  return href?.toLowerCase().startsWith(WORKSPACE_FILE_LINK_PREFIX) ?? false;
+}
+
 /** A chat message resolves sandbox paths from the active workspace root. */
 export function getSandboxFileLink(href: string): string | undefined {
   if (!SANDBOX_FILE_PREFIX.test(href)) return;
@@ -125,6 +130,19 @@ export function getSandboxFileLink(href: string): string | undefined {
       target.path === '.' || isWorkspaceDirectoryLink(relative),
       target.line,
     );
+}
+
+export function getMessageWorkspaceFileLink(href: string): string | undefined {
+  if (BARE_LOOPBACK_URL.test(href)) return;
+  const sandbox = getSandboxFileLink(href);
+  if (sandbox) return sandbox;
+  const target = getWorkspaceFileTarget(href);
+  if (!target) return;
+  return toWorkspaceFileLink(
+    target.path,
+    target.path === '.' || isWorkspaceDirectoryLink(href),
+    target.line,
+  );
 }
 
 type HastNode = {
@@ -155,11 +173,7 @@ export function rehypeMarkdownLinkUrls(options?: {
   return (tree: HastNode) =>
     visitMarkdownNodes(tree, ({ tagName, properties }) => {
       if (tagName === 'a' && typeof properties?.href === 'string') {
-        if (
-          /^(?:localhost|127\.0\.0\.1)(?::\d+)?(?:[/?#]|$)/i.test(
-            properties.href,
-          )
-        ) {
+        if (BARE_LOOPBACK_URL.test(properties.href)) {
           properties.href = `http://${properties.href}`;
         } else if (options?.relativeToDocument) {
           properties.href = properties.href.replace(SANDBOX_FILE_PREFIX, './');
@@ -167,6 +181,14 @@ export function rehypeMarkdownLinkUrls(options?: {
           properties.href =
             getSandboxFileLink(properties.href) ?? properties.href;
         }
+      }
+      if (
+        tagName === 'img' &&
+        typeof properties?.src === 'string' &&
+        !options?.relativeToDocument
+      ) {
+        // The sanitizer accepts relative image paths, but drops sandbox:/ URLs.
+        properties.src = properties.src.replace(SANDBOX_FILE_PREFIX, './');
       }
     });
 }
@@ -218,15 +240,8 @@ export function rehypeWorkspaceFileLinks() {
     visitMarkdownNodes(tree, (node) => {
       if (node.type === 'element' && node.tagName === 'a') {
         const href = node.properties?.href;
-        if (typeof href === 'string') {
-          const target = getWorkspaceFileTarget(href);
-          if (target && node.properties) {
-            node.properties.href = toWorkspaceFileLink(
-              target.path,
-              isWorkspaceDirectoryLink(href),
-              target.line,
-            );
-          }
+        if (typeof href === 'string' && node.properties) {
+          node.properties.href = getMessageWorkspaceFileLink(href) ?? href;
         }
       }
 

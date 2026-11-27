@@ -39,6 +39,8 @@ def history_events(client, runner, symbol, duration, start, end, calendar, rules
         for source in sorted(sources):
             fees = runner.data.instrument(source).fees
             for option in option_instruments(client, source, start, end, fees, calendar):
+                if (option.symbol, 60) in requests:
+                    continue
                 options[option.symbol] = option
                 runner.data._instruments[option.symbol] = option
                 router.known.add(source)

@@ -1,6 +1,7 @@
 import type { ResolveIssues } from '../../mastra/tools/issue.js';
 import type { McpService } from '../mcp/service.js';
 import type { ToolsInput } from '@mastra/core/agent';
+import type { RequestContext } from '@mastra/core/request-context';
 import type {
   RegisteredTool,
   ToolDefaultConfigs,
@@ -54,6 +55,7 @@ export type ToolDependencies = SharedToolDependencies & {
   fetchProvider?: (
     id: string | null,
     timeoutMs: number,
+    context?: RequestContext,
   ) => Promise<Pick<BaseProvider, 'id' | 'webFetch'>>;
   imageModel?: (reference: string | null) => Promise<ResolvedImageModel>;
   speechModel?: (reference: string | null) => Promise<ResolvedSpeechModel>;

@@ -2,8 +2,6 @@
 from dataclasses import asdict, dataclass, field
 from datetime import date
 from math import isfinite
-from pathlib import Path
-import json
 from typing import Any, Literal
 
 
@@ -101,7 +99,12 @@ class Bar:
     smb: float | None = None
     hml: float | None = None
 
+    # Cumulative contracts traded on this exchange trading day through this minute.
+    day_volume: float | None = None
+
     def __post_init__(self):
+        if self.day_volume is not None and (not isfinite(self.day_volume) or self.day_volume < self.volume):
+            raise ValueError('Invalid cumulative trading-day volume')
         for name in ('time', 'end_time', 'open', 'high', 'low', 'close', 'volume'):
             finite(getattr(self, name), name)
         for name in ('amount', 'vwap', 'cap', 'benchmark_open', 'benchmark_close', 'mkt', 'smb', 'hml'):
@@ -154,6 +157,14 @@ class InstrumentUpdate:
             raise ValueError('Instrument identity mismatch')
 
 
+def event_payload(value):
+    wire = asdict(value)
+    if isinstance(value, Bar) and value.day_volume is None:
+        # Preserve IDs and checkpoint digests for bars recorded before this optional field.
+        wire.pop('day_volume')
+    return wire
+
+
 @dataclass(frozen=True)
 class Event:
     id: str
@@ -171,7 +182,7 @@ class Event:
 
     def to_dict(self) -> dict[str, Any]:
         return {'id': self.id, 'available_at': self.available_at,
-                'type': type(self.payload).__name__.lower(), 'payload': asdict(self.payload)}
+                'type': type(self.payload).__name__.lower(), 'payload': event_payload(self.payload)}
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> 'Event':
@@ -183,36 +194,22 @@ class Event:
         return cls(value['id'], value['available_at'], types[value['type']](**payload))
 
 
-OPTION_PROFILE_CATALOG = json.loads(Path(__file__).with_name('option_profiles.json').read_text(encoding='utf-8'))
-
-
 @dataclass(frozen=True)
 class OptionExecution:
-    target_leverage: float | None = None
+    mode: Literal['time_value_third'] = 'time_value_third'
     stop_loss_pct: float | None = None
     take_profit_pct: float | None = None
 
-    profile: Literal['moderate', 'balanced', 'aggressive'] | None = None
-    iv_preference: Literal['strict', 'standard', 'flexible'] | None = None
-
     def __post_init__(self):
-        if self.profile is not None:
-            preset = OPTION_PROFILE_CATALOG['profiles'].get(self.profile)
-            if preset is None:
-                raise ValueError('Unknown option selection profile')
-            if self.target_leverage is None:
-                object.__setattr__(self, 'target_leverage', preset['target_leverage'])
-            if self.iv_preference is None:
-                object.__setattr__(self, 'iv_preference', preset['iv_preference'])
-        if self.iv_preference is not None and (not self.profile or self.iv_preference not in OPTION_PROFILE_CATALOG['iv_limits']):
-            raise ValueError('Invalid IV preference for option selection profile')
-        for name in ('target_leverage', 'stop_loss_pct', 'take_profit_pct'):
+        if self.mode != 'time_value_third':
+            raise ValueError('Unknown option selection mode')
+        for name in ('stop_loss_pct', 'take_profit_pct'):
             value = getattr(self, name)
             if value is not None:
                 if type(value) not in (int, float):
                     raise ValueError(f'Invalid {name}')
                 finite(value, name, positive=True)
-        if self.target_leverage is None or (self.stop_loss_pct is not None and self.stop_loss_pct >= 100):
+        if self.stop_loss_pct is not None and self.stop_loss_pct >= 100:
             raise ValueError('Invalid option execution settings')
 
 
@@ -236,7 +233,8 @@ class RunConfig:
 
     def __post_init__(self):
         if isinstance(self.option_execution, dict):
-            object.__setattr__(self, 'option_execution', OptionExecution(**self.option_execution))
+            object.__setattr__(self, 'option_execution', OptionExecution(**{
+                k: v for k, v in self.option_execution.items() if k not in ('profile', 'iv_preference', 'target_leverage')}))
         if self.option_execution is not None and (not isinstance(self.option_execution, OptionExecution)
                 or self.pnl_mode != 'currency' or self.execution_duration != 60):
             raise ValueError('Automatic option execution requires currency accounting and one-minute fills')

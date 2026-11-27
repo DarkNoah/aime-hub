@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Download, File, RotateCcw } from 'lucide-react';
+import { Download, File, Folder, RotateCcw } from 'lucide-react';
 import {
   fileMediaTypes,
   type WorkspaceFileReference,
@@ -15,7 +15,9 @@ import { useWorkspaceFile } from './context';
 
 type WorkspaceAttachmentProps = {
   threadId?: string;
-  file: { path: string; name: string };
+  file: { path: string; name: string; label?: string };
+  title?: string;
+  className?: string;
 };
 
 export function WorkspaceAttachment(props: WorkspaceAttachmentProps) {
@@ -30,32 +32,34 @@ export function WorkspaceAttachment(props: WorkspaceAttachmentProps) {
 function WorkspaceAttachmentContent({
   threadId,
   file,
+  title,
+  className,
 }: WorkspaceAttachmentProps) {
   const { t } = useTranslation();
   const openFile = useWorkspaceFile();
-  const container = useRef<HTMLDivElement>(null);
+  const container = useRef<HTMLSpanElement>(null);
   const [target, setTarget] = useState<WorkspaceFileReference | null>(null);
-  const [error, setError] = useState<
-    ReturnType<typeof fileErrorKey> | 'chat.preview.fileOnly' | null
-  >(null);
+  const [error, setError] = useState<ReturnType<typeof fileErrorKey> | null>(
+    null,
+  );
   const [retry, setRetry] = useState(0);
   const [mediaFailed, setMediaFailed] = useState(false);
   const [mediaRevision, setMediaRevision] = useState(0);
 
   useEffect(() => {
     if (!threadId) return;
+    const id = threadId;
     const controller = new AbortController();
     async function load() {
       try {
         // Resolve absolute/relative references and shared mounts on the server.
         const resolved = await filesApi.resolve(
-          threadId!,
+          id,
           file.path,
           controller.signal,
         );
         if (controller.signal.aborted) return;
-        if (resolved.kind !== 'file') setError('chat.preview.fileOnly');
-        else setTarget(resolved);
+        setTarget(resolved);
       } catch (cause) {
         if (!controller.signal.aborted) setError(fileErrorKey(cause));
       }
@@ -80,50 +84,66 @@ function WorkspaceAttachmentContent({
   const extension = (target?.path ?? file.path)
     .match(/\.[^./]+$/)?.[0]
     .toLowerCase();
-  const [kind, mime] = fileMediaTypes[extension ?? ''] ?? [];
+  const directory = target?.kind === 'directory';
+  const [kind, mime] = directory ? [] : (fileMediaTypes[extension ?? ''] ?? []);
   const media = kind === 'image' || kind === 'video' || kind === 'audio';
+  const loading = !!threadId && !target && !error;
   const url =
-    threadId && target
-      ? filesApi.raw(threadId, target.path, false, target.scope)
+    threadId && target?.kind === 'file'
+      ? `${filesApi.raw(threadId, target.path, false, target.scope)}${mediaRevision ? `&retry=${mediaRevision}` : ''}`
       : undefined;
   const downloadUrl =
-    threadId && target
+    threadId && target?.kind === 'file'
       ? filesApi.raw(threadId, target.path, true, target.scope)
       : undefined;
+  const label = file.label || file.name;
   const downloadLabel = `${t('files.download')}: ${file.name}`;
+  const open = openFile
+    ? () => openFile(file.path, directory ? 'directory' : 'file')
+    : undefined;
+  const Icon = directory ? Folder : File;
+  const FileName = open ? Button : 'span';
 
   return (
-    <div
+    <span
       ref={container}
       className={cn(
-        'min-w-0 group-[.is-user]:ml-auto',
+        'block min-w-0 group-[.is-user]:ml-auto',
         kind === 'image' && url && !mediaFailed
           ? 'w-fit max-w-full'
           : 'w-full max-w-md',
+        className,
       )}
       data-workspace-attachment={file.path}
+      data-workspace-image={kind === 'image' ? file.path : undefined}
+      aria-busy={loading}
     >
       {kind === 'audio' && url ? (
         <AudioClip
+          inline
           src={url}
           filename={file.name}
+          label={label}
           mediaType={mime}
           downloadUrl={downloadUrl}
-          onOpen={openFile ? () => openFile(file.path) : undefined}
+          onOpen={open}
           className="rounded-lg"
         />
       ) : (
-        <div className="overflow-hidden rounded-lg border bg-card">
+        <span className="block overflow-hidden rounded-lg border bg-card text-left">
           {media && url && !mediaFailed ? (
-            <div key={mediaRevision} className="bg-muted/40">
+            <span className="block bg-muted/40">
               {kind === 'image' ? (
                 <PreviewImage
+                  inline
                   src={url}
-                  alt={file.name}
+                  alt={label}
+                  title={title}
                   downloadUrl={downloadUrl}
+                  containerClassName="grid"
                   className="rounded-none"
                   onError={() => setMediaFailed(true)}
-                  onOpen={openFile ? () => openFile(file.path) : undefined}
+                  onOpen={open}
                 />
               ) : (
                 <video
@@ -131,34 +151,43 @@ function WorkspaceAttachmentContent({
                   controls
                   playsInline
                   preload="metadata"
-                  aria-label={file.name}
+                  aria-label={label}
                   className="block max-h-80 w-full"
                   onError={() => setMediaFailed(true)}
                 />
               )}
-            </div>
-          ) : media && !error && threadId && !target ? (
+            </span>
+          ) : media && loading ? (
             <Skeleton
+              asChild
               className={`w-full rounded-none ${kind === 'audio' ? 'h-24' : 'aspect-video'}`}
               aria-label={t('files.loading')}
-            />
+            >
+              <span className="block" />
+            </Skeleton>
           ) : null}
           {(kind !== 'image' || !url || mediaFailed) && (
-            <div className="flex min-w-0 items-center gap-2 p-2">
-              <Button
-                type="button"
-                variant="ghost"
-                className="h-auto min-w-0 flex-1 justify-start gap-2 px-2 py-1.5 text-sm font-normal"
-                disabled={!openFile}
-                onClick={() => openFile?.(file.path)}
-                title={file.path}
+            <span className="flex min-w-0 items-center gap-2 p-2">
+              <FileName
+                type={open ? 'button' : undefined}
+                variant={open ? 'ghost' : undefined}
+                className="flex h-auto min-w-0 flex-1 items-center justify-start gap-2 px-2 py-1.5 text-left text-sm font-normal"
+                onClick={open}
+                title={title ?? file.path}
               >
-                <File
+                <Icon
                   className="size-4 shrink-0 text-muted-foreground"
                   aria-hidden="true"
                 />
-                <span className="truncate">{file.name}</span>
-              </Button>
+                <span className="min-w-0">
+                  <span className="block truncate">{label}</span>
+                  {label !== file.name && (
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {file.name}
+                    </span>
+                  )}
+                </span>
+              </FileName>
               {downloadUrl ? (
                 <Button asChild variant="ghost" size="icon-sm">
                   <a
@@ -170,7 +199,7 @@ function WorkspaceAttachmentContent({
                     <Download className="size-4" aria-hidden="true" />
                   </a>
                 </Button>
-              ) : (
+              ) : !directory ? (
                 <Button
                   type="button"
                   variant="ghost"
@@ -181,17 +210,17 @@ function WorkspaceAttachmentContent({
                 >
                   <Download className="size-4" aria-hidden="true" />
                 </Button>
-              )}
-            </div>
+              ) : null}
+            </span>
           )}
           {(error || mediaFailed || !threadId) && (
-            <div className="space-y-2 border-t px-3 py-2 text-xs text-muted-foreground">
-              <p role="status">
+            <span className="block space-y-2 border-t px-3 py-2 text-xs text-muted-foreground">
+              <span role="status" className="block">
                 {t(
                   error ??
                     (mediaFailed ? 'files.mediaError' : 'files.unavailable'),
                 )}
-              </p>
+              </span>
               {threadId && (
                 <Button
                   type="button"
@@ -211,10 +240,10 @@ function WorkspaceAttachmentContent({
                   {t('files.retry')}
                 </Button>
               )}
-            </div>
+            </span>
           )}
-        </div>
+        </span>
       )}
-    </div>
+    </span>
   );
 }

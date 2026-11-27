@@ -148,7 +148,7 @@ class Runner:
         self.source = self._source()
         self.source_hash = sha256(self.source.encode()).hexdigest()
         sdk_root = Path(__file__).parent
-        runtime_files = [*sorted(sdk_root.glob('*.py')), sdk_root / 'option_profiles.json']
+        runtime_files = sorted(sdk_root.glob('*.py'))
         self.runtime_hash = sha256(b''.join(path.read_bytes() for path in runtime_files)).hexdigest()
         (self.directory / 'strategy.py').write_text(self.source, encoding='utf-8')
         self.manifest = {'schema_version': 1, 'run_id': self.run_id, 'mode': mode,

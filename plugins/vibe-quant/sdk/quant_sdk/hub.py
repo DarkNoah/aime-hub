@@ -1,5 +1,8 @@
 """Authenticated data adapter for the existing Vibe Quant market service."""
-from dataclasses import asdict
+from collections import defaultdict
+from datetime import datetime
+from dataclasses import replace
+from heapq import merge
 from hashlib import sha256
 import json
 from typing import Callable
@@ -9,8 +12,8 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .calendar import TradingCalendar
 from .data import Dataset
-from .options import catalog_option
-from .models import Bar, Event, Instrument, Roll
+from .options import catalog_option, index_reference
+from .models import Bar, Event, Instrument, Roll, event_payload
 
 RuleResolver = Callable[[str, dict], Instrument]
 PERIODS = (60, 180, 300, 900, 1800, 3600, 86400)
@@ -28,7 +31,7 @@ class _NoRedirect(HTTPRedirectHandler):
 def event_for(payload, available_at=None, *, revision='') -> Event:
     known = payload.end_time if isinstance(payload, Bar) and payload.is_final else payload.time
     available = known if available_at is None else max(known, available_at)
-    identity = sha256(json.dumps([type(payload).__name__, asdict(payload), available, revision],
+    identity = sha256(json.dumps([type(payload).__name__, event_payload(payload), available, revision],
                                 sort_keys=True, allow_nan=False).encode()).hexdigest()
     return Event(identity, available, payload)
 
@@ -37,6 +40,36 @@ def convert_bar(row: dict, item: Instrument, calendar: TradingCalendar) -> Bar:
     end, day = calendar.bar_end(row['time'], row['duration'], futures=item.kind != 'stock')
     return Bar(row['symbol'], row['time'], end, day, row['duration'],
                row['open'], row['high'], row['low'], row['close'], row['volume'])
+
+
+def option_bars(client, items, start, end, calendar):
+    """Merge archived minutes with same-day volume observed strictly before the window."""
+    def page(symbols):
+        options = [s for s in symbols if items[s].kind == 'option']
+        prefix = defaultdict(float)
+        totals = {}
+        if options:
+            for row in client.option_volume_prefix(options, start):
+                local = datetime.fromtimestamp(row['stamp'], calendar.timezone)
+                day = (calendar.trading_day(row['stamp'], futures=True) if local.hour >= 18 or local.hour < 6
+                       else local.date().isoformat())
+                prefix[row['symbol'], day] += row['lots']
+        for row in client.option_minute_rows(symbols, start, end):
+            item = items[row['symbol']]
+            bar = convert_bar(row, item, calendar)
+            if bar.end_time <= end:
+                if item.kind == 'option':
+                    day, total = totals.get(bar.symbol, (None, 0))
+                    if day != bar.trading_day:
+                        total = prefix.pop((bar.symbol, bar.trading_day), 0)
+                    total += bar.volume
+                    totals[bar.symbol] = (bar.trading_day, total)
+                    bar = replace(bar, day_volume=total)
+                yield bar
+
+    names = sorted(items)
+    yield from merge(*(page(names[i:i + 48]) for i in range(0, len(names), 48)),
+                     key=lambda bar: (bar.time, bar.symbol))
 
 
 def three_minute(parts) -> Bar | None:
@@ -159,7 +192,7 @@ class HubClient:
                     when = max(start, mapping['time'])
                     day = calendar.trading_day(when, futures=True)
                     events.append(event_for(Roll(symbol, contract, when, day)))
-        linked = set()
+        linked, chain_items = set(), {}
         if option_execution:
             signal = symbols[0]
             sources = {event.payload.contract for event in events if event.payload.symbol == signal}
@@ -173,7 +206,12 @@ class HubClient:
                     if item is None:
                         continue
                     instruments[symbol] = item
-                    requests.add((symbol, 60))
+                    chain_items[symbol] = item
+                    ref = index_reference(item)
+                    if ref and ref.symbol != source and (ref.symbol, 60) not in requests:
+                        instruments.setdefault(ref.symbol, ref)
+                        chain_items[ref.symbol] = instruments[ref.symbol]
+            events.extend(event_for(bar) for bar in option_bars(self, chain_items, start, end, calendar))
             requests.update((source, 60) for source in linked)
         for symbol, period in sorted(requests):
             count = 0
@@ -194,6 +232,7 @@ class HubClient:
             if not count and instruments[symbol].kind != 'option':
                 raise DataError(f'No closed bars for {symbol} at {period}s; collect/import data first')
         has_options = any(item.kind == 'option' for item in instruments.values())
+        reference_symbols = {item.option_underlying for item in chain_items.values() if item.kind == 'option'}
         def priority(event):
             value = event.payload
             if isinstance(value, Roll):
@@ -202,7 +241,7 @@ class HubClient:
             if kind == 'continuous':
                 return 4
             if has_options:
-                if kind == 'option':
+                if kind == 'option' or (value.symbol in reference_symbols and value.symbol not in linked and value.duration == 60):
                     return 1
                 return 2 if value.duration == 60 else 3
             return 1
@@ -224,6 +263,18 @@ class HubClient:
             'mapping_policy': 'observed quotes, no current-contract substitution',
             'calendar': calendar.to_dict(), 'start': start, 'end': end, 'duration': duration,
         })
+
+    def option_volume_prefix(self, symbols, start):
+        return self.request('/option-volume-prefix', params={'symbols': ','.join(symbols), 'start': int(start)})
+
+    def option_minute_rows(self, symbols, start, end):
+        params = {'symbols': ','.join(symbols), 'start': int(start), 'end': int(end)}
+        while True:
+            data = self.request('/option-minutes', params=params)
+            yield from data['bars']
+            if not data['next']:
+                break
+            params.update(data['next'])
 
     def option_chain(self, source, start, end):
         return self.request('/option-chain', params={'symbol': source, 'start': int(start), 'end': int(end)})

@@ -264,6 +264,7 @@ const tools: ToolService = new ToolService(
   () => automations.service,
   audio,
   () => issues,
+  environmentVariables,
 );
 const localAgents = new LocalAgentService(workspaceRoot, projects);
 const agents = new AgentService(

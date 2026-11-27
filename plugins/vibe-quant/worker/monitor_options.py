@@ -1,10 +1,9 @@
 """Read closed option-chain minutes from the same archive as SDK backtests."""
-from heapq import merge
 
 from quant_sdk import Bar
-from quant_sdk.hub import convert_bar, event_for
+from quant_sdk.hub import event_for, option_bars
 from quant_sdk.models import InstrumentUpdate, Roll
-from quant_sdk.options import catalog_option
+from quant_sdk.options import catalog_option, index_reference
 
 
 def instruments(client, source, start, end, fees, calendar):
@@ -12,24 +11,9 @@ def instruments(client, source, start, end, fees, calendar):
         item = catalog_option(meta, source, fees, calendar)
         if item:
             yield item
-
-
-def option_bars(client, items, start, end, calendar):
-    def page(symbols):
-        params = {'symbols': ','.join(symbols), 'start': int(start), 'end': int(end)}
-        while True:
-            data = client.request('/option-minutes', params=params)
-            for row in data['bars']:
-                bar = convert_bar(row, items[row['symbol']], calendar)
-                if bar.end_time <= end:
-                    yield bar
-            if not data['next']:
-                break
-            params.update(data['next'])
-
-    names = sorted(items)
-    yield from merge(*(page(names[i:i + 48]) for i in range(0, len(names), 48)),
-                     key=lambda bar: (bar.time, bar.symbol))
+            ref = index_reference(item)
+            if ref and ref.symbol != source:
+                yield ref
 
 
 class LiveOptionEvents:

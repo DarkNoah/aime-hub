@@ -1,35 +1,13 @@
 import { useEffect, useId, useState } from 'react';
-import { ChevronRight } from 'lucide-react';
 import { pluginRequest } from '@app/plugin-sdk/web';
+import { Label, Switch } from '@app/plugin-ui';
 import { indexOptionSeries } from '../../option-families';
-import {
-  Button,
-  Label,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  Slider,
-  Switch,
-} from '@app/plugin-ui';
-import {
-  defaultIv,
-  ivLimits,
-  ivNames,
-  ivPreferenceIds,
-  optionProfiles,
-  profileIds,
-  profileNames,
-  type IvPreference,
-  type OptionProfile,
-} from '../../option-selection';
+import { optionMode, optionModeName } from '../../option-selection';
 import type { BacktestInput } from '../../strategy-types';
 
 type Settings = NonNullable<BacktestInput['option_execution']>;
 export const defaultOptionExecution: Settings = {
-  profile: 'balanced',
-  target_leverage: optionProfiles.balanced.target_leverage,
+  mode: optionMode,
 };
 
 export function useOptionAvailability(pluginId: string, symbol: string) {
@@ -71,12 +49,6 @@ export function OptionExecutionSettings(props: {
   return available ? <OptionExecutionFields {...props} /> : null;
 }
 
-const profileDescription = {
-  moderate: '优先偏实值合约，权利金的点数变化更贴近标的。',
-  balanced: '优先近平值合约，兼顾方向跟随和杠杆。',
-  aggressive: '优先偏虚值合约，权利金较低，更依赖标的大幅波动。',
-} satisfies Record<OptionProfile, string>;
-
 export function OptionExecutionFields({
   value,
   onChange,
@@ -87,9 +59,6 @@ export function OptionExecutionFields({
   symbol: string;
 }) {
   const group = useId();
-  const profile = value?.profile;
-  const preset = profile && optionProfiles[profile];
-  const iv = profile && (value?.iv_preference ?? defaultIv(profile));
   const series = indexOptionSeries(symbol);
 
   return (
@@ -119,111 +88,13 @@ export function OptionExecutionFields({
         />
       </div>
       {value && (
-        <>
-          <fieldset className="grid grid-cols-3 gap-1 rounded-md bg-muted p-1">
-            <legend className="sr-only">选约风格</legend>
-            {profileIds.map((id) => (
-              <label key={id} className="cursor-pointer">
-                <input
-                  type="radio"
-                  name={group}
-                  value={id}
-                  checked={profile === id}
-                  className="peer sr-only"
-                  onChange={() =>
-                    onChange({
-                      profile: id,
-                      target_leverage: optionProfiles[id].target_leverage,
-                    })
-                  }
-                />
-                <span className="flex min-h-8 items-center justify-center rounded-sm text-sm text-muted-foreground hover:text-foreground peer-checked:bg-primary peer-checked:font-semibold peer-checked:text-primary-foreground peer-checked:shadow-sm peer-focus-visible:ring-2 peer-focus-visible:ring-ring">
-                  {profileNames[id]}
-                </span>
-              </label>
-            ))}
-          </fieldset>
+        <div className="space-y-1">
+          <p className="text-sm font-medium">{optionModeName}</p>
           <p className="text-xs leading-5 text-muted-foreground">
-            {profile
-              ? profileDescription[profile]
-              : '仅按倍率选择有足够成交量的合约。'}
+            优先选时间价值占比最接近 1/3 的合约。并列时选当日累计成交量最接近
+            1000 手的，到期周再按权利金接近 200 点择优。
           </p>
-          <div className="space-y-2">
-            <div className="flex items-baseline justify-between text-xs">
-              <span>目标有效杠杆</span>
-              <span className="font-semibold tabular-nums">
-                {value.target_leverage} 倍
-              </span>
-            </div>
-            <Slider
-              className="py-2"
-              min={1}
-              max={Math.max(200, value.target_leverage)}
-              step={1}
-              value={[value.target_leverage]}
-              thumbProps={{
-                'aria-label': '目标有效杠杆',
-                'aria-valuetext': `${value.target_leverage} 倍`,
-              }}
-              onValueChange={([target_leverage]) =>
-                onChange({ ...value, target_leverage })
-              }
-            />
-          </div>
-          {preset && iv && (
-            <details className="group border-t pt-2 text-xs">
-              <summary className="flex w-fit cursor-pointer list-none items-center gap-1 rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
-                <ChevronRight
-                  aria-hidden
-                  className="size-3.5 group-open:rotate-90"
-                />
-                选约细节
-              </summary>
-              <div className="mt-3 space-y-2">
-                <Label className="flex items-center justify-between gap-2 text-xs">
-                  IV 容忍度
-                  <Select
-                    value={iv}
-                    onValueChange={(next) =>
-                      onChange({
-                        ...value,
-                        iv_preference: next as IvPreference,
-                      })
-                    }
-                  >
-                    <SelectTrigger className="h-8" aria-label="IV 容忍度">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ivPreferenceIds.map((id) => (
-                        <SelectItem key={id} value={id}>
-                          {ivNames[id]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Label>
-                <p className="leading-5 text-muted-foreground">
-                  |Delta| {preset.delta_min.toFixed(2)}–
-                  {preset.delta_max.toFixed(2)}，IV
-                  最高为同到期、同方向合约当分钟中位数的{' '}
-                  {Math.round(ivLimits[iv] * 100)}
-                  %。至少需要三个有足够成交量的行权价。
-                </p>
-                <Button
-                  type="button"
-                  variant="link"
-                  className="h-auto p-0 text-xs"
-                  onClick={() =>
-                    onChange({ target_leverage: value.target_leverage })
-                  }
-                >
-                  仅按倍率选择
-                </Button>
-              </div>
-            </details>
-          )}
-        </>
+        </div>
       )}
     </section>
   );

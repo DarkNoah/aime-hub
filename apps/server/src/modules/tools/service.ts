@@ -34,6 +34,10 @@ import {
   type ResolvedImageModel,
 } from '../../mastra/tools/image_gen.js';
 import { isValidationError } from '@mastra/core/tools';
+import type { RequestContext } from '@mastra/core/request-context';
+import type { EnvironmentVariableService } from '../environment-variables/service.js';
+import { readerProxy } from '../../mastra/web/reader-proxy.js';
+import { requestWebResource } from '../../mastra/web/request.js';
 import {
   getTools,
   parseToolConfig,
@@ -73,6 +77,10 @@ export class ToolService {
     private readonly automations?: ResolveAutomations,
     private readonly audio?: AudioService,
     private readonly issues?: ResolveIssues,
+    private readonly environmentVariables?: Pick<
+      EnvironmentVariableService,
+      'getEnv'
+    >,
   ) {}
 
   async get(id: ToolId): Promise<ToolConfig> {
@@ -352,11 +360,37 @@ export class ToolService {
     return createProviderInstance({ ...provider, timeoutMs });
   }
 
-  private async fetchProvider(selected: string | null, timeoutMs: number) {
+  private async fetchProvider(
+    selected: string | null,
+    timeoutMs: number,
+    context?: RequestContext,
+  ) {
     const id =
       selected ?? (await this.providers.getDefaults()).webFetchProviderId;
     if (!id) throw new ProviderError('INVALID_TOOL_PROVIDER');
     const provider = await this.configuredProvider(id, 'web_fetch');
+    if (provider.type === 'jina-ai' && this.environmentVariables) {
+      const actor = context?.get('userId');
+      const project = context?.get('projectId');
+      const env = await this.environmentVariables.getEnv(
+        typeof actor === 'string' &&
+          actor !== 'system' &&
+          !project &&
+          !context?.get('systemEnvironment')
+          ? actor
+          : undefined,
+        typeof project === 'string' ? project : undefined,
+      );
+      const proxy = readerProxy(provider.baseUrl, env);
+      if (proxy)
+        return createProviderInstance(
+          { ...provider, timeoutMs },
+          {
+            requestResource: (url, options) =>
+              requestWebResource(url, options, proxy),
+          },
+        );
+    }
     return createProviderInstance({ ...provider, timeoutMs });
   }
 
@@ -385,7 +419,7 @@ export class ToolService {
           : undefined,
         loadConfig: (id) => this.loadConfig(id),
         searchProvider: (id, timeoutMs) => this.searchProvider(id, timeoutMs),
-        fetchProvider: (id, timeoutMs) => this.fetchProvider(id, timeoutMs),
+        fetchProvider: this.fetchProvider.bind(this),
         imageModel: (reference) => this.imageModel(reference),
         speechModel: (reference) => this.speechModel(reference),
         ocrModel: (reference) => this.ocrModel(reference),

@@ -7,13 +7,12 @@ import type { BaseProvider } from '../providers/base-provider.js';
 import { LocalProvider } from '../providers/local.js';
 import { publicWebAddress } from '../web/request.js';
 import { assertWechatResult, WechatArticleError } from '../web/wechat.js';
+import { withAbortSignal } from '../../lib/abort.js';
 
 export function createWebFetchTool(
   config: WebFetchConfig = defaultWebFetchConfig,
   dependencies: {
-    resolveProvider?: (
-      id: string | null,
-    ) => Promise<Pick<BaseProvider, 'id' | 'webFetch'>>;
+    resolveProvider?: ToolDependencies['fetchProvider'];
     fallbackProvider?: Pick<BaseProvider, 'id' | 'webFetch'>;
     validateUrl?: typeof publicWebAddress;
   } = {},
@@ -69,10 +68,15 @@ export function createWebFetchTool(
         ]);
         await (dependencies.validateUrl ?? publicWebAddress)(url, signal);
         abortSignal?.throwIfAborted();
-        if (dependencies.resolveProvider) {
+        const resolveProvider = dependencies.resolveProvider;
+        if (resolveProvider) {
           try {
-            const provider = await dependencies.resolveProvider(
-              config.providerId,
+            const provider = await withAbortSignal(abortSignal, () =>
+              resolveProvider(
+                config.providerId,
+                config.timeoutMs,
+                context?.requestContext,
+              ),
             );
             abortSignal?.throwIfAborted();
             const result = await provider.webFetch(url, { abortSignal });
@@ -124,9 +128,7 @@ export class WebFetchTool extends BuiltinTool<'web_fetch'> {
     dependencies: ToolDependencies,
   ) {
     return createWebFetchTool(config, {
-      resolveProvider: dependencies.fetchProvider
-        ? (id) => dependencies.fetchProvider!(id, config.timeoutMs)
-        : undefined,
+      resolveProvider: dependencies.fetchProvider,
     });
   }
 }

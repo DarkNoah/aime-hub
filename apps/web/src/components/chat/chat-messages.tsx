@@ -444,7 +444,7 @@ export const ChatMessage = memo(function ChatMessage({
             if (part.type === 'text')
               return message.role === 'user' ? (
                 <p key={index} className="whitespace-pre-wrap">
-                  <UserMessageText text={part.text} />
+                  <UserMessageText text={part.text} threadId={threadId} />
                 </p>
               ) : (
                 <MessageResponse

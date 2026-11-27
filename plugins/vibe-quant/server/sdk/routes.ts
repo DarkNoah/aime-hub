@@ -6,7 +6,11 @@ import { DURATIONS, type Bar, type SyncStatus } from '../../shared.js';
 import type { QuantConfig } from '../config.js';
 import type { MarketStore } from '../clickhouse.js';
 import type { StateStore } from '../state-store.js';
-import { hasOptionProduct, optionChain } from '../strategies/option-chain.js';
+import {
+  hasOptionProduct,
+  optionChain,
+  optionVolumePrefix,
+} from '../strategies/option-chain.js';
 import { historicalInstrument, supports } from '../symbols.js';
 import type { StrategyFeed } from './feed.js';
 import type { StrategySubscriptions } from './subscriptions.js';
@@ -20,6 +24,11 @@ type Dependencies = {
   status: () => SyncStatus;
 };
 const symbolSchema = z.string().regex(/^[A-Za-z0-9_.@-]{1,100}$/);
+
+const chainSymbols = z
+  .string()
+  .transform((value) => value.split(','))
+  .pipe(z.array(symbolSchema).min(1).max(48));
 
 export function strategyDataRoutes(get: () => Dependencies) {
   const api = new Hono<PluginHttpEnv>();
@@ -68,14 +77,29 @@ export function strategyDataRoutes(get: () => Dependencies) {
       ),
     );
   });
+  api.get('/option-volume-prefix', async (c) => {
+    const query = z
+      .object({
+        symbols: chainSymbols,
+        start: z.coerce.number().int().positive(),
+      })
+      .safeParse(c.req.query());
+    if (!query.success) return c.json({ code: 'VALIDATION_ERROR' }, 400);
+    const { store, config } = get();
+    return c.json(
+      await optionVolumePrefix(
+        store,
+        config.engine,
+        query.data.symbols,
+        query.data.start,
+      ),
+    );
+  });
   // Page by both time and symbol so a minute can span multiple pages.
   api.get('/option-minutes', async (c) => {
     const parsed = z
       .object({
-        symbols: z
-          .string()
-          .transform((value) => value.split(','))
-          .pipe(z.array(symbolSchema).min(1).max(48)),
+        symbols: chainSymbols,
         start: z.coerce.number().int().nonnegative(),
         end: z.coerce.number().int().positive(),
         after_time: z.coerce.number().int().nonnegative().optional(),
