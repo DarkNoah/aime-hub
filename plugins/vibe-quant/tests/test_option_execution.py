@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'sdk'), str(ROOT / 'worker')]
 from quant_sdk import OptionExecution, RiskLevels, RunConfig, Strategy, backtest
 from quant_sdk.options import CASH_INDEX
+from quant_sdk.runtime import Runner
 from strategy_prepare import prepare
 
 START = 1792373400
@@ -22,9 +23,20 @@ class Targets(Strategy):
         n = int((bar.time - START) / 60)
         quantity = ctx.params['targets'].get(str(n))
         if quantity is not None:
-            entry = ctx.orders.target_position(actual, quantity)
+            symbol = ctx.params.get('order_symbols', {}).get(str(n), actual)
+            entry = ctx.orders.target_position(symbol, quantity)
             if quantity and ctx.params.get('source_stop'):
                 return RiskLevels(actual, entry_id=entry, stop_loss=4900, stop_loss_pnl=9999)
+
+
+class ReportStrategy(Targets):
+    def on_order(self, ctx, order):
+        ctx.log('order', report=order)
+        if order['status'] == 'pending' and ctx.params.get('cancel_pending'):
+            ctx.orders.cancel(order['id'])
+
+    def on_fill(self, ctx, fill):
+        ctx.log('fill', report=fill, position=ctx.position(fill['symbol']))
 
 
 def fixture(product='IM', *, main=False, right='C', volumes=(20, 20, 20, 20, 20)):
@@ -53,17 +65,101 @@ def fixture(product='IM', *, main=False, right='C', volumes=(20, 20, 20, 20, 20)
 
 
 class OptionExecutionTest(unittest.TestCase):
-    def execute(self, raw, targets=None, **params):
+    def execute(self, raw, targets=None, strategy=None, **params):
         config = raw['config']
         dataset = prepare(raw)
         with tempfile.TemporaryDirectory() as directory:
-            result = backtest.run(Targets(), dataset, params=dict(symbol=config['symbol'],
+            result = backtest.run(strategy or Targets(), dataset, params=dict(symbol=config['symbol'],
                                   targets=targets or {'0': 3}, **params),
                                   config=RunConfig(initial_cash=25000, participation_rate=.1,
                                   option_execution=OptionExecution(**config['option_execution'])),
                                   output_dir=directory)
         self.assertEqual(result['status'], 'succeeded', result['message'])
         return result
+
+    def test_routed_callbacks_preserve_signal_prices_direction_and_broker_identity(self):
+        for right, side, use_main in [('C', 1, True), ('P', -1, True), ('P', -1, False)]:
+            with self.subTest(right=right, use_main=use_main):
+                raw, ticker = fixture(main=True, right=right)
+                main, actual = raw['config']['symbol'], 'CFFEX.IM2611'
+                symbol = main if use_main else actual
+                # An option fill at the next open must not use the underlying's later close.
+                for bar in raw['bars']:
+                    if bar['symbol'] == symbol and bar['time'] == START + 60:
+                        bar.update(close=5200, high=5200)
+                result = self.execute(raw, {'0': side}, strategy=ReportStrategy(), order_symbols={'0': symbol},
+                                      option_take_profit_pct=10)
+                orders = [log['report'] for log in result['logs'] if log['message'] == 'order']
+                fills = [log for log in result['logs'] if log['message'] == 'fill']
+                self.assertEqual([(o['target'], o['execution_target'], o['status']) for o in orders],
+                                 [(side, 1, 'pending'), (side, 1, 'filled'), (0, 0, 'pending'), (0, 0, 'filled')])
+                for report in orders + [log['report'] for log in fills]:
+                    self.assertEqual((report['symbol'], report['signal_symbol'], report['source_contract'],
+                                      report['execution_symbol']), (symbol, main, actual, ticker))
+                self.assertEqual([(f['report']['quantity'], f['position']) for f in fills], [(side, side), (-side, 0)])
+                entry, exit_fill = [f['report'] for f in fills]
+                self.assertEqual((entry['price_symbol'], entry['price'], entry['price_time']),
+                                 (symbol, 5100 if use_main else 5000, START + 60))
+                self.assertEqual(exit_fill['price'], 5200)
+                for report, native in zip((entry, exit_fill), result['fills']):
+                    self.assertEqual((report['order_id'], report['signal_id'], report['execution_quantity'],
+                                      report['execution_price']), (native['order_id'], native['signal_id'],
+                                      native['quantity'], native['price']))
+                    self.assertEqual(native['symbol'], ticker)
+                    self.assertNotIn('execution_symbol', native)
+                self.assertEqual((exit_fill['net_pnl'], result['trades'][0]['net_pnl']), (1196, 1196))
+
+    def test_rejected_and_cancelled_routed_orders_notify_the_strategy(self):
+        for volumes, cancel, status, selected in [((5, 20, 20, 20, 20), False, 'rejected', False),
+                                                  ((20, 5, 20, 20, 20), False, 'rejected', True),
+                                                  ((20,) * 5, True, 'cancelled', True)]:
+            raw, ticker = fixture(main=True, right='P', volumes=volumes)
+            main = raw['config']['symbol']
+            raw['bars'] = [b for b in raw['bars'] if b['symbol'] != ticker.replace('5000', '5005')]
+            result = self.execute(raw, {'0': -1}, strategy=ReportStrategy(), order_symbols={'0': main}, cancel_pending=cancel)
+            reports = [log['report'] for log in result['logs'] if log['message'] == 'order']
+            order = reports[-1]
+            self.assertEqual((order['symbol'], order['target'], order['status']), (main, -1, status))
+            self.assertEqual((order['execution_symbol'], order['execution_target']),
+                             (ticker, 1) if selected else (None, None))
+            self.assertEqual(result['fills'], [])
+            if selected:
+                self.assertEqual(order['id'], result['orders'][0]['id'])
+            else:
+                self.assertEqual(result['orders'], [])
+
+    def test_direct_option_orders_keep_native_callbacks(self):
+        raw, ticker = fixture(main=True)
+        result = self.execute(raw, {'0': 1, '2': 0}, strategy=ReportStrategy(), order_symbols={'0': ticker, '2': ticker})
+        fills = [log['report'] for log in result['logs'] if log['message'] == 'fill']
+        self.assertEqual(len(fills), 2)
+        self.assertEqual(fills, result['fills'])
+
+    def test_restore_keeps_origin_of_protective_exit_and_direct_reentry(self):
+        raw, ticker = fixture(main=True, right='P')
+        main, actual = raw['config']['symbol'], 'CFFEX.IM2611'
+        dataset = prepare(raw)
+        with tempfile.TemporaryDirectory() as directory:
+            runner = Runner(ReportStrategy(), dataset.instruments,
+                            config=RunConfig(option_execution=OptionExecution(take_profit_pct=10)),
+                            params={'symbol': main, 'targets': {'0': -1, '3': 1}, 'order_symbols': {'3': ticker}},
+                            output_dir=directory)
+            for event in dataset.events:
+                if event.available_at <= START + 120:
+                    runner.process(event)
+            self.assertEqual(runner.context.position(main), -1)
+            checkpoint = runner.checkpoint()
+            runner.journal.close()
+            resumed = Runner.restore(ReportStrategy(), checkpoint, output_dir=directory)
+            for event in dataset.events:
+                if event.available_at > START + 120:
+                    resumed.process(event)
+            result = resumed.finish()
+        entry, close, direct = [log['report'] for log in result['logs'] if log['message'] == 'fill']
+        self.assertEqual((entry['symbol'], close['symbol'], close['quantity']), (actual, actual, 1))
+        self.assertEqual(close['execution_symbol'], ticker)
+        self.assertEqual(direct, result['fills'][-1])
+        self.assertNotIn('execution_symbol', direct)
 
     def test_cumulative_volume_only_breaks_a_share_tie(self):
         raw, first = fixture(volumes=(1000,) * 5)

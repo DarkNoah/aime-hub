@@ -49,7 +49,7 @@ export class StrategyGuideTool extends PluginTool {
               rules:
                 '所有回调均为同步实例方法，可只实现需要的回调，其余继承 Strategy 的空实现。重写时按上述签名接收 runtime 传入的全部位置参数；即使参数未使用也不能省略。',
               on_fill:
-                'fill 为字典：symbol 是成交标的，price 是本次实际成交价，quantity 是有符号成交数量（买入为正、卖出为负），offset 为 open 或 close。需要入场价或持仓均价时，按成交维护 ctx.state；不能把最后一笔成交价直接当作多批次持仓均价。',
+                'fill 为字典，offset 为 open 或 close。普通委托的 symbol、price、quantity 对应实际标的、成交价和有符号成交数量。智能选约时这三个字段对应开仓请求的标的、标的参考价和策略方向数量，实际期权成交见 execution_symbol、execution_price、execution_quantity。按成交维护 ctx.state 中的成本。',
               on_stop:
                 'runtime 调用 strategy.on_stop(ctx, reason)，self 由 Python 自动传入。必须写 def on_stop(self, ctx, reason):，不能写 def on_stop(self, ctx):。reason 为结束原因字符串：正常结束通常为 succeeded，取消时为用户中止了操作，失败时为错误信息。结束阶段没有活动行情事件，不能调用 ctx.emit、ctx.orders.target_position 或 ctx.set_risk_levels；诊断信息用 ctx.log(message, **fields)，例如 ctx.log("research_diagnostics", reason=reason)。无需清理逻辑时可省略整个 on_stop 方法。',
             },
@@ -57,7 +57,7 @@ export class StrategyGuideTool extends PluginTool {
               position:
                 'ctx.position(symbol) -> int，返回有符号净持仓：正数为多仓、负数为空仓、0 为无持仓。股票单位为股，期货为手，点数模式为 -1/0/1。内置和天勤回测均遵守此接口；它不是 Position 对象或字典，也不是 None，不存在 quantity、qty、net_quantity、average_price、avg_price、entry_price 等字段。直接使用 quantity = ctx.position(symbol)。',
               entry_price:
-                'SDK 当前没有公开的持仓均价读取接口。单次单单位开仓可在 on_fill 中将 fill["price"] 保存到 ctx.state，并在平仓后清除；加仓、部分成交或部分平仓须按数量及策略使用的成本口径维护成交台账。不要从 ctx.position(symbol) 猜测入场价格字段。',
+                'SDK 当前没有公开的持仓均价读取接口。单次单单位开仓可在 on_fill 中用 fill.get("execution_price", fill["price"]) 记录实际成交价，平仓后清除。加仓和部分成交须按实际成交数量维护台账。',
               log: 'ctx.log(message, **fields) 写入结果 logs，可在 on_start/on_stop 中记录诊断；ctx.emit 仅能在非预热的活动事件回调中使用，结束时即使报 Signals cannot be emitted during warm-up，也应改用 ctx.log。',
             },
             reference,
@@ -77,7 +77,7 @@ export class StrategyGuideTool extends PluginTool {
               time: 'start/end 为 UTC epoch 秒；单次区间不超过十年，仅回测已有历史数据。',
               rules:
                 '内置资金回测 rules 必填：multiplier、margin_rate、lot_size、t_plus_one、fees（per_unit/rate/minimum/close_today_per_unit/close_today_rate/sell_tax_rate）。fees.mode 可选 fixed、rate、combined（省略时沿用）。最低费用和卖出税费始终生效。所有费率用小数；平今字段可为 null。天勤引擎使用 tq_options 与原生合约信息；不适用 rules。',
-              data: '内置引擎仅使用已采集数据，主连需要历史映射和实际合约 K 线。天勤引擎直接获取供应商历史数据并保存快照；兼容原 Strategy 回调，但撮合和保护单按回放报价执行，结果可能不同。暂不支持期权回测。',
+              data: '内置引擎使用已采集数据，主连需要历史映射和实际合约 K 线。智能选约使用内置引擎和归档期权行情。天勤引擎直接获取供应商历史数据并保存快照，支持实际期货合约，撮合和保护单按回放报价执行。',
             },
           };
         }),

@@ -4,9 +4,10 @@ from datetime import date, timedelta
 from math import ceil, floor
 import re
 
+from .execution import Order
 from .models import Instrument
 from .protection import trigger
-from .risk import RiskLevels, publish
+from .risk import RiskLevels, accept, publish
 
 INDEX_OPTIONS = {'IM': 'MO', 'IF': 'IO', 'IH': 'HO'}
 CASH_INDEX = {'MO': 'SSE.000852', 'IO': 'SSE.000300', 'HO': 'SSE.000016'}
@@ -99,6 +100,54 @@ class OptionRouter:
             return rows[0]
         return None
 
+    def _reference_at(self, symbol, time):
+        """Latest signal-side observation already delivered at the simulated fill time."""
+        prices = []
+        for duration in dict.fromkeys((60, self.ctx.params.get('duration', 60))):
+            bars = self.ctx.data.history(symbol, duration, 1, as_of=time)
+            if bars:
+                prices.append((bars[0].end_time, bars[0].close))
+        quote = self.ctx.data.quote(symbol)
+        if quote and quote.time <= time and quote.last is not None:
+            prices.append((quote.time, quote.last))
+        return max(prices, key=lambda p: p[0], default=None)
+
+    def _routed_signal(self, signal_id):
+        # A premium protection order belongs to its opening signal. Follow the
+        # order's own provenance even if a callback has already changed the binding.
+        for signal in reversed(self.ctx._runner.signals):
+            if signal['id'] != signal_id:
+                continue
+            if signal['kind'] == 'risk_exit':
+                signal_id = signal['entry_signal_id']
+                continue
+            if signal['kind'] == 'target_position' and signal.get('signal_symbol') == self.signal:
+                return signal
+            break
+        return None
+
+    def strategy_report(self, kind, report):
+        """Project only routed orders into strategy coordinates. Broker records stay native."""
+        contract = report['symbol']
+        item = self.ctx.data.instrument(contract)
+        if item.kind != 'option' or not (signal := self._routed_signal(report['signal_id'])):
+            return report
+        source = signal['source_contract']
+        symbol = signal.get('order_symbol', self.signal)
+        mapped = dict(report, symbol=symbol, signal_symbol=self.signal,
+                      source_contract=source, execution_symbol=contract)
+        direction = 1 if item.option_right == 'C' else -1
+        if kind == 'order':
+            return dict(mapped, target=direction * report['target'], execution_target=report['target'])
+        price_symbol = symbol
+        reference = self._reference_at(symbol, report['time'])
+        if reference is None and source != symbol:
+            price_symbol = source
+            reference = self._reference_at(source, report['time'])
+        return dict(mapped, quantity=direction * report['quantity'], execution_quantity=report['quantity'],
+                    execution_price=report['price'], price_symbol=price_symbol,
+                    price_time=reference[0] if reference else None, price=reference[1] if reference else None)
+
     def select(self, source, direction):
         choice, _ = self._select(source, direction)
         return choice
@@ -149,19 +198,28 @@ class OptionRouter:
             return min(in_week, key=lambda q: (abs(q['premium'] - 200), q['symbol'])), ''
         return min(tied, key=lambda q: q['symbol']), ''
 
-    def _open(self, source, direction, reason):
+    def _open(self, source, direction, reason, order_symbol=None):
         choice, skip_reason = self._select(source, direction)
         if not choice:
-            return self.ctx.emit('option_entry_skipped', signal_symbol=self.signal, source_contract=source,
-                                 direction=direction, reason=skip_reason, mode=self.settings.mode)
+            signal_id = self.ctx.emit('option_entry_skipped', signal_symbol=self.signal, source_contract=source,
+                                      direction=direction, reason=skip_reason, mode=self.settings.mode)
+            # No broker order exists. Resolve the strategy's pending intent as
+            # a rejection, without recording a virtual trade in the option account.
+            order = Order(signal_id, order_symbol or self.signal, direction, self.ctx.now, signal_id,
+                          status='rejected', reason=skip_reason, exit_reason=reason or 'strategy_signal')
+            report = dict(asdict(order), signal_symbol=self.signal, source_contract=source,
+                          execution_symbol=None, execution_target=None)
+            accept(self.ctx, self.ctx._runner.strategy.on_order(self.ctx, report))
+            return signal_id
         contract = choice['symbol']
-        self.state = dict(contract=contract, source=source, direction=direction)
+        origin = {'order_symbol': order_symbol} if order_symbol and order_symbol != self.signal else {}
+        binding = self.state = dict(contract=contract, source=source, direction=direction, **origin)
         signal = self.ctx.emit('target_position', **choice, target=1, signal_symbol=self.signal,
-                               source_contract=source, direction=direction, reason=reason)
-        self.state['entry'] = signal
+                               source_contract=source, direction=direction, reason=reason, **origin)
+        binding['entry'] = signal
         order = self.broker.target_position(contract, 1, now=self.ctx.now, signal_id=signal,
                                             reason=reason, immediate_entry=True)
-        self.state.update(entry_order=order, entry_deadline=ceil(self.ctx.now / 60) * 60 + 60)
+        binding.update(entry_order=order, entry_deadline=ceil(self.ctx.now / 60) * 60 + 60)
         return order
 
     def target(self, symbol, quantity, reason):
@@ -185,15 +243,16 @@ class OptionRouter:
                 if pending and pending.target == 1:
                     self.broker.cancel(pending.id)
                 if held:
-                    binding['next'] = (source, direction, reason) if direction else None
+                    binding['next'] = (source, direction, reason, symbol) if direction else None
                     if pending and pending.target == 0:
                         return pending.id
                     exit_id = self.ctx.emit('target_position', symbol=contract, target=0,
-                                            signal_symbol=self.signal, source_contract=binding['source'], reason=reason)
+                                            signal_symbol=self.signal, source_contract=binding['source'], reason=reason,
+                                            **({'order_symbol': binding['order_symbol']} if 'order_symbol' in binding else {}))
                     return self.broker.target_position(contract, 0, now=self.ctx.now, signal_id=exit_id, reason=reason)
             self.state = {}
         if direction:
-            return self._open(source, direction, reason)
+            return self._open(source, direction, reason, symbol)
         return self.ctx.emit('option_flat', source_contract=source)
 
     def on_bar(self, bar):

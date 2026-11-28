@@ -214,12 +214,14 @@ class Runner:
 
     def _notify(self, kind: str, payload: dict) -> None:
         self._output(kind, payload)
+        router = self.option_router
+        report = router.strategy_report(kind, payload) if router else payload
         if kind == 'order':
-            accept(self.context, self.strategy.on_order(self.context, payload))
+            accept(self.context, self.strategy.on_order(self.context, report))
         else:
-            if self.option_router:
-                self.option_router.after_fill(payload)
-            accept(self.context, self.strategy.on_fill(self.context, payload))
+            if router:
+                router.after_fill(payload)
+            accept(self.context, self.strategy.on_fill(self.context, report))
 
     def process(self, event: Event, *, warmup: bool = False) -> bool:
         if self.finished:

@@ -45,7 +45,19 @@ result = backtest.run(strategy, data, params={'symbol': symbol, 'duration': 300,
                                        option_execution=OptionExecution(mode="time_value_third")))
 ```
 
-策略继续对信号标的或当时解析出的实际合约调用 `ctx.orders.target_position`。正目标买一手 Call，负目标买一手 Put，零目标平掉持有的那张期权。重复的同向目标保持一手，反手等待旧仓平掉，再用当时可见的行情选约。`ctx.position(信号标的)` 表示策略方向，成交回调里的 `symbol`、`quantity` 和 `price` 是实际模拟交易的期权、手数和权利金。
+策略继续对信号标的或当时解析出的实际合约调用 `ctx.orders.target_position`。正目标买一手 Call，负目标买一手 Put，零目标平掉持有的那张期权。重复的同向目标保持一手，反手等待旧仓平掉，再用当时可见的行情选约。
+
+智能选约的 `on_order` 和 `on_fill` 使用开仓请求的标的作为 `symbol`。例如对 IM 主连发出空头信号，买入一手 MO Put 后，策略收到的 `fill["quantity"]` 为 `-1`，与 `ctx.position(IM主连)` 的方向一致。平掉该 Put 时，回报数量为 `+1`。委托、撤单和成交沿用原委托 ID，保护性平仓也按开仓请求映射。
+
+| 回调字段 | 智能选约时的含义 |
+| --- | --- |
+| `signal_symbol`、`source_contract`、`execution_symbol` | 配置的信号标的、选约时对应的实际标的、实际交易的期权。例如 IM 主连、IM2612、MO2612-C-5400。 |
+| `target`、`execution_target` | 策略方向的目标仓位、期权账户的目标仓位。选约阶段没有可成交合约时，策略收到 `rejected` 委托回报，`execution_symbol` 和 `execution_target` 均为 `None`。 |
+| `quantity`、`execution_quantity` | 有符号的策略成交数量、期权实际买卖数量。 |
+| `price`、`price_symbol`、`price_time` | 用于策略止盈止损的参考价、来源和时间。SDK 取截至成交时间已收到的标的收盘价或最新价。缺少主连参考价时使用对应的实际标的价格。两者均缺失时价格和时间为 `None`。 |
+| `execution_price` | 期权实际模拟成交的权利金。资金、手续费、成交记录和盈亏按实际期权结算。 |
+
+例如，在 `on_fill` 中可用 `fill["price"]` 管理 IM 价格上的止损，同时用 `fill["execution_price"]` 记录 MO 的入场权利金。直接对具体期权下单时，回调使用该期权自身的标的、数量和价格。
 
 - 股指期货按当时的实际合约月份自动匹配 IM→MO、IF→IO、IH→HO。主连换月后，原持仓保留原合约。其他标的按行情目录的 `underlying` 关联，选约需要行权价、Call/Put 方向和合约乘数。没有关联品种时沿用原策略的交易标的和数量。已知有关联，但该时点没有可成交的候选时跳过这一笔。
 - 候选和紧接信号后的执行分钟均要求「期权分钟成交量 × 参与率」至少一手。参与率为 10% 时各需至少 10 手成交量。使用下一分钟开盘价和配置的滑点模拟成交。缺行情、成交量不够或该分钟无法按规则成交时，结束本次入场。跳过和拒单原因分别保存在信号和委托中。
@@ -141,12 +153,12 @@ SDK 当前没有公开的持仓均价读取接口；`ctx.position(symbol)` 上�
 
 | 字段 | 含义 |
 | --- | --- |
-| `fill["symbol"]` | 本次成交标的。 |
-| `fill["price"]` | 本次实际成交价。 |
-| `fill["quantity"]` | 有符号成交数量，买入为正、卖出为负；不等于成交后的净持仓。 |
+| `fill["symbol"]` | 下单标的。智能选约使用开仓请求的标的。 |
+| `fill["price"]` | 普通委托为实际成交价，智能选约为策略标的参考价。 |
+| `fill["quantity"]` | 有符号的成交数量。智能选约按策略方向计算。 |
 | `fill["offset"]` | `"open"` 或 `"close"`，用于区分开仓和平仓。 |
 
-单次单单位开仓可记录该笔开仓的 `fill["price"]`，平仓后清除。加仓、部分成交或部分平仓需要按数量及策略使用的成本口径维护成交台账；最后一笔成交价不能直接当作持仓均价，也不能用发出信号时的 K 线收盘价冒充实际入场价。
+单次单单位开仓可记录该笔开仓的实际成交价，平仓后清除。统一处理普通委托和智能选约的实际成本时，可取 `fill.get("execution_price", fill["price"])`。加仓、部分成交或部分平仓需要按实际数量和费用维护成交台账。
 
 ### 回调签名
 
